@@ -1,8 +1,8 @@
 use crate::errors::ErrType;
 use crate::errors::dev_error;
 use crate::errors::throw_parser_error;
-use crate::parser::Expr;
-use crate::parser::symbol_of_expr;
+use crate::expr::Expr;
+use crate::expr::symbol_of_expr;
 use crate::parser_data::Dynamiclib;
 use crate::parser_data::FnSignature;
 use crate::parser_data::Function;

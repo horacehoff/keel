@@ -1,14 +1,20 @@
 use crate::LibFunc;
 use crate::data::NULL;
 use crate::errors::ErrType;
-use crate::errors::dev_error;
 use crate::errors::lalrpop_error;
 use crate::errors::throw_parser_error;
+use crate::expr::Expr;
 use crate::functions::handle_functions;
 use crate::grammar::Token;
-use crate::instr::LibFuncVoid;
 use crate::method_calls::handle_method_calls;
 use crate::parser_data::*;
+use crate::registers::alloc_register;
+use crate::registers::free_register;
+use crate::registers::get_last_tgt_id;
+use crate::registers::get_tgt_id;
+use crate::registers::is_reg_free;
+use crate::registers::move_reg_to_reg;
+use crate::registers::move_to_id;
 use crate::type_system::check_if_returns_void;
 use crate::type_system::contains_recursive_call;
 use crate::type_system::datatype_to_c_type;
@@ -22,359 +28,214 @@ use smol_str::SmolStr;
 use smol_str::ToSmolStr;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::slice;
 
 lalrpop_mod!(pub grammar);
 
-#[derive(Debug, Clone, PartialEq)]
-#[repr(C)]
-pub enum Expr {
-    Float(f64),
-    Int(i32),
-    Bool(bool),
-    Null,
-    String(SmolStr),
-    /// Var(name, start, end)
-    Var(SmolStr, (usize, usize)),
-    /// Array(contents, start, end)
-    Array(Box<[Expr]>, (usize, usize)),
-    /// VarDeclare(name, value),
-    VarDeclare(SmolStr, Box<Expr>),
-    /// VarDeclare(name, value, start, end)
-    VarAssign(SmolStr, Box<Expr>, (usize, usize)),
-    /// Condition(condition, code (contains else_if_blocks and potentially else_block), start, end)
-    Condition(Box<Expr>, Box<[Expr]>, (usize, usize)),
-    /// InlineCondition — expression-form if/else, always produces a value, must have an else branch
-    InlineCondition(Box<Expr>, Box<[Expr]>, (usize, usize)),
-    ElseIfBlock(Box<Expr>, Box<[Expr]>),
-    ElseBlock(Box<[Expr]>),
-
-    WhileBlock(Box<Expr>, Box<[Expr]>),
-    /// FunctionCall(args, (optional namespace + name), start, end, (arg_start,arg_end))
-    FunctionCall(
-        Box<[Expr]>,
-        Box<[SmolStr]>,
-        (usize, usize),
-        Box<[(usize, usize)]>,
-    ),
-    ObjFunctionCall(
-        Box<Expr>,
-        Box<[Expr]>,
-        Box<[SmolStr]>,
-        (
-            // obj_start
-            usize,
-            // obj_end
-            usize,
-        ),
-        (
-            // fn_start
-            usize,
-            // fn_end
-            usize,
-        ),
-        Box<[(usize, usize)]>,
-    ),
-    /// FunctionDecl(name+args, code, start, end)
-    FunctionDecl(Box<[SmolStr]>, Rc<[Expr]>, (usize, usize)),
-
-    ReturnVal(Box<Option<Expr>>),
-
-    GetIndex(Box<Expr>, Box<[Expr]>, (usize, usize)),
-    ArrayModify(
-        Box<Expr>,
-        Box<[Expr]>,
-        Box<Expr>,
-        (usize, usize),
-        (usize, usize),
-    ),
-
-    /// ForLoop(loop_var_name, loop_array+code, obj_markers)
-    ForLoop(SmolStr, Box<[Expr]>, (usize, usize)),
-    /// IntForLoop(loop_var_name, first_elem, final_elem, code)
-    IntForLoop(
-        SmolStr,
-        Box<Expr>,
-        Box<Expr>,
-        Box<[Expr]>,
-        (usize, usize),
-        (usize, usize),
-    ),
-    /// Import(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
-    ImportDynLib(
-        SmolStr,
-        Box<[(SmolStr, Box<[DataType]>, DataType)]>,
-        (usize, usize),
-    ),
-
-    /// ImportFile(path, (start, end))
-    ImportFile(SmolStr, (usize, usize)),
-
-    Break,
-    Continue,
-
-    EvalBlock(Box<[Expr]>),
-    LoopBlock(Box<[Expr]>),
-
-    Mul(Box<Expr>, Box<Expr>, (usize, usize)),
-    Div(Box<Expr>, Box<Expr>, (usize, usize)),
-    Add(Box<Expr>, Box<Expr>, (usize, usize)),
-    Sub(Box<Expr>, Box<Expr>, (usize, usize)),
-    Mod(Box<Expr>, Box<Expr>, (usize, usize)),
-    Pow(Box<Expr>, Box<Expr>, (usize, usize)),
-    Eq(Box<Expr>, Box<Expr>),
-    NotEq(Box<Expr>, Box<Expr>),
-    Sup(Box<Expr>, Box<Expr>, (usize, usize)),
-    SupEq(Box<Expr>, Box<Expr>, (usize, usize)),
-    Inf(Box<Expr>, Box<Expr>, (usize, usize)),
-    InfEq(Box<Expr>, Box<Expr>, (usize, usize)),
-    BoolAnd(Box<Expr>, Box<Expr>, (usize, usize)),
-    BoolOr(Box<Expr>, Box<Expr>, (usize, usize)),
-    BoolNeg(Box<Expr>, (usize, usize)),
-    Neg(Box<Expr>, (usize, usize)),
+/// Fuses the last comparison instruction into a false-jump variant (jumps when condition is false).
+#[inline(always)]
+fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_backwards: bool) {
+    if output.is_empty() {
+        return output.push(Instr::IsFalseJmp(condition_id, *len));
+    }
+    *output.last_mut().unwrap() = match *output.last().unwrap() {
+        Instr::InfFloat(o1, o2, o3) if o3 == condition_id => Instr::SupEqFloatJmp(o1, o2, *len),
+        Instr::InfInt(o1, o2, o3) if o3 == condition_id => Instr::SupEqIntJmp(o1, o2, *len),
+        Instr::InfEqFloat(o1, o2, o3) if o3 == condition_id => Instr::SupFloatJmp(o1, o2, *len),
+        Instr::InfEqInt(o1, o2, o3) if o3 == condition_id => Instr::SupIntJmp(o1, o2, *len),
+        Instr::SupFloat(o1, o2, o3) if o3 == condition_id => Instr::InfEqFloatJmp(o1, o2, *len),
+        Instr::SupInt(o1, o2, o3) if o3 == condition_id => Instr::InfEqIntJmp(o1, o2, *len),
+        Instr::SupEqFloat(o1, o2, o3) if o3 == condition_id => Instr::InfFloatJmp(o1, o2, *len),
+        Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::InfIntJmp(o1, o2, *len),
+        Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, *len),
+        Instr::ArrayEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayNotEqJmp(o1, o2, *len),
+        Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, *len),
+        Instr::ArrayNotEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayEqJmp(o1, o2, *len),
+        _ => {
+            output.push(Instr::IsFalseJmp(condition_id, *len));
+            return;
+        }
+    };
+    if jmp_backwards {
+        *len -= 1;
+    }
 }
 
-#[cold]
-#[inline(never)]
-pub fn symbol_of_expr(expr: &Expr) -> &str {
+/// Fuses the last comparison instruction into a true-jump variant (jumps when condition is true).
+#[inline(always)]
+fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
+    if output.is_empty() {
+        return output.push(Instr::IsTrueJmp(condition_id, 0));
+    }
+    let new_instr = match *output.last().unwrap() {
+        Instr::InfFloat(o1, o2, o3) if o3 == condition_id => Instr::InfFloatJmp(o1, o2, 0),
+        Instr::InfInt(o1, o2, o3) if o3 == condition_id => Instr::InfIntJmp(o1, o2, 0),
+        Instr::InfEqFloat(o1, o2, o3) if o3 == condition_id => Instr::InfEqFloatJmp(o1, o2, 0),
+        Instr::InfEqInt(o1, o2, o3) if o3 == condition_id => Instr::InfEqIntJmp(o1, o2, 0),
+        Instr::SupFloat(o1, o2, o3) if o3 == condition_id => Instr::SupFloatJmp(o1, o2, 0),
+        Instr::SupInt(o1, o2, o3) if o3 == condition_id => Instr::SupIntJmp(o1, o2, 0),
+        Instr::SupEqFloat(o1, o2, o3) if o3 == condition_id => Instr::SupEqFloatJmp(o1, o2, 0),
+        Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::SupEqIntJmp(o1, o2, 0),
+        Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, 0),
+        Instr::ArrayEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayEqJmp(o1, o2, 0),
+        Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, 0),
+        Instr::ArrayNotEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayNotEqJmp(o1, o2, 0),
+        _ => {
+            output.push(Instr::IsTrueJmp(condition_id, 0));
+            return;
+        }
+    };
+    *output.last_mut().unwrap() = new_instr;
+}
+
+/// Sets the jump size field of a jump instruction
+#[inline(always)]
+fn set_jmp_size(instr: &mut Instr, size: u16) {
+    match instr {
+        Instr::IsFalseJmp(_, jump_size)
+        | Instr::IsTrueJmp(_, jump_size)
+        | Instr::Jmp(jump_size)
+        | Instr::SupEqFloatJmp(_, _, jump_size)
+        | Instr::SupEqIntJmp(_, _, jump_size)
+        | Instr::SupFloatJmp(_, _, jump_size)
+        | Instr::SupIntJmp(_, _, jump_size)
+        | Instr::InfEqFloatJmp(_, _, jump_size)
+        | Instr::InfEqIntJmp(_, _, jump_size)
+        | Instr::InfFloatJmp(_, _, jump_size)
+        | Instr::InfIntJmp(_, _, jump_size)
+        | Instr::InfIntJmpBack(_, _, jump_size)
+        | Instr::NotEqJmp(_, _, jump_size)
+        | Instr::EqJmp(_, _, jump_size)
+        | Instr::ArrayNotEqJmp(_, _, jump_size)
+        | Instr::ArrayEqJmp(_, _, jump_size) => *jump_size = size,
+        _ => unreachable!(),
+    }
+}
+
+/// Compiles `expr` as a short-circuit boolean condition.
+/// When `bool_or_mode` is true, sub-expression comparisons emit a true-jump that jumps to the body if the sub-expression is true.
+/// This is used for every operand that is the left-hand side of an OR operator.
+/// When `bool_or_mode` is false (the default), sub-expression comparisons emit a false-jump that jumps past the body if the sub-expression is false
+/// Returns:
+///   - `true_jump_idxs`  — indices into `output` whose targets must be set to the start of the body
+///   - `false_jump_idxs` — indices into `output` whose targets must be set to past the body
+#[allow(clippy::too_many_arguments)]
+fn compile_short_circuit_condition(
+    expr: &Expr,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+    offset: u16,
+    single_run: bool,
+    bool_or_mode: bool,
+) -> (Vec<usize>, Vec<usize>) {
     match expr {
-        Expr::Mul(_, _, _) => "*",
-        Expr::Div(_, _, _) => "/",
-        Expr::Add(_, _, _) => "+",
-        Expr::Sub(_, _, _) => "-",
-        Expr::Mod(_, _, _) => "%",
-        Expr::Pow(_, _, _) => "^",
-        Expr::Eq(_, _) => "==",
-        Expr::NotEq(_, _) => "!=",
-        Expr::Sup(_, _, _) => ">",
-        Expr::SupEq(_, _, _) => ">=",
-        Expr::Inf(_, _, _) => "<",
-        Expr::InfEq(_, _, _) => "<=",
-        Expr::BoolAnd(_, _, _) => "&&",
-        Expr::BoolOr(_, _, _) => "||",
-        Expr::Neg(_, _) => "-",
-        other => dev_error(
-            "parser.rs",
-            "symbol_of_expr",
-            format_args!("Tried to get symbol of {other:?}"),
-        ),
-    }
-}
-
-pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
-    if x.is_empty()
-        || matches!(
-            x.last().unwrap(),
-            Instr::ArrayElemMov(_, _, _) // | Instr::IoDelete(_)
-            | Instr::IncInt(_)
-            | Instr::DecInt(_)
-        )
-    {
-        return;
-    }
-    let matching_elem_index = x
-        .iter()
-        .rposition(|w| get_tgt_id(*w).is_some())
-        .unwrap_or(x.len() - 1);
-    let matching_elem = x.get_mut(matching_elem_index).unwrap();
-    match matching_elem {
-        Instr::Mov(_, y)
-        | Instr::SetInt(y, _)
-        | Instr::SetBool(y, _)
-        | Instr::CallFunc(_, y)
-        | Instr::AddFloat(_, _, y)
-        | Instr::AddInt(_, _, y)
-        | Instr::AddArray(_, _, y)
-        | Instr::AddStr(_, _, y)
-        | Instr::MulFloat(_, _, y)
-        | Instr::MulInt(_, _, y)
-        | Instr::SubFloat(_, _, y)
-        | Instr::SubInt(_, _, y)
-        | Instr::DivFloat(_, _, y)
-        | Instr::DivInt(_, _, y)
-        | Instr::DivIntUnchecked(_, _, y)
-        | Instr::ModFloat(_, _, y)
-        | Instr::ModInt(_, _, y)
-        | Instr::ModIntUnchecked(_, _, y)
-        | Instr::PowFloat(_, _, y)
-        | Instr::PowInt(_, _, y)
-        | Instr::Eq(_, _, y)
-        | Instr::ArrayEq(_, _, y)
-        | Instr::NotEq(_, _, y)
-        | Instr::ArrayNotEq(_, _, y)
-        | Instr::SupFloat(_, _, y)
-        | Instr::SupInt(_, _, y)
-        | Instr::SupEqFloat(_, _, y)
-        | Instr::SupEqInt(_, _, y)
-        | Instr::InfFloat(_, _, y)
-        | Instr::InfInt(_, _, y)
-        | Instr::InfEqFloat(_, _, y)
-        | Instr::InfEqInt(_, _, y)
-        | Instr::BoolAnd(_, _, y)
-        | Instr::BoolOr(_, _, y)
-        | Instr::NegBool(_, y)
-        | Instr::EmptyArray(y)
-        | Instr::NegFloat(_, y)
-        | Instr::NegInt(_, y)
-        | Instr::CallLibFunc(_, _, y)
-        | Instr::GetIndexArray(_, _, y)
-        | Instr::GetIndexString(_, _, y)
-        | Instr::SaveFrame(_, y, _)
-        | Instr::CallDynamicLibFunc(_, y)
-        | Instr::IncIntTo(_, y)
-        | Instr::DecIntTo(_, y) => *y = tgt_id,
-        Instr::CallFuncRecursive(_, y_func) => {
-            *y_func = tgt_id;
-            for i in 1..x.len() - 1 {
-                if let Some(Instr::SaveFrame(_, y_frame, _)) = x.get_mut(matching_elem_index - i) {
-                    *y_frame = tgt_id;
-                    break;
-                }
+        Expr::BoolOr(left, right, _) => {
+            // If true then jump to body (true-jump mode)
+            let (mut true_jumps, _) = compile_short_circuit_condition(
+                left, v, ctx, state, output, offset, single_run, true,
+            );
+            // Inherit the caller's mode
+            let (right_true, right_false) = compile_short_circuit_condition(
+                right,
+                v,
+                ctx,
+                state,
+                output,
+                offset,
+                single_run,
+                bool_or_mode,
+            );
+            true_jumps.extend(right_true);
+            (true_jumps, right_false)
+        }
+        Expr::BoolAnd(left, right, _) => {
+            if bool_or_mode {
+                // AND inside the left side of an OR
+                // Fall back to eager evaluation then a single true-jump
+                let id_l = get_id(left, v, ctx, state, output, None, false, offset, single_run);
+                let id_r = get_id(
+                    right, v, ctx, state, output, None, false, offset, single_run,
+                );
+                free_register(id_l, state.free_registers, v, state.const_registers);
+                free_register(id_r, state.free_registers, v, state.const_registers);
+                let id = alloc_register(state.registers, state.free_registers);
+                output.push(Instr::BoolAnd(id_l, id_r, id));
+                add_cmp_true(id, output);
+                free_register(id, state.free_registers, v, state.const_registers);
+                (vec![output.len() - 1], Vec::new())
+            } else {
+                // Normal AND
+                // If either side is false, jump past the body
+                let (_, mut false_jumps) = compile_short_circuit_condition(
+                    left, v, ctx, state, output, offset, single_run, false,
+                );
+                let (_, right_false) = compile_short_circuit_condition(
+                    right, v, ctx, state, output, offset, single_run, false,
+                );
+                false_jumps.extend(right_false);
+                (Vec::new(), false_jumps)
             }
         }
-        other => dev_error(
-            "parser.rs",
-            "move_to_id",
-            format_args!("Tried to move {other:?} to tgt_id={tgt_id}"),
-        ),
-    }
-}
-
-/// Returns the ID of the register that will be modified by the given instruction
-fn get_tgt_id(x: Instr) -> Option<u16> {
-    match x {
-        // ↓ INSTRUCTIONS THAT DON'T MODIFY ANY REGISTER ↓
-        Instr::Print(_)
-        | Instr::Jmp(_)
-        | Instr::JmpBack(_)
-        | Instr::IsFalseJmp(_, _)
-        | Instr::IsTrueJmp(_, _)
-        | Instr::NotEqJmp(_, _, _)
-        | Instr::ArrayNotEqJmp(_, _, _)
-        | Instr::EqJmp(_, _, _)
-        | Instr::ArrayEqJmp(_, _, _)
-        | Instr::SupFloatJmp(_, _, _)
-        | Instr::SupIntJmp(_, _, _)
-        | Instr::SupEqFloatJmp(_, _, _)
-        | Instr::SupEqIntJmp(_, _, _)
-        | Instr::InfEqFloatJmp(_, _, _)
-        | Instr::InfEqIntJmp(_, _, _)
-        | Instr::InfFloatJmp(_, _, _)
-        | Instr::InfIntJmp(_, _, _)
-        | Instr::InfIntJmpBack(_, _, _)
-        // | Instr::IoDelete(_)
-        | Instr::StoreFuncArg(_)
-        | Instr::SetElementArray(_, _, _)
-        | Instr::ArrayElemMov(_, _, _)
-        | Instr::Push(_, _)
-        | Instr::Return(_) // Modifies a register, but this function doesn't know which one
-        | Instr::RecursiveReturn(_) // Modifies a register, but this function doesn't know which one
-        | Instr::VoidReturn
-        | Instr::Remove(_, _)
-        | Instr::CallLibFuncVoid(_, _, _)
-        | Instr::Halt(_)
-
-        => None,
-        Instr::Mov(_, y)
-        | Instr::SetInt(y, _)
-        | Instr::SetBool(y, _)
-        | Instr::CallFunc(_, y)
-        | Instr::CallFuncRecursive(_, y)
-        | Instr::SaveFrame(_, y, _)
-        | Instr::AddFloat(_, _, y)
-        | Instr::AddInt(_, _, y)
-        | Instr::AddArray(_, _, y)
-        | Instr::AddStr(_, _, y)
-        | Instr::MulFloat(_, _, y)
-        | Instr::MulInt(_, _, y)
-        | Instr::SubFloat(_, _, y)
-        | Instr::SubInt(_, _, y)
-        | Instr::DivFloat(_, _, y)
-        | Instr::DivInt(_, _, y)
-        | Instr::DivIntUnchecked(_, _, y)
-        | Instr::ModFloat(_, _, y)
-        | Instr::ModInt(_, _, y)
-        | Instr::ModIntUnchecked(_, _, y)
-        | Instr::PowFloat(_, _, y)
-        | Instr::PowInt(_, _, y)
-        | Instr::Eq(_, _, y)
-        | Instr::ArrayEq(_, _, y)
-        | Instr::NotEq(_, _, y)
-        | Instr::ArrayNotEq(_, _, y)
-        | Instr::SupFloat(_, _, y)
-        | Instr::SupInt(_, _, y)
-        | Instr::SupEqFloat(_, _, y)
-        | Instr::SupEqInt(_, _, y)
-        | Instr::InfFloat(_, _, y)
-        | Instr::InfInt(_, _, y)
-        | Instr::InfEqFloat(_, _, y)
-        | Instr::InfEqInt(_, _, y)
-        | Instr::BoolAnd(_, _, y)
-        | Instr::BoolOr(_, _, y)
-        | Instr::NegBool(_, y)
-        | Instr::EmptyArray(y)
-        | Instr::NegFloat(_, y)
-        | Instr::NegInt(_, y)
-        | Instr::CallLibFunc(_, _, y)
-        | Instr::GetIndexArray(_, _, y)
-        | Instr::GetIndexString(_, _, y)
-        // | Instr::IoOpen(_, y, _)
-        | Instr::SetElementString(y, _, _)
-        | Instr::CallDynamicLibFunc(_, y)
-        | Instr::IncInt(y)
-        | Instr::DecInt(y)
-        | Instr::IncIntTo(_, y)
-        | Instr::DecIntTo(_, y)
-        | Instr::CloneArray(_, y, _) => Some(y),
-
-    }
-}
-
-/// Returns a list containing the IDs of all the state.registers which are modified by the given instructions
-pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
-    let mut ids: Vec<u16> = x.iter().filter_map(|i| get_tgt_id(*i)).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
-}
-
-fn get_last_tgt_id(x: &[Instr]) -> Option<u16> {
-    debug_assert!(!(x.is_empty() || matches!(x.last().unwrap(), Instr::ArrayElemMov(_, _, _))));
-    for y in x.iter().rev() {
-        if let Some(id) = get_tgt_id(*y) {
-            return Some(id);
+        sub_expr => {
+            let cond_id = get_id(
+                sub_expr, v, ctx, state, output, None, false, offset, single_run,
+            );
+            if bool_or_mode {
+                add_cmp_true(cond_id, output);
+                free_register(cond_id, state.free_registers, v, state.const_registers);
+                (vec![output.len() - 1], Vec::new())
+            } else {
+                add_cmp_false(cond_id, &mut 0, output, false);
+                free_register(cond_id, state.free_registers, v, state.const_registers);
+                (Vec::new(), vec![output.len() - 1])
+            }
         }
     }
-    None
 }
 
-pub fn alloc_register(registers: &mut Vec<Data>, free_registers: &mut Vec<u16>) -> u16 {
-    if let Some(id) = free_registers.pop() {
-        id
-    } else {
-        registers.push(NULL);
-        (registers.len() - 1) as u16
-    }
-}
-
-pub fn free_register(
-    id: u16,
-    free_registers: &mut Vec<u16>,
-    v: &[Variable],
-    const_registers: &[u16],
+fn parse_loop_flow_control(
+    loop_code: &mut [Instr],
+    loop_id: u16,
+    code_length: u16,
+    for_loop: bool,
+    indef: bool,
 ) {
-    if !v.iter().any(|var| var.register_id == id)
-        && !const_registers.iter().any(|reg| reg == &id)
-        && !free_registers.contains(&id)
-    {
-        free_registers.push(id);
-    }
+    loop_code.iter_mut().enumerate().for_each(|(i, x)| {
+        if let Instr::NotEqJmp(break_id, 0, 0) = x
+            && *break_id == loop_id
+        {
+            if for_loop && !indef {
+                *x = Instr::Jmp(code_length - i as u16 - 1);
+            } else {
+                *x = Instr::Jmp(code_length - i as u16);
+            }
+        } else if let Instr::EqJmp(continue_id, 0, 0) = x
+            && *continue_id == loop_id
+        {
+            if for_loop || indef {
+                *x = Instr::Jmp(code_length - i as u16 - 3);
+            } else {
+                *x = Instr::Jmp(code_length - i as u16 - 1);
+            }
+        }
+    });
 }
 
-pub fn is_reg_free(v: &[Variable], id: u16, name: &SmolStr) -> bool {
-    !v.iter()
-        .any(|var| &var.name != name && var.register_id == id)
+fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
+    code.iter().any(|expr| match expr {
+        Expr::VarAssign(n, _, _) => n == name,
+        Expr::Condition(_, body, _)
+        | Expr::WhileBlock(_, body)
+        | Expr::EvalBlock(body)
+        | Expr::LoopBlock(body)
+        | Expr::InlineCondition(_, body, _) => contains_var_reassign(name, body),
+        Expr::ElseIfBlock(_, body) | Expr::ElseBlock(body) => contains_var_reassign(name, body),
+        Expr::ForLoop(_, body, _) => contains_var_reassign(name, body),
+        Expr::IntForLoop(_, _, _, body, _, _) => contains_var_reassign(name, body),
+        _ => false,
+    })
 }
 
 pub fn get_id(
@@ -1130,325 +991,6 @@ pub fn get_id(
             }
         }
     }
-}
-
-/// Fuses the last comparison instruction into a false-jump variant (jumps when condition is false).
-#[inline(always)]
-fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_backwards: bool) {
-    if output.is_empty() {
-        return output.push(Instr::IsFalseJmp(condition_id, *len));
-    }
-    *output.last_mut().unwrap() = match *output.last().unwrap() {
-        Instr::InfFloat(o1, o2, o3) if o3 == condition_id => Instr::SupEqFloatJmp(o1, o2, *len),
-        Instr::InfInt(o1, o2, o3) if o3 == condition_id => Instr::SupEqIntJmp(o1, o2, *len),
-        Instr::InfEqFloat(o1, o2, o3) if o3 == condition_id => Instr::SupFloatJmp(o1, o2, *len),
-        Instr::InfEqInt(o1, o2, o3) if o3 == condition_id => Instr::SupIntJmp(o1, o2, *len),
-        Instr::SupFloat(o1, o2, o3) if o3 == condition_id => Instr::InfEqFloatJmp(o1, o2, *len),
-        Instr::SupInt(o1, o2, o3) if o3 == condition_id => Instr::InfEqIntJmp(o1, o2, *len),
-        Instr::SupEqFloat(o1, o2, o3) if o3 == condition_id => Instr::InfFloatJmp(o1, o2, *len),
-        Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::InfIntJmp(o1, o2, *len),
-        Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, *len),
-        Instr::ArrayEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayNotEqJmp(o1, o2, *len),
-        Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, *len),
-        Instr::ArrayNotEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayEqJmp(o1, o2, *len),
-        _ => {
-            output.push(Instr::IsFalseJmp(condition_id, *len));
-            return;
-        }
-    };
-    if jmp_backwards {
-        *len -= 1;
-    }
-}
-
-/// Fuses the last comparison instruction into a true-jump variant (jumps when condition is true).
-#[inline(always)]
-fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
-    if output.is_empty() {
-        return output.push(Instr::IsTrueJmp(condition_id, 0));
-    }
-    let new_instr = match *output.last().unwrap() {
-        Instr::InfFloat(o1, o2, o3) if o3 == condition_id => Instr::InfFloatJmp(o1, o2, 0),
-        Instr::InfInt(o1, o2, o3) if o3 == condition_id => Instr::InfIntJmp(o1, o2, 0),
-        Instr::InfEqFloat(o1, o2, o3) if o3 == condition_id => Instr::InfEqFloatJmp(o1, o2, 0),
-        Instr::InfEqInt(o1, o2, o3) if o3 == condition_id => Instr::InfEqIntJmp(o1, o2, 0),
-        Instr::SupFloat(o1, o2, o3) if o3 == condition_id => Instr::SupFloatJmp(o1, o2, 0),
-        Instr::SupInt(o1, o2, o3) if o3 == condition_id => Instr::SupIntJmp(o1, o2, 0),
-        Instr::SupEqFloat(o1, o2, o3) if o3 == condition_id => Instr::SupEqFloatJmp(o1, o2, 0),
-        Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::SupEqIntJmp(o1, o2, 0),
-        Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, 0),
-        Instr::ArrayEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayEqJmp(o1, o2, 0),
-        Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, 0),
-        Instr::ArrayNotEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayNotEqJmp(o1, o2, 0),
-        _ => {
-            output.push(Instr::IsTrueJmp(condition_id, 0));
-            return;
-        }
-    };
-    *output.last_mut().unwrap() = new_instr;
-}
-
-/// Sets the jump size field of a jump instruction
-#[inline(always)]
-fn set_jmp_size(instr: &mut Instr, size: u16) {
-    match instr {
-        Instr::IsFalseJmp(_, jump_size)
-        | Instr::IsTrueJmp(_, jump_size)
-        | Instr::Jmp(jump_size)
-        | Instr::SupEqFloatJmp(_, _, jump_size)
-        | Instr::SupEqIntJmp(_, _, jump_size)
-        | Instr::SupFloatJmp(_, _, jump_size)
-        | Instr::SupIntJmp(_, _, jump_size)
-        | Instr::InfEqFloatJmp(_, _, jump_size)
-        | Instr::InfEqIntJmp(_, _, jump_size)
-        | Instr::InfFloatJmp(_, _, jump_size)
-        | Instr::InfIntJmp(_, _, jump_size)
-        | Instr::InfIntJmpBack(_, _, jump_size)
-        | Instr::NotEqJmp(_, _, jump_size)
-        | Instr::EqJmp(_, _, jump_size)
-        | Instr::ArrayNotEqJmp(_, _, jump_size)
-        | Instr::ArrayEqJmp(_, _, jump_size) => *jump_size = size,
-        _ => unreachable!(),
-    }
-}
-
-/// Compiles `expr` as a short-circuit boolean condition.
-/// When `bool_or_mode` is true, sub-expression comparisons emit a true-jump that jumps to the body if the sub-expression is true.
-/// This is used for every operand that is the left-hand side of an OR operator.
-/// When `bool_or_mode` is false (the default), sub-expression comparisons emit a false-jump that jumps past the body if the sub-expression is false
-/// Returns:
-///   - `true_jump_idxs`  — indices into `output` whose targets must be set to the start of the body
-///   - `false_jump_idxs` — indices into `output` whose targets must be set to past the body
-#[allow(clippy::too_many_arguments)]
-fn compile_short_circuit_condition(
-    expr: &Expr,
-    v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
-    state: &mut State<'_>,
-    output: &mut Vec<Instr>,
-    offset: u16,
-    single_run: bool,
-    bool_or_mode: bool,
-) -> (Vec<usize>, Vec<usize>) {
-    match expr {
-        Expr::BoolOr(left, right, _) => {
-            // If true then jump to body (true-jump mode)
-            let (mut true_jumps, _) = compile_short_circuit_condition(
-                left, v, ctx, state, output, offset, single_run, true,
-            );
-            // Inherit the caller's mode
-            let (right_true, right_false) = compile_short_circuit_condition(
-                right,
-                v,
-                ctx,
-                state,
-                output,
-                offset,
-                single_run,
-                bool_or_mode,
-            );
-            true_jumps.extend(right_true);
-            (true_jumps, right_false)
-        }
-        Expr::BoolAnd(left, right, _) => {
-            if bool_or_mode {
-                // AND inside the left side of an OR
-                // Fall back to eager evaluation then a single true-jump
-                let id_l = get_id(left, v, ctx, state, output, None, false, offset, single_run);
-                let id_r = get_id(
-                    right, v, ctx, state, output, None, false, offset, single_run,
-                );
-                free_register(id_l, state.free_registers, v, state.const_registers);
-                free_register(id_r, state.free_registers, v, state.const_registers);
-                let id = alloc_register(state.registers, state.free_registers);
-                output.push(Instr::BoolAnd(id_l, id_r, id));
-                add_cmp_true(id, output);
-                free_register(id, state.free_registers, v, state.const_registers);
-                (vec![output.len() - 1], Vec::new())
-            } else {
-                // Normal AND
-                // If either side is false, jump past the body
-                let (_, mut false_jumps) = compile_short_circuit_condition(
-                    left, v, ctx, state, output, offset, single_run, false,
-                );
-                let (_, right_false) = compile_short_circuit_condition(
-                    right, v, ctx, state, output, offset, single_run, false,
-                );
-                false_jumps.extend(right_false);
-                (Vec::new(), false_jumps)
-            }
-        }
-        sub_expr => {
-            let cond_id = get_id(
-                sub_expr, v, ctx, state, output, None, false, offset, single_run,
-            );
-            if bool_or_mode {
-                add_cmp_true(cond_id, output);
-                free_register(cond_id, state.free_registers, v, state.const_registers);
-                (vec![output.len() - 1], Vec::new())
-            } else {
-                add_cmp_false(cond_id, &mut 0, output, false);
-                free_register(cond_id, state.free_registers, v, state.const_registers);
-                (Vec::new(), vec![output.len() - 1])
-            }
-        }
-    }
-}
-
-fn parse_loop_flow_control(
-    loop_code: &mut [Instr],
-    loop_id: u16,
-    code_length: u16,
-    for_loop: bool,
-    indef: bool,
-) {
-    loop_code.iter_mut().enumerate().for_each(|(i, x)| {
-        if let Instr::NotEqJmp(break_id, 0, 0) = x
-            && *break_id == loop_id
-        {
-            if for_loop && !indef {
-                *x = Instr::Jmp(code_length - i as u16 - 1);
-            } else {
-                *x = Instr::Jmp(code_length - i as u16);
-            }
-        } else if let Instr::EqJmp(continue_id, 0, 0) = x
-            && *continue_id == loop_id
-        {
-            if for_loop || indef {
-                *x = Instr::Jmp(code_length - i as u16 - 3);
-            } else {
-                *x = Instr::Jmp(code_length - i as u16 - 1);
-            }
-        }
-    });
-}
-
-pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
-    match instr {
-        Instr::AddFloat(a, b, _)
-        | Instr::AddInt(a, b, _)
-        | Instr::AddArray(a, b, _)
-        | Instr::AddStr(a, b, _)
-        | Instr::MulFloat(a, b, _)
-        | Instr::MulInt(a, b, _)
-        | Instr::SubFloat(a, b, _)
-        | Instr::SubInt(a, b, _)
-        | Instr::DivFloat(a, b, _)
-        | Instr::DivInt(a, b, _)
-        | Instr::DivIntUnchecked(a, b, _)
-        | Instr::ModFloat(a, b, _)
-        | Instr::ModInt(a, b, _)
-        | Instr::ModIntUnchecked(a, b, _)
-        | Instr::PowFloat(a, b, _)
-        | Instr::PowInt(a, b, _)
-        | Instr::Eq(a, b, _)
-        | Instr::NotEq(a, b, _)
-        | Instr::ArrayEq(a, b, _)
-        | Instr::ArrayNotEq(a, b, _)
-        | Instr::SupFloat(a, b, _)
-        | Instr::SupInt(a, b, _)
-        | Instr::SupEqFloat(a, b, _)
-        | Instr::SupEqInt(a, b, _)
-        | Instr::InfFloat(a, b, _)
-        | Instr::InfInt(a, b, _)
-        | Instr::InfEqFloat(a, b, _)
-        | Instr::InfEqInt(a, b, _)
-        | Instr::BoolAnd(a, b, _)
-        | Instr::BoolOr(a, b, _)
-        | Instr::GetIndexArray(a, b, _)
-        | Instr::GetIndexString(a, b, _)
-        | Instr::NotEqJmp(a, b, _)
-        | Instr::EqJmp(a, b, _)
-        | Instr::ArrayNotEqJmp(a, b, _)
-        | Instr::ArrayEqJmp(a, b, _)
-        | Instr::SupFloatJmp(a, b, _)
-        | Instr::SupIntJmp(a, b, _)
-        | Instr::SupEqFloatJmp(a, b, _)
-        | Instr::SupEqIntJmp(a, b, _)
-        | Instr::InfFloatJmp(a, b, _)
-        | Instr::InfIntJmp(a, b, _)
-        | Instr::InfEqFloatJmp(a, b, _)
-        | Instr::InfEqIntJmp(a, b, _)
-        | Instr::InfIntJmpBack(a, b, _)
-        | Instr::Push(a, b)
-        | Instr::Remove(a, b) => {
-            f(a);
-            f(b);
-        }
-
-        Instr::SetElementArray(a, b, c) | Instr::SetElementString(a, b, c) => {
-            f(a);
-            f(b);
-            f(c);
-        }
-
-        Instr::Mov(a, _)
-        | Instr::IncInt(a)
-        | Instr::DecInt(a)
-        | Instr::IncIntTo(a, _)
-        | Instr::DecIntTo(a, _)
-        | Instr::NegFloat(a, _)
-        | Instr::NegInt(a, _)
-        | Instr::CallLibFunc(_, a, _)
-        | Instr::Print(a)
-        | Instr::StoreFuncArg(a)
-        | Instr::Return(a)
-        | Instr::RecursiveReturn(a)
-        | Instr::IsFalseJmp(a, _)
-        | Instr::IsTrueJmp(a, _)
-        | Instr::NegBool(a, _) => f(a),
-
-        Instr::ArrayElemMov(a, _, _) => f(a),
-
-        Instr::CallLibFuncVoid(func, a, b) => {
-            f(a);
-            if matches!(func, LibFuncVoid::FsWrite | LibFuncVoid::FsAppend) {
-                f(b);
-            }
-        }
-        Instr::Halt(x) if x != 0 => f(x),
-        Instr::Halt(_) => {}
-
-        Instr::CloneArray(src, _, _) => f(src),
-
-        Instr::Jmp(_)
-        | Instr::JmpBack(_)
-        | Instr::VoidReturn
-        | Instr::CallFunc(_, _)
-        | Instr::CallFuncRecursive(_, _)
-        | Instr::SaveFrame(_, _, _)
-        | Instr::CallDynamicLibFunc(_, _)
-        | Instr::EmptyArray(_)
-        | Instr::SetInt(_, _)
-        | Instr::SetBool(_, _) => {}
-    }
-}
-
-/// Emit the cheapest instruction that writes `val` (from `src_id`) into `dest_id`.
-#[inline(always)]
-fn move_reg_to_reg(output: &mut Vec<Instr>, src_id: u16, dest_id: u16, v: Data) {
-    if v.is_int() {
-        output.push(Instr::SetInt(dest_id, v.as_int()));
-    } else if v.is_bool() {
-        output.push(Instr::SetBool(dest_id, v.as_bool()));
-    } else {
-        output.push(Instr::Mov(src_id, dest_id));
-    }
-}
-
-fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
-    code.iter().any(|expr| match expr {
-        Expr::VarAssign(n, _, _) => n == name,
-        Expr::Condition(_, body, _)
-        | Expr::WhileBlock(_, body)
-        | Expr::EvalBlock(body)
-        | Expr::LoopBlock(body)
-        | Expr::InlineCondition(_, body, _) => contains_var_reassign(name, body),
-        Expr::ElseIfBlock(_, body) | Expr::ElseBlock(body) => contains_var_reassign(name, body),
-        Expr::ForLoop(_, body, _) => contains_var_reassign(name, body),
-        Expr::IntForLoop(_, _, _, body, _, _) => contains_var_reassign(name, body),
-        _ => false,
-    })
 }
 
 #[inline(always)]

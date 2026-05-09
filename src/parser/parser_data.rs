@@ -1,6 +1,6 @@
 use crate::Data;
-use crate::Expr;
 use crate::Instr;
+use crate::expr::Expr;
 use crate::type_system::DataType;
 use crate::vm::ArrayPool;
 use crate::vm::StringPool;

@@ -30,6 +30,8 @@ mod data;
 mod display;
 #[path = "./util/errors.rs"]
 mod errors;
+#[path = "./parser/expr.rs"]
+mod expr;
 #[path = "./parser/functions/functions.rs"]
 mod functions;
 #[path = "./instr.rs"]
@@ -40,6 +42,8 @@ mod method_calls;
 mod parser;
 #[path = "./parser/parser_data.rs"]
 mod parser_data;
+#[path = "./parser/registers.rs"]
+mod registers;
 #[path = "./repl.rs"]
 mod repl;
 #[path = "./vm/string_gc.rs"]

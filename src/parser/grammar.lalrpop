@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use std::rc::Rc;
-use crate::parser::Expr;
+use crate::expr::Expr;
 use crate::errors::throw_parser_error;
 use crate::errors::ErrType;
 use crate::type_system::DataType;

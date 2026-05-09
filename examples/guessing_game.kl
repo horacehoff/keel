@@ -1,0 +1,17 @@
+function main() {
+    let secret = 42;
+    print("Guess a number between 1 and 100!");
+
+    let found = false;
+    while !found {
+        let guess = int(input("> "));
+        if guess == secret {
+            print("Correct!");
+            found = true;
+        } else if guess < secret {
+            print("Too low!");
+        } else {
+            print("Too high!");
+        }
+    }
+}

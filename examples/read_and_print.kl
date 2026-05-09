@@ -1,0 +1,3 @@
+function main() {
+    print("fib.kl:\n\n"+fs::read("examples/fib.kl"));
+}

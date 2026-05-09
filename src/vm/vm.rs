@@ -122,7 +122,7 @@ pub fn execute(
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
 
-    let mut free_arrays: Vec<u16> = Vec::with_capacity(array_pool.len());
+    let mut free_arrays: Vec<u32> = Vec::with_capacity(array_pool.len());
     let mut free_strings: Vec<u16> = Vec::with_capacity(string_pool.len());
     let mut array_live: Vec<bool> = Vec::new();
     let mut string_live: Vec<bool> = Vec::new();
@@ -380,6 +380,25 @@ pub fn execute(
                     &mut array_live,
                 );
                 *w!(arr_reg_id) = Data::array(array_id);
+            }
+            Instr::CloneArray(src_reg, dest_reg, len) => {
+                let src_id = r!(src_reg).as_array();
+                let new_id = alloc_array(
+                    array_pool,
+                    &mut free_arrays,
+                    registers,
+                    &recursion_stack,
+                    &mut gc_array_threshold,
+                    &mut array_live,
+                ) as usize;
+                unsafe {
+                    let src_ptr = array_pool.get_unchecked(src_id).as_ptr();
+                    let dst = array_pool.get_unchecked_mut(new_id);
+                    dst.reserve(len as usize);
+                    dst.set_len(len as usize);
+                    std::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len as usize);
+                }
+                *w!(dest_reg) = Data::array(new_id as u32);
             }
             Instr::AddArray(o1, o2, dest) => {
                 let arr_a_id = r!(o1).as_array();
@@ -684,14 +703,6 @@ pub fn execute(
                 let array = &array_pool[arr_id];
                 if idx >= array.len() {
                     cold_path();
-                    eprintln!(
-                        "DEBUG GetIndexArray: arr_reg={} arr_pool_id={} idx={} arr.len()={} arr={:?}",
-                        array_reg_id,
-                        arr_id,
-                        idx,
-                        array.len(),
-                        array
-                    );
                     throw_error(
                         instr_src,
                         sources,

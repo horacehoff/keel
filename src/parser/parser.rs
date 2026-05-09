@@ -325,7 +325,8 @@ fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::IncInt(y)
         | Instr::DecInt(y)
         | Instr::IncIntTo(_, y)
-        | Instr::DecIntTo(_, y) => Some(y),
+        | Instr::DecIntTo(_, y)
+        | Instr::CloneArray(_, y, _) => Some(y),
 
     }
 }
@@ -551,29 +552,83 @@ pub fn get_id(
                 output.push(Instr::EmptyArray(array_reg));
                 return array_reg;
             }
-            for elem in elems {
-                let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
-                if !x.is_empty() {
-                    let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
-                    state.pools.array_pool.get_mut(array_id).unwrap().push(NULL);
+            if single_run {
+                for elem in elems {
+                    let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
+                    if !x.is_empty() {
+                        let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
+                        state.pools.array_pool.get_mut(array_id).unwrap().push(NULL);
 
-                    output.extend(x);
-                    output.push(Instr::ArrayElemMov(
-                        c_id,
-                        array_id as u16,
-                        (state.pools.array_pool[array_id].len() - 1) as u16,
+                        output.extend(x);
+                        output.push(Instr::ArrayElemMov(
+                            c_id,
+                            array_id as u16,
+                            (state.pools.array_pool[array_id].len() - 1) as u16,
+                        ));
+                    } else {
+                        state
+                            .pools
+                            .array_pool
+                            .get_mut(array_id)
+                            .unwrap()
+                            .push(state.registers.pop().unwrap());
+                    }
+                }
+                state.registers.push(Data::array(array_id as u32));
+                (state.registers.len() - 1) as u16
+            } else {
+                // Check if all elements are constant (no instructions emitted)
+                let mut constant_array = true;
+                let mut elem_ids: Vec<(Vec<Instr>, u16)> = Vec::with_capacity(elems.len());
+                for elem in elems {
+                    let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
+                    if !x.is_empty() {
+                        constant_array = false;
+                        let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
+                        state.pools.array_pool.get_mut(array_id).unwrap().push(NULL);
+                        elem_ids.push((x, c_id));
+                    } else {
+                        let reg_id = (state.registers.len() - 1) as u16;
+                        state
+                            .pools
+                            .array_pool
+                            .get_mut(array_id)
+                            .unwrap()
+                            .push(state.registers.pop().unwrap());
+                        elem_ids.push((Vec::new(), reg_id));
+                    }
+                }
+
+                if constant_array {
+                    // The template array is held by a register to prevent it from being freed by the GC
+                    let template_reg = {
+                        state.registers.push(Data::array(array_id as u32));
+                        (state.registers.len() - 1) as u16
+                    };
+                    let dest_reg = {
+                        state.registers.push(Data::array(0));
+                        (state.registers.len() - 1) as u16
+                    };
+                    output.push(Instr::CloneArray(
+                        template_reg,
+                        dest_reg,
+                        state.pools.array_pool[array_id].len() as u16,
                     ));
+                    dest_reg
                 } else {
-                    state
-                        .pools
-                        .array_pool
-                        .get_mut(array_id)
-                        .unwrap()
-                        .push(state.registers.pop().unwrap());
+                    // Mixed: allocate fresh + push each element
+                    let dest_reg = {
+                        state.registers.push(Data::array(0));
+                        (state.registers.len() - 1) as u16
+                    };
+                    output.push(Instr::EmptyArray(dest_reg));
+                    for (instrs, elem_reg) in elem_ids {
+                        output.extend(instrs);
+                        output.push(Instr::Push(dest_reg, elem_reg));
+                    }
+                    dest_reg
                 }
             }
-            state.registers.push(Data::array(array_id as u32));
-            (state.registers.len() - 1) as u16
         }
         Expr::Mul(l, r, markers) => {
             uniform_op!(
@@ -1353,6 +1408,8 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         }
         Instr::Halt(x) if x != 0 => f(x),
         Instr::Halt(_) => {}
+
+        Instr::CloneArray(src, _, _) => f(src),
 
         Instr::Jmp(_)
         | Instr::JmpBack(_)

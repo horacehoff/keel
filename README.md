@@ -8,6 +8,7 @@ Keel is a fast, statically-typed interpreted language that aims to combine Rust-
 
 Its goal is to provide a faster alternative to Python that sits closer to low-level languages while remaining accessible to a wide audience.
 
+
 ## Why Keel?
 
 - **Fast**: ~2-10x faster than Python ([benchmarks](docs/COMPARISONS.md)), with constant folding, constant propagation, function inlining, peephole optimization, and monomorphization
@@ -15,6 +16,9 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 - **Statically typed, zero annotations**: full type inference, static type checking, polymorphism
 - **FFI support**: call C/dynamic libraries directly from Keel
 - **Built-in REPL**
+
+[Browse examples](examples/)
+
 
 ## Installation
 

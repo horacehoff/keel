@@ -3,7 +3,7 @@ use crate::vm::ArrayPool;
 
 pub fn alloc_array(
     array_pool: &mut ArrayPool,
-    free_arrays: &mut Vec<u16>,
+    free_arrays: &mut Vec<u32>,
     registers: &[Data],
     recursion_stack: &[Data],
     gc_array_threshold: &mut u32,
@@ -30,7 +30,7 @@ pub fn alloc_array(
 
 fn array_gc(
     array_pool: &ArrayPool,
-    free_arrays: &mut Vec<u16>,
+    free_arrays: &mut Vec<u32>,
     registers: &[Data],
     recursion_stack: &[Data],
     live: &mut Vec<bool>,
@@ -53,7 +53,7 @@ fn array_gc(
     // Mark as free any array that isn't referenced by a register
     for (i, array_alive) in live.iter().enumerate() {
         if !array_alive {
-            free_arrays.push(i as u16);
+            free_arrays.push(i as u32);
         }
     }
 }

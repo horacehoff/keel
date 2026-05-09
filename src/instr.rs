@@ -119,6 +119,11 @@ pub enum Instr {
     /// Allocates a fresh empty array and stores its address in array_reg_id
     EmptyArray(u16),
 
+    /// CloneArray(src_reg, dest_reg, len)
+    /// Allocates a fresh array with exact capacity `len`, copies `len` elements
+    /// from the array in src_reg, and stores the new array in dest_reg.
+    CloneArray(u16, u16, u16),
+
     /// SetElementArray(array_reg_id, new_elem_reg_id, idx)\
     /// Replaces the idx-th element in the array located in array_reg_id with the element located in new_elem_reg_id
     SetElementArray(u16, u16, u16),

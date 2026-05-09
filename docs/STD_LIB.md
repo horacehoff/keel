@@ -388,6 +388,11 @@ print(arr); // Prints "[1,2,3]"
 Returns the arguments passed to the script, excluding the interpreter path and script name.
 Example:
 ```
-// ./keel script.keel foo bar
+// ./keel script.kl foo bar
 argv() // Returns ["foo", "bar"]
 ```
+## Exit
+
+`exit()`\
+`exit(exit_code: Int)`\
+Exits the program with the exit code 0, if not provided with one.

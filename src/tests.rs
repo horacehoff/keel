@@ -4,7 +4,7 @@ use crate::parse;
 macro_rules! run_and_check_registers {
     ($contents:expr, $expected:expr) => {
         let contents = $contents;
-        let filename = "test.keel";
+        let filename = "test.kl";
         let (
             instructions,
             mut registers,
@@ -34,6 +34,34 @@ macro_rules! run_and_check_registers {
                 false
             }
         }));
+    };
+}
+
+macro_rules! run {
+    ($contents:expr) => {
+        let filename = "test.kl";
+        let (
+            instructions,
+            mut registers,
+            mut arrays,
+            instr_src,
+            fn_registers,
+            _,
+            allocated_arg_count,
+            allocated_call_depth,
+            _,
+        ) = parse($contents, filename, true);
+        crate::vm::execute(
+            &instructions,
+            &mut registers,
+            &mut arrays,
+            &instr_src,
+            &[(filename.into(), $contents.into())],
+            &fn_registers,
+            &[],
+            allocated_arg_count,
+            allocated_call_depth,
+        );
     };
 }
 
@@ -1745,5 +1773,201 @@ pub fn fn_call_in_if_and_in_nested_for() {
         }
         "#,
         14.into()
+    );
+}
+
+#[test]
+pub fn branch_without_return() {
+    run_and_check_registers!(
+        "
+        function choose(x) {
+            if x > 0 {
+                let unused = 1;
+            }
+            return 7;
+        }
+
+        function main() {
+            print(choose(1));
+        }
+        ",
+        7.into()
+    );
+}
+
+#[test]
+pub fn unusued_branch_wth_return() {
+    run_and_check_registers!(
+        "
+        function choose(x) {
+            if x > 0 {
+                return 1;
+            }
+            return 2;
+        }
+
+        function main() {
+            print(choose(0));
+        }
+        ",
+        2.into()
+    );
+}
+
+#[test]
+pub fn unreachable_return_after_exhaustive_condition() {
+    run_and_check_registers!(
+        "
+        function choose(x) {
+            if x > 0 {
+                return 1;
+            } else {
+                return 2;
+            }
+            return \"bad\";
+        }
+
+        function main() {
+            print(choose(1));
+        }
+        ",
+        1.into()
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn partial_return_flow_with_null() {
+    run!(
+        r#"
+        function test(n) {
+            if n == "" {
+                return n;
+            }
+        }
+
+        function main() {
+            print(test(input("> ")).uppercase());
+        }
+        "#
+    );
+}
+
+#[test]
+pub fn unused_nested_partial_branch() {
+    run_and_check_registers!(
+        r#"
+        function label(n) {
+            if n > 0 {
+                if n == 1 {
+                    return "one";
+                }
+            }
+            return "other";
+        }
+
+        function main() {
+            print(label(2).uppercase());
+        }
+        "#,
+        crate::Data::small_str("OTHER")
+    );
+}
+
+#[test]
+pub fn return_flow_exhaustive_condition_ignores_later_conflicting_return() {
+    run_and_check_registers!(
+        r#"
+        function choose(n) {
+            if n == 0 {
+                return 10;
+            } else if n == 1 {
+                return 20;
+            } else {
+                return 30;
+            }
+            return "bad";
+        }
+
+        function main() {
+            print(choose(2) + 1);
+        }
+        "#,
+        31.into()
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn return_flow_return_inside_for_loop_is_not_total() {
+    run!(
+        r#"
+        function first_word(words) {
+            for word in words {
+                return word;
+            }
+        }
+
+        function main() {
+            print(first_word(["hello"]).uppercase());
+        }
+        "#
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn return_flow_return_inside_while_loop_is_not_total() {
+    run!(
+        r#"
+        function maybe_word(n) {
+            while n > 0 {
+                return "word";
+            }
+        }
+
+        function main() {
+            print(maybe_word(0).uppercase());
+        }
+        "#
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn return_flow_branch_returns_null() {
+    run!(
+        "
+        function maybe_number(n) {
+            if n > 0 {
+                return;
+            }
+            return 1;
+        }
+
+        function main() {
+            print(maybe_number(0) + 1);
+        }
+        "
+    );
+}
+
+#[test]
+pub fn return_flow_branch_local_return_value_type_is_preserved() {
+    run_and_check_registers!(
+        r#"
+        function word(n) {
+            if n > 0 {
+                let value = "branch";
+                return value;
+            }
+            return "fallback";
+        }
+
+        function main() {
+            print(word(1).uppercase());
+        }
+        "#,
+        crate::Data::small_str("BRANCH")
     );
 }

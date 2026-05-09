@@ -131,6 +131,7 @@ pub enum Expr {
     InfEq(Box<Expr>, Box<Expr>, (usize, usize)),
     BoolAnd(Box<Expr>, Box<Expr>, (usize, usize)),
     BoolOr(Box<Expr>, Box<Expr>, (usize, usize)),
+    BoolNeg(Box<Expr>, (usize, usize)),
     Neg(Box<Expr>, (usize, usize)),
 }
 
@@ -165,7 +166,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()
         || matches!(
             x.last().unwrap(),
-            Instr::ArrayMov(_, _, _) // | Instr::IoDelete(_)
+            Instr::ArrayElemMov(_, _, _) // | Instr::IoDelete(_)
             | Instr::IncInt(_)
             | Instr::DecInt(_)
         )
@@ -212,6 +213,8 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::InfEqInt(_, _, y)
         | Instr::BoolAnd(_, _, y)
         | Instr::BoolOr(_, _, y)
+        | Instr::NegBool(_, y)
+        | Instr::EmptyArray(y)
         | Instr::NegFloat(_, y)
         | Instr::NegInt(_, y)
         | Instr::CallLibFunc(_, _, y)
@@ -263,14 +266,14 @@ fn get_tgt_id(x: Instr) -> Option<u16> {
         // | Instr::IoDelete(_)
         | Instr::StoreFuncArg(_)
         | Instr::SetElementArray(_, _, _)
-        | Instr::ArrayMov(_, _, _)
+        | Instr::ArrayElemMov(_, _, _)
         | Instr::Push(_, _)
         | Instr::Return(_) // Modifies a register, but this function doesn't know which one
         | Instr::RecursiveReturn(_) // Modifies a register, but this function doesn't know which one
         | Instr::VoidReturn
         | Instr::Remove(_, _)
         | Instr::CallLibFuncVoid(_, _, _)
-        | Instr::Halt
+        | Instr::Halt(_)
 
         => None,
         Instr::Mov(_, y)
@@ -309,6 +312,8 @@ fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::InfEqInt(_, _, y)
         | Instr::BoolAnd(_, _, y)
         | Instr::BoolOr(_, _, y)
+        | Instr::NegBool(_, y)
+        | Instr::EmptyArray(y)
         | Instr::NegFloat(_, y)
         | Instr::NegInt(_, y)
         | Instr::CallLibFunc(_, _, y)
@@ -334,7 +339,7 @@ pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
 }
 
 fn get_last_tgt_id(x: &[Instr]) -> Option<u16> {
-    debug_assert!(!(x.is_empty() || matches!(x.last().unwrap(), Instr::ArrayMov(_, _, _))));
+    debug_assert!(!(x.is_empty() || matches!(x.last().unwrap(), Instr::ArrayElemMov(_, _, _))));
     for y in x.iter().rev() {
         if let Some(id) = get_tgt_id(*y) {
             return Some(id);
@@ -538,6 +543,14 @@ pub fn get_id(
                 state.pools.array_pool.push(Vec::new());
                 state.pools.array_pool.len() - 1
             };
+            if elems.is_empty() && !single_run {
+                let array_reg = {
+                    state.registers.push(Data::array(array_id as u32));
+                    state.registers.len() - 1
+                } as u16;
+                output.push(Instr::EmptyArray(array_reg));
+                return array_reg;
+            }
             for elem in elems {
                 let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
                 if !x.is_empty() {
@@ -545,7 +558,7 @@ pub fn get_id(
                     state.pools.array_pool.get_mut(array_id).unwrap().push(NULL);
 
                     output.extend(x);
-                    output.push(Instr::ArrayMov(
+                    output.push(Instr::ArrayElemMov(
                         c_id,
                         array_id as u16,
                         (state.pools.array_pool[array_id].len() - 1) as u16,
@@ -867,7 +880,21 @@ pub fn get_id(
             }
             id
         }
-
+        Expr::BoolNeg(l, markers) => {
+            let operand_type = infer_type(l, v, state.fns, src, state.dyn_libs);
+            let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
+            free_register(id_l, state.free_registers, v, state.const_registers);
+            let id = if let Some(tgt_register_id) = tgt_id {
+                tgt_register_id
+            } else {
+                alloc_register(state.registers, state.free_registers)
+            };
+            if operand_type != DataType::Bool {
+                throw_parser_error(src, markers, ErrType::InvalidOp(&operand_type, "!"));
+            }
+            output.push(Instr::NegBool(id_l, id));
+            id
+        }
         Expr::InlineCondition(main_condition, code, markers) => {
             let return_id = alloc_register(state.registers, state.free_registers);
 
@@ -1313,9 +1340,10 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::Return(a)
         | Instr::RecursiveReturn(a)
         | Instr::IsFalseJmp(a, _)
-        | Instr::IsTrueJmp(a, _) => f(a),
+        | Instr::IsTrueJmp(a, _)
+        | Instr::NegBool(a, _) => f(a),
 
-        Instr::ArrayMov(a, _, _) => f(a),
+        Instr::ArrayElemMov(a, _, _) => f(a),
 
         Instr::CallLibFuncVoid(func, a, b) => {
             f(a);
@@ -1323,6 +1351,8 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
                 f(b);
             }
         }
+        Instr::Halt(x) if x != 0 => f(x),
+        Instr::Halt(_) => {}
 
         Instr::Jmp(_)
         | Instr::JmpBack(_)
@@ -1331,9 +1361,9 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::CallFuncRecursive(_, _)
         | Instr::SaveFrame(_, _, _)
         | Instr::CallDynamicLibFunc(_, _)
+        | Instr::EmptyArray(_)
         | Instr::SetInt(_, _)
-        | Instr::SetBool(_, _)
-        | Instr::Halt => {}
+        | Instr::SetBool(_, _) => {}
     }
 }
 
@@ -1434,7 +1464,7 @@ pub fn compile_expr(
                         let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
                         output.extend(x);
                         state.pools.array_pool.get_mut(array_id).unwrap().push(NULL);
-                        output.push(Instr::ArrayMov(
+                        output.push(Instr::ArrayElemMov(
                             c_id,
                             array_id as u16,
                             (state.pools.array_pool[array_id].len() - 1) as u16,
@@ -2523,13 +2553,12 @@ pub fn parse(
         0,
         true
     );
-    instructions.push(Instr::Halt);
+    instructions.push(Instr::Halt(0));
     for x in fn_registers.iter_mut() {
         x.sort();
         x.dedup();
     }
-    #[cfg(debug_assertions)]
-    {
+    if debug {
         crate::display::print_debug(&instructions, &registers, &pools);
     }
     (

@@ -79,6 +79,7 @@ pub enum Instr {
     InfEqInt(u16, u16, u16),
     BoolAnd(u16, u16, u16),
     BoolOr(u16, u16, u16),
+    NegBool(u16, u16),
     NegFloat(u16, u16),
     NegInt(u16, u16),
 
@@ -112,7 +113,11 @@ pub enum Instr {
 
     /// ArrayMov(new_elem_reg_id, array_id, idx)\
     /// Replaces the idx-th element in the array (with the id array_id) with the element located in new_elem_reg_id
-    ArrayMov(u16, u16, u16),
+    ArrayElemMov(u16, u16, u16),
+
+    /// EmptyArray(array_reg_id)
+    /// Allocates a fresh empty array and stores its address in array_reg_id
+    EmptyArray(u16),
 
     /// SetElementArray(array_reg_id, new_elem_reg_id, idx)\
     /// Replaces the idx-th element in the array located in array_reg_id with the element located in new_elem_reg_id
@@ -134,8 +139,8 @@ pub enum Instr {
     /// Remove(array_reg_id, elem_index_reg_id)
     Remove(u16, u16),
 
-    /// Sentinel: terminates the interpreter loop.
-    Halt,
+    /// Terminates the interpreter loop or exits the program with the i32 code if it's != 0
+    Halt(u16),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

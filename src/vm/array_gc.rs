@@ -66,7 +66,7 @@ fn track_arrays(id: usize, array_pool: &ArrayPool, live: &mut [bool]) {
     live[id] = true;
     // Arrays can only hold a single type
     // As such, if the first element in the array is not an array, then the other elements aren't either
-    if !array_pool[id].is_empty() && !array_pool[id][0].is_array() {
+    if array_pool[id].is_empty() || !array_pool[id][0].is_array() {
         return;
     }
     for elem in &array_pool[id] {

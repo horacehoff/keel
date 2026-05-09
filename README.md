@@ -10,33 +10,27 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 
 ## Why Keel?
 
-- ~2-10x faster than Python in most cases.
-  [Comparisons](docs/COMPARISONS.md)
-- Inlined functions
-- Constant folding
-- Constant propagation
-- Peephole optimization
-- Basic optimization of conditions
-- Basic loop summation optimization (will get better)
-- Type inference, static type checking, supports polymorphism
-- Monomorphization
+- **Fast**: ~2-10x faster than Python ([benchmarks](docs/COMPARISONS.md)), with constant folding, constant propagation, function inlining, peephole optimization, and monomorphization
+- **Familiar syntax**: Rust-like, with Python's ease-of-use
+- **Statically typed, zero annotations**: full type inference, static type checking, polymorphism
+- **FFI support**: call C/dynamic libraries directly from Keel
+- **Built-in REPL**
 
 ## Installation
 
-No binaries are provided yet. You need to compile Keel yourself.
-
-1. [Install Rust](https://rustup.rs/)
-2. Clone the repo
-
+### macOS / Linux
 ```sh
-# 1. Install Rust: https://rustup.rs/
-# 2. Clone
-git clone https://github.com/horacehoff/keel
-cd keel
-# 3. Build
-cargo build --release
-# 4. Run
-./target/release/keel myfile.keel
+curl -fsSL https://raw.githubusercontent.com/horacehoff/keel/main/install.sh | sh
+```
+
+### Windows
+Download the latest `.zip` from the [releases page](https://github.com/horacehoff/keel/releases/latest) and add the binary to your PATH.
+
+### Build from source
+Make sure [Rust](https://rustup.rs/) is installed.
+```sh
+git clone https://github.com/horacehoff/keel && cd keel && cargo build --release
+./target/release/keel myfile.kl
 ```
 
 ## Language tour
@@ -57,7 +51,7 @@ Built-in types: `Integer` (i32), `Float` (f64), `Boolean`, `String`, `Array<T>`.
 
 ### Functions
 
-> A `main()` function is required when executing a `.keel` file.\
+> A `main()` function is required when executing a `.kl` file.\
 > It is the starting point for the execution of the program.
 
 ```rs
@@ -190,11 +184,11 @@ match x {
 }
 ```
 
-### Importing other `.keel` files
+### Importing other `.kl` files
 
-You can import other `.keel` files with the following syntax:
+You can import other `.kl` files with the following syntax:
 ```keel
-use "fibonacci_lib.keel"
+use "fibonacci_lib.kl"
 
 fn main() {print(fibonacci(25));}
 ```

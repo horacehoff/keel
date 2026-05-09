@@ -153,7 +153,7 @@ fn collect_direct_calls(content: &[Expr], out: &mut Vec<SmolStr>) {
                 stack.push(x);
                 stack.push(y);
             }
-            Expr::Neg(x, _) => stack.push(x),
+            Expr::Neg(x, _) | Expr::BoolNeg(x, _) => stack.push(x),
             _ => {}
         }
     }
@@ -219,7 +219,6 @@ pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
                     return true;
                 }
             }
-
             Expr::ElseIfBlock(x, y) => {
                 if contains_recursive_call(slice::from_ref(x), fn_name)
                     || contains_recursive_call(y, fn_name)
@@ -227,8 +226,41 @@ pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
                     return true;
                 }
             }
-            Expr::ElseBlock(x) => {
+            Expr::ElseBlock(x) | Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
                 if contains_recursive_call(x, fn_name) {
+                    return true;
+                }
+            }
+            Expr::WhileBlock(x, y) => {
+                if contains_recursive_call(slice::from_ref(x), fn_name)
+                    || contains_recursive_call(y, fn_name)
+                {
+                    return true;
+                }
+            }
+            Expr::ForLoop(_, code, _) => {
+                if contains_recursive_call(code, fn_name) {
+                    return true;
+                }
+            }
+            Expr::IntForLoop(_, start, end, code, _, _) => {
+                if contains_recursive_call(slice::from_ref(start), fn_name)
+                    || contains_recursive_call(slice::from_ref(end), fn_name)
+                    || contains_recursive_call(code, fn_name)
+                {
+                    return true;
+                }
+            }
+            Expr::VarDeclare(_, x) | Expr::VarAssign(_, x, _) => {
+                if contains_recursive_call(slice::from_ref(x), fn_name) {
+                    return true;
+                }
+            }
+            Expr::ArrayModify(array, index, value, _, _) => {
+                if contains_recursive_call(slice::from_ref(array), fn_name)
+                    || contains_recursive_call(index, fn_name)
+                    || contains_recursive_call(slice::from_ref(value), fn_name)
+                {
                     return true;
                 }
             }
@@ -246,7 +278,6 @@ pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
                     return true;
                 }
             }
-            // name+args -- code
             Expr::FunctionDecl(_, x, _) => {
                 if contains_recursive_call(x, fn_name) {
                     return true;
@@ -256,6 +287,11 @@ pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
                 if contains_recursive_call(slice::from_ref(x), fn_name)
                     || contains_recursive_call(y, fn_name)
                 {
+                    return true;
+                }
+            }
+            Expr::Array(elems, _) => {
+                if contains_recursive_call(elems, fn_name) {
                     return true;
                 }
             }
@@ -279,7 +315,7 @@ pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
                     return true;
                 }
             }
-            Expr::Neg(x, _) => {
+            Expr::Neg(x, _) | Expr::BoolNeg(x, _) => {
                 if contains_recursive_call(slice::from_ref(x), fn_name) {
                     return true;
                 }
@@ -317,38 +353,128 @@ pub fn check_if_returns_void(content: &[Expr]) -> bool {
     true
 }
 
+macro_rules! add_return_type {
+    ($return_types: expr, $return_type: expr) => {
+        if $return_type != DataType::Unknown && !($return_types).contains(&($return_type)) {
+            ($return_types).push($return_type);
+        }
+    };
+}
+
+macro_rules! extend_return_types {
+    ($return_types: expr, $new_types: expr) => {
+        for return_type in $new_types {
+            add_return_type!($return_types, return_type);
+        }
+    };
+}
+
 pub fn track_returns(
     content: &[Expr],
     v: &mut Vec<Variable>,
     fns: &[Function],
     src: (&str, &str),
     fn_name: &str,
-    track_condition: bool,
     dyn_libs: &[Dynamiclib],
 ) -> Vec<DataType> {
+    let mut flow = track_return_flow(content, v, fns, src, fn_name, dyn_libs);
+    if !flow.always_returns && !flow.types.is_empty() {
+        add_return_type!(&mut flow.types, DataType::Null);
+    }
+    flow.types
+}
+
+struct FnReturnFlow {
+    types: Vec<DataType>,
+    always_returns: bool,
+}
+
+fn track_scoped_returns(
+    code: &[Expr],
+    v: &mut Vec<Variable>,
+    fns: &[Function],
+    src: (&str, &str),
+    fn_name: &str,
+    dyn_libs: &[Dynamiclib],
+) -> FnReturnFlow {
+    let v_len = v.len();
+    let flow = track_return_flow(code, v, fns, src, fn_name, dyn_libs);
+    v.truncate(v_len);
+    flow
+}
+
+fn track_condition_returns(
+    code: &[Expr],
+    v: &mut Vec<Variable>,
+    fns: &[Function],
+    src: (&str, &str),
+    fn_name: &str,
+    dyn_libs: &[Dynamiclib],
+) -> FnReturnFlow {
+    let mut return_types = Vec::new();
+    let first_branch_end = code
+        .iter()
+        .position(|expr| matches!(expr, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
+        .unwrap_or(code.len());
+
+    let first_flow =
+        track_scoped_returns(&code[..first_branch_end], v, fns, src, fn_name, dyn_libs);
+    let mut all_branches_return = first_flow.always_returns;
+    let mut has_else = false;
+    extend_return_types!(&mut return_types, first_flow.types);
+
+    for expr in &code[first_branch_end..] {
+        match expr {
+            Expr::ElseIfBlock(_, branch_code) => {
+                let flow = track_scoped_returns(branch_code, v, fns, src, fn_name, dyn_libs);
+                all_branches_return &= flow.always_returns;
+                extend_return_types!(&mut return_types, flow.types);
+            }
+            Expr::ElseBlock(branch_code) => {
+                has_else = true;
+                let flow = track_scoped_returns(branch_code, v, fns, src, fn_name, dyn_libs);
+                all_branches_return &= flow.always_returns;
+                extend_return_types!(&mut return_types, flow.types);
+            }
+            _ => {}
+        }
+    }
+
+    FnReturnFlow {
+        types: return_types,
+        always_returns: has_else && all_branches_return,
+    }
+}
+
+fn track_return_flow(
+    content: &[Expr],
+    v: &mut Vec<Variable>,
+    fns: &[Function],
+    src: (&str, &str),
+    fn_name: &str,
+    dyn_libs: &[Dynamiclib],
+) -> FnReturnFlow {
     let mut return_types: Vec<DataType> = Vec::new();
-    for content in content {
-        match content {
+    for expr in content {
+        match expr {
             Expr::Condition(_, code, _) | Expr::InlineCondition(_, code, _) => {
-                if track_condition {
-                    return_types.extend(track_returns(
-                        code,
-                        v,
-                        fns,
-                        src,
-                        fn_name,
-                        track_condition,
-                        dyn_libs,
-                    ));
+                let flow = track_condition_returns(code, v, fns, src, fn_name, dyn_libs);
+                extend_return_types!(&mut return_types, flow.types);
+                if flow.always_returns {
+                    return FnReturnFlow {
+                        types: return_types,
+                        always_returns: true,
+                    };
                 }
             }
             Expr::ElseIfBlock(_, code) | Expr::ElseBlock(code) => {
-                let to_return =
-                    track_returns(code, v, fns, src, fn_name, track_condition, dyn_libs);
-                if !to_return.is_empty() || contains_recursive_call(code, fn_name) {
-                    return_types.extend(to_return)
-                } else {
-                    return_types.push(DataType::Null);
+                let flow = track_scoped_returns(code, v, fns, src, fn_name, dyn_libs);
+                extend_return_types!(&mut return_types, flow.types);
+                if flow.always_returns {
+                    return FnReturnFlow {
+                        types: return_types,
+                        always_returns: true,
+                    };
                 }
             }
             Expr::VarDeclare(name, expr) => {
@@ -359,16 +485,35 @@ pub fn track_returns(
                     infered_type: var_type,
                 });
             }
-            Expr::WhileBlock(_, code) | Expr::EvalBlock(code) | Expr::LoopBlock(code) => {
-                return_types.extend(track_returns(
-                    code,
-                    v,
-                    fns,
-                    src,
-                    fn_name,
-                    track_condition,
-                    dyn_libs,
-                ))
+            Expr::VarAssign(name, expr, _) => {
+                let var_type = infer_type(expr, v, fns, src, dyn_libs);
+                if let Some(var) = v.iter_mut().rfind(|var| &var.name == name) {
+                    var.infered_type = var_type;
+                }
+            }
+            Expr::EvalBlock(code) => {
+                let flow = track_scoped_returns(code, v, fns, src, fn_name, dyn_libs);
+                extend_return_types!(&mut return_types, flow.types);
+                if flow.always_returns {
+                    return FnReturnFlow {
+                        types: return_types,
+                        always_returns: true,
+                    };
+                }
+            }
+            Expr::WhileBlock(_, code) => {
+                let flow = track_scoped_returns(code, v, fns, src, fn_name, dyn_libs);
+                extend_return_types!(&mut return_types, flow.types);
+            }
+            Expr::LoopBlock(code) => {
+                let flow = track_scoped_returns(code, v, fns, src, fn_name, dyn_libs);
+                extend_return_types!(&mut return_types, flow.types);
+                if flow.always_returns {
+                    return FnReturnFlow {
+                        types: return_types,
+                        always_returns: true,
+                    };
+                }
             }
             Expr::IntForLoop(var_name, _, _, code, _, _) => {
                 let v_len = v.len();
@@ -377,22 +522,17 @@ pub fn track_returns(
                     register_id: 0,
                     infered_type: DataType::Int,
                 });
-                return_types.extend(track_returns(
-                    code,
-                    v,
-                    fns,
-                    src,
-                    fn_name,
-                    track_condition,
-                    dyn_libs,
-                ));
+                let flow = track_return_flow(code, v, fns, src, fn_name, dyn_libs);
+                extend_return_types!(&mut return_types, flow.types);
                 v.truncate(v_len);
             }
             Expr::ForLoop(var_name, array_code, _) => {
                 let array_expr = array_code.first().unwrap();
-                let elem_type = match infer_type(array_expr, v, fns, src, dyn_libs) {
-                    DataType::Array(inner) => inner.map_or(DataType::Null, |t| *t),
+                let inferred_collection_type = infer_type(array_expr, v, fns, src, dyn_libs);
+                let elem_type = match inferred_collection_type {
+                    DataType::Array(inner) => inner.map_or(DataType::Unknown, |t| *t),
                     DataType::String => DataType::String,
+                    DataType::Unknown => DataType::Unknown,
                     _ => unreachable!(),
                 };
                 let v_len = v.len();
@@ -403,19 +543,10 @@ pub fn track_returns(
                         infered_type: elem_type,
                     });
                 }
-                return_types.extend(track_returns(
-                    &array_code[1..],
-                    v,
-                    fns,
-                    src,
-                    fn_name,
-                    track_condition,
-                    dyn_libs,
-                ));
+                let flow = track_return_flow(&array_code[1..], v, fns, src, fn_name, dyn_libs);
+                extend_return_types!(&mut return_types, flow.types);
                 v.truncate(v_len);
             }
-            // When arr.push(x) is called on an Array(None) variable, upgrade
-            // its inferred type to Array(T) where T is the type of x
             Expr::ObjFunctionCall(obj, args, namespace, _, _, _)
                 if namespace.last().unwrap().as_str() == "push" =>
             {
@@ -432,26 +563,23 @@ pub fn track_returns(
             }
             Expr::ReturnVal(return_val) => {
                 if let Some(val) = return_val.as_ref() {
-                    let contains_call = contains_recursive_call(slice::from_ref(val), fn_name);
-                    if !contains_call {
-                        let infered = infer_type(val, v, fns, src, dyn_libs);
-                        // Discard Null inferred from a value expression -> it means the cycle guard fired (mutual recursion) rather than the
-                        // expression genuinely evaluating to void/null
-                        if infered != DataType::Null
-                            && infered != DataType::Unknown
-                            && !return_types.contains(&infered)
-                        {
-                            return_types.push(infered);
-                        }
-                    }
-                } else if !return_types.contains(&DataType::Null) {
-                    return_types.push(DataType::Null);
+                    let infered = infer_type(val, v, fns, src, dyn_libs);
+                    add_return_type!(&mut return_types, infered);
+                } else {
+                    add_return_type!(&mut return_types, DataType::Null);
                 }
+                return FnReturnFlow {
+                    types: return_types,
+                    always_returns: true,
+                };
             }
             _ => continue,
         }
     }
-    return_types
+    FnReturnFlow {
+        types: return_types,
+        always_returns: false,
+    }
 }
 
 pub fn infer_type(
@@ -466,7 +594,7 @@ pub fn infer_type(
             .iter()
             .rfind(|x| &x.name == name)
             .unwrap_or_else(|| {
-                throw_parser_error(src, markers, ErrType::CannotInferType(name));
+                throw_parser_error(src, markers, ErrType::UnknownVariable(name));
             })
             .infered_type
             .clone(),
@@ -549,10 +677,14 @@ pub fn infer_type(
                 (l, r) => throw_parser_error(src, markers, ErrType::OpError(&l, &r, "||")),
             }
         }
-        Expr::Neg(x, _) => match infer_type(x, v, fns, src, dyn_libs) {
+        Expr::Neg(e, _) => match infer_type(e, v, fns, src, dyn_libs) {
             DataType::Float => DataType::Float,
             DataType::Int => DataType::Int,
             DataType::Unknown => DataType::Unknown,
+            _ => unreachable!(),
+        },
+        Expr::BoolNeg(e, _) => match infer_type(e, v, fns, src, dyn_libs) {
+            DataType::Bool => DataType::Bool,
             _ => unreachable!(),
         },
         Expr::GetIndex(array, index, _) => match infer_type(array, v, fns, src, dyn_libs) {
@@ -661,17 +793,7 @@ pub fn infer_type(
                     RETURN_TYPE_INFERRING
                         .with(|s| s.borrow_mut().insert(SmolStr::from(function_name)));
 
-                    // ----- MORE COMPLEX SOLUTION (DOES NOT ALLOW NULL OPS) -----
-                    // let mut fn_type = [
-                    //     track_returns(fn_code, var_types, fns, src, function, false),
-                    //     track_returns(fn_code, var_types, fns, src, function, true),
-                    // ]
-                    // .concat();
-                    // fn_type.dedup();
-                    // -----
-
-                    let fn_type =
-                        track_returns(fn_code, v, fns, src, function_name, true, dyn_libs);
+                    let fn_type = track_returns(fn_code, v, fns, src, function_name, dyn_libs);
 
                     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(function_name));
 

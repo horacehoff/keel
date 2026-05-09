@@ -388,6 +388,7 @@ pub fn benchmark() {
     let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
     let mut hyperfine = Command::new("hyperfine");
     hyperfine
+        .stdout(std::process::Stdio::inherit())
         .arg("--show-output")
         .arg("--warmup")
         .arg(BENCHMARK_WARMUP.to_string())
@@ -398,7 +399,7 @@ pub fn benchmark() {
 
     for program in PROGRAMS {
         // Keel
-        let keel_path = temp_dir.join(format!("{}.keel", program.name));
+        let keel_path = temp_dir.join(format!("{}.kl", program.name));
         fs::write(&keel_path, program.source).unwrap_or_else(|e| {
             eprintln!(
                 "{color_red}KEEL ERROR{color_reset}\nCannot write benchmark program {}: {e}",
@@ -505,7 +506,7 @@ pub fn benchmark() {
 
         println!("{color_cyan}{}{color_reset}", program.name);
         if let Some(ms) = keel_ms {
-            println!("  {color_green}keel  {color_reset}: {ms:.3} ms");
+            println!("  {color_blue}keel  {color_reset}: {ms:.3} ms");
         }
 
         if has_python
@@ -539,16 +540,16 @@ pub fn benchmark() {
                 let ratio = ms / keel_ms;
                 if ratio >= 1.0 {
                     println!(
-                        "  {color_blue}luajit {color_reset}: {ms:.3} ms  ({ratio:.2}x slower)"
+                        "  {color_green}luajit {color_reset}: {ms:.3} ms  ({ratio:.2}x slower)"
                     );
                 } else {
                     println!(
-                        "  {color_blue}luajit {color_reset}: {ms:.3} ms  ({:.2}x faster)",
+                        "  {color_green}luajit {color_reset}: {ms:.3} ms  ({:.2}x faster)",
                         1.0 / ratio
                     );
                 }
             } else {
-                println!("  {color_blue}luajit {color_reset}: {ms:.3} ms");
+                println!("  {color_green}luajit {color_reset}: {ms:.3} ms");
             }
         }
 

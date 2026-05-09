@@ -10,6 +10,7 @@ use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::parser::parse;
 use crate::parser_data::DynamicLibFn;
+use crate::repl::repl;
 use inline_colorization::*;
 use mimalloc::MiMalloc;
 use parser::*;
@@ -39,6 +40,8 @@ mod method_calls;
 mod parser;
 #[path = "./parser/parser_data.rs"]
 mod parser_data;
+#[path = "./repl.rs"]
+mod repl;
 #[path = "./vm/string_gc.rs"]
 mod string_gc;
 #[path = "./tests.rs"]
@@ -57,22 +60,30 @@ fn main() {
         eprintln!("{color_red}KEEL ERROR{color_reset}\n{info}");
     }));
 
-    let args: Vec<String> = std::env::args().collect();
+    let mut args = std::env::args().skip(1);
 
-    if args.len() == 1 {
+    if args.len() == 0 {
+        cold_path();
+        repl();
+        return;
+    }
+
+    let next_arg = unsafe { args.next().unwrap_unchecked() };
+
+    if next_arg == "--help" || next_arg == "-h" {
         cold_path();
         println!(
-            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel [-v | --version]\n  keel file.keel [--bench [--verbose]]",
+            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel [-v | --version]\n  keel file.kl [--bench [--verbose]]",
             util::KEEL_LOGO
         );
         return;
     }
 
-    if args.iter().any(|x| x == "--version" || x == "-v") {
+    if next_arg == "--version" || next_arg == "-v" {
         cold_path();
-        if args.len() > 2 {
+        if args.len() > 1 {
             eprintln!(
-                "{color_red}KEEL ERROR{color_reset}\nInvalid arguments\nUsage:\n  keel -v\n  keel program.keel [--bench [--verbose]]"
+                "{color_red}KEEL ERROR{color_reset}\nInvalid arguments\nUsage:\n  keel -v\n  keel program.kl [--bench [--verbose]]"
             );
             return;
         }
@@ -80,22 +91,16 @@ fn main() {
         return;
     }
 
-    if args.iter().any(|x| x == "--bench") {
+    if next_arg == "--bench" {
         cold_path();
         crate::benchmark::benchmark();
         return;
     }
 
-    #[cfg(debug_assertions)]
-    let filename = args.get(1).map(String::as_str).unwrap_or("test.keel");
-
-    #[cfg(not(debug_assertions))]
-    let filename = &args.get(1).unwrap_or_else(|| {
-        println!("{}", util::KEEL_LOGO);
-        std::process::exit(0);
-    });
+    let filename = &next_arg;
 
     let contents = fs::read_to_string(filename).unwrap_or_else(|_| {
+        cold_path();
         eprintln!(
             "--------------\n{color_red}KEEL RUNTIME ERROR:{color_reset}\nCannot read {color_bright_red}{style_bold}{filename}{style_reset}{color_reset}\n--------------",
         );
@@ -103,7 +108,7 @@ fn main() {
     });
 
     #[cfg(debug_assertions)]
-    if args.iter().any(|x| x == "--debug") {
+    if args.next() == Some(String::from("--debug")) {
         let now = std::time::Instant::now();
         let (
             instructions,
@@ -115,7 +120,7 @@ fn main() {
             allocated_arg_count,
             allocated_call_depth,
             sources,
-        ) = parse(&contents, filename, false);
+        ) = parse(&contents, filename, true);
         println!("COMPILATION TIME: {:.2?}", now.elapsed());
         let now = std::time::Instant::now();
         vm::execute(

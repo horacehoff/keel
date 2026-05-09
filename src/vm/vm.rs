@@ -370,13 +370,7 @@ pub fn execute(
                 s.push_str(r);
                 *w!(dest) = string!(s);
             }
-            Instr::AddArray(o1, o2, dest) => {
-                let arr_a = &array_pool[r!(o1).as_array()];
-                let arr_b = &array_pool[r!(o2).as_array()];
-
-                let mut combined = Vec::with_capacity(arr_a.len() + arr_b.len());
-                combined.extend_from_slice(arr_a);
-                combined.extend_from_slice(arr_b);
+            Instr::EmptyArray(arr_reg_id) => {
                 let array_id = alloc_array(
                     array_pool,
                     &mut free_arrays,
@@ -385,7 +379,30 @@ pub fn execute(
                     &mut gc_array_threshold,
                     &mut array_live,
                 );
-                array_pool[array_id as usize] = combined;
+                *w!(arr_reg_id) = Data::array(array_id);
+            }
+            Instr::AddArray(o1, o2, dest) => {
+                let arr_a_id = r!(o1).as_array();
+                let arr_b_id = r!(o2).as_array();
+                let array_id = alloc_array(
+                    array_pool,
+                    &mut free_arrays,
+                    registers,
+                    &recursion_stack,
+                    &mut gc_array_threshold,
+                    &mut array_live,
+                );
+                let array_idx = array_id as usize;
+                unsafe {
+                    let array_pool_ptr = array_pool.as_mut_ptr();
+                    let arr_a = &*array_pool_ptr.add(arr_a_id);
+                    let arr_b = &*array_pool_ptr.add(arr_b_id);
+                    let combined = &mut *array_pool_ptr.add(array_idx);
+
+                    combined.reserve(arr_a.len() + arr_b.len());
+                    combined.extend_from_slice(arr_a);
+                    combined.extend_from_slice(arr_b);
+                }
                 *w!(dest) = Data::array(array_id);
             }
             Instr::MulFloat(o1, o2, dest) => {
@@ -574,46 +591,62 @@ pub fn execute(
             Instr::BoolOr(o1, o2, dest) => {
                 *w!(dest) = (r!(o1).as_bool() || r!(o2).as_bool()).into();
             }
+            Instr::NegBool(src, dest) => {
+                *w!(dest) = (!r!(src).as_bool()).into();
+            }
             Instr::NegFloat(tgt, dest) => {
                 *w!(dest) = (-r!(tgt).as_float()).into();
             }
             Instr::NegInt(tgt, dest) => {
                 *w!(dest) = (-r!(tgt).as_int()).into();
             }
+            #[allow(unused_must_use)]
             Instr::Print(target) => {
                 let tgt = r!(target);
                 if tgt.is_str() {
-                    writeln!(handle, "{}", tgt.as_str(string_pool)).unwrap();
+                    writeln!(handle, "{}", tgt.as_str(string_pool));
                 } else if tgt.is_int() {
-                    writeln!(handle, "{}", tgt.as_int()).unwrap();
+                    writeln!(handle, "{}", tgt.as_int());
                 } else if tgt.is_float() {
-                    writeln!(handle, "{}", tgt.as_float()).unwrap();
+                    writeln!(handle, "{}", tgt.as_float());
                 } else if tgt.is_bool() {
-                    writeln!(handle, "{}", tgt.as_bool()).unwrap();
+                    writeln!(handle, "{}", tgt.as_bool());
                 } else if tgt.is_array() {
                     let array = &array_pool[tgt.as_array()];
-                    write!(handle, "[").unwrap();
+                    write!(handle, "[");
                     for (idx, item) in array.iter().enumerate() {
                         if idx != 0 {
-                            write!(handle, ",").unwrap();
+                            write!(handle, ",");
                         }
                         write!(
                             handle,
                             "{}",
                             format_data(item, array_pool, string_pool, false)
-                        )
-                        .unwrap();
+                        );
                     }
-                    writeln!(handle, "]").unwrap();
+                    writeln!(handle, "]");
                 }
             }
-
             Instr::StoreFuncArg(id) => args.push(id),
-            Instr::ArrayMov(new_elem_reg_id, array_id, idx) => {
-                array_pool.get_mut(array_id as usize).unwrap()[idx as usize] = r!(new_elem_reg_id);
-            }
+            #[allow(unused_unsafe)]
+            Instr::ArrayElemMov(new_elem_reg_id, array_id, idx) => unsafe {
+                let arr = array_pool.get_mut(array_id as usize).unwrap_unchecked();
+                assert!(
+                    (idx as usize) < arr.len(),
+                    "ArrayElemMov: idx {} >= arr.len() {} for pool slot {}. Template was corrupted/recycled!",
+                    idx,
+                    arr.len(),
+                    array_id
+                );
+                arr[idx as usize] = r!(new_elem_reg_id);
+            },
+            #[allow(unused_unsafe)]
             Instr::SetElementArray(array_reg_id, new_elem_reg_id, idx) => {
-                let array = array_pool.get_mut(r!(array_reg_id).as_array()).unwrap();
+                let array = unsafe {
+                    array_pool
+                        .get_mut(r!(array_reg_id).as_array())
+                        .unwrap_unchecked()
+                };
                 let index = r!(idx).as_int() as usize;
                 if index >= array.len() {
                     cold_path();
@@ -647,9 +680,18 @@ pub fn execute(
             // takes tgt from  registers, index is index, dest is registers index destination
             Instr::GetIndexArray(array_reg_id, index, dest) => {
                 let idx = r!(index).as_int() as usize;
-                let array = &array_pool[r!(array_reg_id).as_array()];
+                let arr_id = r!(array_reg_id).as_array();
+                let array = &array_pool[arr_id];
                 if idx >= array.len() {
                     cold_path();
+                    eprintln!(
+                        "DEBUG GetIndexArray: arr_reg={} arr_pool_id={} idx={} arr.len()={} arr={:?}",
+                        array_reg_id,
+                        arr_id,
+                        idx,
+                        array.len(),
+                        array
+                    );
                     throw_error(
                         instr_src,
                         sources,
@@ -676,12 +718,12 @@ pub fn execute(
                     std::str::from_utf8_unchecked(std::slice::from_ref(bytes.get_unchecked(idx)))
                 });
             }
-            Instr::Push(array, element) => {
+            #[allow(unused_unsafe)]
+            Instr::Push(array, element) => unsafe {
                 array_pool
-                    .get_mut(r!(array).as_array())
-                    .unwrap()
+                    .get_unchecked_mut(r!(array).as_array())
                     .push(r!(element));
-            }
+            },
             Instr::Remove(array, idx) => {
                 let arr = &mut array_pool[r!(array).as_array()];
                 let index = r!(idx).as_int() as usize;
@@ -708,11 +750,11 @@ pub fn execute(
                 let reg = r!(tgt);
                 if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    let temp_arg = r!(args.pop().unwrap());
+                    let temp_arg = r!(args.pop().unwrap_unchecked());
                     let arg = temp_arg.as_str(string_pool);
                     *w!(dest) = str.contains(arg).into();
                 } else if reg.is_array() {
-                    let arg = r!(args.pop().unwrap());
+                    let arg = r!(args.pop().unwrap_unchecked());
                     *w!(dest) = array_pool[reg.as_array()].contains(&arg).into();
                 }
             }
@@ -720,7 +762,7 @@ pub fn execute(
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim());
             }
             Instr::CallLibFunc(LibFunc::TrimSequence, tgt, dest) => {
-                let temp_arg = r!(args.pop().unwrap());
+                let temp_arg = r!(args.pop().unwrap_unchecked());
                 let arg = temp_arg.as_str(string_pool);
                 let chars: Vec<char> = arg.chars().collect();
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim_matches(&chars[..]));
@@ -729,7 +771,7 @@ pub fn execute(
                 let reg = r!(tgt);
                 if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    let temp_elem = r!(args.pop().unwrap());
+                    let temp_elem = r!(args.pop().unwrap_unchecked());
                     let element = temp_elem.as_str(string_pool);
                     *w!(dest) = if let Some(idx) = str.find(element) {
                         idx as i32
@@ -739,7 +781,7 @@ pub fn execute(
                     .into();
                 } else if reg.is_array() {
                     let arr_id = reg.as_array();
-                    let element = r!(args.pop().unwrap());
+                    let element = r!(args.pop().unwrap_unchecked());
                     *w!(dest) =
                         if let Some(idx) = array_pool[arr_id].iter().position(|x| x == &element) {
                             idx as i32
@@ -764,14 +806,14 @@ pub fn execute(
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim_end());
             }
             Instr::CallLibFunc(LibFunc::TrimSequenceLeft, tgt, dest) => {
-                let chars: Vec<char> = r!(args.pop().unwrap())
+                let chars: Vec<char> = r!(args.pop().unwrap_unchecked())
                     .as_str(string_pool)
                     .chars()
                     .collect();
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim_start_matches(&chars[..]));
             }
             Instr::CallLibFunc(LibFunc::TrimSequenceRight, tgt, dest) => {
-                let chars: Vec<char> = r!(args.pop().unwrap())
+                let chars: Vec<char> = r!(args.pop().unwrap_unchecked())
                     .as_str(string_pool)
                     .chars()
                     .collect();
@@ -781,10 +823,10 @@ pub fn execute(
                 let reg = r!(tgt);
                 if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    let repeat_count = r!(args.pop().unwrap()).as_int();
+                    let repeat_count = r!(args.pop().unwrap_unchecked()).as_int();
                     *w!(dest) = string!(str.repeat(repeat_count as usize));
                 } else if reg.is_array() {
-                    let repeat_count = r!(args.pop().unwrap()).as_int();
+                    let repeat_count = r!(args.pop().unwrap_unchecked()).as_int();
                     let array_id = alloc_array(
                         array_pool,
                         &mut free_arrays,
@@ -895,8 +937,12 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Floor, tgt, dest) => {
                 *w!(dest) = r!(tgt).as_float().floor().into()
             }
+            #[allow(unused_must_use)]
             Instr::CallLibFunc(LibFunc::TheAnswer, _, dest) => {
-                writeln!(handle, "The answer to the Ultimate Question of Life, the Universe, and Everything is 42.").unwrap();
+                writeln!(
+                    handle,
+                    "The answer to the Ultimate Question of Life, the Universe, and Everything is 42."
+                );
                 *w!(dest) = 42.into();
             }
             Instr::CallLibFunc(LibFunc::Len, tgt, dest) => {
@@ -910,25 +956,25 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::StartsWith, source_register, dest_register) => {
                 *w!(dest_register) = r!(source_register)
                     .as_str(string_pool)
-                    .starts_with(r!(args.pop().unwrap()).as_str(string_pool))
+                    .starts_with(r!(args.pop().unwrap_unchecked()).as_str(string_pool))
                     .into();
             }
             Instr::CallLibFunc(LibFunc::EndsWith, source_register, dest_register) => {
                 *w!(dest_register) = r!(source_register)
                     .as_str(string_pool)
-                    .ends_with(r!(args.pop().unwrap()).as_str(string_pool))
+                    .ends_with(r!(args.pop().unwrap_unchecked()).as_str(string_pool))
                     .into();
             }
             #[allow(clippy::no_effect_replace)]
             Instr::CallLibFunc(LibFunc::Replace, source_register, dest_register) => {
                 *w!(dest_register) = string!(r!(source_register).as_str(string_pool).replace(
-                    r!(args.pop().unwrap()).as_str(string_pool),
-                    r!(args.pop().unwrap()).as_str(string_pool),
+                    r!(args.pop().unwrap_unchecked()).as_str(string_pool),
+                    r!(args.pop().unwrap_unchecked()).as_str(string_pool),
                 ));
             }
             Instr::CallLibFunc(LibFunc::Split, source_register, dest_register) => {
                 let source = r!(source_register);
-                let separator = args.pop().unwrap();
+                let separator = unsafe { args.pop().unwrap_unchecked() };
                 if source.is_str() {
                     let output_str_reg_id = alloc_array(
                         array_pool,
@@ -1154,7 +1200,14 @@ pub fn execute(
                     }
                 }
             }
-            Instr::Halt => break,
+            Instr::Halt(code) => {
+                cold_path();
+                if code != 0 {
+                    cold_path();
+                    std::process::exit(r!(code).as_int());
+                }
+                break;
+            }
         }
         i += 1;
     }

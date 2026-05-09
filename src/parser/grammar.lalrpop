@@ -445,6 +445,12 @@ Expression: Expr = {
     },
 
     #[precedence(level="1")] #[assoc(side="left")]
+    <start: @L> "!" <r:Expression> <end: @R> => match r {
+            Expr::Bool(x) => Expr::Bool(!x),
+            l => Expr::BoolNeg(Box::from(l), (start, end)),
+    },
+
+    #[precedence(level="1")] #[assoc(side="left")]
     <start: @L> "-" <r:Expression> <end: @R> => match r {
             Expr::Float(x) => Expr::Float(-x),
             Expr::Int(x) => Expr::Int(x.wrapping_neg()),

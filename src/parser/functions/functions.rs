@@ -220,6 +220,18 @@ pub fn handle_functions(
                     alloc_register(state.registers, state.free_registers),
                 ));
             }
+            "exit" => {
+                check_args_range!(args, 0, 1, name, src, markers);
+                let halt_code = if !args.is_empty() {
+                    check_arg_type(0, &[DataType::Int]);
+                    get_id(
+                        &args[0], v, ctx, state, output, None, false, offset, single_run,
+                    )
+                } else {
+                    0
+                };
+                output.push(Instr::Halt(halt_code));
+            }
             fn_name => {
                 // Lookup function by name in function registry
                 // Registry is (fn_name, fn_args, fn_code, fn_data (per implementation: loc, args_loc, arg_types) )
@@ -564,7 +576,7 @@ fn compile_function(
                 infered_type: infered_type.clone(),
             });
         });
-    let fn_type = track_returns(fn_code, v, state.fns, fn_src, fn_name, true, state.dyn_libs);
+    let fn_type = track_returns(fn_code, v, state.fns, fn_src, fn_name, state.dyn_libs);
     let return_type = if !fn_type.is_empty() {
         // If function returns anything, check if it returns the same thing each time
         check_poly(DataType::Poly(Box::from(fn_type)))

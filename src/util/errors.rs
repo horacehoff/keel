@@ -168,11 +168,11 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::IOStorageFull => "Storage is full".into(),
             ErrType::IOTimedOut => "This operation timed out".into(),
             ErrType::UnknownFunction(f) => format_args!(
-                "Cannot find function {color_bright_blue}{style_bold}{f}{color_reset}{style_reset}"
+                "Unknown function {color_bright_blue}{style_bold}{f}{color_reset}{style_reset}"
             )
             .to_smolstr(),
             ErrType::UnknownVariable(v) => format_args!(
-                "Cannot find variable {color_bright_blue}{style_bold}{v}{color_reset}{style_reset}"
+                "Unknown variable {color_bright_blue}{style_bold}{v}{color_reset}{style_reset}"
             )
             .to_smolstr(),
             ErrType::UnknownNamespace(n) => format_args!(
@@ -229,7 +229,7 @@ pub fn throw_error(
         instr_src
             .iter()
             .find(|(x, _, _)| x == instr)
-            .unwrap_or(&(Instr::Halt, (0, 0), 0));
+            .unwrap_or(&(Instr::Halt(1), (0, 0), 0));
     let src = &sources[*file_idx as usize];
     let err_message: SmolStr = t.into();
     eprintln!("{color_red}KEEL ERROR{color_reset}");
@@ -242,7 +242,12 @@ pub fn throw_error(
         .finish()
         .eprint((src.0.as_str(), Source::from(src.1.as_str())))
         .unwrap();
+
+    #[cfg(not(debug_assertions))]
     std::process::exit(1);
+
+    #[cfg(debug_assertions)]
+    panic!();
 }
 
 #[cold]
@@ -259,7 +264,12 @@ pub fn throw_parser_error(src: (&str, &str), (start, end): &(usize, usize), t: E
         .finish()
         .eprint((src.0, Source::from(src.1)))
         .unwrap();
+
+    #[cfg(not(debug_assertions))]
     std::process::exit(1);
+
+    #[cfg(debug_assertions)]
+    panic!();
 }
 
 #[cold]

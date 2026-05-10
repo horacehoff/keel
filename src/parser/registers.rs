@@ -216,6 +216,48 @@ pub fn free_register(
     }
 }
 
+/// Frees registers allocated during a scope that are runtime temporaries.
+/// Only frees registers that are written by instructions in scope_instrs, are not held by a variable, and are not in const_registers.
+pub fn free_scope_registers(
+    regs_before: u16,
+    scope_instrs: &[Instr],
+    free_registers: &mut Vec<u16>,
+    v: &[Variable],
+    const_registers: &[u16],
+) {
+    let written = get_tgt_ids(scope_instrs);
+    for id in written {
+        if id >= regs_before {
+            free_register(id, free_registers, v, const_registers);
+        }
+    }
+}
+
+/// Similar to free_scope_registers, but also frees CloneArray template registers. Only call this after a loop ends.
+pub fn free_loop_scope_registers(
+    regs_before: u16,
+    scope_instrs: &[Instr],
+    free_registers: &mut Vec<u16>,
+    v: &[Variable],
+    const_registers: &[u16],
+) {
+    free_scope_registers(
+        regs_before,
+        scope_instrs,
+        free_registers,
+        v,
+        const_registers,
+    );
+    // Free CloneArray template registers
+    for instr in scope_instrs {
+        if let Instr::CloneArray(template_reg, _, _) = instr {
+            if *template_reg >= regs_before {
+                free_register(*template_reg, free_registers, v, const_registers);
+            }
+        }
+    }
+}
+
 pub fn is_reg_free(v: &[Variable], id: u16, name: &SmolStr) -> bool {
     !v.iter()
         .any(|var| &var.name != name && var.register_id == id)

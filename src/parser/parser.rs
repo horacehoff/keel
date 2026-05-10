@@ -10,6 +10,8 @@ use crate::method_calls::handle_method_calls;
 use crate::parser_data::*;
 use crate::registers::alloc_register;
 use crate::registers::free_register;
+use crate::registers::free_loop_scope_registers;
+use crate::registers::free_scope_registers;
 use crate::registers::get_last_tgt_id;
 use crate::registers::get_tgt_id;
 use crate::registers::is_reg_free;
@@ -841,6 +843,7 @@ pub fn get_id(
             cmp_markers.push(output.len() - 1);
 
             let v_len = v.len();
+            let regs_before = state.registers.len() as u16;
             // parse the main code block
             let cond_code = compile_expr(
                 &code[0..main_code_limit],
@@ -851,6 +854,13 @@ pub fn get_id(
                 single_run,
             );
             v.truncate(v_len);
+            free_scope_registers(
+                regs_before,
+                &cond_code,
+                state.free_registers,
+                v,
+                state.const_registers,
+            );
             let is_empty = cond_code.is_empty();
             output.extend(cond_code);
             output.push(Instr::Mov(
@@ -877,6 +887,7 @@ pub fn get_id(
                     free_register(condition_id, state.free_registers, v, state.const_registers);
                     cmp_markers.push(output.len() - 1);
                     let v_len = v.len();
+                    let regs_before = state.registers.len() as u16;
                     let cond_code = compile_expr(
                         code,
                         v,
@@ -886,6 +897,13 @@ pub fn get_id(
                         single_run,
                     );
                     v.truncate(v_len);
+                    free_scope_registers(
+                        regs_before,
+                        &cond_code,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                    );
                     let is_empty = cond_code.is_empty();
                     output.extend(cond_code);
                     output.push(Instr::Mov(
@@ -902,6 +920,7 @@ pub fn get_id(
                     else_exists = true;
                     condition_markers.push(output.len());
                     let v_len = v.len();
+                    let regs_before = state.registers.len() as u16;
                     let cond_code = compile_expr(
                         code,
                         v,
@@ -911,6 +930,13 @@ pub fn get_id(
                         single_run,
                     );
                     v.truncate(v_len);
+                    free_scope_registers(
+                        regs_before,
+                        &cond_code,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                    );
                     let is_empty = cond_code.is_empty();
                     output.extend(cond_code);
                     output.push(Instr::Mov(
@@ -1447,6 +1473,7 @@ pub fn compile_expr(
                 // returns but BEFORE cond_code is extended into output
                 let pending = if real_var { 1 } else { 0 };
 
+                let regs_before = state.registers.len() as u16;
                 let mut cond_code = compile_expr(
                     code,
                     v,
@@ -1457,6 +1484,13 @@ pub fn compile_expr(
                 );
                 // Clean up variables
                 v.truncate(v_len);
+                free_loop_scope_registers(
+                    regs_before,
+                    &cond_code,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                );
 
                 // add the condition ('i < len') jumping logic
                 let mut len = (cond_code.len() + 3) as u16 + pending;
@@ -1574,8 +1608,16 @@ pub fn compile_expr(
                 let jmp_idx = output.len();
                 output.push(Instr::SupEqIntJmp(elem_id, end_elem_id, 0));
 
+                let regs_before = state.registers.len() as u16;
                 let compiled_loop_code =
                     compile_expr(code, v, ctx, state, offset + output.len() as u16, false);
+                free_loop_scope_registers(
+                    regs_before,
+                    &compiled_loop_code,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                );
                 let compiled_loop_code_len = compiled_loop_code.len() as u16;
 
                 // (2) loop_body
@@ -1611,8 +1653,16 @@ pub fn compile_expr(
             Expr::LoopBlock(code) => {
                 let loop_id = block_id + 1;
                 let v_len = v.len();
+                let regs_before = state.registers.len() as u16;
                 let mut compiled = compile_expr(code, v, ctx, state, output.len() as u16, false);
                 v.truncate(v_len);
+                free_loop_scope_registers(
+                    regs_before,
+                    &compiled,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                );
                 let code_length = compiled.len() as u16;
                 parse_loop_flow_control(&mut compiled, loop_id, code_length + 1, false, true);
                 output.extend(compiled);

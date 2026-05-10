@@ -112,37 +112,43 @@ fn main() {
     });
 
     #[cfg(debug_assertions)]
-    if args.next() == Some(String::from("--debug")) {
-        let now = std::time::Instant::now();
-        let (
-            instructions,
-            mut registers,
-            mut arrays,
-            instr_src,
-            fn_registers,
-            fn_dyn_libs,
-            allocated_arg_count,
-            allocated_call_depth,
-            sources,
-        ) = parse(&contents, filename, true);
-        println!("COMPILATION TIME: {:.2?}", now.elapsed());
-        let now = std::time::Instant::now();
-        vm::execute(
-            &instructions,
-            &mut registers,
-            &mut arrays,
-            &instr_src,
-            &sources,
-            &fn_registers,
-            &fn_dyn_libs,
-            allocated_arg_count,
-            allocated_call_depth,
-        );
-        println!(
-            "EXECUTION TIME: {:.3}ms",
-            now.elapsed().as_nanos() / 1000000
-        );
-        return;
+    {
+        let next = args.next();
+        if next == Some(String::from("--debug")) {
+            let now = std::time::Instant::now();
+            let (
+                instructions,
+                mut registers,
+                mut arrays,
+                instr_src,
+                fn_registers,
+                fn_dyn_libs,
+                allocated_arg_count,
+                allocated_call_depth,
+                sources,
+            ) = parse(&contents, filename, true);
+            println!("COMPILATION TIME: {:.2?}", now.elapsed());
+            let now = std::time::Instant::now();
+            vm::execute(
+                &instructions,
+                &mut registers,
+                &mut arrays,
+                &instr_src,
+                &sources,
+                &fn_registers,
+                &fn_dyn_libs,
+                allocated_arg_count,
+                allocated_call_depth,
+            );
+            println!(
+                "EXECUTION TIME: {:.3}ms",
+                now.elapsed().as_nanos() / 1000000
+            );
+            return;
+        } else if next == Some(String::from("--debug-parser")) {
+            parse(&contents, filename, false);
+            return;
+        }
     }
 
     let (

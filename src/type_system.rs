@@ -755,14 +755,6 @@ pub fn infer_type(
                             );
                         });
 
-                    if let Some(fn_impl) = func
-                        .impls
-                        .iter()
-                        .find(|fn_impl| *fn_impl.arg_types == infered_arg_types)
-                    {
-                        return fn_impl.return_type.clone();
-                    }
-
                     // Check the return type cache
                     if let Some((_, ret)) = func
                         .return_type_cache

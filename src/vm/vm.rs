@@ -394,7 +394,7 @@ pub fn execute(
                 unsafe {
                     let src_ptr = array_pool.get_unchecked(src_id).as_ptr();
                     let dst = array_pool.get_unchecked_mut(new_id);
-                    dst.reserve(len as usize);
+                    dst.reserve_exact(len as usize);
                     dst.set_len(len as usize);
                     std::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len as usize);
                 }

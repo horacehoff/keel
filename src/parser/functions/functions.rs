@@ -588,17 +588,21 @@ fn compile_function(
     v.truncate(v_len_before_args);
 
     // Add this func specialization to the func's metadata, storing start location, location of args, and infered arg types
-    state
-        .fns
-        .get_mut(function_id)
-        .unwrap()
-        .impls
-        .push(FunctionImpl {
-            loc,
-            args_loc: Box::from(args_loc),
-            arg_types: Box::from(infered_arg_types),
-            return_type,
-        });
+    let func = state.fns.get_mut(function_id).unwrap();
+    func.impls.push(FunctionImpl {
+        loc,
+        args_loc: Box::from(args_loc),
+        arg_types: Box::from(infered_arg_types),
+    });
+    // Cache the return type
+    if !func
+        .return_type_cache
+        .iter()
+        .any(|(args, _)| **args == *infered_arg_types)
+    {
+        func.return_type_cache
+            .push((Box::from(infered_arg_types), return_type));
+    }
 
     // Compile the function into instructions using local vars
     let parsed = compile_expr(

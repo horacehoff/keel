@@ -252,10 +252,10 @@ pub fn free_loop_scope_registers(
     );
     // Free CloneArray template registers
     for instr in scope_instrs {
-        if let Instr::CloneArray(template_reg, _, _) = instr {
-            if *template_reg >= regs_before {
-                free_register(*template_reg, free_registers, v, const_registers);
-            }
+        if let Instr::CloneArray(template_reg, _, _) = instr
+            && *template_reg >= regs_before
+        {
+            free_register(*template_reg, free_registers, v, const_registers);
         }
     }
 }

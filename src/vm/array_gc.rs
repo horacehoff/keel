@@ -11,7 +11,7 @@ pub fn alloc_array(
 ) -> u32 {
     if let Some(id) = free_arrays.pop() {
         array_pool[id as usize].clear();
-        id as u32
+        id
     } else {
         if free_arrays.is_empty() && array_pool.len() >= (*gc_array_threshold as usize) {
             *gc_array_threshold *= 2;
@@ -19,7 +19,7 @@ pub fn alloc_array(
         }
         if let Some(id) = free_arrays.pop() {
             array_pool[id as usize].clear();
-            id as u32
+            id
         } else {
             let id = array_pool.len() as u32;
             array_pool.push(Vec::new());

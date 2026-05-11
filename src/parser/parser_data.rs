@@ -29,7 +29,6 @@ pub struct FunctionImpl {
     pub loc: u16,
     pub args_loc: Box<[u16]>,
     pub arg_types: Box<[DataType]>,
-    pub return_type: DataType,
 }
 
 #[derive(Debug)]

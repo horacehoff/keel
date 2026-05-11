@@ -4,7 +4,6 @@ use smol_str::SmolStr;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
-#[repr(C)]
 pub enum Expr {
     Float(f64),
     Int(i32),

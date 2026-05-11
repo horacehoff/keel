@@ -17,7 +17,7 @@ pub const NULL: Data = Data(NAN_TAG_NULL);
 pub const FALSE: Data = Data(NAN_TAG_BOOL);
 pub const TRUE: Data = Data(NAN_TAG_BOOL | 1);
 
-#[derive(Debug, Clone, Copy, Hash, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Data(pub u64);
 
 impl Data {
@@ -229,13 +229,6 @@ impl Data {
     pub fn get_str_pool_id(&self) -> usize {
         debug_assert!(self.is_large_str());
         (self.0 & PAYLOAD_MASK) as usize
-    }
-}
-
-impl PartialEq for Data {
-    #[inline(always)]
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 

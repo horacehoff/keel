@@ -42,6 +42,11 @@ pub fn format_data(
 
 pub fn _display_fn_signatures(f: Function) {
     for fn_impl in f.impls {
+        let return_type = f.return_type_cache
+            .iter()
+            .find(|(args, _)| *args == fn_impl.arg_types)
+            .map(|(_, ret)| ret.clone())
+            .unwrap_or(DataType::Null);
         println!(
             "{} : ({}) -> {}",
             f.name,
@@ -52,7 +57,6 @@ pub fn _display_fn_signatures(f: Function) {
                 .collect::<Vec<_>>()
                 .join(", "),
             {
-                let return_type = fn_impl.return_type;
                 if return_type != DataType::Null {
                     return_type.to_smolstr()
                 } else {

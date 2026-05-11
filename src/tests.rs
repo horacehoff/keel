@@ -524,6 +524,19 @@ pub fn string_repeat() {
         6.into()
     );
 }
+#[test]
+pub fn array_repeat() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = [1,2];
+            let t = s.repeat(3);
+            print(t.len()+t[2]);
+        }
+        "#,
+        7.into()
+    );
+}
 
 #[test]
 pub fn array_contains() {

@@ -32,7 +32,7 @@ fn array_to_c_ptr(
     keep_alive: &mut Vec<Box<[u8]>>,
 ) -> u64 {
     // Every element is copied so that array_pool is no longer borrowed
-    let elems: Vec<Data> = array_pool[data.as_array()].to_vec();
+    let elems: Vec<Data> = unsafe { array_pool.get_unchecked(data.as_array()) }.to_vec();
 
     match elem_type {
         DataType::Int => {
@@ -99,6 +99,7 @@ struct CallFrame {
     callsite_id: u16,
 }
 
+#[allow(unused_unsafe)]
 pub fn execute(
     instructions: &[Instr],
     registers: &mut [Data],
@@ -494,7 +495,11 @@ pub fn execute(
                 *w!(dest) = (r!(o1) == r!(o2)).into();
             }
             Instr::ArrayEq(o1, o2, dest) => {
-                *w!(dest) = (array_pool[r!(o1).as_array()] == array_pool[r!(o2).as_array()]).into();
+                *w!(dest) = unsafe {
+                    (array_pool.get_unchecked(r!(o1).as_array())
+                        == array_pool.get_unchecked(r!(o2).as_array()))
+                    .into()
+                };
             }
             Instr::NotEqJmp(o1, o2, jump_size) => {
                 if r!(o1) != r!(o2) {
@@ -503,7 +508,10 @@ pub fn execute(
                 }
             }
             Instr::ArrayNotEqJmp(o1, o2, jump_size) => {
-                if array_pool[r!(o1).as_array()] != array_pool[r!(o2).as_array()] {
+                if unsafe {
+                    array_pool.get_unchecked(r!(o1).as_array())
+                        != array_pool.get_unchecked(r!(o2).as_array())
+                } {
                     i += jump_size as usize;
                     continue;
                 }
@@ -512,7 +520,11 @@ pub fn execute(
                 *w!(dest) = (r!(o1) != r!(o2)).into();
             }
             Instr::ArrayNotEq(o1, o2, dest) => {
-                *w!(dest) = (array_pool[r!(o1).as_array()] != array_pool[r!(o2).as_array()]).into();
+                *w!(dest) = unsafe {
+                    (array_pool.get_unchecked(r!(o1).as_array())
+                        != array_pool.get_unchecked(r!(o2).as_array()))
+                    .into()
+                };
             }
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r!(o1) == r!(o2) {
@@ -521,7 +533,10 @@ pub fn execute(
                 }
             }
             Instr::ArrayEqJmp(o1, o2, jump_size) => {
-                if array_pool[r!(o1).as_array()] == array_pool[r!(o2).as_array()] {
+                if unsafe {
+                    array_pool.get_unchecked(r!(o1).as_array())
+                        == array_pool.get_unchecked(r!(o2).as_array())
+                } {
                     i += jump_size as usize;
                     continue;
                 }
@@ -631,7 +646,7 @@ pub fn execute(
                 } else if tgt.is_bool() {
                     writeln!(handle, "{}", tgt.as_bool());
                 } else if tgt.is_array() {
-                    let array = &array_pool[tgt.as_array()];
+                    let array = unsafe { array_pool.get_unchecked(tgt.as_array()) };
                     write!(handle, "[");
                     for (idx, item) in array.iter().enumerate() {
                         if idx != 0 {
@@ -647,25 +662,12 @@ pub fn execute(
                 }
             }
             Instr::StoreFuncArg(id) => args.push(id),
-            #[allow(unused_unsafe)]
             Instr::ArrayElemMov(new_elem_reg_id, array_id, idx) => unsafe {
-                let arr = array_pool.get_mut(array_id as usize).unwrap_unchecked();
-                assert!(
-                    (idx as usize) < arr.len(),
-                    "ArrayElemMov: idx {} >= arr.len() {} for pool slot {}. Template was corrupted/recycled!",
-                    idx,
-                    arr.len(),
-                    array_id
-                );
-                arr[idx as usize] = r!(new_elem_reg_id);
+                let arr = array_pool.get_unchecked_mut(array_id as usize);
+                *arr.get_unchecked_mut(idx as usize) = r!(new_elem_reg_id);
             },
-            #[allow(unused_unsafe)]
             Instr::SetElementArray(array_reg_id, new_elem_reg_id, idx) => {
-                let array = unsafe {
-                    array_pool
-                        .get_mut(r!(array_reg_id).as_array())
-                        .unwrap_unchecked()
-                };
+                let array = unsafe { array_pool.get_unchecked_mut(r!(array_reg_id).as_array()) };
                 let index = r!(idx).as_int() as usize;
                 if index >= array.len() {
                     cold_path();
@@ -700,7 +702,7 @@ pub fn execute(
             Instr::GetIndexArray(array_reg_id, index, dest) => {
                 let idx = r!(index).as_int() as usize;
                 let arr_id = r!(array_reg_id).as_array();
-                let array = &array_pool[arr_id];
+                let array = unsafe { array_pool.get_unchecked(arr_id) };
                 if idx >= array.len() {
                     cold_path();
                     throw_error(
@@ -710,7 +712,7 @@ pub fn execute(
                         ErrType::IndexOutOfBounds(array.len(), idx),
                     );
                 }
-                *w!(dest) = array[idx];
+                *w!(dest) = unsafe { *array.get_unchecked(idx) };
             }
             Instr::GetIndexString(tgt, index, dest) => {
                 let idx = r!(index).as_int() as usize;
@@ -729,14 +731,13 @@ pub fn execute(
                     std::str::from_utf8_unchecked(std::slice::from_ref(bytes.get_unchecked(idx)))
                 });
             }
-            #[allow(unused_unsafe)]
             Instr::Push(array, element) => unsafe {
                 array_pool
                     .get_unchecked_mut(r!(array).as_array())
                     .push(r!(element));
             },
             Instr::Remove(array, idx) => {
-                let arr = &mut array_pool[r!(array).as_array()];
+                let arr = unsafe { array_pool.get_unchecked_mut(r!(array).as_array()) };
                 let index = r!(idx).as_int() as usize;
                 if index >= arr.len() {
                     cold_path();
@@ -766,7 +767,9 @@ pub fn execute(
                     *w!(dest) = str.contains(arg).into();
                 } else if reg.is_array() {
                     let arg = r!(args.pop().unwrap_unchecked());
-                    *w!(dest) = array_pool[reg.as_array()].contains(&arg).into();
+                    *w!(dest) = unsafe { array_pool.get_unchecked(reg.as_array()) }
+                        .contains(&arg)
+                        .into();
                 }
             }
             Instr::CallLibFunc(LibFunc::Trim, tgt, dest) => {
@@ -793,13 +796,15 @@ pub fn execute(
                 } else if reg.is_array() {
                     let arr_id = reg.as_array();
                     let element = r!(args.pop().unwrap_unchecked());
-                    *w!(dest) =
-                        if let Some(idx) = array_pool[arr_id].iter().position(|x| x == &element) {
-                            idx as i32
-                        } else {
-                            -1
-                        }
-                        .into()
+                    *w!(dest) = if let Some(idx) = unsafe { array_pool.get_unchecked(arr_id) }
+                        .iter()
+                        .position(|x| x == &element)
+                    {
+                        idx as i32
+                    } else {
+                        -1
+                    }
+                    .into()
                 }
             }
             Instr::CallLibFunc(LibFunc::IsFloat, tgt, dest) => {
@@ -846,8 +851,11 @@ pub fn execute(
                         &mut gc_array_threshold,
                         &mut array_live,
                     );
-                    array_pool[array_id as usize] =
-                        array_pool[reg.as_array()].repeat(repeat_count as usize);
+                    unsafe {
+                        *array_pool.get_unchecked_mut(array_id as usize) = array_pool
+                            .get_unchecked(reg.as_array())
+                            .repeat(repeat_count as usize);
+                    }
                     *w!(dest) = Data::array(array_id);
                 }
             }
@@ -872,7 +880,7 @@ pub fn execute(
                 );
             }
             Instr::CallLibFuncVoid(LibFuncVoid::Reverse, tgt, _) => {
-                array_pool[r!(tgt).as_array()].reverse();
+                unsafe { array_pool.get_unchecked_mut(r!(tgt).as_array()) }.reverse();
             }
             Instr::CallLibFunc(LibFunc::SqrtFloat, tgt, dest) => {
                 *w!(dest) = r!(tgt).as_float().sqrt().into()
@@ -959,7 +967,8 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Len, tgt, dest) => {
                 let reg = r!(tgt);
                 if reg.is_array() {
-                    *w!(dest) = (array_pool[reg.as_array()].len() as i32).into()
+                    *w!(dest) =
+                        (unsafe { array_pool.get_unchecked(reg.as_array()) }.len() as i32).into()
                 } else if reg.is_str() {
                     *w!(dest) = (reg.as_str(string_pool).len() as i32).into()
                 }
@@ -1003,7 +1012,8 @@ pub fn execute(
                     } else {
                         source.matches(separator).count() + 1
                     };
-                    let output = &mut array_pool[output_str_reg_id as usize];
+                    let output =
+                        unsafe { array_pool.get_unchecked_mut(output_str_reg_id as usize) };
                     output.clear();
                     output.reserve(output_len);
                     for part in source.split(separator) {
@@ -1025,7 +1035,7 @@ pub fn execute(
                 } else if source.is_array() {
                     let source_array_id = source.as_array();
                     let separator = r!(separator);
-                    let source_array = &array_pool[source_array_id];
+                    let source_array = unsafe { array_pool.get_unchecked(source_array_id) };
 
                     // Find the source slice ranges that will become output arrays
                     let mut split_ranges: Vec<(usize, usize)> =
@@ -1070,7 +1080,7 @@ pub fn execute(
                         &mut gc_array_threshold,
                         &mut array_live,
                     );
-                    array_pool[array_id as usize] = sub_array_ids
+                    *unsafe { array_pool.get_unchecked_mut(array_id as usize) } = sub_array_ids
                         .iter()
                         .map(|id| Data::array(*id))
                         .collect::<Vec<Data>>();
@@ -1093,8 +1103,9 @@ pub fn execute(
                     &mut gc_array_threshold,
                     &mut array_live,
                 );
-                array_pool[output_array_id as usize].clear();
-                array_pool[output_array_id as usize].extend((min..max).map(Data::from));
+                let range_arr = unsafe { array_pool.get_unchecked_mut(output_array_id as usize) };
+                range_arr.clear();
+                range_arr.extend((min..max).map(Data::from));
                 *w!(dest) = Data::array(output_array_id);
             }
             Instr::CallLibFunc(LibFunc::JoinStringArray, tgt, dest) => {
@@ -1102,7 +1113,7 @@ pub fn execute(
                 let separator = temp_separator
                     .as_ref()
                     .map_or("", |d| d.as_str(string_pool));
-                let array = &array_pool[r!(tgt).as_array()];
+                let array = unsafe { array_pool.get_unchecked(r!(tgt).as_array()) };
                 let total_len: usize = array
                     .iter()
                     .map(|x| x.as_str(string_pool).len())
@@ -1187,14 +1198,14 @@ pub fn execute(
                     &mut gc_array_threshold,
                     &mut array_live,
                 );
-                array_pool[array_id as usize] = std::env::args()
+                *unsafe { array_pool.get_unchecked_mut(array_id as usize) } = std::env::args()
                     .skip(2)
                     .map(|s| string!(s))
                     .collect::<Vec<Data>>();
                 *w!(dest) = Data::array(array_id);
             }
             Instr::CallLibFuncVoid(LibFuncVoid::Sort, tgt, _) => {
-                let array = &mut array_pool[r!(tgt).as_array()];
+                let array = unsafe { array_pool.get_unchecked_mut(r!(tgt).as_array()) };
                 if !array.is_empty() {
                     if array[0].is_int() {
                         array.sort_unstable_by_key(|x| x.as_int());

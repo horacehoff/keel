@@ -4,13 +4,14 @@ use crate::errors::ErrType;
 use crate::errors::lalrpop_error;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
+use crate::expr::contains_var_reassign;
 use crate::functions::handle_functions;
 use crate::grammar::Token;
 use crate::method_calls::handle_method_calls;
 use crate::parser_data::*;
 use crate::registers::alloc_register;
-use crate::registers::free_register;
 use crate::registers::free_loop_scope_registers;
+use crate::registers::free_register;
 use crate::registers::free_scope_registers;
 use crate::registers::get_last_tgt_id;
 use crate::registers::get_tgt_id;
@@ -28,7 +29,7 @@ use inline_colorization::*;
 use lalrpop_util::lalrpop_mod;
 use smol_str::SmolStr;
 use smol_str::ToSmolStr;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::slice;
 
@@ -225,21 +226,6 @@ fn parse_loop_flow_control(
     });
 }
 
-fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
-    code.iter().any(|expr| match expr {
-        Expr::VarAssign(n, _, _) => n == name,
-        Expr::Condition(_, body, _)
-        | Expr::WhileBlock(_, body)
-        | Expr::EvalBlock(body)
-        | Expr::LoopBlock(body)
-        | Expr::InlineCondition(_, body, _) => contains_var_reassign(name, body),
-        Expr::ElseIfBlock(_, body) | Expr::ElseBlock(body) => contains_var_reassign(name, body),
-        Expr::ForLoop(_, body, _) => contains_var_reassign(name, body),
-        Expr::IntForLoop(_, _, _, body, _, _) => contains_var_reassign(name, body),
-        _ => false,
-    })
-}
-
 pub fn get_id(
     input: &Expr,
     v: &mut Vec<Variable>,
@@ -298,16 +284,14 @@ pub fn get_id(
                 state.registers.push((*num).into());
                 return (state.registers.len() - 1) as u16;
             }
-            if let Some(id) = state
-                .const_registers
-                .iter()
-                .find(|x| state.registers[**x as usize] == (*num).into())
-            {
-                *id
+            let data = (*num).into();
+            if let Some(&id) = state.const_registers.get(&data) {
+                id
             } else {
-                state.registers.push((*num).into());
-                state.const_registers.push(state.registers.len() as u16);
-                (state.registers.len() - 1) as u16
+                state.registers.push(data);
+                let id = (state.registers.len() - 1) as u16;
+                state.const_registers.insert(data, id);
+                id
             }
         }
         Expr::Int(num) => {
@@ -315,16 +299,14 @@ pub fn get_id(
                 state.registers.push((*num).into());
                 return (state.registers.len() - 1) as u16;
             }
-            if let Some(id) = state
-                .const_registers
-                .iter()
-                .find(|x| state.registers[**x as usize] == (*num).into())
-            {
-                *id
+            let data = (*num).into();
+            if let Some(&id) = state.const_registers.get(&data) {
+                id
             } else {
-                state.const_registers.push(state.registers.len() as u16);
-                state.registers.push((*num).into());
-                (state.registers.len() - 1) as u16
+                let id = state.registers.len() as u16;
+                state.const_registers.insert(data, id);
+                state.registers.push(data);
+                id
             }
         }
         Expr::String(str) => {
@@ -334,17 +316,14 @@ pub fn get_id(
                     .push(Data::p_str(str, &mut state.pools.string_pool));
                 return (state.registers.len() - 1) as u16;
             }
-            if let Some(id) = state.const_registers.iter().find(|x| {
-                state.registers[**x as usize].is_str()
-                    && state.registers[**x as usize].as_str(&state.pools.string_pool) == str
-            }) {
-                *id
+            let data = Data::p_str(str, &mut state.pools.string_pool);
+            if let Some(&id) = state.const_registers.get(&data) {
+                id
             } else {
-                state.const_registers.push(state.registers.len() as u16);
-                state
-                    .registers
-                    .push(Data::p_str(str, &mut state.pools.string_pool));
-                (state.registers.len() - 1) as u16
+                let id = state.registers.len() as u16;
+                state.const_registers.insert(data, id);
+                state.registers.push(data);
+                id
             }
         }
         Expr::Null => {
@@ -352,16 +331,13 @@ pub fn get_id(
                 state.registers.push(NULL);
                 return (state.registers.len() - 1) as u16;
             }
-            if let Some(id) = state
-                .const_registers
-                .iter()
-                .find(|x| state.registers[**x as usize].is_null())
-            {
-                *id
+            if let Some(&id) = state.const_registers.get(&NULL) {
+                id
             } else {
-                state.const_registers.push(state.registers.len() as u16);
+                let id = state.registers.len() as u16;
+                state.const_registers.insert(NULL, id);
                 state.registers.push(NULL);
-                (state.registers.len() - 1) as u16
+                id
             }
         }
         Expr::Bool(bool) => {
@@ -369,16 +345,14 @@ pub fn get_id(
                 state.registers.push((*bool).into());
                 return (state.registers.len() - 1) as u16;
             }
-            if let Some(id) = state
-                .const_registers
-                .iter()
-                .find(|x| state.registers[**x as usize] == (*bool).into())
-            {
-                *id
+            let data: Data = (*bool).into();
+            if let Some(&id) = state.const_registers.get(&data) {
+                id
             } else {
-                state.const_registers.push(state.registers.len() as u16);
-                state.registers.push((*bool).into());
-                (state.registers.len() - 1) as u16
+                let id = state.registers.len() as u16;
+                state.const_registers.insert(data, id);
+                state.registers.push(data);
+                id
             }
         }
         Expr::Var(name, markers) => {
@@ -1573,7 +1547,9 @@ pub fn compile_expr(
                     );
                     let start_val = state.registers[start_elem_id as usize];
                     let elem_id = alloc_register(state.registers, state.free_registers);
-                    if state.const_registers.contains(&start_elem_id) && start_val.is_int() {
+                    if state.const_registers.values().any(|&v| v == start_elem_id)
+                        && start_val.is_int()
+                    {
                         output.push(Instr::SetInt(elem_id, start_val.as_int()));
                     } else {
                         output.push(Instr::Mov(start_elem_id, elem_id));
@@ -1593,7 +1569,7 @@ pub fn compile_expr(
                 );
 
                 // elem_id is a fresh mutable register — remove from state.const_registers just in case
-                state.const_registers.retain(|&id| id != elem_id);
+                state.const_registers.retain(|_, &mut v| v != elem_id);
 
                 let v_len = v.len();
                 v.push(Variable {
@@ -1798,7 +1774,7 @@ pub fn compile_expr(
                 );
                 if output.len() != output_len {
                     move_to_id(&mut output, id);
-                } else if state.const_registers.contains(&obj_id) {
+                } else if state.const_registers.values().any(|&v| v == obj_id) {
                     move_reg_to_reg(&mut output, obj_id, id, state.registers[obj_id as usize]);
                 } else {
                     output.push(Instr::Mov(obj_id, id));
@@ -1859,6 +1835,7 @@ pub fn compile_expr(
                     id: state.fn_registers.len() as u16,
                     returns_void: check_if_returns_void(y),
                     src_file: current_src_file,
+                    return_type_cache: Vec::new(),
                 });
                 state.fn_registers.push(Vec::new());
             }
@@ -1951,6 +1928,7 @@ fn parse_toplevel(
                     id: (fn_registers.len() - 1) as u16,
                     returns_void,
                     src_file: src_file_idx,
+                    return_type_cache: Vec::new(),
                 });
             }
             Expr::ImportDynLib(path, fn_signatures, markers) => {
@@ -2136,7 +2114,7 @@ pub fn parse(
     let mut dyn_lib_fns: Vec<DynamicLibFn> = Vec::new();
     let mut allocated_arg_count = 0;
     let mut allocated_call_depth = 0;
-    let mut const_registers = Vec::new();
+    let mut const_registers = HashMap::new();
     let mut free_registers = Vec::new();
 
     // sources[0] = main file; additional entries added for each `use`

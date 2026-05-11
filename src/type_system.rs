@@ -372,7 +372,7 @@ macro_rules! extend_return_types {
 pub fn track_returns(
     content: &[Expr],
     v: &mut Vec<Variable>,
-    fns: &[Function],
+    fns: &mut [Function],
     src: (&str, &str),
     fn_name: &str,
     dyn_libs: &[Dynamiclib],
@@ -392,7 +392,7 @@ struct FnReturnFlow {
 fn track_scoped_returns(
     code: &[Expr],
     v: &mut Vec<Variable>,
-    fns: &[Function],
+    fns: &mut [Function],
     src: (&str, &str),
     fn_name: &str,
     dyn_libs: &[Dynamiclib],
@@ -406,7 +406,7 @@ fn track_scoped_returns(
 fn track_condition_returns(
     code: &[Expr],
     v: &mut Vec<Variable>,
-    fns: &[Function],
+    fns: &mut [Function],
     src: (&str, &str),
     fn_name: &str,
     dyn_libs: &[Dynamiclib],
@@ -449,7 +449,7 @@ fn track_condition_returns(
 fn track_return_flow(
     content: &[Expr],
     v: &mut Vec<Variable>,
-    fns: &[Function],
+    fns: &mut [Function],
     src: (&str, &str),
     fn_name: &str,
     dyn_libs: &[Dynamiclib],
@@ -585,7 +585,7 @@ fn track_return_flow(
 pub fn infer_type(
     e: &Expr,
     v: &mut Vec<Variable>,
-    fns: &[Function],
+    fns: &mut [Function],
     src: (&str, &str),
     dyn_libs: &[Dynamiclib],
 ) -> DataType {
@@ -739,17 +739,12 @@ pub fn infer_type(
                     {
                         return fn_return_type.clone();
                     }
+                    let infered_arg_types = args
+                        .iter()
+                        .map(|x| infer_type(x, v, fns, src, dyn_libs))
+                        .collect::<Vec<DataType>>();
 
-                    let Function {
-                        name: _,
-                        args: fn_args,
-                        code: fn_code,
-                        impls,
-                        is_recursive: _,
-                        id: _,
-                        returns_void: _,
-                        src_file: _,
-                    } = fns
+                    let func = fns
                         .iter()
                         .find(|func| func.name == function_name)
                         .unwrap_or_else(|| {
@@ -760,19 +755,27 @@ pub fn infer_type(
                             );
                         });
 
-                    let infered_arg_types = args
-                        .iter()
-                        .map(|x| infer_type(x, v, fns, src, dyn_libs))
-                        .collect::<Vec<DataType>>();
-                    if let Some(fn_impl) = impls
+                    if let Some(fn_impl) = func
+                        .impls
                         .iter()
                         .find(|fn_impl| *fn_impl.arg_types == infered_arg_types)
                     {
                         return fn_impl.return_type.clone();
                     }
 
+                    // Check the return type cache
+                    if let Some((_, ret)) = func
+                        .return_type_cache
+                        .iter()
+                        .find(|(args, _)| **args == *infered_arg_types)
+                    {
+                        return ret.clone();
+                    }
+
+                    let fn_args = func.args.clone();
+                    let fn_code = func.code.clone();
                     let v_len_before_args = v.len();
-                    for (i, infered_type) in infered_arg_types.into_iter().enumerate() {
+                    for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
                         // 0 => placeholder id, it's never used
                         v.push(Variable {
                             name: fn_args[i].clone(),
@@ -793,7 +796,7 @@ pub fn infer_type(
                     RETURN_TYPE_INFERRING
                         .with(|s| s.borrow_mut().insert(SmolStr::from(function_name)));
 
-                    let fn_type = track_returns(fn_code, v, fns, src, function_name, dyn_libs);
+                    let fn_type = track_returns(&fn_code, v, fns, src, function_name, dyn_libs);
 
                     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(function_name));
 
@@ -806,6 +809,13 @@ pub fn infer_type(
                     };
 
                     v.truncate(v_len_before_args);
+
+                    // Cache the result
+                    fns.iter_mut()
+                        .find(|f| f.name == function_name)
+                        .unwrap()
+                        .return_type_cache
+                        .push((Box::from(infered_arg_types), to_return.clone()));
 
                     to_return
                 }

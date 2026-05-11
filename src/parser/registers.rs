@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::Data;
 use crate::Instr;
 use crate::NULL;
@@ -206,10 +208,10 @@ pub fn free_register(
     id: u16,
     free_registers: &mut Vec<u16>,
     v: &[Variable],
-    const_registers: &[u16],
+    const_registers: &HashMap<Data, u16>,
 ) {
     if !v.iter().any(|var| var.register_id == id)
-        && !const_registers.iter().any(|reg| reg == &id)
+        && !const_registers.values().any(|&reg| reg == id)
         && !free_registers.contains(&id)
     {
         free_registers.push(id);
@@ -223,7 +225,7 @@ pub fn free_scope_registers(
     scope_instrs: &[Instr],
     free_registers: &mut Vec<u16>,
     v: &[Variable],
-    const_registers: &[u16],
+    const_registers: &HashMap<Data, u16>,
 ) {
     let written = get_tgt_ids(scope_instrs);
     for id in written {
@@ -239,7 +241,7 @@ pub fn free_loop_scope_registers(
     scope_instrs: &[Instr],
     free_registers: &mut Vec<u16>,
     v: &[Variable],
-    const_registers: &[u16],
+    const_registers: &HashMap<Data, u16>,
 ) {
     free_scope_registers(
         regs_before,

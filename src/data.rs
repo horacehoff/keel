@@ -17,7 +17,7 @@ pub const NULL: Data = Data(NAN_TAG_NULL);
 pub const FALSE: Data = Data(NAN_TAG_BOOL);
 pub const TRUE: Data = Data(NAN_TAG_BOOL | 1);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, Eq)]
 pub struct Data(pub u64);
 
 impl Data {

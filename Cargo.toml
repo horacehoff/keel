@@ -54,6 +54,7 @@ debug = 2
 debug-assertions = false
 panic = "abort"
 rpath = true
+incremental = false
 
 [profile.debugrelease.package."*"]
 opt-level = 3

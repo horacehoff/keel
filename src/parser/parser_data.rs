@@ -6,6 +6,7 @@ use crate::vm::ArrayPool;
 use crate::vm::StringPool;
 use libloading::Library;
 use smol_str::SmolStr;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -19,6 +20,8 @@ pub struct Function {
     pub returns_void: bool,
     /// Index into the sources table for error reporting
     pub src_file: u16,
+    /// Cache of return types from track_returns, keyed by arg types
+    pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
 }
 
 #[derive(Debug, Clone)]
@@ -82,12 +85,13 @@ pub struct State<'a> {
     pub registers: &'a mut Vec<Data>,
     pub fns: &'a mut Vec<Function>,
     pub pools: &'a mut Pools,
+    /// Vec<(instruction, markers, file_id)>
     pub instr_src: &'a mut Vec<(Instr, (usize, usize), u16)>,
     pub fn_registers: &'a mut Vec<Vec<u16>>,
     pub dyn_libs: &'a mut Vec<Dynamiclib>,
     pub allocated_arg_count: &'a mut usize,
     pub allocated_call_depth: &'a mut usize,
-    pub const_registers: &'a mut Vec<u16>,
+    pub const_registers: &'a mut HashMap<Data, u16>,
     pub free_registers: &'a mut Vec<u16>,
     pub sources: &'a mut Vec<(SmolStr, String)>,
 }

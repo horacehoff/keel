@@ -10,7 +10,6 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
 <tr>
   <th>Keel</th>
   <th>Python 3</th>
-  <th>Node.js</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -32,14 +31,6 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
         c = a + b
         a = b
         b = c</code></pre></td>
-<td><pre><code class="language-javascript">for (let r = 0; r < 200000; r++) {
-    let a = 0, b = 1, c = 0;
-    for (let i = 0; i < 39; i++) {
-        c = a + b;
-        a = b;
-        b = c;
-    }
-}</code></pre></td>
 <td><pre><code class="language-lua">for r = 0, 199999 do
     local a, b, c = 0, 1, 0
     for i = 0, 38 do
@@ -50,10 +41,9 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
 end</code></pre></td>
 </tr>
 <tr>
-  <td><b>52.3ms</b></td>
-  <td>684ms</td>
-  <td>35.8ms</td>
-  <td>62.4ms</td>
+  <td><b>59.1ms</b></td>
+  <td>668ms</td>
+  <td>60.2ms</td>
 </tr>
 </table>
 
@@ -65,7 +55,6 @@ end</code></pre></td>
 <tr>
   <th>Keel</th>
   <th>Python 3</th>
-  <th>Node.js</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -83,12 +72,6 @@ function main() {
     return fib(n - 1) + fib(n - 2)
 
 print(fib(30))</code></pre></td>
-<td><pre><code class="language-javascript">function fib(n) {
-    if (n <= 1) return n;
-    return fib(n - 1) + fib(n - 2);
-}
-
-console.log(fib(30));</code></pre></td>
 <td><pre><code class="language-lua">local function fib(n)
     if n <= 1 then return n end
     return fib(n - 1) + fib(n - 2)
@@ -97,10 +80,9 @@ end
 print(fib(30))</code></pre></td>
 </tr>
 <tr>
-  <td><b>40.4ms</b></td>
-  <td>114.5ms</td>
-  <td>45.6ms</td>
-  <td>36.9ms</td>
+  <td><b>41.1ms</b></td>
+  <td>111.8ms</td>
+  <td>36.5ms</td>
 </tr>
 </table>
 
@@ -112,7 +94,6 @@ print(fib(30))</code></pre></td>
 <tr>
   <th>Keel</th>
   <th>Python 3</th>
-  <th>Node.js</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -136,16 +117,6 @@ while count < 1000000:
         result %= 1000000
     count += 1
 print(result)</code></pre></td>
-<td><pre><code class="language-javascript">let count = 0;
-let result = 1;
-while (count < 1000000) {
-    result *= 2;
-    if (result > 1000000) {
-        result %= 1000000;
-    }
-    count++;
-}
-console.log(result);</code></pre></td>
 <td><pre><code class="language-lua">local count = 0
 local result = 1
 while count < 1000000 do
@@ -158,9 +129,8 @@ end
 print(result)</code></pre></td>
 </tr>
 <tr>
-  <td><b>18ms</b></td>
-  <td>137.8ms</td>
-  <td>39.7ms</td>
+  <td><b>18.5ms</b></td>
+  <td>136ms</td>
   <td>25.6ms</td>
 </tr>
 </table>
@@ -173,7 +143,6 @@ print(result)</code></pre></td>
 <tr>
   <th>Keel</th>
   <th>Python 3</th>
-  <th>Node.js</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -190,11 +159,6 @@ x = 0.0
 for i in range(10000000):
     x += sqrt(i)
 print(x)</code></pre></td>
-<td><pre><code class="language-javascript">let x = 0.0;
-for (let i = 0; i < 10000000; i++) {
-    x += Math.sqrt(i);
-}
-console.log(x);</code></pre></td>
 <td><pre><code class="language-lua">local x = 0.0
 for i = 0, 9999999 do
     x = x + math.sqrt(i)
@@ -202,10 +166,9 @@ end
 print(x)</code></pre></td>
 </tr>
 <tr>
-  <td><b>96.2ms</b></td>
-  <td>992ms</td>
-  <td>50ms</td>
-  <td>173.8ms</td>
+  <td><b>99.8ms</b></td>
+  <td>1164ms</td>
+  <td>167ms</td>
 </tr>
 </table>
 
@@ -217,7 +180,6 @@ print(x)</code></pre></td>
 <tr>
   <th>Keel</th>
   <th>Python 3</th>
-  <th>Node.js</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -257,20 +219,6 @@ while i * i <= limit:
     i += 1
 count = sum(1 for x in sieve if x)
 print(count)</code></pre></td>
-<td><pre><code class="language-javascript">const limit = 100000;
-const sieve = Array.from(
-    { length: limit }, (_, i) => i
-);
-sieve[0] = 0;
-sieve[1] = 0;
-for (let i = 2; i * i <= limit; i++) {
-    if (sieve[i] !== 0) {
-        for (let j = i*i; j < limit; j += i) {
-            sieve[j] = 0;
-        }
-    }
-}
-console.log(sieve.filter(x => x > 0).length);</code></pre></td>
 <td><pre><code class="language-lua">local limit = 100000
 local sieve = {}
 for i = 0, limit - 1 do
@@ -296,10 +244,9 @@ end
 print(count)</code></pre></td>
 </tr>
 <tr>
-  <td><b>4.2ms</b></td>
-  <td>45.1ms</td>
-  <td>39.8ms</td>
-  <td>6.6ms</td>
+  <td><b>6.2ms</b></td>
+  <td>40ms</td>
+  <td>7ms</td>
 </tr>
 </table>
 
@@ -311,7 +258,6 @@ print(count)</code></pre></td>
 <tr>
   <th>Keel</th>
   <th>Python 3</th>
-  <th>Node.js</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -333,15 +279,6 @@ for _ in range(50000):
     if "fox" in parts:
         count += 1
 print(count)</code></pre></td>
-<td><pre><code class="language-javascript">const s = "the quick brown fox";
-let count = 0;
-for (let i = 0; i < 50000; i++) {
-    const parts = s.split(" ");
-    if (parts.includes("fox")) {
-        count++;
-    }
-}
-console.log(count);</code></pre></td>
 <td><pre><code class="language-lua">local s = "the quick brown fox"
 local count = 0
 for _ = 1, 50000 do
@@ -352,10 +289,9 @@ end
 print(count)</code></pre></td>
 </tr>
 <tr>
-  <td><b>4.8ms</b></td>
-  <td>32.2ms</td>
-  <td>37.5ms</td>
-  <td>4.3ms</td>
+  <td><b>7.7ms</b></td>
+  <td>32ms</td>
+  <td>27ms</td>
 </tr>
 </table>
 
@@ -367,7 +303,6 @@ print(count)</code></pre></td>
 <tr>
   <th>Keel</th>
   <th>Python 3</th>
-  <th>Node.js</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -397,14 +332,6 @@ for i in range(1, 1000001):
     else:
         last = str(i)
 print(last)</code></pre></td>
-<td><pre><code class="language-javascript">let last = "";
-for (let i = 1; i <= 1000000; i++) {
-    if (i % 15 === 0) last = "FizzBuzz";
-    else if (i % 3 === 0) last = "Fizz";
-    else if (i % 5 === 0) last = "Buzz";
-    else last = String(i);
-}
-console.log(last);</code></pre></td>
 <td><pre><code class="language-lua">local last = ""
 for i = 1, 1000000 do
     if i % 15 == 0 then
@@ -420,10 +347,9 @@ end
 print(last)</code></pre></td>
 </tr>
 <tr>
-  <td><b>26.6ms</b></td>
-  <td>172.5ms</td>
-  <td>48.9ms</td>
-  <td>84.3ms</td>
+  <td><b>26.9ms</b></td>
+  <td>171ms</td>
+  <td>82.4ms</td>
 </tr>
 </table>
 

@@ -7,6 +7,7 @@ use crate::NULL;
 use crate::alloc_array;
 use crate::data::TRUE;
 use crate::errors::ErrType;
+use crate::errors::ErrorCtx;
 use crate::errors::throw_error;
 use crate::format_data;
 use crate::fs;
@@ -107,8 +108,7 @@ pub fn execute(
         array_pool,
         string_pool,
     }: &mut Pools,
-    instr_src: &[(Instr, (usize, usize), u16)],
-    sources: &[(SmolStr, String)],
+    err_ctx: &ErrorCtx,
     fn_registers: &[Vec<u16>],
     dyn_libs: &[DynamicLibFn],
     allocated_arg_count: usize,
@@ -282,8 +282,7 @@ pub fn execute(
                                     .unwrap_or_else(|_| {
                                         cold_path();
                                         throw_error(
-                                            instr_src,
-                                            sources,
+                                            err_ctx,
                                             &instructions[i],
                                             ErrType::Custom(
                                                 "String passed to C contains an interior null byte"
@@ -307,8 +306,7 @@ pub fn execute(
                             t => {
                                 cold_path();
                                 throw_error(
-                                    instr_src,
-                                    sources,
+                                    err_ctx,
                                     &instructions[i],
                                     ErrType::Custom(
                                         format_args!("Invalid argument type: {t:?}").to_smolstr(),
@@ -346,8 +344,7 @@ pub fn execute(
                         DataType::Array(_) => {
                             cold_path();
                             throw_error(
-                                instr_src,
-                                sources,
+                                err_ctx,
                                 &instructions[i],
                                 ErrType::Custom(
                                     "Array return types are not supported: C does not convey the length of a returned array".into(),
@@ -357,8 +354,7 @@ pub fn execute(
                         t => {
                             cold_path();
                             throw_error(
-                                instr_src,
-                                sources,
+                                err_ctx,
                                 &instructions[i],
                                 ErrType::Custom(
                                     format_args!("Invalid return type: {t:?}").to_smolstr(),
@@ -452,8 +448,7 @@ pub fn execute(
                 if b == 0 {
                     cold_path();
                     throw_error(
-                        instr_src,
-                        sources,
+                        err_ctx,
                         &Instr::DivInt(o1, o2, dest),
                         ErrType::DivisionByZero,
                     );
@@ -476,12 +471,7 @@ pub fn execute(
                 let b = r!(o2).as_int();
                 if b == 0 {
                     cold_path();
-                    throw_error(
-                        instr_src,
-                        sources,
-                        &Instr::ModInt(o1, o2, dest),
-                        ErrType::ModuloByZero,
-                    );
+                    throw_error(err_ctx, &Instr::ModInt(o1, o2, dest), ErrType::ModuloByZero);
                 }
                 *w!(dest) = (r!(o1).as_int() % b).into();
             }
@@ -685,8 +675,7 @@ pub fn execute(
                 if index >= array.len() {
                     cold_path();
                     throw_error(
-                        instr_src,
-                        sources,
+                        err_ctx,
                         &instructions[i],
                         ErrType::IndexOutOfBounds(array.len(), index),
                     );
@@ -700,8 +689,7 @@ pub fn execute(
                 if index >= source_string.len() {
                     cold_path();
                     throw_error(
-                        instr_src,
-                        sources,
+                        err_ctx,
                         &instructions[i],
                         ErrType::IndexOutOfBounds(source_string.len(), index),
                     );
@@ -719,8 +707,7 @@ pub fn execute(
                 if idx >= array.len() {
                     cold_path();
                     throw_error(
-                        instr_src,
-                        sources,
+                        err_ctx,
                         &instructions[i],
                         ErrType::IndexOutOfBounds(array.len(), idx),
                     );
@@ -734,8 +721,7 @@ pub fn execute(
                 if idx >= bytes.len() {
                     cold_path();
                     throw_error(
-                        instr_src,
-                        sources,
+                        err_ctx,
                         &instructions[i],
                         ErrType::IndexOutOfBounds(bytes.len(), idx),
                     );
@@ -755,8 +741,7 @@ pub fn execute(
                 if index >= arr.len() {
                     cold_path();
                     throw_error(
-                        instr_src,
-                        sources,
+                        err_ctx,
                         &instructions[i],
                         ErrType::IndexOutOfBounds(arr.len(), index),
                     );
@@ -906,12 +891,7 @@ pub fn execute(
                     let str = reg.as_str(string_pool);
                     *w!(dest) = (str.parse::<f64>().unwrap_or_else(|_| {
                         cold_path();
-                        throw_error(
-                            instr_src,
-                            sources,
-                            &instructions[i],
-                            ErrType::FloatParsingError,
-                        );
+                        throw_error(err_ctx, &instructions[i], ErrType::FloatParsingError);
                     }))
                     .into();
                 }
@@ -924,7 +904,7 @@ pub fn execute(
                     let str = reg.as_str(string_pool);
                     *w!(dest) = (str.parse::<i32>().unwrap_or_else(|e| {
                         cold_path();
-                        throw_error(instr_src, sources, &instructions[i], (*e.kind()).into());
+                        throw_error(err_ctx, &instructions[i], (*e.kind()).into());
                     }))
                     .into();
                 }
@@ -948,12 +928,7 @@ pub fn execute(
                 let str = temp_tgt.as_str(string_pool);
                 *w!(dest) = (str.parse::<bool>().unwrap_or_else(|_| {
                     cold_path();
-                    throw_error(
-                        instr_src,
-                        sources,
-                        &instructions[i],
-                        ErrType::BoolParsingError,
-                    );
+                    throw_error(err_ctx, &instructions[i], ErrType::BoolParsingError);
                 }))
                 .into();
             }
@@ -1150,7 +1125,7 @@ pub fn execute(
                 *w!(dest_reg_id) = string!(
                     fs::read_to_string(r!(path).as_str(string_pool)).unwrap_or_else(|e| {
                         cold_path();
-                        throw_error(instr_src, sources, &instructions[i], e.kind().into())
+                        throw_error(err_ctx, &instructions[i], e.kind().into())
                     })
                 );
             }
@@ -1158,7 +1133,7 @@ pub fn execute(
                 *w!(dest_reg_id) = fs::exists(r!(path).as_str(string_pool))
                     .unwrap_or_else(|e| {
                         cold_path();
-                        throw_error(instr_src, sources, &instructions[i], e.kind().into())
+                        throw_error(err_ctx, &instructions[i], e.kind().into())
                     })
                     .into()
             }
@@ -1170,7 +1145,7 @@ pub fn execute(
                 )
                 .unwrap_or_else(|e| {
                     cold_path();
-                    throw_error(instr_src, sources, &instructions[i], e.kind().into())
+                    throw_error(err_ctx, &instructions[i], e.kind().into())
                 });
             }
             // Appends to a file, will create if it doesn't exist
@@ -1180,26 +1155,26 @@ pub fn execute(
                     .open(r!(path).as_str(string_pool))
                     .unwrap_or_else(|e| {
                         cold_path();
-                        throw_error(instr_src, sources, &instructions[i], e.kind().into())
+                        throw_error(err_ctx, &instructions[i], e.kind().into())
                     })
                     .write_all(r!(contents).as_str(string_pool).as_bytes())
                     .unwrap_or_else(|e| {
                         cold_path();
-                        throw_error(instr_src, sources, &instructions[i], e.kind().into())
+                        throw_error(err_ctx, &instructions[i], e.kind().into())
                     });
             }
             // Deletes the file located at `path`, throwing an error if it doesn't exist.
             Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, _) => {
                 fs::remove_file(r!(path).as_str(string_pool)).unwrap_or_else(|e| {
                     cold_path();
-                    throw_error(instr_src, sources, &instructions[i], e.kind().into())
+                    throw_error(err_ctx, &instructions[i], e.kind().into())
                 });
             }
             // Deletes the empty directory located at `path`
             Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, _) => {
                 fs::remove_dir(r!(path).as_str(string_pool)).unwrap_or_else(|e| {
                     cold_path();
-                    throw_error(instr_src, sources, &instructions[i], e.kind().into())
+                    throw_error(err_ctx, &instructions[i], e.kind().into())
                 });
             }
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {

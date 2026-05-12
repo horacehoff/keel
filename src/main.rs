@@ -6,6 +6,7 @@ use crate::data::Data;
 use crate::data::FALSE;
 use crate::data::NULL;
 use crate::display::format_data;
+use crate::errors::ErrorCtx;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::parser::parse;
@@ -133,8 +134,7 @@ fn main() {
                 &instructions,
                 &mut registers,
                 &mut arrays,
-                &instr_src,
-                &sources,
+                &ErrorCtx { instr_src, sources },
                 &fn_registers,
                 &fn_dyn_libs,
                 allocated_arg_count,
@@ -166,8 +166,7 @@ fn main() {
         &instructions,
         &mut registers,
         &mut arrays,
-        &instr_src,
-        &sources,
+        &ErrorCtx { instr_src, sources },
         &fn_registers,
         &fn_dyn_libs,
         allocated_arg_count,

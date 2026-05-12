@@ -16,6 +16,11 @@ pub fn dev_error(file: &str, function: &str, additional_data: Arguments) -> ! {
     );
 }
 
+pub struct ErrorCtx {
+    pub instr_src: Vec<(Instr, (usize, usize), u16)>,
+    pub sources: Vec<(SmolStr, String)>,
+}
+
 impl From<std::io::ErrorKind> for ErrType<'_> {
     fn from(value: std::io::ErrorKind) -> Self {
         match value {
@@ -219,18 +224,13 @@ impl From<ErrType<'_>> for SmolStr {
 
 #[cold]
 #[inline(never)]
-pub fn throw_error(
-    instr_src: &[(Instr, (usize, usize), u16)],
-    sources: &[(SmolStr, String)],
-    instr: &Instr,
-    t: ErrType,
-) -> ! {
-    let (_, (start, end), file_idx) =
-        instr_src
-            .iter()
-            .find(|(x, _, _)| x == instr)
-            .unwrap_or(&(Instr::Halt(1), (0, 0), 0));
-    let src = &sources[*file_idx as usize];
+pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
+    let (_, (start, end), file_idx) = ctx
+        .instr_src
+        .iter()
+        .find(|(x, _, _)| x == instr)
+        .unwrap_or(&(Instr::Halt(1), (0, 0), 0));
+    let src = &ctx.sources[*file_idx as usize];
     let err_message: SmolStr = t.into();
     eprintln!("{color_red}KEEL ERROR{color_reset}");
     Report::build(ReportKind::Error, (src.0.as_str(), *start..*end))

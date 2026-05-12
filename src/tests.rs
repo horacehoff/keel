@@ -3,7 +3,6 @@ use crate::parse;
 
 macro_rules! run_and_check_registers {
     ($contents:expr, $expected:expr) => {
-        let contents = $contents;
         let filename = "test.kl";
         let (
             instructions,
@@ -15,13 +14,15 @@ macro_rules! run_and_check_registers {
             allocated_arg_count,
             allocated_call_depth,
             _,
-        ) = parse(contents, filename, true);
+        ) = parse($contents, filename, true);
         crate::vm::execute(
             &instructions,
             &mut registers,
             &mut arrays,
-            &instr_src,
-            &[(filename.into(), contents.into())],
+            &crate::errors::ErrorCtx {
+                instr_src,
+                sources: vec![(filename.into(), $contents.into())],
+            },
             &fn_registers,
             &[],
             allocated_arg_count,
@@ -55,8 +56,10 @@ macro_rules! run {
             &instructions,
             &mut registers,
             &mut arrays,
-            &instr_src,
-            &[(filename.into(), $contents.into())],
+            &crate::errors::ErrorCtx {
+                instr_src,
+                sources: vec![(filename.into(), $contents.into())],
+            },
             &fn_registers,
             &[],
             allocated_arg_count,

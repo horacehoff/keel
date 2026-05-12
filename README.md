@@ -37,6 +37,15 @@ git clone https://github.com/horacehoff/keel && cd keel && cargo build --release
 ./target/release/keel myfile.kl
 ```
 
+## Usage
+
+```sh
+keel program.kl    # Run a file
+keel               # Start the REPL
+keel -v/--version  # Print version
+keel -h/--help     # Print help
+```
+
 ## Language tour
 
 ### Variables & Types

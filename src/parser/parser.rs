@@ -1074,9 +1074,12 @@ pub fn compile_expr(
             }
             // array[index]
             Expr::GetIndex(array, index, markers) => {
-                let mut infered = infer_type(array, v, state.fns, src, state.dyn_libs);
-                // process the array/string that is being indexed
-                let mut id = get_id(
+                let infered = infer_type(array, v, state.fns, src, state.dyn_libs);
+                if !is_indexable(&infered) {
+                    throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
+                }
+
+                let id = get_id(
                     array,
                     v,
                     ctx,
@@ -1087,52 +1090,41 @@ pub fn compile_expr(
                     offset,
                     single_run,
                 );
-                // for each indexing operation, process the index, adjust the id variable for the next index operation, push null to state.registers to use GetIndex to index at runtime
-                for elem in index {
-                    if !is_indexable(&infered) {
-                        throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
-                    }
 
-                    let index_infered = infer_type(elem, v, state.fns, src, state.dyn_libs);
-                    if index_infered != DataType::Int {
-                        throw_parser_error(src, markers, ErrType::InvalidIndexType(&index_infered));
-                    }
-                    let f_id = get_id(
-                        elem,
-                        v,
-                        ctx,
-                        state,
-                        &mut output,
-                        None,
-                        false,
-                        offset,
-                        single_run,
-                    );
-                    free_register(f_id, state.free_registers, v, state.const_registers);
-                    let dest_reg_id = alloc_register(state.registers, state.free_registers);
-
-                    let to_push = if infered == DataType::String {
-                        Instr::GetIndexString(id, f_id, dest_reg_id)
-                    } else {
-                        Instr::GetIndexArray(id, f_id, dest_reg_id)
-                    };
-                    state.instr_src.push((to_push, *markers, current_src_file));
-                    output.push(to_push);
-
-                    id = (state.registers.len() - 1) as u16;
-                    if let DataType::Array(Some(array_type)) = infered {
-                        infered = *array_type;
-                    }
+                let index_infered = infer_type(index, v, state.fns, src, state.dyn_libs);
+                if index_infered != DataType::Int {
+                    throw_parser_error(src, markers, ErrType::InvalidIndexType(&index_infered));
                 }
+                let f_id = get_id(
+                    index,
+                    v,
+                    ctx,
+                    state,
+                    &mut output,
+                    None,
+                    false,
+                    offset,
+                    single_run,
+                );
+                free_register(f_id, state.free_registers, v, state.const_registers);
+                let dest_reg_id = alloc_register(state.registers, state.free_registers);
+
+                let to_push = if infered == DataType::String {
+                    Instr::GetIndexString(id, f_id, dest_reg_id)
+                } else {
+                    Instr::GetIndexArray(id, f_id, dest_reg_id)
+                };
+                state.instr_src.push((to_push, *markers, current_src_file));
+                output.push(to_push);
             }
-            // x[y]... = z;
-            Expr::ArrayModify(array, z, w, index_markers, elem_markers) => {
-                let mut array_type = infer_type(array, v, state.fns, src, state.dyn_libs);
+            // x[y] = z;
+            Expr::ArrayModify(array, index, value, index_markers, elem_markers) => {
+                let array_type = infer_type(array, v, state.fns, src, state.dyn_libs);
                 if !is_indexable(&array_type) {
                     throw_parser_error(src, index_markers, ErrType::NotIndexable(&array_type));
                 }
-                // Get the id of the source array
-                let mut id = get_id(
+                // Get the id of the source array/string (may be a nested GetIndex)
+                let id = get_id(
                     array,
                     v,
                     ctx,
@@ -1144,38 +1136,8 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                for elem in z.iter().rev().skip(1).rev() {
-                    // Check if the index is an integer
-                    let t = infer_type(elem, v, state.fns, src, state.dyn_libs);
-                    if t != DataType::Int {
-                        throw_parser_error(src, index_markers, ErrType::InvalidIndexType(&t));
-                    }
-                    let f_id = get_id(
-                        elem,
-                        v,
-                        ctx,
-                        state,
-                        &mut output,
-                        None,
-                        false,
-                        offset,
-                        single_run,
-                    );
-
-                    let dest_reg_id = alloc_register(state.registers, state.free_registers);
-
-                    output.push(Instr::GetIndexArray(id, f_id, dest_reg_id));
-
-                    id = dest_reg_id;
-                    free_register(f_id, state.free_registers, v, state.const_registers);
-                    if let DataType::Array(Some(inner)) = array_type {
-                        array_type = *inner;
-                    }
-                }
-
-                // get the
                 let final_id = get_id(
-                    z.last().unwrap(),
+                    index,
                     v,
                     ctx,
                     state,
@@ -1186,9 +1148,9 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                let elem_type = infer_type(w, v, state.fns, src, state.dyn_libs);
+                let elem_type = infer_type(value, v, state.fns, src, state.dyn_libs);
                 let elem_id = get_id(
-                    w,
+                    value,
                     v,
                     ctx,
                     state,

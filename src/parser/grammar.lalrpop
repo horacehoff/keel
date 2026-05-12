@@ -287,7 +287,15 @@ VarDeclare: Expr = {
 
 VarAssign: Expr = {
     <start: @L> <v: Var> <end: @R> "=" <e: Expression>  => Expr::VarAssign(v, Box::from(e), (start, end)),
-    <start: @L> <t: Term> <f: ("[" Expression "]")+> <end: @R> "=" <startb: @L> <e: Expression> <endb: @R> => Expr::ArrayModify(Box::from(t), f.into_iter().map(|(_,x,_)| x).collect::<Vec<Expr>>().into_boxed_slice(), Box::from(e), (start, end), (startb, endb)),
+    <start: @L> <t: Term> <f: ("[" Expression "]")+> <end: @R> "=" <startb: @L> <e: Expression> <endb: @R> => {
+        let mut indices: Vec<Expr> = f.into_iter().map(|(_,x,_)| x).collect();
+        let last_idx = Box::from(indices.pop().unwrap());
+        let mut base = t;
+        for idx in indices {
+            base = Expr::GetIndex(Box::from(base), Box::from(idx), (start, end));
+        }
+        Expr::ArrayModify(Box::from(base), last_idx, Box::from(e), (start, end), (startb, endb))
+    },
 }
 
 OpVarAssign: Expr = {
@@ -331,7 +339,11 @@ OpVarAssign: Expr = {
 
 ArrayIndex: Expr = {
     <start: @L> <t: Term> <f: ( "[" Expression "]")+> <end: @R> => {
-        Expr::GetIndex(Box::from(t), f.into_iter().map(|(_,x,_)| x).collect::<Vec<_>>().into_boxed_slice(), (start, end))
+        let mut output = t;
+        for (_, idx, _) in f {
+            output = Expr::GetIndex(Box::from(output), Box::from(idx), (start, end));
+        }
+        output
     }
 }
 

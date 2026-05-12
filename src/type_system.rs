@@ -121,7 +121,7 @@ fn collect_direct_calls(content: &[Expr], out: &mut Vec<SmolStr>) {
             Expr::FunctionDecl(_, x, _) => stack.extend(x.iter()),
             Expr::GetIndex(x, y, _) => {
                 stack.push(x);
-                stack.extend(y.iter());
+                stack.push(y);
             }
             Expr::VarDeclare(_, x) | Expr::VarAssign(_, x, _) => stack.push(x),
             Expr::ForLoop(_, code, _) => stack.extend(code.iter()),
@@ -132,7 +132,7 @@ fn collect_direct_calls(content: &[Expr], out: &mut Vec<SmolStr>) {
             }
             Expr::ArrayModify(array, index, value, _, _) => {
                 stack.push(array);
-                stack.extend(index.iter());
+                stack.push(index);
                 stack.push(value);
             }
             Expr::Array(elems, _) => stack.extend(elems.iter()),
@@ -258,7 +258,7 @@ pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
             }
             Expr::ArrayModify(array, index, value, _, _) => {
                 if contains_recursive_call(slice::from_ref(array), fn_name)
-                    || contains_recursive_call(index, fn_name)
+                    || contains_recursive_call(slice::from_ref(index), fn_name)
                     || contains_recursive_call(slice::from_ref(value), fn_name)
                 {
                     return true;
@@ -285,7 +285,7 @@ pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
             }
             Expr::GetIndex(x, y, _) => {
                 if contains_recursive_call(slice::from_ref(x), fn_name)
-                    || contains_recursive_call(y, fn_name)
+                    || contains_recursive_call(slice::from_ref(y), fn_name)
                 {
                     return true;
                 }
@@ -687,17 +687,8 @@ pub fn infer_type(
             DataType::Bool => DataType::Bool,
             _ => unreachable!(),
         },
-        Expr::GetIndex(array, index, _) => match infer_type(array, v, fns, src, dyn_libs) {
-            DataType::Array(array_type) => {
-                let mut final_type = array_type.map_or(DataType::Null, |t| *t);
-                for _ in 0..index.len() {
-                    match final_type {
-                        DataType::Array(t) => final_type = t.map_or(DataType::Null, |t| *t),
-                        other => final_type = other,
-                    }
-                }
-                final_type
-            }
+        Expr::GetIndex(array, _, _) => match infer_type(array, v, fns, src, dyn_libs) {
+            DataType::Array(array_type) => array_type.map_or(DataType::Null, |t| *t),
             DataType::String => DataType::String,
             DataType::Unknown => DataType::Unknown,
             _ => unreachable!(),

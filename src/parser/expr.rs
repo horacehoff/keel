@@ -56,10 +56,10 @@ pub enum Expr {
 
     ReturnVal(Box<Option<Expr>>),
 
-    GetIndex(Box<Expr>, Box<[Expr]>, (usize, usize)),
+    GetIndex(Box<Expr>, Box<Expr>, (usize, usize)),
     ArrayModify(
         Box<Expr>,
-        Box<[Expr]>,
+        Box<Expr>,
         Box<Expr>,
         (usize, usize),
         (usize, usize),

@@ -2,7 +2,7 @@
 ![Keel logo](assets/keel_banner_dark.png#gh-dark-mode-only)
 
 > [!WARNING]
-> Keel is experimental. Expect bugs and breaking changes.
+> Keel is under active development
 
 Keel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.
 
@@ -11,7 +11,7 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 
 ## Why Keel?
 
-- **Fast**: ~2-10x faster than Python ([benchmarks](docs/COMPARISONS.md)), with constant folding, constant propagation, function inlining, peephole optimization, and monomorphization
+- **Fast**: ~2-10x faster than Python ([benchmarks](docs/COMPARISONS.md)), with aggressive compile-time optimizations
 - **Familiar syntax**: Rust-like, with Python's ease-of-use
 - **Statically typed, zero annotations**: full type inference, static type checking, polymorphism
 - **FFI support**: call C/dynamic libraries directly from Keel
@@ -156,7 +156,6 @@ for i in 0..10000000 {
     x += i;
 }
 print(x);
-}
 ```
 
 ```rs
@@ -194,7 +193,7 @@ You can import other `.kl` files with the following syntax:
 ```keel
 use "fibonacci_lib.kl"
 
-fn main() {print(fibonacci(25));}
+function main() {print(fibonacci(25));}
 ```
 
 All top-level functions from the imported file become available immediately.

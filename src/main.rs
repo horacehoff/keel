@@ -111,7 +111,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    // #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
     {
         let next = args.next();
         if next == Some(String::from("--debug")) {

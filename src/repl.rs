@@ -30,7 +30,7 @@ pub fn repl() {
         if s.is_empty() {
             continue;
         }
-        if !s.ends_with(';') {
+        if !s.ends_with(';') && !s.ends_with('}') {
             s.push(';');
         }
         if s.contains("exit()") && !s.contains('"') {

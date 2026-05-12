@@ -10,7 +10,7 @@ pub fn alloc_array(
     live: &mut Vec<bool>,
 ) -> u32 {
     if let Some(id) = free_arrays.pop() {
-        array_pool[id as usize].clear();
+        unsafe { array_pool.get_unchecked_mut(id as usize) }.clear();
         id
     } else {
         if free_arrays.is_empty() && array_pool.len() >= (*gc_array_threshold as usize) {
@@ -18,7 +18,7 @@ pub fn alloc_array(
             array_gc(array_pool, free_arrays, registers, recursion_stack, live);
         }
         if let Some(id) = free_arrays.pop() {
-            array_pool[id as usize].clear();
+            unsafe { array_pool.get_unchecked_mut(id as usize) }.clear();
             id
         } else {
             let id = array_pool.len() as u32;
@@ -60,16 +60,17 @@ fn array_gc(
 
 /// Tracks nested arrays
 fn track_arrays(id: usize, array_pool: &ArrayPool, live: &mut [bool]) {
-    if live[id] {
+    if unsafe { *live.get_unchecked(id) } {
         return;
     }
-    live[id] = true;
+    unsafe { *live.get_unchecked_mut(id) = true };
     // Arrays can only hold a single type
     // As such, if the first element in the array is not an array, then the other elements aren't either
-    if array_pool[id].is_empty() || !array_pool[id][0].is_array() {
+    let arr = unsafe { array_pool.get_unchecked(id) };
+    if arr.is_empty() || !arr[0].is_array() {
         return;
     }
-    for elem in &array_pool[id] {
+    for elem in arr {
         track_arrays(elem.as_array(), array_pool, live);
     }
 }

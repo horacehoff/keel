@@ -214,7 +214,11 @@ pub fn execute(
                     return_reg: return_register,
                     callsite_id,
                 });
-                recursion_stack.extend(fn_registers[callsite_id as usize].iter().map(|&r| r!(r)));
+                recursion_stack.extend(
+                    unsafe { fn_registers.get_unchecked(callsite_id as usize) }
+                        .iter()
+                        .map(|&r| r!(r)),
+                );
             }
             Instr::Return(tgt) => {
                 // Pop the latest call frame, set the return value and jump back to the callsite
@@ -235,9 +239,12 @@ pub fn execute(
                     ptr.read()
                 };
                 let temp = r!(tgt);
-                let regs = &fn_registers[call_frame.callsite_id as usize];
+                let regs = unsafe { fn_registers.get_unchecked(call_frame.callsite_id as usize) };
                 let base = recursion_stack.len() - regs.len();
-                for (reg, &saved) in regs.iter().zip(&recursion_stack[base..]) {
+                for (reg, &saved) in regs
+                    .iter()
+                    .zip(unsafe { recursion_stack.get_unchecked(base..) })
+                {
                     *w!(*reg) = saved;
                 }
                 unsafe {
@@ -261,11 +268,7 @@ pub fn execute(
             Instr::CallDynamicLibFunc(fn_id, dest) => {
                 let func = &dyn_libs[fn_id as usize];
                 let args_len = args.len();
-                // Pointers are "owned" in dyn_lib_args
                 dyn_lib_args.clear();
-                // Universal keep-alive: every heap allocation that must outlive
-                // the FFI call is stored here as raw bytes. Box<[u8]> is a stable address on the heap,
-                // so pointers into it remain valid even as this vector grows
                 let mut keep_alive: Vec<Box<[u8]>> = Vec::new();
 
                 for (idx, register_id) in args.drain(..args_len).enumerate() {
@@ -277,6 +280,7 @@ pub fn execute(
                             DataType::String => {
                                 let bytes = std::ffi::CString::new(data.as_str(string_pool))
                                     .unwrap_or_else(|_| {
+                                        cold_path();
                                         throw_error(
                                             instr_src,
                                             sources,
@@ -300,14 +304,17 @@ pub fn execute(
                                 string_pool,
                                 &mut keep_alive,
                             ),
-                            t => throw_error(
-                                instr_src,
-                                sources,
-                                &instructions[i],
-                                ErrType::Custom(
-                                    format_args!("Invalid argument type: {t:?}").to_smolstr(),
-                                ),
-                            ),
+                            t => {
+                                cold_path();
+                                throw_error(
+                                    instr_src,
+                                    sources,
+                                    &instructions[i],
+                                    ErrType::Custom(
+                                        format_args!("Invalid argument type: {t:?}").to_smolstr(),
+                                    ),
+                                )
+                            }
                         }
                     });
                 }
@@ -336,22 +343,28 @@ pub fn execute(
                             }
                         }
                         DataType::Null => NULL,
-                        DataType::Array(_) => throw_error(
-                            instr_src,
-                            sources,
-                            &instructions[i],
-                            ErrType::Custom(
-                                "Array return types are not supported: C does not convey the length of a returned array".into(),
-                            ),
-                        ),
-                        t => throw_error(
-                            instr_src,
-                            sources,
-                            &instructions[i],
-                            ErrType::Custom(
-                                format_args!("Invalid return type: {t:?}").to_smolstr(),
-                            ),
-                        ),
+                        DataType::Array(_) => {
+                            cold_path();
+                            throw_error(
+                                instr_src,
+                                sources,
+                                &instructions[i],
+                                ErrType::Custom(
+                                    "Array return types are not supported: C does not convey the length of a returned array".into(),
+                                ),
+                            )
+                        }
+                        t => {
+                            cold_path();
+                            throw_error(
+                                instr_src,
+                                sources,
+                                &instructions[i],
+                                ErrType::Custom(
+                                    format_args!("Invalid return type: {t:?}").to_smolstr(),
+                                ),
+                            )
+                        }
                     }
                 };
             }

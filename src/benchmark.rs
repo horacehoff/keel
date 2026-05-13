@@ -322,23 +322,179 @@ for i in range(1, 1000001):
     else:
         last = str(i)
 print(last)
+    "#,
+        ),
+        lua: Some(
+            r#"
+    local last = ""
+    for i = 1, 1000000 do
+        if i % 15 == 0 then
+            last = "FizzBuzz"
+        elseif i % 3 == 0 then
+            last = "Fizz"
+        elseif i % 5 == 0 then
+            last = "Buzz"
+        else
+            last = tostring(i)
+        end
+    end
+    print(last)
+    "#,
+        ),
+    },
+    Prog {
+        name: "stdlib_ops_x_100000",
+        source: r#"
+function main() {
+    let count = 0;
+    for _ in 0..100000 {
+        let s = "  Hello, World!  ";
+        // Trim variants
+        let t = s.trim();
+        let tl = s.trim_left();
+        let tr = s.trim_right();
+        let ts = "-Hello-".trim_sequence("-");
+        let tsl = "-Hello-".trim_sequence_left("-");
+        let tsr = "-Hello-".trim_sequence_right("-");
+        // Case
+        let u = t.uppercase();
+        let l = u.lowercase();
+        // Search
+        let c = t.contains("World");
+        let f = t.find("World");
+        let sw = t.starts_with("Hello");
+        let ew = t.ends_with("!");
+        // Type checks
+        let isf = "3.14".is_float();
+        let isi = "42".is_int();
+        // Split/Join/Replace
+        let parts = l.split(", ");
+        let joined = parts.join("-");
+        let r = joined.replace("-", " ");
+        // Len
+        let length = r.len();
+        // Reverse (returning)
+        let rev = r.reverse();
+        // Repeat
+        let rep = "ab".repeat(3);
+        // Numeric
+        let n = 42.7;
+        let sq = n.sqrt();
+        let fl = n.floor();
+        let ro = n.round();
+        let ab = (-5).abs();
+        let fab = (-3.14).abs();
+        // Conversions
+        let to_f = float(42);
+        let to_i = int(3.14);
+        let to_s = str(42);
+        let to_b = bool("true");
+        // Range
+        let rng = range(10);
+        // Sort (void)
+        let arr = [3, 1, 4, 1, 5];
+        arr.sort();
+        // Reverse (void)
+        arr.reverse();
+        count += length;
+    }
+    print(count);
+}
+        "#,
+        python: Some(
+            r#"
+import math
+count = 0
+for _ in range(100000):
+    s = "  Hello, World!  "
+    t = s.strip()
+    tl = s.lstrip()
+    tr = s.rstrip()
+    ts = "-Hello-".strip("-")
+    tsl = "-Hello-".lstrip("-")
+    tsr = "-Hello-".rstrip("-")
+    u = t.upper()
+    l = u.lower()
+    c = "World" in t
+    f = t.find("World")
+    sw = t.startswith("Hello")
+    ew = t.endswith("!")
+    isf = True  # no direct equivalent
+    isi = True
+    parts = l.split(", ")
+    joined = "-".join(parts)
+    r = joined.replace("-", " ")
+    length = len(r)
+    rev = r[::-1]
+    rep = "ab" * 3
+    n = 42.7
+    sq = math.sqrt(n)
+    fl = math.floor(n)
+    ro = round(n)
+    ab = abs(-5)
+    fab = abs(-3.14)
+    to_f = float(42)
+    to_i = int(3.14)
+    to_s = str(42)
+    to_b = bool("true")  # not equivalent but close
+    rng = list(range(10))
+    arr = [3, 1, 4, 1, 5]
+    arr.sort()
+    arr.reverse()
+    count += length
+print(count)
 "#,
         ),
         lua: Some(
             r#"
-local last = ""
-for i = 1, 1000000 do
-    if i % 15 == 0 then
-        last = "FizzBuzz"
-    elseif i % 3 == 0 then
-        last = "Fizz"
-    elseif i % 5 == 0 then
-        last = "Buzz"
-    else
-        last = tostring(i)
+local count = 0
+for _ = 1, 100000 do
+    local s = "  Hello, World!  "
+    local t = s:match("^%s*(.-)%s*$")
+    local tl = s:match("^%s*(.*)")
+    local tr = s:match("(.-)%s*$")
+    local ts = ("-Hello-"):match("^%-(.-)%-$")
+    local tsl = ("-Hello-"):match("^%-(.*)")
+    local tsr = ("-Hello-"):match("(.-)%-$")
+    local u = t:upper()
+    local l = u:lower()
+    local c = t:find("World") ~= nil
+    local f = t:find("World")
+    local sw = t:sub(1,5) == "Hello"
+    local ew = t:sub(-1) == "!"
+    local isf = tonumber("3.14") ~= nil
+    local isi = tonumber("42") ~= nil
+    local parts = {}
+    for p in l:gmatch("[^,]+") do parts[#parts+1] = p end
+    local joined = table.concat(parts, "-")
+    local r = joined:gsub("-", " ")
+    local length = #r
+    local rev = r:reverse()
+    local rep = ("ab"):rep(3)
+    local n = 42.7
+    local sq = math.sqrt(n)
+    local fl = math.floor(n)
+    local ro = math.floor(n + 0.5)
+    local ab = math.abs(-5)
+    local fab = math.abs(-3.14)
+    local to_f = 42 + 0.0
+    local to_i = math.floor(3.14)
+    local to_s = tostring(42)
+    local to_b = ("true") == "true"
+    local rng = {}
+    for i = 0, 9 do rng[#rng+1] = i end
+    local arr = {3, 1, 4, 1, 5}
+    table.sort(arr)
+    local j = 1
+    local k = #arr
+    while j < k do
+        arr[j], arr[k] = arr[k], arr[j]
+        j = j + 1
+        k = k - 1
     end
+    count = count + length
 end
-print(last)
+print(count)
 "#,
         ),
     },

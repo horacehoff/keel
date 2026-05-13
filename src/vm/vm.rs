@@ -15,7 +15,6 @@ use crate::instr::LibFuncVoid;
 use crate::parser_data::Pools;
 use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
-use smol_str::SmolStr;
 use smol_str::ToSmolStr;
 use std::hint::cold_path;
 use std::io::Write;
@@ -455,9 +454,6 @@ pub fn execute(
                 }
                 *w!(dest) = (r!(o1).as_int() / b).into();
             }
-            Instr::DivIntUnchecked(o1, o2, dest) => {
-                *w!(dest) = (r!(o1).as_int() / r!(o2).as_int()).into();
-            }
             Instr::SubFloat(o1, o2, dest) => {
                 *w!(dest) = (r!(o1).as_float() - r!(o2).as_float()).into();
             }
@@ -474,9 +470,6 @@ pub fn execute(
                     throw_error(err_ctx, &Instr::ModInt(o1, o2, dest), ErrType::ModuloByZero);
                 }
                 *w!(dest) = (r!(o1).as_int() % b).into();
-            }
-            Instr::ModIntUnchecked(o1, o2, dest) => {
-                *w!(dest) = (r!(o1).as_int() % r!(o2).as_int()).into();
             }
             Instr::PowFloat(o1, o2, dest) => {
                 *w!(dest) = (r!(o1).as_float().powf(r!(o2).as_float())).into();
@@ -1213,7 +1206,6 @@ pub fn execute(
             Instr::Halt(code) => {
                 cold_path();
                 if code != 0 {
-                    cold_path();
                     std::process::exit(r!(code).as_int());
                 }
                 break;

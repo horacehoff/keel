@@ -480,15 +480,11 @@ pub fn get_id(
             )
         }
         Expr::Div(l, r, markers) => {
-            // Check for a constant integer divisor at compile time
-            let const_divisor = if let Expr::Int(n) = r.as_ref() {
+            if let Expr::Int(n) = r.as_ref() {
                 if *n == 0 {
                     throw_parser_error(src, markers, ErrType::DivisionByZero);
                 }
-                true
-            } else {
-                false
-            };
+            }
             let id = uniform_op!(
                 DivFloat,
                 DivInt,
@@ -500,16 +496,9 @@ pub fn get_id(
                 DataType::Int
             );
             if matches!(output.last(), Some(Instr::DivInt(..))) {
-                if const_divisor {
-                    // Skip the runtime check if the divisor is known to be non-zero
-                    if let Some(Instr::DivInt(o1, o2, dest)) = output.pop() {
-                        output.push(Instr::DivIntUnchecked(o1, o2, dest));
-                    }
-                } else {
-                    state
-                        .instr_src
-                        .push((*output.last().unwrap(), *markers, ctx.current_src_file));
-                }
+                state
+                    .instr_src
+                    .push((*output.last().unwrap(), *markers, ctx.current_src_file));
             }
             id
         }
@@ -608,15 +597,11 @@ pub fn get_id(
             id
         }
         Expr::Mod(l, r, markers) => {
-            // Check for a constant integer divisor at compile time
-            let const_divisor = if let Expr::Int(n) = r.as_ref() {
+            if let Expr::Int(n) = r.as_ref() {
                 if *n == 0 {
                     throw_parser_error(src, markers, ErrType::ModuloByZero);
                 }
-                true
-            } else {
-                false
-            };
+            }
             let id = uniform_op!(
                 ModFloat,
                 ModInt,
@@ -628,16 +613,9 @@ pub fn get_id(
                 DataType::Int
             );
             if matches!(output.last(), Some(Instr::ModInt(..))) {
-                if const_divisor {
-                    // Skip the runtime check if the divisor is known to be non-zero
-                    if let Some(Instr::ModInt(o1, o2, dest)) = output.pop() {
-                        output.push(Instr::ModIntUnchecked(o1, o2, dest));
-                    }
-                } else {
-                    state
-                        .instr_src
-                        .push((*output.last().unwrap(), *markers, ctx.current_src_file));
-                }
+                state
+                    .instr_src
+                    .push((*output.last().unwrap(), *markers, ctx.current_src_file));
             }
             id
         }

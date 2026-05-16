@@ -31,8 +31,7 @@ fn array_to_c_ptr(
     string_pool: &StringPool,
     keep_alive: &mut Vec<Box<[u8]>>,
 ) -> u64 {
-    // Every element is copied so that array_pool is no longer borrowed
-    let elems: Vec<Data> = unsafe { array_pool.get_unchecked(data.as_array()) }.to_vec();
+    let elems = unsafe { array_pool.get_unchecked(data.as_array()) };
 
     match elem_type {
         DataType::Int => {
@@ -60,7 +59,7 @@ fn array_to_c_ptr(
         }
         DataType::String => {
             let mut ptrs: Vec<usize> = Vec::with_capacity(elems.len());
-            for e in &elems {
+            for e in elems {
                 // Allocate one null-terminated C string per element.
                 let bytes = std::ffi::CString::new(e.as_str(string_pool))
                     .expect("interior null byte in string passed to C")
@@ -77,7 +76,7 @@ fn array_to_c_ptr(
         }
         DataType::Array(Some(inner)) => {
             let mut ptrs: Vec<usize> = Vec::with_capacity(elems.len());
-            for e in &elems {
+            for e in elems {
                 // Converts the inner array, pushes its allocations into keep_alive,
                 // and returns the pointer to its first element
                 ptrs.push(array_to_c_ptr(*e, inner, array_pool, string_pool, keep_alive) as usize);
@@ -128,6 +127,8 @@ pub fn execute(
     let mut string_live: Vec<bool> = Vec::new();
 
     let mut dyn_lib_args: Vec<u64> = Vec::new();
+    let mut keep_alive: Vec<Box<[u8]>> = Vec::new();
+    let mut array_gc_stack: Vec<usize> = Vec::new();
 
     let mut gc_string_threshold: u32 = 256;
     let mut gc_array_threshold: u32 = 256;
@@ -268,9 +269,9 @@ pub fn execute(
                 let func = &dyn_libs[fn_id as usize];
                 let args_len = args.len();
                 dyn_lib_args.clear();
-                let mut keep_alive: Vec<Box<[u8]>> = Vec::new();
+                keep_alive.clear();
 
-                for (idx, register_id) in args.drain(..args_len).enumerate() {
+                for (idx, &register_id) in args.iter().enumerate() {
                     let data = r!(register_id);
                     dyn_lib_args.push({
                         match func.get_nth_arg_type(idx) {
@@ -315,6 +316,7 @@ pub fn execute(
                         }
                     });
                 }
+                args.clear();
 
                 // Args converted from Data to libffi args are stored here
                 let mut ffi_args: Vec<libffi::middle::Arg> = Vec::with_capacity(args_len);
@@ -387,6 +389,7 @@ pub fn execute(
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut array_gc_stack,
                 );
                 *w!(arr_reg_id) = Data::array(array_id);
             }
@@ -399,6 +402,7 @@ pub fn execute(
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut array_gc_stack,
                 ) as usize;
                 unsafe {
                     let src_ptr = array_pool.get_unchecked(src_id).as_ptr();
@@ -419,6 +423,7 @@ pub fn execute(
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut array_gc_stack,
                 );
                 let array_idx = array_id as usize;
                 unsafe {
@@ -512,6 +517,12 @@ pub fn execute(
                     continue;
                 }
             }
+            Instr::StrNotEqJmp(o1, o2, jump_size) => {
+                if r!(o1).as_str(&string_pool) != r!(o2).as_str(&string_pool) {
+                    i += jump_size as usize;
+                    continue;
+                }
+            }
             Instr::NotEq(o1, o2, dest) => {
                 *w!(dest) = (r!(o1) != r!(o2)).into();
             }
@@ -521,6 +532,12 @@ pub fn execute(
                         != array_pool.get_unchecked(r!(o2).as_array()))
                     .into()
                 };
+            }
+            Instr::StrEq(o1, o2, dest) => {
+                *w!(dest) = (r!(o1).as_str(&string_pool) == r!(o2).as_str(&string_pool)).into();
+            }
+            Instr::StrNotEq(o1, o2, dest) => {
+                *w!(dest) = (r!(o1).as_str(&string_pool) != r!(o2).as_str(&string_pool)).into();
             }
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r!(o1) == r!(o2) {
@@ -533,6 +550,12 @@ pub fn execute(
                     array_pool.get_unchecked(r!(o1).as_array())
                         == array_pool.get_unchecked(r!(o2).as_array())
                 } {
+                    i += jump_size as usize;
+                    continue;
+                }
+            }
+            Instr::StrEqJmp(o1, o2, jump_size) => {
+                if r!(o1).as_str(&string_pool) == r!(o2).as_str(&string_pool) {
                     i += jump_size as usize;
                     continue;
                 }
@@ -630,31 +653,31 @@ pub fn execute(
             Instr::NegInt(tgt, dest) => {
                 *w!(dest) = (-r!(tgt).as_int()).into();
             }
-            #[allow(unused_must_use)]
             Instr::Print(target) => {
                 let tgt = r!(target);
                 if tgt.is_str() {
-                    writeln!(handle, "{}", tgt.as_str(string_pool));
+                    writeln!(handle, "{}", tgt.as_str(string_pool)).unwrap();
                 } else if tgt.is_int() {
-                    writeln!(handle, "{}", tgt.as_int());
+                    writeln!(handle, "{}", tgt.as_int()).unwrap();
                 } else if tgt.is_float() {
-                    writeln!(handle, "{}", tgt.as_float());
+                    writeln!(handle, "{}", tgt.as_float()).unwrap();
                 } else if tgt.is_bool() {
-                    writeln!(handle, "{}", tgt.as_bool());
+                    writeln!(handle, "{}", tgt.as_bool()).unwrap();
                 } else if tgt.is_array() {
                     let array = unsafe { array_pool.get_unchecked(tgt.as_array()) };
-                    write!(handle, "[");
+                    write!(handle, "[").unwrap();
                     for (idx, item) in array.iter().enumerate() {
                         if idx != 0 {
-                            write!(handle, ",");
+                            write!(handle, ",").unwrap();
                         }
                         write!(
                             handle,
                             "{}",
                             format_data(item, array_pool, string_pool, false)
-                        );
+                        )
+                        .unwrap();
                     }
-                    writeln!(handle, "]");
+                    writeln!(handle, "]").unwrap();
                 }
             }
             Instr::StoreFuncArg(id) => args.push(id),
@@ -801,7 +824,7 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::IsFloat, tgt, dest) => {
                 let temp_tgt = r!(tgt);
                 let num = temp_tgt.as_str(string_pool);
-                *w!(dest) = (num.parse::<f64>().is_ok() && num.parse::<i64>().is_err()).into();
+                *w!(dest) = (num.parse::<i64>().is_err() && num.parse::<f64>().is_ok()).into();
             }
             Instr::CallLibFunc(LibFunc::IsInt, tgt, dest) => {
                 *w!(dest) = r!(tgt).as_str(string_pool).parse::<i64>().is_ok().into()
@@ -841,6 +864,7 @@ pub fn execute(
                         &recursion_stack,
                         &mut gc_array_threshold,
                         &mut array_live,
+                        &mut array_gc_stack,
                     );
                     unsafe {
                         *array_pool.get_unchecked_mut(array_id as usize) = array_pool
@@ -928,11 +952,11 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Input, tgt, dest) => {
                 let temp_tgt = r!(tgt);
                 let str_msg = temp_tgt.as_str(string_pool);
-                println!("{str_msg}");
+                write!(handle, "{str_msg}").unwrap();
                 std::io::stdout().flush().unwrap();
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line).unwrap();
-                *w!(dest) = str!(line.trim());
+                *w!(dest) = str!(line.trim_end_matches(['\n', '\r']));
             }
             Instr::CallLibFunc(LibFunc::Floor, tgt, dest) => {
                 *w!(dest) = r!(tgt).as_float().floor().into()
@@ -984,6 +1008,7 @@ pub fn execute(
                         &recursion_stack,
                         &mut gc_array_threshold,
                         &mut array_live,
+                        &mut array_gc_stack,
                     );
                     let source = source.as_str(string_pool);
                     let separator_data = r!(separator);
@@ -1032,7 +1057,7 @@ pub fn execute(
                     split_ranges.push((start, source_array.len()));
 
                     // Allocate one pooled array per recorded range and copy just that segment
-                    let mut sub_array_ids: Vec<u32> = Vec::with_capacity(split_ranges.len());
+                    let mut sub_arrays: Vec<Data> = Vec::with_capacity(split_ranges.len());
                     for (start, end) in split_ranges {
                         let dest_array_id = alloc_array(
                             array_pool,
@@ -1041,6 +1066,7 @@ pub fn execute(
                             &recursion_stack,
                             &mut gc_array_threshold,
                             &mut array_live,
+                            &mut array_gc_stack,
                         ) as usize;
                         // Use split_at_mut to copy directly from the source array without having to clone it
                         if dest_array_id < source_array_id {
@@ -1050,7 +1076,7 @@ pub fn execute(
                             let (left, right) = array_pool.split_at_mut(dest_array_id);
                             right[0].extend_from_slice(&left[source_array_id][start..end]);
                         }
-                        sub_array_ids.push(dest_array_id as u32);
+                        sub_arrays.push(Data::array(dest_array_id as u32));
                     }
 
                     let array_id = alloc_array(
@@ -1060,11 +1086,9 @@ pub fn execute(
                         &recursion_stack,
                         &mut gc_array_threshold,
                         &mut array_live,
+                        &mut array_gc_stack,
                     );
-                    *unsafe { array_pool.get_unchecked_mut(array_id as usize) } = sub_array_ids
-                        .iter()
-                        .map(|id| Data::array(*id))
-                        .collect::<Vec<Data>>();
+                    *unsafe { array_pool.get_unchecked_mut(array_id as usize) } = sub_arrays;
 
                     *w!(dest_register) = Data::array(array_id);
                 }
@@ -1083,6 +1107,7 @@ pub fn execute(
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut array_gc_stack,
                 );
                 let range_arr = unsafe { array_pool.get_unchecked_mut(output_array_id as usize) };
                 range_arr.clear();
@@ -1178,6 +1203,7 @@ pub fn execute(
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut array_gc_stack,
                 );
                 *unsafe { array_pool.get_unchecked_mut(array_id as usize) } = std::env::args()
                     .skip(2)

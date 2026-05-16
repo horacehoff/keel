@@ -128,6 +128,10 @@ pub enum ErrType<'a> {
     /// DuplicateFunctionInImport(fn_name, file_path)
     DuplicateFunctionInImport(&'a str, &'a str),
     IsNotAnIterator(&'a DataType),
+    /// InvalidArgType(expected_types, received_type)
+    InvalidArgType(&'a [DataType], DataType),
+    /// InvalidObjType(expected_description, received_type)
+    InvalidObjType(&'a str, &'a DataType),
     DivisionByZero,
     ModuloByZero,
 }
@@ -216,6 +220,19 @@ impl From<ErrType<'_>> for SmolStr {
                 "Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} imported from {color_bright_red}{style_bold}{file_path}{color_reset}{style_reset} is already defined"
             ).to_smolstr(),
             ErrType::IsNotAnIterator(t) => format_args!("The type {color_bright_red}{style_bold}{t}{color_reset}{style_reset} is not a collection").to_smolstr(),
+            ErrType::InvalidArgType(expected, received) => {
+                let expected_str = expected
+                    .iter()
+                    .map(|x| format!("{color_bright_blue}{style_bold}{x}{color_reset}{style_reset}"))
+                    .collect::<Vec<String>>()
+                    .join(" or ");
+                format_args!(
+                    "Expected {expected_str}, found {color_bright_red}{style_bold}{received}{color_reset}{style_reset}"
+                ).to_smolstr()
+            }
+            ErrType::InvalidObjType(expected, received) => format_args!(
+                "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}, found {color_bright_red}{style_bold}{received}{color_reset}{style_reset}"
+            ).to_smolstr(),
             ErrType::DivisionByZero => "Division by zero".into(),
             ErrType::ModuloByZero => "Modulo by zero".into()
         }

@@ -508,7 +508,7 @@ print(count)</code></pre></td>
 
 ## C FFI call overhead × 10 000 000
 
-Both programs call the same shared C library function in a tight loop. The C function is intentionally trivial so the measured time reflects the cost of crossing the language–C boundary, not the C computation itself.
+All programs call the same shared C library function in a tight loop. The C function is intentionally trivial so the measured time reflects the cost of crossing the language–C boundary, not the C computation itself.
 
 **`bench_ffi.c`** (compiled with `-O2`):
 ```c
@@ -521,6 +521,7 @@ int increment(int x) {
 <tr>
   <th>Keel</th>
   <th>Python 3</th>
+  <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
 <td><pre><code class="language-rust">import "./bench_ffi.dylib" {
@@ -544,9 +545,21 @@ x = 0
 for _ in range(10_000_000):
     x = lib.increment(x)
 print(x)</code></pre></td>
+<td><pre><code class="language-lua">local ffi = require("ffi")
+ffi.cdef[[
+    int increment(int x);
+]]
+local lib = ffi.load("./bench_ffi")
+
+local x = 0
+for _ = 1, 10000000 do
+    x = lib.increment(x)
+end
+print(x)</code></pre></td>
 </tr>
 <tr>
   <td><b>211.6ms</b></td>
   <td>2907ms</td>
+  <td>535.8ms</td>
 </tr>
 </table>

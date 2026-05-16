@@ -944,7 +944,6 @@ pub fn for_loop_called_twice() {
     );
 }
 
-// --- two for loops in sequence in the same function ---
 #[test]
 pub fn two_for_loops_in_sequence() {
     run_and_check_registers!(
@@ -962,7 +961,6 @@ pub fn two_for_loops_in_sequence() {
     );
 }
 
-// --- early return from inside a for loop ---
 #[test]
 pub fn early_return_from_for_loop() {
     run_and_check_registers!(
@@ -981,7 +979,6 @@ pub fn early_return_from_for_loop() {
     );
 }
 
-// --- early return from inside a while loop ---
 #[test]
 pub fn early_return_from_while_loop() {
     run_and_check_registers!(
@@ -1002,7 +999,6 @@ pub fn early_return_from_while_loop() {
     );
 }
 
-// --- nested function call as argument ---
 #[test]
 pub fn nested_fn_call_as_arg() {
     run_and_check_registers!(
@@ -1017,7 +1013,6 @@ pub fn nested_fn_call_as_arg() {
     );
 }
 
-// --- function with multiple sequential for loops called twice ---
 #[test]
 pub fn multi_loop_fn_called_twice() {
     run_and_check_registers!(
@@ -1037,7 +1032,6 @@ pub fn multi_loop_fn_called_twice() {
     );
 }
 
-// --- while loop function called twice ---
 #[test]
 pub fn while_fn_called_twice() {
     run_and_check_registers!(
@@ -1059,7 +1053,6 @@ pub fn while_fn_called_twice() {
     );
 }
 
-// --- function returning an array ---
 #[test]
 pub fn function_returns_array() {
     run_and_check_registers!(
@@ -1076,7 +1069,6 @@ pub fn function_returns_array() {
     );
 }
 
-// --- passing an array to a function and reading it ---
 #[test]
 pub fn pass_array_to_function() {
     run_and_check_registers!(
@@ -1093,7 +1085,6 @@ pub fn pass_array_to_function() {
     );
 }
 
-// --- string split result iterated ---
 #[test]
 pub fn string_split_then_iterate() {
     run_and_check_registers!(
@@ -1110,7 +1101,6 @@ pub fn string_split_then_iterate() {
     );
 }
 
-// --- deeply nested conditions ---
 #[test]
 pub fn deeply_nested_conditions() {
     run_and_check_registers!(
@@ -1138,7 +1128,6 @@ pub fn deeply_nested_conditions() {
     );
 }
 
-// --- break inside a while loop ---
 #[test]
 pub fn break_in_while_loop() {
     run_and_check_registers!(
@@ -1156,7 +1145,6 @@ pub fn break_in_while_loop() {
     );
 }
 
-// --- for loop with _ discard variable ---
 #[test]
 pub fn for_loop_discard_var() {
     run_and_check_registers!(
@@ -1171,7 +1159,6 @@ pub fn for_loop_discard_var() {
     );
 }
 
-// --- integer range loop called twice inside another function ---
 #[test]
 pub fn int_range_loop_fn_called_twice() {
     run_and_check_registers!(
@@ -1192,7 +1179,6 @@ pub fn int_range_loop_fn_called_twice() {
 
 #[test]
 pub fn inc_int_to_basic() {
-    // y = x + 1 where y != x  →  IncIntTo(x_reg, y_reg)
     run_and_check_registers!(
         "
         function main() {
@@ -1207,7 +1193,6 @@ pub fn inc_int_to_basic() {
 
 #[test]
 pub fn dec_int_to_basic() {
-    // y = x - 1 where y != x  →  DecIntTo(x_reg, y_reg)
     run_and_check_registers!(
         "
         function main() {
@@ -1222,7 +1207,6 @@ pub fn dec_int_to_basic() {
 
 #[test]
 pub fn inc_int_commutative() {
-    // y = 1 + x  (addition is commutative, same fast path)
     run_and_check_registers!(
         "
         function main() {
@@ -1237,7 +1221,6 @@ pub fn inc_int_commutative() {
 
 #[test]
 pub fn inc_int_to_chained() {
-    // z = y + 1 where y = x + 1  (two successive IncIntTo)
     run_and_check_registers!(
         "
         function main() {
@@ -1253,7 +1236,6 @@ pub fn inc_int_to_chained() {
 
 #[test]
 pub fn inc_int_as_function_arg() {
-    // x + 1 passed directly as an argument
     run_and_check_registers!(
         "
         function identity(n) { return n; }
@@ -1268,7 +1250,6 @@ pub fn inc_int_as_function_arg() {
 
 #[test]
 pub fn dec_int_as_return_value() {
-    // return x - 1 from a function
     run_and_check_registers!(
         "
         function pred(n) { return n - 1; }
@@ -1282,7 +1263,6 @@ pub fn dec_int_as_return_value() {
 
 #[test]
 pub fn inc_int_in_condition() {
-    // if (x + 1) > threshold — exercises IncIntTo inside a comparison
     run_and_check_registers!(
         "
         function main() {
@@ -1298,7 +1278,6 @@ pub fn inc_int_in_condition() {
 
 #[test]
 pub fn inc_int_does_not_mutate_source() {
-    // After y = x + 1, x must still hold its original value
     run_and_check_registers!(
         "
         function main() {
@@ -1327,7 +1306,6 @@ pub fn dec_int_does_not_mutate_source() {
 
 #[test]
 pub fn int_wraps_on_overflow() {
-    // 2147483647 + 1 wraps to -2147483648 (i32 wrapping semantics)
     run_and_check_registers!(
         "
         function main() {
@@ -1342,7 +1320,6 @@ pub fn int_wraps_on_overflow() {
 
 #[test]
 pub fn int_wraps_on_underflow() {
-    // -2147483648 is i32::MIN; subtracting 1 wraps around to i32::MAX = 2147483647
     run_and_check_registers!(
         "
         function main() {
@@ -1357,7 +1334,6 @@ pub fn int_wraps_on_underflow() {
 
 #[test]
 pub fn negative_int_literal() {
-    // -2147483648 is i32::MIN and must parse without "integer too big" error
     run_and_check_registers!(
         "
         function main() {
@@ -1371,7 +1347,6 @@ pub fn negative_int_literal() {
 
 #[test]
 pub fn string_exactly_6_chars() {
-    // 6-char strings are stored inline (small string)
     run_and_check_registers!(
         r#"
         function main() {
@@ -1385,7 +1360,6 @@ pub fn string_exactly_6_chars() {
 
 #[test]
 pub fn string_exactly_7_chars() {
-    // 7-char strings go into the pool (large string)
     run_and_check_registers!(
         r#"
         function main() {
@@ -1399,7 +1373,6 @@ pub fn string_exactly_7_chars() {
 
 #[test]
 pub fn string_small_to_large_concat() {
-    // Concatenating two small strings can produce a large one
     run_and_check_registers!(
         r#"
         function main() {
@@ -1467,7 +1440,6 @@ pub fn string_escape_quote() {
 
 #[test]
 pub fn empty_range_for_loop() {
-    // 0..0 should iterate zero times
     run_and_check_registers!(
         "
         function main() {
@@ -1482,7 +1454,6 @@ pub fn empty_range_for_loop() {
 
 #[test]
 pub fn while_never_executes() {
-    // Condition false from the start
     run_and_check_registers!(
         "
         function main() {
@@ -1557,7 +1528,6 @@ pub fn single_element_array_len() {
 
 #[test]
 pub fn array_after_all_removes() {
-    // Remove all elements one by one, check length reaches 0
     run_and_check_registers!(
         "
         function main() {
@@ -1594,7 +1564,6 @@ pub fn mutual_recursion() {
 
 #[test]
 pub fn null_literal_store_and_compare() {
-    // null literal should be expressible, storable, and equal to itself
     run_and_check_registers!(
         "
         function main() {
@@ -1608,7 +1577,6 @@ pub fn null_literal_store_and_compare() {
 
 #[test]
 pub fn null_literal_as_default() {
-    // null used as a sentinel / unset value, then overwritten
     run_and_check_registers!(
         "
         function main() {
@@ -1621,7 +1589,6 @@ pub fn null_literal_as_default() {
     );
 }
 
-// Regression test for the Array(None) type inference bug
 #[test]
 pub fn array_push_type_inference_propagation() {
     run_and_check_registers!(
@@ -2021,5 +1988,765 @@ pub fn return_flow_branch_local_return_value_type_is_preserved() {
         }
         "#,
         crate::Data::small_str("BRANCH")
+    );
+}
+
+#[test]
+pub fn match_basic_int() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 2;
+            let result = 0;
+            match x {
+                1 => { result = 10; }
+                2 => { result = 20; }
+                3 => { result = 30; }
+            }
+            print(result);
+        }
+        ",
+        20.into()
+    );
+}
+
+#[test]
+pub fn match_with_wildcard() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let x = "other";
+            let result = 0;
+            match x {
+                "hello" => { result = 1; }
+                "goodbye" => { result = 2; }
+                _ => { result = 99; }
+            }
+            print(result);
+        }
+        "#,
+        99.into()
+    );
+}
+
+#[test]
+pub fn match_first_arm() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 1;
+            let result = 0;
+            match x {
+                1 => { result = 100; }
+                2 => { result = 200; }
+            }
+            print(result);
+        }
+        ",
+        100.into()
+    );
+}
+
+#[test]
+pub fn match_no_match() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 99;
+            let result = 0;
+            match x {
+                1 => { result = 10; }
+                2 => { result = 20; }
+            }
+            print(result);
+        }
+        ",
+        0.into()
+    );
+}
+
+#[test]
+pub fn match_string_arms() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let cmd = "run";
+            let code = 0;
+            match cmd {
+                "stop" => { code = 1; }
+                "run" => { code = 2; }
+                "pause" => { code = 3; }
+                _ => { code = -1; }
+            }
+            print(code);
+        }
+        "#,
+        2.into()
+    );
+}
+
+#[test]
+pub fn match_arm_computation() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 3;
+            let result = 0;
+            match x {
+                1 => {
+                    result = 10 + 5;
+                }
+                3 => {
+                    let a = 7;
+                    let b = 8;
+                    result = a * b;
+                }
+            }
+            print(result);
+        }
+        ",
+        56.into()
+    );
+}
+
+#[test]
+pub fn loop_break() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let i = 0;
+            loop {
+                i += 1;
+                if i == 10 { break; }
+            }
+            print(i);
+        }
+        ",
+        10.into()
+    );
+}
+
+#[test]
+pub fn loop_continue() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let i = 0;
+            let sum = 0;
+            loop {
+                i += 1;
+                if i > 20 { break; }
+                if (i % 2) == 0 { continue; }
+                sum += i;
+            }
+            print(sum);
+        }
+        ",
+        100.into()
+    );
+}
+
+#[test]
+pub fn nested_loop_blocks() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let count = 0;
+            let i = 0;
+            loop {
+                i += 1;
+                if i > 3 { break; }
+                let j = 0;
+                loop {
+                    j += 1;
+                    if j > 4 { break; }
+                    count += 1;
+                }
+            }
+            print(count);
+        }
+        ",
+        12.into()
+    );
+}
+
+#[test]
+pub fn nested_loop_inner_break() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let outer = 0;
+            let i = 0;
+            loop {
+                i += 1;
+                if i > 3 { break; }
+                let j = 0;
+                loop {
+                    j += 1;
+                    if j > 1 { break; }
+                }
+                outer += 1;
+            }
+            print(outer);
+        }
+        ",
+        3.into()
+    );
+}
+
+#[test]
+pub fn nested_fn() {
+    run_and_check_registers!(
+        "
+        function main() {
+            function add(a, b) {
+                return a + b;
+            }
+            print(add(3, 4));
+        }
+        ",
+        7.into()
+    );
+}
+
+#[test]
+pub fn nested_fn_in_loop() {
+    run_and_check_registers!(
+        "
+        function main() {
+            function square(n) {
+                return n * n;
+            }
+            let sum = 0;
+            for i in 1..5 {
+                sum += square(i);
+            }
+            print(sum);
+        }
+        ",
+        30.into()
+    );
+}
+
+#[test]
+pub fn block_scope() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 1;
+            {
+                let y = 2;
+                x = x + y;
+            }
+            print(x);
+        }
+        ",
+        3.into()
+    );
+}
+
+#[test]
+pub fn range_two_arg() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let arr = range(5, 10);
+            let sum = 0;
+            for x in arr { sum += x; }
+            print(sum);
+        }
+        ",
+        35.into()
+    );
+}
+
+#[test]
+pub fn range_two_arg_index() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let arr = range(3, 7);
+            print(arr[0]);
+        }
+        ",
+        3.into()
+    );
+}
+
+#[test]
+pub fn string_uppercase() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = "hello";
+            print(s.uppercase().len());
+        }
+        "#,
+        5.into()
+    );
+}
+
+#[test]
+pub fn string_lowercase() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = "ABCDE";
+            print(s.lowercase().len());
+        }
+        "#,
+        5.into()
+    );
+}
+
+#[test]
+pub fn string_is_float() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print("3.14".is_float());
+        }
+        "#,
+        true.into()
+    );
+}
+
+#[test]
+pub fn string_is_float_false() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print("42".is_float());
+        }
+        "#,
+        false.into()
+    );
+}
+
+#[test]
+pub fn string_is_int_true() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print("42".is_int());
+        }
+        "#,
+        true.into()
+    );
+}
+
+#[test]
+pub fn string_is_int_false() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print("hello".is_int());
+        }
+        "#,
+        false.into()
+    );
+}
+
+#[test]
+pub fn string_trim_sequence() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = "--hello--";
+            print(s.trim_sequence("-").len());
+        }
+        "#,
+        5.into()
+    );
+}
+
+#[test]
+pub fn string_trim_sequence_left() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = "--hello";
+            print(s.trim_sequence_left("-").len());
+        }
+        "#,
+        5.into()
+    );
+}
+
+#[test]
+pub fn string_trim_sequence_right() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = "hello--";
+            print(s.trim_sequence_right("-").len());
+        }
+        "#,
+        5.into()
+    );
+}
+
+#[test]
+pub fn float_round() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 3.7;
+            print(x.round());
+        }
+        ",
+        4.0f64.into()
+    );
+}
+
+#[test]
+pub fn int_abs() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = -42;
+            print(x.abs());
+        }
+        ",
+        42.into()
+    );
+}
+
+#[test]
+pub fn string_reverse_method() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = "abcde";
+            let r = s.reverse();
+            print(r.len());
+        }
+        "#,
+        5.into()
+    );
+}
+
+#[test]
+pub fn array_find() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let arr = [10, 20, 30, 40];
+            print(arr.find(30));
+        }
+        ",
+        2.into()
+    );
+}
+
+#[test]
+pub fn array_find_missing() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let arr = [10, 20, 30];
+            print(arr.find(99));
+        }
+        ",
+        (-1).into()
+    );
+}
+
+#[test]
+pub fn array_sort_floats() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let arr = [3.1, 1.4, 2.7];
+            arr.sort();
+            print(arr[0]);
+        }
+        ",
+        1.4f64.into()
+    );
+}
+
+#[test]
+pub fn array_sort_strings() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let arr = ["banana", "apple", "cherry"];
+            arr.sort();
+            print(arr[0].len());
+        }
+        "#,
+        5.into()
+    );
+}
+
+#[test]
+pub fn nested_array_index() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let arr = [[1, 2], [3, 4], [5, 6]];
+            print(arr[1][1]);
+        }
+        ",
+        4.into()
+    );
+}
+
+#[test]
+pub fn nested_array_set() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let arr = [[1, 2], [3, 4]];
+            arr[0][1] = 99;
+            print(arr[0][1]);
+        }
+        ",
+        99.into()
+    );
+}
+
+#[test]
+pub fn bool_from_string_true() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print(bool("true"));
+        }
+        "#,
+        true.into()
+    );
+}
+
+#[test]
+pub fn bool_from_string_false() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print(bool("false"));
+        }
+        "#,
+        false.into()
+    );
+}
+
+#[test]
+pub fn the_answer() {
+    run_and_check_registers!(
+        "
+        function main() {
+            print(the_answer());
+        }
+        ",
+        42.into()
+    );
+}
+
+#[test]
+pub fn compound_mul_assign() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 5;
+            x *= 3;
+            print(x);
+        }
+        ",
+        15.into()
+    );
+}
+
+#[test]
+pub fn compound_div_assign() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 20;
+            x /= 4;
+            print(x);
+        }
+        ",
+        5.into()
+    );
+}
+
+#[test]
+pub fn compound_mod_assign() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 17;
+            x %= 5;
+            print(x);
+        }
+        ",
+        2.into()
+    );
+}
+
+#[test]
+pub fn compound_pow_assign() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 2;
+            x ^= 8;
+            print(x);
+        }
+        ",
+        256.into()
+    );
+}
+
+#[test]
+pub fn string_index() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = "hello";
+            print(s[0] == "h");
+        }
+        "#,
+        true.into()
+    );
+}
+
+#[test]
+pub fn string_set_index() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let s = "hello";
+            s[0] = "H";
+            print(s.len());
+        }
+        "#,
+        5.into()
+    );
+}
+
+#[test]
+pub fn not_equal() {
+    run_and_check_registers!(
+        "
+        function main() {
+            print(3 != 4);
+        }
+        ",
+        true.into()
+    );
+}
+
+#[test]
+pub fn equal_false() {
+    run_and_check_registers!(
+        "
+        function main() {
+            print(3 == 4);
+        }
+        ",
+        false.into()
+    );
+}
+
+#[test]
+pub fn array_join_no_sep() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let arr = ["a", "b", "c"];
+            let s = arr.join();
+            print(s.len());
+        }
+        "#,
+        3.into()
+    );
+}
+
+#[test]
+pub fn float_div_zero() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 1.0 / 0.0;
+            print(x > 9999999.0);
+        }
+        ",
+        true.into()
+    );
+}
+
+#[test]
+pub fn float_negative_pow() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 2.0 ^ -1.0;
+            print(x);
+        }
+        ",
+        0.5f64.into()
+    );
+}
+
+#[test]
+pub fn float_negative_pow_square() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = 4.0 ^ -0.5;
+            print(x);
+        }
+        ",
+        0.5f64.into()
+    );
+}
+
+#[test]
+pub fn type_int() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print(type(42) == "Integer");
+        }
+        "#,
+        true.into()
+    );
+}
+
+#[test]
+pub fn type_string() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print(type("hello") == "String");
+        }
+        "#,
+        true.into()
+    );
+}
+
+#[test]
+pub fn type_float() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print(type(3.14) == "Float");
+        }
+        "#,
+        true.into()
+    );
+}
+
+#[test]
+pub fn type_bool() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            print(type(true) == "Boolean");
+        }
+        "#,
+        true.into()
     );
 }

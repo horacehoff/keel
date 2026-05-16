@@ -23,6 +23,8 @@ pub enum Instr {
     EqJmp(u16, u16, u16),
     ArrayNotEqJmp(u16, u16, u16),
     ArrayEqJmp(u16, u16, u16),
+    StrNotEqJmp(u16, u16, u16),
+    StrEqJmp(u16, u16, u16),
 
     Mov(u16, u16),
     /// SetInt(dest_reg_id, val)\
@@ -65,6 +67,8 @@ pub enum Instr {
     NotEq(u16, u16, u16),
     ArrayEq(u16, u16, u16),
     ArrayNotEq(u16, u16, u16),
+    StrEq(u16, u16, u16),
+    StrNotEq(u16, u16, u16),
     SupFloat(u16, u16, u16),
     SupInt(u16, u16, u16),
     SupEqFloat(u16, u16, u16),

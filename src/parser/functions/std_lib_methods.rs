@@ -7,24 +7,24 @@ use crate::errors::throw_parser_error;
 use crate::expr::Expr;
 use crate::get_id;
 use crate::instr::LibFuncVoid;
+use crate::parser_data::Ctx;
+use crate::parser_data::State;
 use crate::parser_data::Variable;
-use crate::parser_data::{Ctx, State};
 use crate::registers::alloc_register;
 use crate::registers::free_register;
 use crate::type_system::DataType;
 use crate::type_system::infer_type;
-use inline_colorization::*;
-use smol_str::SmolStr;
-use smol_str::ToSmolStr;
 
-pub fn handle_method_calls(
+pub fn std_lib_methods(
+    name: &str,
+    id: u16,
+    obj_type: DataType,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
     obj: &Expr,
     args: &[Expr],
-    namespace: &[SmolStr],
     obj_markers: &(usize, usize),
     fn_markers: &(usize, usize),
     args_indexes: &[(usize, usize)],
@@ -33,15 +33,6 @@ pub fn handle_method_calls(
 ) {
     let src = ctx.src;
     let current_src_file = ctx.current_src_file;
-
-    let len = namespace.len() - 1;
-    let name = namespace[len].as_str();
-    // not in use for now
-    // let namespace = &namespace[0..len];
-
-    let obj_type = infer_type(obj, v, state.fns, src, state.dyn_libs);
-    let id = get_id(obj, v, ctx, state, output, None, false, offset, single_run);
-    free_register(id, state.free_registers, v, state.const_registers);
 
     macro_rules! add_args {
         () => {
@@ -66,12 +57,7 @@ pub fn handle_method_calls(
                 throw_parser_error(
                     src,
                     obj_markers,
-                    ErrType::Custom(
-                    format_args!(
-                        "Expected {color_bright_blue}{style_bold}{}{color_reset}{style_reset}, found {color_bright_red}{style_bold}{}{color_reset}{style_reset}",
-                        $expected_str,
-                        obj_type
-                    ).to_smolstr())
+                    ErrType::InvalidObjType($expected_str, &obj_type),
                 );
             }
         };
@@ -101,7 +87,6 @@ pub fn handle_method_calls(
             )
         };
     }
-
     match name {
         "uppercase" => {
             check!(DataType::String, "String", 0);
@@ -205,15 +190,15 @@ pub fn handle_method_calls(
             check!(DataType::String | DataType::Array(_), "Array or String", 1);
 
             let arg_type = infer_type(&args[0], v, state.fns, src, state.dyn_libs);
-            if let DataType::Array(Some(array_elem_type)) = &obj_type
-                && **array_elem_type != arg_type
-            {
-                throw_parser_error(
-                    src,
-                    &args_indexes[0],
-                    ErrType::InvalidType(*array_elem_type.clone(), &arg_type),
-                );
-            } else if !matches!(obj_type, DataType::Array(None)) && arg_type != obj_type {
+            if let DataType::Array(Some(array_elem_type)) = &obj_type {
+                if **array_elem_type != arg_type {
+                    throw_parser_error(
+                        src,
+                        &args_indexes[0],
+                        ErrType::InvalidType(*array_elem_type.clone(), &arg_type),
+                    );
+                }
+            } else if obj_type == DataType::String && arg_type != DataType::String {
                 throw_parser_error(
                     src,
                     &args_indexes[0],

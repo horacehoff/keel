@@ -2,7 +2,7 @@ use inline_colorization::*;
 use std::fs;
 use std::process::Command;
 
-const BENCHMARK_RUNS: u16 = 150;
+const BENCHMARK_RUNS: u16 = 10;
 const BENCHMARK_WARMUP: u16 = 10;
 
 struct Prog {
@@ -585,7 +585,7 @@ pub fn benchmark() {
             hyperfine
                 .arg("--command-name")
                 .arg(format!("{} [python]", program.name))
-                .arg(format!("python3 {}", quote(&py_path.to_string_lossy())));
+                .arg(format!("python3.15 {}", quote(&py_path.to_string_lossy())));
         }
 
         // LuaJIT (-joff)

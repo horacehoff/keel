@@ -8,14 +8,22 @@ pub fn alloc_array(
     recursion_stack: &[Data],
     gc_array_threshold: &mut u32,
     live: &mut Vec<bool>,
+    array_gc_stack: &mut Vec<usize>,
 ) -> u32 {
     if let Some(id) = free_arrays.pop() {
         unsafe { array_pool.get_unchecked_mut(id as usize) }.clear();
         id
     } else {
-        if free_arrays.is_empty() && array_pool.len() >= (*gc_array_threshold as usize) {
+        if array_pool.len() >= (*gc_array_threshold as usize) {
             *gc_array_threshold *= 2;
-            array_gc(array_pool, free_arrays, registers, recursion_stack, live);
+            array_gc(
+                array_pool,
+                free_arrays,
+                registers,
+                recursion_stack,
+                live,
+                array_gc_stack,
+            );
         }
         if let Some(id) = free_arrays.pop() {
             unsafe { array_pool.get_unchecked_mut(id as usize) }.clear();
@@ -34,6 +42,7 @@ fn array_gc(
     registers: &[Data],
     recursion_stack: &[Data],
     live: &mut Vec<bool>,
+    array_gc_stack: &mut Vec<usize>,
 ) {
     live.clear();
     live.resize(array_pool.len(), false);
@@ -41,7 +50,7 @@ fn array_gc(
     // Recursively find all "used" arrays
     for data in registers.iter().chain(recursion_stack.iter()) {
         if data.is_array() {
-            track_arrays(data.as_array(), array_pool, live);
+            track_arrays(data.as_array(), array_pool, live, array_gc_stack);
         }
     }
 
@@ -59,18 +68,23 @@ fn array_gc(
 }
 
 /// Tracks nested arrays
-fn track_arrays(id: usize, array_pool: &ArrayPool, live: &mut [bool]) {
-    if unsafe { *live.get_unchecked(id) } {
-        return;
-    }
-    unsafe { *live.get_unchecked_mut(id) = true };
-    // Arrays can only hold a single type
-    // As such, if the first element in the array is not an array, then the other elements aren't either
-    let arr = unsafe { array_pool.get_unchecked(id) };
-    if arr.is_empty() || !arr[0].is_array() {
-        return;
-    }
-    for elem in arr {
-        track_arrays(elem.as_array(), array_pool, live);
+fn track_arrays(
+    root_id: usize,
+    array_pool: &ArrayPool,
+    live: &mut [bool],
+    array_gc_stack: &mut Vec<usize>,
+) {
+    array_gc_stack.push(root_id);
+    while let Some(id) = array_gc_stack.pop() {
+        let is_live = unsafe { live.get_unchecked_mut(id) };
+        if *is_live {
+            continue;
+        }
+        *is_live = true;
+        let arr = unsafe { array_pool.get_unchecked(id) };
+        if arr.is_empty() || unsafe { !arr.get_unchecked(0).is_array() } {
+            continue;
+        }
+        array_gc_stack.extend(arr.iter().map(|elem| elem.as_array()));
     }
 }

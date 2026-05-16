@@ -189,7 +189,7 @@ impl Data {
             }
         } else {
             let payload = (self.0 & PAYLOAD_MASK) as usize;
-            unsafe { &*(string_pool[payload].as_str() as *const str) }
+            unsafe { &*(string_pool.get_unchecked(payload).as_str() as *const str) }
         }
     }
     #[inline(always)]

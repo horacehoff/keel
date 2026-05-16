@@ -13,6 +13,7 @@ pub fn repl() {
 
     let mut all_lines: Vec<String> = Vec::new();
     let mut prev_stdout = String::new();
+    let mut contents = String::with_capacity(20);
 
     loop {
         let mut s = String::new();
@@ -39,7 +40,19 @@ pub fn repl() {
 
         all_lines.push(s);
 
-        let contents = format!("function main() {{\n{}\n}}", all_lines.join("\n"));
+        contents.clear();
+        for x in all_lines.iter().filter(|x| x.starts_with("import")) {
+            contents.push_str(x);
+            contents.push('\n');
+        }
+        contents.push_str("function main() {\n");
+        for x in all_lines.iter().filter(|x| !x.starts_with("import")) {
+            contents.push_str(x);
+            contents.push('\n');
+        }
+        contents.push('\n');
+        contents.push('}');
+
         std::fs::write(&tmp, &contents)
             .expect("{color_red}[ERROR]{color_reset} Cannot write to temporary file");
 

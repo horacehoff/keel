@@ -186,10 +186,13 @@ InlineConditionalBlock: Expr = {
 
 MatchBlock:Expr = {
     <start: @L> "match" <match_obj: Expression> "{" <o2: (Expression "=>" Block<Code>)+> <o3: (r"[a-zA-Z_]+\s*=>" Block<Code>)?> "}" <end: @R> => {
-        let mut output_code:Vec<Expr> = o2.into_iter().enumerate().map(|(i,(condition,_,code))|
-            if i == 0 {condition}
-            else {
-                Expr::ElseIfBlock(
+        let mut first_condition: Option<Expr> = None;
+        let mut output_code:Vec<Expr> = o2.into_iter().enumerate().flat_map(|(i,(condition,_,code))|
+            if i == 0 {
+                first_condition = Some(condition);
+                Vec::from(code)
+            } else {
+                vec![Expr::ElseIfBlock(
                     Box::from(
                         Expr::Eq(
                             Box::from(match_obj.clone()),
@@ -197,7 +200,7 @@ MatchBlock:Expr = {
                         )
                     ),
                     code
-                )
+                )]
             }
         ).collect();
 
@@ -205,7 +208,7 @@ MatchBlock:Expr = {
             output_code.push(Expr::ElseBlock(wildcard_code))
         }
 
-        Expr::Condition(Box::from(Expr::Eq(Box::from(match_obj), Box::from(output_code[0].clone()))),Box::from(output_code),(start,end))
+        Expr::Condition(Box::from(Expr::Eq(Box::from(match_obj), Box::from(first_condition.unwrap()))),Box::from(output_code),(start,end))
     }
 }
 
@@ -492,13 +495,21 @@ ItemAfter<S,T>: T = {
 
 FunctionCall: Expr = {
     <start: @L> <namespace: ItemBefore<Var, "::">+?> <o1: Var> <args: IndexedArgs<Expression>> <end: @R> => {
-        Expr::FunctionCall(args.clone().into_iter().map(|(_,x,_)| x).collect::<Vec<Expr>>().into_boxed_slice(), {
+        let mut parsed_args: Vec<Expr> = Vec::with_capacity(args.len());
+        let mut arg_markers: Vec<(usize, usize)> = Vec::with_capacity(args.len());
+        for (arg_start, arg, arg_end) in args {
+            parsed_args.push(arg);
+            arg_markers.push((arg_start, arg_end));
+        }
+        Expr::FunctionCall(parsed_args.into_boxed_slice(), {
             if let Some(ns) = namespace {
-                Box::from([ns.as_slice(), &[o1]].concat())
+                let mut namespace = ns;
+                namespace.push(o1);
+                namespace.into_boxed_slice()
             } else {
-                Box::from(vec![o1])
+                Box::from([o1])
             }
-        }, (start, end), args.into_iter().map(|(x,_,y)| (x,y)).collect::<Vec<(usize,usize)>>().into_boxed_slice())
+        }, (start, end), arg_markers.into_boxed_slice())
     }
 }
 

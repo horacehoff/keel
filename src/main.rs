@@ -33,12 +33,14 @@ mod display;
 mod errors;
 #[path = "./parser/expr.rs"]
 mod expr;
+#[path = "./parser/functions/fs_lib_functions.rs"]
+mod fs_lib_functions;
 #[path = "./parser/functions/functions.rs"]
 mod functions;
 #[path = "./instr.rs"]
 mod instr;
-#[path = "./parser/functions/method_calls.rs"]
-mod method_calls;
+#[path = "./parser/functions/methods.rs"]
+mod methods;
 #[path = "./parser/parser.rs"]
 mod parser;
 #[path = "./parser/parser_data.rs"]
@@ -47,6 +49,10 @@ mod parser_data;
 mod registers;
 #[path = "./repl.rs"]
 mod repl;
+#[path = "./parser/functions/std_lib_functions.rs"]
+mod std_lib_functions;
+#[path = "./parser/functions/std_lib_methods.rs"]
+mod std_lib_methods;
 #[path = "./vm/string_gc.rs"]
 mod string_gc;
 #[path = "./tests.rs"]
@@ -54,6 +60,8 @@ mod string_gc;
 mod tests;
 #[path = "./type_system.rs"]
 mod type_system;
+#[path = "./parser/functions/user_functions.rs"]
+mod user_functions;
 #[path = "./util/util.rs"]
 mod util;
 #[path = "./vm/vm.rs"]

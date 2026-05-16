@@ -7,7 +7,7 @@ use crate::expr::Expr;
 use crate::expr::contains_var_reassign;
 use crate::functions::handle_functions;
 use crate::grammar::Token;
-use crate::method_calls::handle_method_calls;
+use crate::methods::handle_method_calls;
 use crate::parser_data::*;
 use crate::registers::alloc_register;
 use crate::registers::free_loop_scope_registers;
@@ -52,8 +52,10 @@ fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_
         Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::InfIntJmp(o1, o2, *len),
         Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, *len),
         Instr::ArrayEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayNotEqJmp(o1, o2, *len),
+        Instr::StrEq(o1, o2, o3) if o3 == condition_id => Instr::StrNotEqJmp(o1, o2, *len),
         Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, *len),
         Instr::ArrayNotEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayEqJmp(o1, o2, *len),
+        Instr::StrNotEq(o1, o2, o3) if o3 == condition_id => Instr::StrEqJmp(o1, o2, *len),
         _ => {
             output.push(Instr::IsFalseJmp(condition_id, *len));
             return;
@@ -81,8 +83,10 @@ fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
         Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::SupEqIntJmp(o1, o2, 0),
         Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, 0),
         Instr::ArrayEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayEqJmp(o1, o2, 0),
+        Instr::StrEq(o1, o2, o3) if o3 == condition_id => Instr::StrEqJmp(o1, o2, 0),
         Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, 0),
         Instr::ArrayNotEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayNotEqJmp(o1, o2, 0),
+        Instr::StrNotEq(o1, o2, o3) if o3 == condition_id => Instr::StrNotEqJmp(o1, o2, 0),
         _ => {
             output.push(Instr::IsTrueJmp(condition_id, 0));
             return;
@@ -110,7 +114,9 @@ fn set_jmp_size(instr: &mut Instr, size: u16) {
         | Instr::NotEqJmp(_, _, jump_size)
         | Instr::EqJmp(_, _, jump_size)
         | Instr::ArrayNotEqJmp(_, _, jump_size)
-        | Instr::ArrayEqJmp(_, _, jump_size) => *jump_size = size,
+        | Instr::ArrayEqJmp(_, _, jump_size)
+        | Instr::StrNotEqJmp(_, _, jump_size)
+        | Instr::StrEqJmp(_, _, jump_size) => *jump_size = size,
         _ => unreachable!(),
     }
 }
@@ -203,13 +209,13 @@ fn parse_loop_flow_control(
     loop_id: u16,
     code_length: u16,
     for_loop: bool,
-    indef: bool,
+    indefinite: bool,
 ) {
     loop_code.iter_mut().enumerate().for_each(|(i, x)| {
         if let Instr::NotEqJmp(break_id, 0, 0) = x
             && *break_id == loop_id
         {
-            if for_loop && !indef {
+            if for_loop && !indefinite {
                 *x = Instr::Jmp(code_length - i as u16 - 1);
             } else {
                 *x = Instr::Jmp(code_length - i as u16);
@@ -217,9 +223,10 @@ fn parse_loop_flow_control(
         } else if let Instr::EqJmp(continue_id, 0, 0) = x
             && *continue_id == loop_id
         {
-            if for_loop || indef {
+            if for_loop {
                 *x = Instr::Jmp(code_length - i as u16 - 3);
             } else {
+                // loop blocks and while loops only have 1 trailing instruction
                 *x = Instr::Jmp(code_length - i as u16 - 1);
             }
         }
@@ -480,10 +487,10 @@ pub fn get_id(
             )
         }
         Expr::Div(l, r, markers) => {
-            if let Expr::Int(n) = r.as_ref() {
-                if *n == 0 {
-                    throw_parser_error(src, markers, ErrType::DivisionByZero);
-                }
+            if let Expr::Int(n) = r.as_ref()
+                && *n == 0
+            {
+                throw_parser_error(src, markers, ErrType::DivisionByZero);
             }
             let id = uniform_op!(
                 DivFloat,
@@ -597,10 +604,10 @@ pub fn get_id(
             id
         }
         Expr::Mod(l, r, markers) => {
-            if let Expr::Int(n) = r.as_ref() {
-                if *n == 0 {
-                    throw_parser_error(src, markers, ErrType::ModuloByZero);
-                }
+            if let Expr::Int(n) = r.as_ref()
+                && *n == 0
+            {
+                throw_parser_error(src, markers, ErrType::ModuloByZero);
             }
             let id = uniform_op!(
                 ModFloat,
@@ -632,13 +639,11 @@ pub fn get_id(
             )
         }
         Expr::Eq(l, r) => {
-            let is_array = matches!(
-                infer_type(l, v, state.fns, src, state.dyn_libs),
-                DataType::Array(_)
-            ) && matches!(
-                infer_type(r, v, state.fns, src, state.dyn_libs),
-                DataType::Array(_)
-            );
+            let l_type = infer_type(l, v, state.fns, src, state.dyn_libs);
+            let r_type = infer_type(r, v, state.fns, src, state.dyn_libs);
+            let is_array = matches!(l_type, DataType::Array(_))
+                && matches!(r_type, DataType::Array(_));
+            let is_string = l_type == DataType::String || r_type == DataType::String;
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
             free_register(id_l, state.free_registers, v, state.const_registers);
@@ -650,12 +655,19 @@ pub fn get_id(
             };
             output.push(if is_array {
                 Instr::ArrayEq(id_l, id_r, id)
+            } else if is_string {
+                Instr::StrEq(id_l, id_r, id)
             } else {
                 Instr::Eq(id_l, id_r, id)
             });
             id
         }
         Expr::NotEq(l, r) => {
+            let l_type = infer_type(l, v, state.fns, src, state.dyn_libs);
+            let r_type = infer_type(r, v, state.fns, src, state.dyn_libs);
+            let is_array = matches!(l_type, DataType::Array(_))
+                && matches!(r_type, DataType::Array(_));
+            let is_string = l_type == DataType::String || r_type == DataType::String;
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
             free_register(id_l, state.free_registers, v, state.const_registers);
@@ -665,14 +677,10 @@ pub fn get_id(
             } else {
                 alloc_register(state.registers, state.free_registers)
             };
-            if matches!(
-                infer_type(l, v, state.fns, src, state.dyn_libs),
-                DataType::Array(_)
-            ) && matches!(
-                infer_type(r, v, state.fns, src, state.dyn_libs),
-                DataType::Array(_)
-            ) {
+            if is_array {
                 output.push(Instr::ArrayNotEq(id_l, id_r, id));
+            } else if is_string {
+                output.push(Instr::StrNotEq(id_l, id_r, id));
             } else {
                 output.push(Instr::NotEq(id_l, id_r, id));
             }

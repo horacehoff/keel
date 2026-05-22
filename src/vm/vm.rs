@@ -22,32 +22,30 @@ use std::io::Write;
 pub type ArrayPool = Vec<Vec<Data>>;
 pub type StringPool = Vec<String>;
 
-/// Converts a Keel array into a raw pointer suitable for passing to a C function via libffi.
-/// Box<\[u8\]> is used to store data because its address is stable.
+/// Converts a Keel array to a C pointer for libffi
 fn array_to_c_ptr(
     data: Data,
     elem_type: &DataType,
     array_pool: &ArrayPool,
     string_pool: &StringPool,
+    // boxed so the address doesn't move
     keep_alive: &mut Vec<Box<[u8]>>,
 ) -> u64 {
     let elems = unsafe { array_pool.get_unchecked(data.as_array()) };
 
     match elem_type {
         DataType::Int => {
-            // Converts every i32 to [u8; 4] and flattens it using flat_map
-            // This produces a contiguous [u8] array that C expects for ints
+            // C expects [u8; 4] for ints
             let bytes: Box<[u8]> = elems
                 .iter()
                 .flat_map(|e| e.as_int().to_ne_bytes())
                 .collect();
             let ptr = bytes.as_ptr() as u64;
-            keep_alive.push(bytes); // hand ownership to keep_alive; the pointer stays valid
+            keep_alive.push(bytes);
             ptr
         }
 
-        // Converts every f64 to [u8; 8] and flattens it using flat_map
-        // This produces a contiguous [u8] array that C expects for doubles
+        // C expects [u8; 8] for doubles
         DataType::Float => {
             let bytes: Box<[u8]> = elems
                 .iter()
@@ -57,31 +55,27 @@ fn array_to_c_ptr(
             keep_alive.push(bytes);
             ptr
         }
+        // builds a char** from null-terminated strings
         DataType::String => {
             let mut ptrs: Vec<usize> = Vec::with_capacity(elems.len());
             for e in elems {
-                // Allocate one null-terminated C string per element.
                 let bytes = std::ffi::CString::new(e.as_str(string_pool))
                     .expect("interior null byte in string passed to C")
-                    .into_bytes_with_nul() // Vec<u8> including '\0'
+                    .into_bytes_with_nul()
                     .into_boxed_slice();
-                ptrs.push(bytes.as_ptr() as usize); // record char* before moving
-                keep_alive.push(bytes); // keep the string alive
+                ptrs.push(bytes.as_ptr() as usize);
+                keep_alive.push(bytes);
             }
-            // Serialise the pointer array itself into bytes
             let ptr_bytes: Box<[u8]> = ptrs.iter().flat_map(|p| p.to_ne_bytes()).collect();
-            let ptr = ptr_bytes.as_ptr() as u64; // this is the char** value C receives
+            let ptr = ptr_bytes.as_ptr() as u64;
             keep_alive.push(ptr_bytes);
             ptr
         }
         DataType::Array(Some(inner)) => {
             let mut ptrs: Vec<usize> = Vec::with_capacity(elems.len());
             for e in elems {
-                // Converts the inner array, pushes its allocations into keep_alive,
-                // and returns the pointer to its first element
                 ptrs.push(array_to_c_ptr(*e, inner, array_pool, string_pool, keep_alive) as usize);
             }
-            // Box the pointer array so its address is stable, then add it to keep_alive
             let ptr_bytes: Box<[u8]> = ptrs.iter().flat_map(|p| p.to_ne_bytes()).collect();
             let ptr = ptr_bytes.as_ptr() as u64;
             keep_alive.push(ptr_bytes);
@@ -730,6 +724,7 @@ pub fn execute(
                 }
                 *w!(dest) = unsafe { *array.get_unchecked(idx) };
             }
+            // Keel currently indexes strings by byte, meaning multi-byte characters won't get properly indexed
             Instr::GetIndexString(tgt, index, dest) => {
                 let idx = r!(index).as_int() as usize;
                 let tgt_data = r!(tgt);
@@ -1043,7 +1038,6 @@ pub fn execute(
                     let separator = r!(separator);
                     let source_array = unsafe { array_pool.get_unchecked(source_array_id) };
 
-                    // Find the source slice ranges that will become output arrays
                     let mut split_ranges: Vec<(usize, usize)> =
                         Vec::with_capacity(source_array.len());
 
@@ -1056,7 +1050,7 @@ pub fn execute(
                     }
                     split_ranges.push((start, source_array.len()));
 
-                    // Allocate one pooled array per recorded range and copy just that segment
+                    // alloc one array per range
                     let mut sub_arrays: Vec<Data> = Vec::with_capacity(split_ranges.len());
                     for (start, end) in split_ranges {
                         let dest_array_id = alloc_array(
@@ -1068,7 +1062,6 @@ pub fn execute(
                             &mut array_live,
                             &mut array_gc_stack,
                         ) as usize;
-                        // Use split_at_mut to copy directly from the source array without having to clone it
                         if dest_array_id < source_array_id {
                             let (left, right) = array_pool.split_at_mut(source_array_id);
                             left[dest_array_id].extend_from_slice(&right[0][start..end]);

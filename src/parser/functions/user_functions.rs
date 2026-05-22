@@ -35,7 +35,6 @@ pub fn handle_user_function(
 ) -> u16 {
     let src = ctx.src;
     // Lookup function by name in function registry
-    // Registry is (fn_name, fn_args, fn_code, fn_data (per implementation: loc, args_loc, arg_types) )
     let function_id = state
         .fns
         .iter_mut()
@@ -43,7 +42,6 @@ pub fn handle_user_function(
         .unwrap_or_else(|| {
             throw_parser_error(src, markers, ErrType::UnknownFunction(fn_name));
         });
-    // Retrieve list of args, code, and function data (loc, args_loc, arg_types)
     let fn_id = state.fns[function_id].id;
     let is_recursive = state.fns[function_id].is_recursive;
     let fn_returns_void = state.fns[function_id].returns_void;
@@ -173,7 +171,7 @@ fn compile_function(
     let src = ctx.src;
     let current_src_file = ctx.current_src_file;
 
-    // Use the function's own source file for error reporting inside the function body
+    // Errors inside of the function body are reported using the function's file
     let fn_src_file = state.fns[function_id].src_file;
 
     let fn_src: (&str, &str) = if fn_src_file != current_src_file {
@@ -195,7 +193,7 @@ fn compile_function(
             Variable {
                 name: x.clone(),
                 register_id: (state.registers.len() - 1) as u16,
-                infered_type: infered_arg_types[i].clone(),
+                var_type: infered_arg_types[i].clone(),
             }
         })
         .collect();
@@ -221,7 +219,7 @@ fn compile_function(
             v.push(Variable {
                 name: fn_args[i].clone(),
                 register_id: 0,
-                infered_type: infered_type.clone(),
+                var_type: infered_type.clone(),
             });
         });
     let fn_type = track_returns(fn_code, v, state.fns, fn_src, fn_name, state.dyn_libs);
@@ -235,7 +233,7 @@ fn compile_function(
 
     v.truncate(v_len_before_args);
 
-    // Add this func specialization to the func's metadata, storing start location, location of args, and infered arg types
+    // Add this func specialization to the func's metadata
     let func = state.fns.get_mut(function_id).unwrap();
     func.impls.push(FunctionImpl {
         loc,

@@ -116,14 +116,14 @@ pub fn fn_call_in_if_in_for() {
             for x in \"3 + 4\" {
                 if x != \" \" {
                     if is_digit(x) {
-                        count += 1;
+                        count += int(x);
                     }
                 }
             }
             print(count);
         }
         ",
-        2.into()
+        7.into()
     );
 }
 
@@ -196,7 +196,7 @@ pub fn iter_fib_40_loop() {
 }
 
 #[test]
-pub fn string_split_len() {
+pub fn string_split_array_len() {
     run_and_check_registers!(
         r#"
         function main() {
@@ -210,7 +210,7 @@ pub fn string_split_len() {
 }
 
 #[test]
-pub fn string_contains_replace() {
+pub fn string_contains() {
     run_and_check_registers!(
         r#"
         function main() {
@@ -328,7 +328,7 @@ pub fn recursive_factorial() {
 }
 
 #[test]
-pub fn inline_condition_basic() {
+pub fn inline_condition_true() {
     run_and_check_registers!(
         "
         function main() {
@@ -342,7 +342,7 @@ pub fn inline_condition_basic() {
 }
 
 #[test]
-pub fn inline_condition_else_branch() {
+pub fn inline_condition_false() {
     run_and_check_registers!(
         "
         function main() {
@@ -2618,16 +2618,16 @@ pub fn string_set_index() {
         r#"
         function main() {
             let s = "hello";
-            s[0] = "H";
+            s[0] = "He";
             print(s.len());
         }
         "#,
-        5.into()
+        6.into()
     );
 }
 
 #[test]
-pub fn not_equal() {
+pub fn neq_3_4() {
     run_and_check_registers!(
         "
         function main() {
@@ -2639,7 +2639,7 @@ pub fn not_equal() {
 }
 
 #[test]
-pub fn equal_false() {
+pub fn eq_3_4() {
     run_and_check_registers!(
         "
         function main() {
@@ -2647,6 +2647,20 @@ pub fn equal_false() {
         }
         ",
         false.into()
+    );
+}
+
+#[test]
+pub fn array_join_sep() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let arr = ["a", "b", "c"];
+            let s = arr.join("--");
+            print(s.len());
+        }
+        "#,
+        7.into()
     );
 }
 
@@ -2704,47 +2718,11 @@ pub fn float_negative_pow_square() {
 }
 
 #[test]
-pub fn type_int() {
+pub fn type_function() {
     run_and_check_registers!(
         r#"
         function main() {
-            print(type(42) == "Integer");
-        }
-        "#,
-        true.into()
-    );
-}
-
-#[test]
-pub fn type_string() {
-    run_and_check_registers!(
-        r#"
-        function main() {
-            print(type("hello") == "String");
-        }
-        "#,
-        true.into()
-    );
-}
-
-#[test]
-pub fn type_float() {
-    run_and_check_registers!(
-        r#"
-        function main() {
-            print(type(3.14) == "Float");
-        }
-        "#,
-        true.into()
-    );
-}
-
-#[test]
-pub fn type_bool() {
-    run_and_check_registers!(
-        r#"
-        function main() {
-            print(type(true) == "Boolean");
+            print(type(42)+type("hello")+type(3.14)+type(true) == "IntegerStringFloatBoolean");
         }
         "#,
         true.into()

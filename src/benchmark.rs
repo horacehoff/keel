@@ -3,17 +3,17 @@ use std::fs;
 use std::process::Command;
 
 const BENCHMARK_RUNS: u16 = 10;
-const BENCHMARK_WARMUP: u16 = 10;
+const BENCHMARK_WARMUP_RUNS: u16 = 10;
 
-struct Prog {
+struct Benchmark {
     name: &'static str,
     source: &'static str,
     python: Option<&'static str>,
     lua: Option<&'static str>,
 }
 
-const PROGRAMS: &[Prog] = &[
-    Prog {
+const PROGRAMS: &[Benchmark] = &[
+    Benchmark {
         name: "iter_fib_40_x_200000",
         source: r#"
 function main() {
@@ -56,7 +56,7 @@ end
         "#,
         ),
     },
-    Prog {
+    Benchmark {
         name: "rec_fib_30",
         source: r#"
 function fib(n) {
@@ -89,7 +89,7 @@ print(fib(30))
 "#,
         ),
     },
-    Prog {
+    Benchmark {
         name: "multiply_branch_modulo_x_1000000",
         source: r#"
 function main() {
@@ -132,7 +132,7 @@ print(result)
 "#,
         ),
     },
-    Prog {
+    Benchmark {
         name: "sqrt_x_10000000",
         source: r#"
 function main() {
@@ -162,7 +162,7 @@ print(x)
 "#,
         ),
     },
-    Prog {
+    Benchmark {
         name: "sieve_100000",
         source: r#"
 function main() {
@@ -234,7 +234,7 @@ print(count)
 "#,
         ),
     },
-    Prog {
+    Benchmark {
         name: "string_ops_array_split_search_x_50000",
         source: r#"
 function main() {
@@ -290,7 +290,7 @@ print(count)
 "#,
         ),
     },
-    Prog {
+    Benchmark {
         name: "fizzbuzz_x_1000000",
         source: r#"
 function main() {
@@ -342,7 +342,7 @@ print(last)
     "#,
         ),
     },
-    Prog {
+    Benchmark {
         name: "stdlib_ops_x_100000",
         source: r#"
 function main() {
@@ -547,7 +547,7 @@ pub fn benchmark() {
         .stdout(std::process::Stdio::inherit())
         .arg("--show-output")
         .arg("--warmup")
-        .arg(BENCHMARK_WARMUP.to_string())
+        .arg(BENCHMARK_WARMUP_RUNS.to_string())
         .arg("--runs")
         .arg(BENCHMARK_RUNS.to_string())
         .arg("--export-json")

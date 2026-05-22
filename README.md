@@ -11,7 +11,7 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 
 ## Why Keel?
 
-- **Fast**: ~2-10x faster than Python ([benchmarks](docs/COMPARISONS.md)), with aggressive compile-time optimizations
+- **Fast**: ~2-10x faster than Python ([benchmarks](docs/BENCHMARKS.md)), with aggressive compile-time optimizations
 - **Familiar syntax**: Rust-like, with Python's ease-of-use
 - **Statically typed, zero annotations**: full type inference, static type checking, polymorphism
 - **FFI support**: call C/dynamic libraries directly from Keel
@@ -45,6 +45,11 @@ keel               # Start the REPL
 keel -v/--version  # Print version
 keel -h/--help     # Print help
 ```
+
+## Near-future roadmap
+- Array slices
+- Higher-order functions 
+- Error handling
 
 ## Language tour
 
@@ -292,5 +297,3 @@ print(x > 1 && x < 1);
 
 - [Standard library](docs/STD_LIB.md)
 - [File system library](docs/FS_LIB.md)
-
-**Note**: AI tools were used for the commenting process. *All* architecture, design, and code is written by me.

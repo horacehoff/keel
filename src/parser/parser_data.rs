@@ -19,9 +19,8 @@ pub struct Function {
     pub is_recursive: bool,
     pub id: u16,
     pub returns_void: bool,
-    /// Index into the sources table for error reporting
     pub src_file: u16,
-    /// Cache of return types from track_returns, keyed by arg types
+    /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
 }
 
@@ -48,7 +47,7 @@ pub struct Dynamiclib {
 
 #[derive(Debug)]
 pub struct DynamicLibFn {
-    // [ return_type, arg_types... ]
+    /// [ return_type, arg_types... ]
     pub types: Box<[DataType]>,
     pub _lib: Library,
     pub ptr: libffi::middle::CodePtr,
@@ -80,7 +79,6 @@ pub struct Ctx<'a> {
     pub current_src_file: u16,
 }
 
-/// Shared mutable compilation state. Passed as `&mut State` - no unsafe needed.
 pub struct State<'a> {
     pub registers: &'a mut Vec<Data>,
     pub fns: &'a mut Vec<Function>,
@@ -100,5 +98,5 @@ pub struct State<'a> {
 pub struct Variable {
     pub name: SmolStr,
     pub register_id: u16,
-    pub infered_type: DataType,
+    pub var_type: DataType,
 }

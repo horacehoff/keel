@@ -82,60 +82,60 @@ impl std::hash::Hash for DataType {
     }
 }
 
-pub fn is_indexable(x: &DataType) -> bool {
+pub fn is_type_indexable(x: &DataType) -> bool {
     matches!(x, DataType::String | DataType::Array(_) | DataType::Unknown)
 }
 
-/// Collect every function name that is directly called in the given code
-fn collect_direct_calls(content: &[Expr], out: &mut Vec<SmolStr>) {
-    let mut stack: Vec<&Expr> = content.iter().collect();
-    while let Some(node) = stack.pop() {
-        match node {
+/// Collect all the function calls in the given code
+fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
+    let mut expr_stack: Vec<&Expr> = content.iter().collect();
+    while let Some(expression) = expr_stack.pop() {
+        match expression {
             Expr::FunctionCall(_, namespace, _, _) => {
-                out.push(namespace.last().unwrap().clone());
+                calls.push(namespace.last().unwrap().clone());
             }
             Expr::Condition(x, y, _) | Expr::InlineCondition(x, y, _) => {
-                stack.push(x);
-                stack.extend(y.iter());
+                expr_stack.push(x);
+                expr_stack.extend(y.iter());
             }
             Expr::ElseIfBlock(x, y) => {
-                stack.push(x);
-                stack.extend(y.iter());
+                expr_stack.push(x);
+                expr_stack.extend(y.iter());
             }
             Expr::ElseBlock(x) | Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
-                stack.extend(x.iter());
+                expr_stack.extend(x.iter());
             }
             Expr::WhileBlock(x, y) => {
-                stack.push(x);
-                stack.extend(y.iter());
+                expr_stack.push(x);
+                expr_stack.extend(y.iter());
             }
             Expr::ObjFunctionCall(x, y, _, _, _, _) => {
-                stack.push(x);
-                stack.extend(y.iter());
+                expr_stack.push(x);
+                expr_stack.extend(y.iter());
             }
             Expr::ReturnVal(code) => {
                 if let Some(code) = code.as_ref() {
-                    stack.push(code);
+                    expr_stack.push(code);
                 }
             }
-            Expr::FunctionDecl(_, x, _) => stack.extend(x.iter()),
+            Expr::FunctionDecl(_, x, _) => expr_stack.extend(x.iter()),
             Expr::GetIndex(x, y, _) => {
-                stack.push(x);
-                stack.push(y);
+                expr_stack.push(x);
+                expr_stack.push(y);
             }
-            Expr::VarDeclare(_, x) | Expr::VarAssign(_, x, _) => stack.push(x),
-            Expr::ForLoop(_, code, _) => stack.extend(code.iter()),
+            Expr::VarDeclare(_, x) | Expr::VarAssign(_, x, _) => expr_stack.push(x),
+            Expr::ForLoop(_, code, _) => expr_stack.extend(code.iter()),
             Expr::IntForLoop(_, start, end, code, _, _) => {
-                stack.push(start);
-                stack.push(end);
-                stack.extend(code.iter());
+                expr_stack.push(start);
+                expr_stack.push(end);
+                expr_stack.extend(code.iter());
             }
             Expr::ArrayModify(array, index, value, _, _) => {
-                stack.push(array);
-                stack.push(index);
-                stack.push(value);
+                expr_stack.push(array);
+                expr_stack.push(index);
+                expr_stack.push(value);
             }
-            Expr::Array(elems, _) => stack.extend(elems.iter()),
+            Expr::Array(elems, _) => expr_stack.extend(elems.iter()),
             Expr::Mul(x, y, _)
             | Expr::Div(x, y, _)
             | Expr::Add(x, y, _)
@@ -150,25 +150,30 @@ fn collect_direct_calls(content: &[Expr], out: &mut Vec<SmolStr>) {
             | Expr::InfEq(x, y, _)
             | Expr::BoolAnd(x, y, _)
             | Expr::BoolOr(x, y, _) => {
-                stack.push(x);
-                stack.push(y);
+                expr_stack.push(x);
+                expr_stack.push(y);
             }
-            Expr::Neg(x, _) | Expr::BoolNeg(x, _) => stack.push(x),
+            Expr::Neg(x, _) | Expr::BoolNeg(x, _) => expr_stack.push(x),
             _ => {}
         }
     }
 }
 
-/// Check if the function `from` (by name) can transitively call `target`
-fn can_reach(from: &str, target: &str, fns: &[Function], visited: &mut HashSet<SmolStr>) -> bool {
-    if let Some(from_fn) = fns.iter().find(|f| f.name.as_str() == from) {
+/// Check if the function src_fn can call target_fn
+fn can_reach(
+    src_fn: &str,
+    target_fn: &str,
+    fns: &[Function],
+    visited: &mut HashSet<SmolStr>,
+) -> bool {
+    if let Some(from_fn) = fns.iter().find(|f| f.name.as_str() == src_fn) {
         let mut callees = Vec::new();
-        collect_direct_calls(&from_fn.code, &mut callees);
+        collect_direct_fn_calls(&from_fn.code, &mut callees);
         for callee in callees {
-            if callee.as_str() == target {
+            if callee.as_str() == target_fn {
                 return true;
             }
-            if visited.insert(callee.clone()) && can_reach(&callee, target, fns, visited) {
+            if visited.insert(callee.clone()) && can_reach(&callee, target_fn, fns, visited) {
                 return true;
             }
         }
@@ -176,7 +181,6 @@ fn can_reach(from: &str, target: &str, fns: &[Function], visited: &mut HashSet<S
     false
 }
 
-/// Mark every function that is part of a mutual recursion cycle as recursive
 pub fn mark_mutually_recursive(fns: &mut [Function]) {
     for i in 0..fns.len() {
         if fns[i].is_recursive {
@@ -184,11 +188,11 @@ pub fn mark_mutually_recursive(fns: &mut [Function]) {
         }
         let fn_name = fns[i].name.clone();
         let mut callees = Vec::new();
-        collect_direct_calls(&fns[i].code, &mut callees);
+        collect_direct_fn_calls(&fns[i].code, &mut callees);
         let mut found = false;
         for callee in callees {
             if callee == fn_name {
-                continue; // direct self-call, already handled
+                continue;
             }
             let mut visited: HashSet<SmolStr> = HashSet::new();
             visited.insert(fn_name.clone());
@@ -203,7 +207,7 @@ pub fn mark_mutually_recursive(fns: &mut [Function]) {
     }
 }
 
-/// Check if given function body contains a direct call to `fn_name`
+/// Check if the given code contains any function call to fn_name
 pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
     for content in content {
         match content {
@@ -482,13 +486,13 @@ fn track_return_flow(
                 v.push(Variable {
                     name: name.clone(),
                     register_id: 0,
-                    infered_type: var_type,
+                    var_type,
                 });
             }
             Expr::VarAssign(name, expr, _) => {
                 let var_type = infer_type(expr, v, fns, src, dyn_libs);
                 if let Some(var) = v.iter_mut().rfind(|var| &var.name == name) {
-                    var.infered_type = var_type;
+                    var.var_type = var_type;
                 }
             }
             Expr::EvalBlock(code) => {
@@ -520,7 +524,7 @@ fn track_return_flow(
                 v.push(Variable {
                     name: var_name.clone(),
                     register_id: 0,
-                    infered_type: DataType::Int,
+                    var_type: DataType::Int,
                 });
                 let flow = track_return_flow(code, v, fns, src, fn_name, dyn_libs);
                 extend_return_types!(&mut return_types, flow.types);
@@ -540,7 +544,7 @@ fn track_return_flow(
                     v.push(Variable {
                         name: var_name.clone(),
                         register_id: 0,
-                        infered_type: elem_type,
+                        var_type: elem_type,
                     });
                 }
                 let flow = track_return_flow(&array_code[1..], v, fns, src, fn_name, dyn_libs);
@@ -553,11 +557,11 @@ fn track_return_flow(
                 if let Expr::Var(var_name, _) = obj.as_ref()
                     && v.iter()
                         .rfind(|var| &var.name == var_name)
-                        .is_some_and(|var| var.infered_type == DataType::Array(None))
+                        .is_some_and(|var| var.var_type == DataType::Array(None))
                 {
                     let arg_type = infer_type(&args[0], v, fns, src, dyn_libs);
                     if let Some(var) = v.iter_mut().rfind(|var| &var.name == var_name) {
-                        var.infered_type = DataType::Array(Some(Box::new(arg_type)));
+                        var.var_type = DataType::Array(Some(Box::new(arg_type)));
                     }
                 }
             }
@@ -596,7 +600,7 @@ pub fn infer_type(
             .unwrap_or_else(|| {
                 throw_parser_error(src, markers, ErrType::UnknownVariable(name));
             })
-            .infered_type
+            .var_type
             .clone(),
         Expr::Float(_) => DataType::Float,
         Expr::Int(_) => DataType::Int,
@@ -763,7 +767,7 @@ pub fn infer_type(
                         v.push(Variable {
                             name: fn_args[i].clone(),
                             register_id: 0,
-                            infered_type,
+                            var_type: infered_type,
                         });
                     }
 

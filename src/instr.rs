@@ -28,21 +28,17 @@ pub enum Instr {
 
     Mov(u16, u16),
     /// SetInt(dest_reg_id, val)\
-    /// Writes the integer `val` directly into dest_reg_id
+    /// Writes val directly into dest_reg_id
     SetInt(u16, i32),
     /// SetBool(dest_reg_id, val)\
-    /// Writes the bool `val` directly into dest_reg_id
+    /// Writes val directly into dest_reg_id
     SetBool(u16, bool),
 
     // OPS
-    /// (3) = (1) + (2)
     AddFloat(u16, u16, u16),
     AddInt(u16, u16, u16),
-    /// (3) = (1) ∪ (2)
     AddArray(u16, u16, u16),
-    /// (3) = (1) + (2)
     AddStr(u16, u16, u16),
-    /// (3) = (1) * (2)
     MulFloat(u16, u16, u16),
     MulInt(u16, u16, u16),
     SubFloat(u16, u16, u16),
@@ -105,10 +101,10 @@ pub enum Instr {
     CallDynamicLibFunc(u16, u16),
 
     StoreFuncArg(u16),
-    /// CallLibFunc(function, src register id, dest register id)
+    /// CallLibFunc(function, src_register_id, dest_register_id)
     CallLibFunc(LibFunc, u16, u16),
-    /// CallLibFuncVoid(function, src register 1, src register 2)
-    /// For single-source ops, src register 2 is unused (pass 0).
+    /// CallLibFuncVoid(function, src_register_1, src_register_2)
+    /// For single-source ops, src register 2 is unused
     CallLibFuncVoid(LibFuncVoid, u16, u16),
 
     /// ArrayMov(new_elem_reg_id, array_id, idx)\
@@ -120,8 +116,7 @@ pub enum Instr {
     EmptyArray(u16),
 
     /// CloneArray(src_reg, dest_reg, len)
-    /// Allocates a fresh array with exact capacity `len`, copies `len` elements
-    /// from the array in src_reg, and stores the new array in dest_reg.
+    /// Allocates a fresh array with exact capacity len and clones the array in src_reg to dest_reg
     CloneArray(u16, u16, u16),
 
     /// SetElementArray(array_reg_id, new_elem_reg_id, idx)\
@@ -144,7 +139,7 @@ pub enum Instr {
     /// Remove(array_reg_id, elem_index_reg_id)
     Remove(u16, u16),
 
-    /// Terminates the interpreter loop or exits the program with the i32 code if it's != 0
+    /// Exits the program with the i32 code if it's != 0
     Halt(u16),
 }
 

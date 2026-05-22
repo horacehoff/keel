@@ -7,7 +7,7 @@ use crate::type_system::DataType;
 use smol_str::SmolStr;
 use smol_str::ToSmolStr;
 use crate::util::str_to_type;
-use crate::util::unescape_string;
+use crate::util::parse_string;
 use crate::span;
 use crate::expr::Span;
 
@@ -541,7 +541,7 @@ Null: Expr = {
 }
 
 String: SmolStr = {
-    <s: r#"\"(?:[^\"\\]|\\.)*\""#> => unescape_string(s)
+    <s: r#"\"(?:[^\"\\]|\\.)*\""#> => parse_string(s)
 }
 
 Var: SmolStr = {

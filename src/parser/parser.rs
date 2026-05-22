@@ -22,7 +22,7 @@ use crate::registers::move_to_id;
 use crate::type_system::check_if_returns_void;
 use crate::type_system::contains_recursive_call;
 use crate::type_system::datatype_to_c_type;
-use crate::type_system::is_indexable;
+use crate::type_system::is_type_indexable;
 use crate::type_system::mark_mutually_recursive;
 use crate::type_system::{DataType, infer_type};
 use crate::{Data, Instr};
@@ -36,7 +36,7 @@ use std::slice;
 
 lalrpop_mod!(pub grammar);
 
-/// Fuses the last comparison instruction into a false-jump variant (jumps when condition is false).
+/// Fuses the last comparison instruction into a jump instruction (jumps when condition is false)
 #[inline(always)]
 fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_backwards: bool) {
     if output.is_empty() {
@@ -67,7 +67,7 @@ fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_
     }
 }
 
-/// Fuses the last comparison instruction into a true-jump variant (jumps when condition is true).
+/// Fuses the last comparison instruction into a jump instruction (jumps when condition is true)
 #[inline(always)]
 fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
     if output.is_empty() {
@@ -122,13 +122,10 @@ fn set_jmp_size(instr: &mut Instr, size: u16) {
     }
 }
 
-/// Compiles `expr` as a short-circuit boolean condition.
-/// When `bool_or_mode` is true, sub-expression comparisons emit a true-jump that jumps to the body if the sub-expression is true.
-/// This is used for every operand that is the left-hand side of an OR operator.
-/// When `bool_or_mode` is false (the default), sub-expression comparisons emit a false-jump that jumps past the body if the sub-expression is false
-/// Returns:
-///   - `true_jump_idxs`  - indices into `output` whose targets must be set to the start of the body
-///   - `false_jump_idxs` - indices into `output` whose targets must be set to past the body
+/// Compiles short-circuit && and || conditions
+/// bool_or_mode true indicates left side of ||, emits true jumps
+/// bool_or_mode false emits false jumps
+/// Returns (true_jump_idxs, false_jump_idxs)
 #[allow(clippy::too_many_arguments)]
 fn compile_short_circuit_condition(
     expr: &Expr,
@@ -142,11 +139,10 @@ fn compile_short_circuit_condition(
 ) -> (Vec<usize>, Vec<usize>) {
     match expr {
         Expr::BoolOr(left, right, _) => {
-            // If true then jump to body (true-jump mode)
+            // left side of || always uses true jump mode
             let (mut true_jumps, _) = compile_short_circuit_condition(
                 left, v, ctx, state, output, offset, single_run, true,
             );
-            // Inherit the caller's mode
             let (right_true, right_false) = compile_short_circuit_condition(
                 right,
                 v,
@@ -162,8 +158,7 @@ fn compile_short_circuit_condition(
         }
         Expr::BoolAnd(left, right, _) => {
             if bool_or_mode {
-                // AND inside the left side of an OR
-                // Fall back to eager evaluation then a single true-jump
+                // && inside left side of ||
                 let id_l = get_id(left, v, ctx, state, output, None, false, offset, single_run);
                 let id_r = get_id(
                     right, v, ctx, state, output, None, false, offset, single_run,
@@ -176,8 +171,7 @@ fn compile_short_circuit_condition(
                 free_register(id, state.free_registers, v, state.const_registers);
                 (vec![output.len() - 1], Vec::new())
             } else {
-                // Normal AND
-                // If either side is false, jump past the body
+                // normal && -> if either side is false, jump past the body
                 let (_, mut false_jumps) = compile_short_circuit_condition(
                     left, v, ctx, state, output, offset, single_run, false,
                 );
@@ -188,10 +182,8 @@ fn compile_short_circuit_condition(
                 (Vec::new(), false_jumps)
             }
         }
-        sub_expr => {
-            let cond_id = get_id(
-                sub_expr, v, ctx, state, output, None, false, offset, single_run,
-            );
+        expr => {
+            let cond_id = get_id(expr, v, ctx, state, output, None, false, offset, single_run);
             if bool_or_mode {
                 add_cmp_true(cond_id, output);
                 free_register(cond_id, state.free_registers, v, state.const_registers);
@@ -367,7 +359,7 @@ pub fn get_id(
             if let Some(Variable {
                 name: _,
                 register_id,
-                infered_type: _,
+                var_type: _,
             }) = v.iter().rfind(|v_temp| *name == v_temp.name)
             {
                 *register_id
@@ -461,7 +453,6 @@ pub fn get_id(
                     ));
                     dest_reg
                 } else {
-                    // Mixed: allocate fresh + push each element
                     let dest_reg = {
                         state.registers.push(Data::array(0));
                         (state.registers.len() - 1) as u16
@@ -521,7 +512,7 @@ pub fn get_id(
             {
                 throw_parser_error(src, markers, ErrType::OpError(&t_l, &t_r, "+"));
             }
-            // Fast path: intVar + 1  or  1 + intVar  →  IncInt / IncIntTo
+            // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
             if t_l == DataType::Int
                 && let Some(Expr::Var(src_name, _)) = {
                     if matches!(r.as_ref(), Expr::Int(1)) {
@@ -572,7 +563,7 @@ pub fn get_id(
             {
                 throw_parser_error(src, markers, ErrType::OpError(&t_l, &t_r, "-"));
             }
-            // Fast path: intVar - 1  →  DecInt / DecIntTo
+            // var-1 uses the dedicated DecInt/DecIntTo instructions
             if t_l == DataType::Int
                 && matches!(r.as_ref(), Expr::Int(1))
                 && let Expr::Var(src_name, _) = l.as_ref()
@@ -998,7 +989,7 @@ pub fn compile_expr(
 
     for (idx, x) in input.iter().enumerate() {
         match x {
-            // if number / bool / str, just push it to the state.registers, and the caller will grab the last index
+            // if number / bool / str, just push it to the registers, and the caller will grab the last index
             Expr::Float(num) => state.registers.push((*num).into()),
             Expr::Int(num) => state.registers.push((*num).into()),
             Expr::Bool(bool) => state.registers.push((*bool).into()),
@@ -1010,7 +1001,7 @@ pub fn compile_expr(
                 if let Some(Variable {
                     name: _,
                     register_id,
-                    infered_type: _,
+                    var_type: _,
                 }) = v.iter().find(|v_temp| *name == v_temp.name)
                 {
                     output.push(Instr::Mov(
@@ -1029,15 +1020,15 @@ pub fn compile_expr(
                 {
                     throw_parser_error(src, markers, ErrType::ArrayWithDiffType);
                 }
-                // create new blank array with latest id
+                // create a new blank array
                 let array_id = {
                     state.pools.array_pool.push(Vec::new());
                     state.pools.array_pool.len() - 1
                 };
+                // process each array element
                 for elem in elems {
-                    // process each array element
                     let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
-                    // if there are no instructions, then that means the element has been pushed to the state.registers, so pop it and push it directly to the array
+                    // if there are no instructions, then that means the element has been pushed to the registers, so pop it and push it directly to the array
                     if x.is_empty() {
                         state
                             .pools
@@ -1062,7 +1053,7 @@ pub fn compile_expr(
             // array[index]
             Expr::GetIndex(array, index, markers) => {
                 let infered = infer_type(array, v, state.fns, src, state.dyn_libs);
-                if !is_indexable(&infered) {
+                if !is_type_indexable(&infered) {
                     throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
                 }
 
@@ -1107,7 +1098,7 @@ pub fn compile_expr(
             // x[y] = z;
             Expr::ArrayModify(array, index, value, index_markers, elem_markers) => {
                 let array_type = infer_type(array, v, state.fns, src, state.dyn_libs);
-                if !is_indexable(&array_type) {
+                if !is_type_indexable(&array_type) {
                     throw_parser_error(src, index_markers, ErrType::NotIndexable(&array_type));
                 }
                 // Get the id of the source array/string (may be a nested GetIndex)
@@ -1190,7 +1181,7 @@ pub fn compile_expr(
                 let mut jmp_instr_idx: Vec<usize> = Vec::with_capacity(condition_blocks_count);
                 let mut condition_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
 
-                // Compile the main condition with short-circuit evaluation
+                // Compile the main condition
                 let (true_jump_idxs, false_jump_idxs) = compile_short_circuit_condition(
                     main_condition,
                     v,
@@ -1203,7 +1194,7 @@ pub fn compile_expr(
                 );
                 conditional_false_jmp_idxs.push(false_jump_idxs);
 
-                // Modify true-jump instructions to point to body_start
+                // Modify true jump instructions to point to body_start
                 let body_start = output.len();
                 for j in true_jump_idxs {
                     set_jmp_size(&mut output[j], (body_start - j) as u16);
@@ -1323,7 +1314,7 @@ pub fn compile_expr(
                 let cond_len = (output.len() - output_len_before) as u16;
                 let body_len = cond_code.len() as u16;
                 let len = cond_len + body_len; // full span used by JmpBack
-                // Break/continue offsets are relative to cond_code, so pass body_len+1 (body remaining + JmpBack)
+                // Break/Continue offsets are relative to cond_code, so pass body_len+1 (body remaining + JmpBack)
                 parse_loop_flow_control(&mut cond_code, loop_id, body_len + 1, false, false);
                 output.extend(cond_code);
                 output.push(Instr::JmpBack(len));
@@ -1347,7 +1338,6 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                // add an instruction to get array length (func id 2 = len)
                 let array_len_id = alloc_register(state.registers, state.free_registers);
 
                 output.push(Instr::CallLibFunc(LibFunc::Len, array, array_len_id));
@@ -1371,7 +1361,6 @@ pub fn compile_expr(
                 let current_element_id = if real_var {
                     alloc_register(state.registers, state.free_registers)
                 } else {
-                    // In this case, the register id doesn't matter since it's never interacted with
                     0
                 };
 
@@ -1383,7 +1372,7 @@ pub fn compile_expr(
                     v.push(Variable {
                         name: var_name.clone(),
                         register_id: current_element_id,
-                        infered_type: match array_type {
+                        var_type: match array_type {
                             DataType::String => DataType::String,
                             DataType::Array(a_type) => a_type.map_or(DataType::Null, |t| *t),
                             t => throw_parser_error(src, markers, ErrType::IsNotAnIterator(&t)),
@@ -1392,8 +1381,7 @@ pub fn compile_expr(
                 }
                 let loop_id = block_id + 1;
 
-                // pending accounts for the GetIndexArray instruction inserted AFTER compile_expr
-                // returns but BEFORE cond_code is extended into output
+                // accounts for the GetIndexArray/GetIndexString instruction
                 let pending = if real_var { 1 } else { 0 };
 
                 let regs_before = state.registers.len() as u16;
@@ -1419,7 +1407,7 @@ pub fn compile_expr(
                 let mut len = (cond_code.len() + 3) as u16 + pending;
                 add_cmp_false(condition_id, &mut len, &mut output, true);
 
-                // instruction to make current_element actually hold the array index's value
+                // make the current_element_id register actually hold the element's value
                 if real_var {
                     if is_str {
                         output.push(Instr::GetIndexString(array, index_id, current_element_id));
@@ -1458,7 +1446,6 @@ pub fn compile_expr(
                 // (3) i += 1
                 // (4) if i < end_elem jump back to body
                 // ----
-                //
                 //
                 //
                 // Check start and elem type
@@ -1517,19 +1504,18 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                // elem_id is a fresh mutable register -> remove from state.const_registers just in case
+                // elem_id is a fresh mutable register -> remove from const_registers just in case
                 state.const_registers.retain(|_, &mut v| v != elem_id);
 
                 let v_len = v.len();
                 v.push(Variable {
                     name: var_name.clone(),
                     register_id: elem_id,
-                    infered_type: DataType::Int,
+                    var_type: DataType::Int,
                 });
-                // Compile the code inside the loop
                 let loop_id = block_id + 1;
 
-                // (1) if i >= end_elem jump out -> push placeholder FIRST so that compile_expr sees the correct offset
+                // (1) if i >= end_elem jump out -> push placeholder first so that compile_expr sees the correct offset
                 let jmp_idx = output.len();
                 output.push(Instr::SupEqIntJmp(elem_id, end_elem_id, 0));
 
@@ -1637,7 +1623,7 @@ pub fn compile_expr(
                 v.push(Variable {
                     name: x.clone(),
                     register_id: var_id,
-                    infered_type: var_type,
+                    var_type,
                 });
             }
             Expr::VarAssign(name, y, markers) => {
@@ -1647,14 +1633,10 @@ pub fn compile_expr(
                 });
                 let id = v[var_pos].register_id;
 
-                // Fast path:
-                //   x += 1  / x = x + 1  → IncInt(id)       (in-place)
-                //   x -= 1  / x = x - 1  → DecInt(id)       (in-place)
-                //   x = y + 1 / x = 1 + y → IncIntTo(y, id) (cross-register)
-                //   x = y - 1             → DecIntTo(y, id)  (cross-register)
                 if var_type == DataType::Int {
-                    // Returns (is_inc, src_var_name) for any `<intVar> ± 1` pattern.
+                    // (is_inc, src_var_name)
                     let inc_dec: Option<(bool, &str)> = match y.as_ref() {
+                        // var+1/1+var use the dedicated IncInt/IncIntTo instructions
                         Expr::Add(l, r, _) => {
                             let src = if matches!(r.as_ref(), Expr::Int(1)) {
                                 Some(l.as_ref())
@@ -1667,19 +1649,20 @@ pub fn compile_expr(
                                 if let Expr::Var(src_name, _) = e {
                                     v.iter()
                                         .rfind(|x| x.name == *src_name)
-                                        .filter(|x| x.infered_type == DataType::Int)
+                                        .filter(|x| x.var_type == DataType::Int)
                                         .map(|_| (true, src_name.as_str()))
                                 } else {
                                     None
                                 }
                             })
                         }
+                        // var-1 uses the dedicated DecInt/DecIntTo instructions
                         Expr::Sub(l, r, _) => {
                             if matches!(r.as_ref(), Expr::Int(1)) {
                                 if let Expr::Var(src_name, _) = l.as_ref() {
                                     v.iter()
                                         .rfind(|x| x.name == *src_name)
-                                        .filter(|x| x.infered_type == DataType::Int)
+                                        .filter(|x| x.var_type == DataType::Int)
                                         .map(|_| (false, src_name.as_str()))
                                 } else {
                                     None
@@ -1731,7 +1714,7 @@ pub fn compile_expr(
                 if is_reg_free(v, obj_id, name) {
                     free_register(obj_id, state.free_registers, v, state.const_registers);
                 }
-                v[var_pos].infered_type = var_type;
+                v[var_pos].var_type = var_type;
             }
 
             Expr::FunctionCall(args, namespace, markers, args_indexes) => {
@@ -1856,22 +1839,22 @@ fn parse_toplevel(
 ) {
     for expr in code {
         match expr {
-            Expr::FunctionDecl(x, y, markers) => {
-                if let Some(existing) = fns.iter().find(|f| f.name == x[0]) {
-                    let existing_file = &sources[existing.src_file as usize].0;
+            Expr::FunctionDecl(namespace, fn_code, markers) => {
+                if let Some(func) = fns.iter().find(|f| f.name == namespace[0]) {
+                    let func_file = &sources[func.src_file as usize].0;
                     throw_parser_error(
                         use_line_markers,
                         &markers,
-                        ErrType::DuplicateFunctionInImport(&x[0], existing_file.as_str()),
+                        ErrType::DuplicateFunctionInImport(&namespace[0], func_file.as_str()),
                     );
                 }
                 fn_registers.push(Vec::new());
-                let is_recursive = contains_recursive_call(&y, &x[0]);
-                let returns_void = check_if_returns_void(&y);
+                let is_recursive = contains_recursive_call(&fn_code, &namespace[0]);
+                let returns_void = check_if_returns_void(&fn_code);
                 fns.push(Function {
-                    name: x[0].to_smolstr(),
-                    args: x[1..].into(),
-                    code: y,
+                    name: namespace[0].to_smolstr(),
+                    args: namespace[1..].into(),
+                    code: fn_code,
                     impls: Vec::new(),
                     is_recursive,
                     id: (fn_registers.len() - 1) as u16,
@@ -1923,18 +1906,7 @@ fn parse_toplevel(
                                         )
                                     })
                                     .try_as_raw_ptr()
-                                    .unwrap_or_else(|| {
-                                        throw_parser_error(
-                                            use_line_markers,
-                                            &markers,
-                                            ErrType::Custom(
-                                                format_args!(
-                                                    "Symbol \"{fn_name}\" in \"{path}\" is null"
-                                                )
-                                                .to_smolstr(),
-                                            ),
-                                        )
-                                    }),
+                                    .unwrap(),
                             )
                         };
 
@@ -1961,7 +1933,6 @@ fn parse_toplevel(
                 });
             }
             Expr::ImportFile(path, markers) => {
-                // Resolve path relative to the importing file's directory
                 let file_path = file_path
                     .parent()
                     .unwrap_or(Path::new("."))
@@ -1992,7 +1963,6 @@ fn parse_toplevel(
                         ErrType::CannotReadImportedFile(path.as_str()),
                     );
                 });
-                let new_idx = sources.len() as u16;
                 let file_name: SmolStr = file_path.to_str().unwrap_or(path.as_str()).into();
                 sources.push((file_name.clone(), file_contents.clone()));
 
@@ -2010,7 +1980,7 @@ fn parse_toplevel(
                 parse_toplevel(
                     file_code,
                     &file_path,
-                    new_idx,
+                    (sources.len() - 1) as u16,
                     import_src,
                     fns,
                     fn_registers,
@@ -2066,7 +2036,7 @@ pub fn parse(
     let mut const_registers = HashMap::new();
     let mut free_registers = Vec::new();
 
-    // sources[0] = main file; additional entries added for each `use`
+    // sources[0] = main file
     let mut sources: Vec<(SmolStr, String)> = vec![(SmolStr::from(filename), contents.to_string())];
     let main_path = PathBuf::from(filename)
         .canonicalize()

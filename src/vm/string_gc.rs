@@ -20,7 +20,6 @@ pub fn string_gc(
         }
     }
 
-    // Prevent duplicates: mark already-free slots as live
     for &id in free_strings.iter() {
         live[id as usize] = true;
     }

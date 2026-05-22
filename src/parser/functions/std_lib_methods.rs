@@ -330,7 +330,7 @@ pub fn std_lib_methods(
                 && let Expr::Var(var_name, _) = obj
                 && let Some(var) = v.iter_mut().rfind(|var| &var.name == var_name)
             {
-                var.infered_type = DataType::Array(Some(Box::new(arg_type.clone())));
+                var.var_type = DataType::Array(Some(Box::new(arg_type.clone())));
             }
 
             let arg_id = get_id(

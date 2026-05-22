@@ -179,7 +179,7 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
     }
 }
 
-/// Returns a list containing the IDs of all the state.registers which are modified by the given instructions
+/// Returns the IDs of all the registers which are modified by the given instructions
 pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
     let mut ids: Vec<u16> = x.iter().filter_map(|i| get_tgt_id(*i)).collect();
     ids.sort_unstable();
@@ -220,8 +220,7 @@ pub fn free_register(
     }
 }
 
-/// Frees registers allocated during a scope that are runtime temporaries.
-/// Only frees registers that are written by instructions in scope_instrs, are not held by a variable, and are not in const_registers.
+/// Frees registers that are written by instructions in scope_instrs & are not held by a variable & and are not in const_registers.
 pub fn free_scope_registers(
     regs_before: u16,
     scope_instrs: &[Instr],
@@ -229,8 +228,7 @@ pub fn free_scope_registers(
     v: &[Variable],
     const_registers: &HashMap<Data, u16>,
 ) {
-    let written = get_tgt_ids(scope_instrs);
-    for id in written {
+    for id in get_tgt_ids(scope_instrs) {
         if id >= regs_before {
             free_register(id, free_registers, v, const_registers);
         }
@@ -370,7 +368,7 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
     }
 }
 
-/// Emit the cheapest instruction that writes `val` (from `src_id`) into `dest_id`.
+/// Write v, located in the src_id register, into the dest_id register using the cheapest instruction
 #[inline(always)]
 pub fn move_reg_to_reg(output: &mut Vec<Instr>, src_id: u16, dest_id: u16, v: Data) {
     if v.is_int() {

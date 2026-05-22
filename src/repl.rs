@@ -61,7 +61,7 @@ pub fn repl() {
             .output()
             .expect("{color_red}[ERROR]{color_reset} Failed to execute Keel");
 
-        let _ = std::fs::remove_file(&tmp);
+        std::fs::remove_file(&tmp).unwrap();
 
         let new_stdout = String::from_utf8_lossy(&output.stdout).to_string();
 

@@ -2,75 +2,62 @@ use crate::type_system::DataType;
 use smol_str::SmolStr;
 use smol_str::ToSmolStr;
 
-/// Strips the surrounding quotes from a raw string token and processes
-/// backslash escape sequences: \n \t \r \\ \\" \0
-pub fn unescape_string(raw: &str) -> SmolStr {
-    let inner = &raw[1..raw.len() - 1]; // strip surrounding "
+/// Strips the surrounding quotes & processes escape sequences \n \t \r \\ \" \0
+pub fn parse_string(s: &str) -> SmolStr {
+    let inner = &s[1..s.len() - 1]; // Strip the surrounding quotes
 
-    // Fast path -> no backslash
-    let Some(first_bs) = inner.find('\\') else {
+    // Return the stripped string directly if it doesn't contain any escape sequences
+    let Some(first_escape) = inner.find('\\') else {
         return SmolStr::from(inner);
     };
+    let mut processed = String::with_capacity(inner.len());
 
-    let mut out = String::with_capacity(inner.len());
-
-    // Since find returns the first result, we know that inner[..first_bs] does not contain any backslash
-    // This allows us to only search the rest of the string
-    out.push_str(&inner[..first_bs]);
-    let mut rest = &inner[first_bs..];
-
+    // Find returns the first occurence, so we know that inner[..first_escape] does not contain any escape sequence
+    processed.push_str(&inner[..first_escape]);
+    let mut to_process = &inner[first_escape..];
     loop {
-        match rest.find('\\') {
+        match to_process.find('\\') {
             None => {
-                out.push_str(rest); // there are no more escapes
+                // there are no escape sequences left
+                processed.push_str(to_process);
                 break;
             }
-            Some(bs) => {
-                out.push_str(&rest[..bs]); // copy chunk before the backslash
-                let after = &rest[bs + 1..];
+            Some(escape_seq_idx) => {
+                processed.push_str(&to_process[..escape_seq_idx]);
+                let after = &to_process[escape_seq_idx + 1..];
                 if after.is_empty() {
-                    out.push('\\'); // trailing lone backslash
+                    processed.push('\\');
                     break;
                 }
-                // All recognised escape codes are ASCII, so index by byte
-                match after.as_bytes()[0] {
-                    b'n' => {
-                        out.push('\n');
-                        rest = &after[1..];
-                    }
-                    b't' => {
-                        out.push('\t');
-                        rest = &after[1..];
-                    }
-                    b'r' => {
-                        out.push('\r');
-                        rest = &after[1..];
-                    }
-                    b'\\' => {
-                        out.push('\\');
-                        rest = &after[1..];
-                    }
-                    b'"' => {
-                        out.push('"');
-                        rest = &after[1..];
-                    }
-                    b'0' => {
-                        out.push('\0');
-                        rest = &after[1..];
-                    }
-                    _ => {
-                        // Unknown escape -> keep backslash + character verbatim
-                        // Use chars() only here to correctly handle multi-byte UTF-8.
-                        let c = after.chars().next().unwrap();
-                        out.push('\\');
-                        out.push(c);
-                        rest = &after[c.len_utf8()..];
-                    }
+                let escape_seq = after.as_bytes()[0];
+                if escape_seq == b'n'
+                    || escape_seq == b't'
+                    || escape_seq == b'r'
+                    || escape_seq == b'\\'
+                    || escape_seq == b'"'
+                    || escape_seq == b'0'
+                {
+                    processed.push(match escape_seq {
+                        b'n' => '\n',
+                        b't' => '\t',
+                        b'r' => '\r',
+                        b'\\' => '\\',
+                        b'"' => '"',
+                        b'0' => '\0',
+                        _ => unreachable!(),
+                    });
+                    to_process = &after[1..];
+                } else {
+                    // chars() is used to correctly handle multi-byte characters
+                    let c = after.chars().next().unwrap();
+                    processed.push('\\');
+                    processed.push(c);
+                    to_process = &after[c.len_utf8()..];
                 }
             }
         }
     }
-    SmolStr::from(out)
+    SmolStr::from(processed)
 }
 
 pub fn str_to_type(s: &str) -> DataType {

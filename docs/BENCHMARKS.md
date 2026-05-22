@@ -1,6 +1,6 @@
-> Keel is experimental - more optimizations are still to come.
+> Keel is still experimental, and more optimizations are still to come.
 
-All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`--runs 150 --warmup 10`). All benchmarks are run on the same machine.
+All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`--runs 150 --warmup 10`). All benchmarks are run on a 2021 M1 Pro Macbook Pro with 16GBs of ram.
 
 ---
 
@@ -88,7 +88,7 @@ print(fib(30))</code></pre></td>
 
 ---
 
-## Multiply, branch, modulo × 1 000 000
+## Multiply, condition, modulo × 1 000 000
 
 <table>
 <tr>
@@ -137,7 +137,7 @@ print(result)</code></pre></td>
 
 ---
 
-## Sqrt × 10 000 000
+## Sqrt from 0 to 9999999
 
 <table>
 <tr>
@@ -252,7 +252,7 @@ print(count)</code></pre></td>
 
 ---
 
-## String operations, array split and search × 50 000
+## String.split(), Array.contains() × 50 000
 
 <table>
 <tr>
@@ -508,7 +508,7 @@ print(count)</code></pre></td>
 
 ## C FFI call overhead × 10 000 000
 
-All programs call the same shared C library function in a tight loop. The C function is intentionally trivial so the measured time reflects the cost of crossing the language–C boundary, not the C computation itself.
+All programs call the same shared C library function in a huge loop. The C function is intentionally trivial so the measured time reflects the cost of crossing the language–C boundary, not the C computation itself.
 
 **`bench_ffi.c`** (compiled with `-O2`):
 ```c

@@ -53,7 +53,7 @@ impl From<std::num::IntErrorKind> for ErrType<'_> {
             std::num::IntErrorKind::PosOverflow => ErrType::IntPosOverflow,
             std::num::IntErrorKind::Zero => dev_error(
                 file!(),
-                "impl<'a> From<std::num::IntErrorKind> for ErrType<'a>",
+                "impl From<std::num::IntErrorKind> for ErrType<'_>",
                 format_args!("Encountered std::num::IntErrorKind::Zero"),
             ),
             _ => unreachable!(),
@@ -267,6 +267,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
     #[cfg(not(debug_assertions))]
     std::process::exit(1);
 
+    // This is only used for tests, to allow #[should_panic] to work
     #[cfg(debug_assertions)]
     panic!();
 }
@@ -292,6 +293,7 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: &Span, t: ErrT
     #[cfg(not(debug_assertions))]
     std::process::exit(1);
 
+    // This is only used for tests, to allow #[should_panic] to work
     #[cfg(debug_assertions)]
     panic!();
 }

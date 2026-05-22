@@ -47,14 +47,14 @@ fn array_gc(
     live.clear();
     live.resize(array_pool.len(), false);
 
-    // Recursively find all "used" arrays
+    // Find all used arrays
     for data in registers.iter().chain(recursion_stack.iter()) {
         if data.is_array() {
-            track_arrays(data.as_array(), array_pool, live, array_gc_stack);
+            track_nested_arrays(data.as_array(), array_pool, live, array_gc_stack);
         }
     }
 
-    // Prevent duplicates: mark already-free slots as live
+    // Mark slots that are already free as live
     for &id in free_arrays.iter() {
         live[id as usize] = true;
     }
@@ -67,8 +67,7 @@ fn array_gc(
     }
 }
 
-/// Tracks nested arrays
-fn track_arrays(
+fn track_nested_arrays(
     root_id: usize,
     array_pool: &ArrayPool,
     live: &mut [bool],

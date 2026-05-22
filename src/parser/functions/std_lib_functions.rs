@@ -6,6 +6,7 @@ use crate::check_args_range;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
+use crate::expr::Span;
 use crate::functions::check_arg_type;
 use crate::get_id;
 use crate::parser_data::Ctx;
@@ -24,8 +25,8 @@ pub fn std_lib_functions(
     ctx: Ctx<'_>,
     state: &mut State<'_>,
     args: &[Expr],
-    markers: &(usize, usize),
-    args_indexes: &[(usize, usize)],
+    markers: &Span,
+    args_indexes: &[Span],
     offset: u16,
     single_run: bool,
 ) -> Option<u16> {

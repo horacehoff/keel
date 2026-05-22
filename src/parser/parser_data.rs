@@ -1,6 +1,7 @@
 use crate::Data;
 use crate::Instr;
 use crate::expr::Expr;
+use crate::expr::Span;
 use crate::type_system::DataType;
 use crate::vm::ArrayPool;
 use crate::vm::StringPool;
@@ -79,13 +80,13 @@ pub struct Ctx<'a> {
     pub current_src_file: u16,
 }
 
-/// Shared mutable compilation state. Passed as `&mut State` — no unsafe needed.
+/// Shared mutable compilation state. Passed as `&mut State` - no unsafe needed.
 pub struct State<'a> {
     pub registers: &'a mut Vec<Data>,
     pub fns: &'a mut Vec<Function>,
     pub pools: &'a mut Pools,
     /// Vec<(instruction, markers, file_id)>
-    pub instr_src: &'a mut Vec<(Instr, (usize, usize), u16)>,
+    pub instr_src: &'a mut Vec<(Instr, Span, u16)>,
     pub fn_registers: &'a mut Vec<Vec<u16>>,
     pub dyn_libs: &'a mut Vec<Dynamiclib>,
     pub allocated_arg_count: &'a mut usize,

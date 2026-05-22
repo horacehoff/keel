@@ -87,6 +87,16 @@ pub fn str_to_type(s: &str) -> DataType {
     }
 }
 
+#[macro_export]
+macro_rules! span {
+    ($start:expr,$end:expr) => {
+        Span {
+            start: $start as u32,
+            end: $end as u32,
+        }
+    };
+}
+
 impl std::fmt::Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

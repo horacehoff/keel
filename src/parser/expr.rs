@@ -3,6 +3,12 @@ use crate::type_system::DataType;
 use smol_str::SmolStr;
 use std::rc::Rc;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Float(f64),
@@ -11,80 +17,50 @@ pub enum Expr {
     Null,
     String(SmolStr),
     /// Var(name, start, end)
-    Var(SmolStr, (usize, usize)),
+    Var(SmolStr, Span),
     /// Array(contents, start, end)
-    Array(Box<[Expr]>, (usize, usize)),
+    Array(Box<[Expr]>, Span),
     /// VarDeclare(name, value),
     VarDeclare(SmolStr, Box<Expr>),
     /// VarDeclare(name, value, start, end)
-    VarAssign(SmolStr, Box<Expr>, (usize, usize)),
+    VarAssign(SmolStr, Box<Expr>, Span),
     /// Condition(condition, code (contains else_if_blocks and potentially else_block), start, end)
-    Condition(Box<Expr>, Box<[Expr]>, (usize, usize)),
-    /// InlineCondition — expression-form if/else, always produces a value, must have an else branch
-    InlineCondition(Box<Expr>, Box<[Expr]>, (usize, usize)),
+    Condition(Box<Expr>, Box<[Expr]>, Span),
+    /// InlineCondition - expression-form if/else, always produces a value, must have an else branch
+    InlineCondition(Box<Expr>, Box<[Expr]>, Span),
     ElseIfBlock(Box<Expr>, Box<[Expr]>),
     ElseBlock(Box<[Expr]>),
 
     WhileBlock(Box<Expr>, Box<[Expr]>),
     /// FunctionCall(args, (optional namespace + name), start, end, (arg_start,arg_end))
-    FunctionCall(
-        Box<[Expr]>,
-        Box<[SmolStr]>,
-        (usize, usize),
-        Box<[(usize, usize)]>,
-    ),
+    FunctionCall(Box<[Expr]>, Box<[SmolStr]>, Span, Box<[Span]>),
     ObjFunctionCall(
         Box<Expr>,
         Box<[Expr]>,
         Box<[SmolStr]>,
-        (
-            // obj_start
-            usize,
-            // obj_end
-            usize,
-        ),
-        (
-            // fn_start
-            usize,
-            // fn_end
-            usize,
-        ),
-        Box<[(usize, usize)]>,
+        // obj_span
+        Span,
+        // fn_span
+        Span,
+        Box<[Span]>,
     ),
     /// FunctionDecl(name+args, code, start, end)
-    FunctionDecl(Box<[SmolStr]>, Rc<[Expr]>, (usize, usize)),
+    FunctionDecl(Box<[SmolStr]>, Rc<[Expr]>, Span),
 
     ReturnVal(Box<Option<Expr>>),
 
-    GetIndex(Box<Expr>, Box<Expr>, (usize, usize)),
-    ArrayModify(
-        Box<Expr>,
-        Box<Expr>,
-        Box<Expr>,
-        (usize, usize),
-        (usize, usize),
-    ),
+    GetIndex(Box<Expr>, Box<Expr>, Span),
+    ArrayModify(Box<Expr>, Box<Expr>, Box<Expr>, Span, Span),
 
     /// ForLoop(loop_var_name, loop_array+code, obj_markers)
-    ForLoop(SmolStr, Box<[Expr]>, (usize, usize)),
+    ForLoop(SmolStr, Box<[Expr]>, Span),
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
-    IntForLoop(
-        SmolStr,
-        Box<Expr>,
-        Box<Expr>,
-        Box<[Expr]>,
-        (usize, usize),
-        (usize, usize),
-    ),
+    IntForLoop(SmolStr, Box<Expr>, Box<Expr>, Box<[Expr]>, Span, Span),
     /// Import(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
-    ImportDynLib(
-        SmolStr,
-        Box<[(SmolStr, Box<[DataType]>, DataType)]>,
-        (usize, usize),
-    ),
+    ImportDynLib(SmolStr, Box<[(SmolStr, Box<[DataType]>, DataType)]>, Span),
 
     /// ImportFile(path, (start, end))
-    ImportFile(SmolStr, (usize, usize)),
+    ImportFile(SmolStr, Span),
 
     Break,
     Continue,
@@ -92,22 +68,22 @@ pub enum Expr {
     EvalBlock(Box<[Expr]>),
     LoopBlock(Box<[Expr]>),
 
-    Mul(Box<Expr>, Box<Expr>, (usize, usize)),
-    Div(Box<Expr>, Box<Expr>, (usize, usize)),
-    Add(Box<Expr>, Box<Expr>, (usize, usize)),
-    Sub(Box<Expr>, Box<Expr>, (usize, usize)),
-    Mod(Box<Expr>, Box<Expr>, (usize, usize)),
-    Pow(Box<Expr>, Box<Expr>, (usize, usize)),
+    Mul(Box<Expr>, Box<Expr>, Span),
+    Div(Box<Expr>, Box<Expr>, Span),
+    Add(Box<Expr>, Box<Expr>, Span),
+    Sub(Box<Expr>, Box<Expr>, Span),
+    Mod(Box<Expr>, Box<Expr>, Span),
+    Pow(Box<Expr>, Box<Expr>, Span),
     Eq(Box<Expr>, Box<Expr>),
     NotEq(Box<Expr>, Box<Expr>),
-    Sup(Box<Expr>, Box<Expr>, (usize, usize)),
-    SupEq(Box<Expr>, Box<Expr>, (usize, usize)),
-    Inf(Box<Expr>, Box<Expr>, (usize, usize)),
-    InfEq(Box<Expr>, Box<Expr>, (usize, usize)),
-    BoolAnd(Box<Expr>, Box<Expr>, (usize, usize)),
-    BoolOr(Box<Expr>, Box<Expr>, (usize, usize)),
-    BoolNeg(Box<Expr>, (usize, usize)),
-    Neg(Box<Expr>, (usize, usize)),
+    Sup(Box<Expr>, Box<Expr>, Span),
+    SupEq(Box<Expr>, Box<Expr>, Span),
+    Inf(Box<Expr>, Box<Expr>, Span),
+    InfEq(Box<Expr>, Box<Expr>, Span),
+    BoolAnd(Box<Expr>, Box<Expr>, Span),
+    BoolOr(Box<Expr>, Box<Expr>, Span),
+    BoolNeg(Box<Expr>, Span),
+    Neg(Box<Expr>, Span),
 }
 
 #[cold]

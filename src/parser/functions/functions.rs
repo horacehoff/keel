@@ -4,6 +4,7 @@ use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
+use crate::expr::Span;
 use crate::fs_lib_functions::fs_lib_functions;
 use crate::get_id;
 use crate::parser_data::Ctx;
@@ -21,7 +22,7 @@ pub fn check_arg_type(
     ctx: Ctx<'_>,
     state: &mut State<'_>,
     args: &[Expr],
-    args_indexes: &[(usize, usize)],
+    args_indexes: &[Span],
     arg_idx: usize,
     expected: &[DataType],
 ) {
@@ -49,8 +50,8 @@ pub fn handle_functions(
     // method call data
     args: &[Expr],
     namespace: &[SmolStr],
-    markers: &(usize, usize),
-    args_indexes: &[(usize, usize)],
+    markers: &Span,
+    args_indexes: &[Span],
     offset: u16,
     single_run: bool,
 ) -> Option<u16> {

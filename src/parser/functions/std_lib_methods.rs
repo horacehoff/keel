@@ -5,6 +5,7 @@ use crate::check_args_range;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
+use crate::expr::Span;
 use crate::get_id;
 use crate::instr::LibFuncVoid;
 use crate::parser_data::Ctx;
@@ -25,9 +26,9 @@ pub fn std_lib_methods(
     state: &mut State<'_>,
     obj: &Expr,
     args: &[Expr],
-    obj_markers: &(usize, usize),
-    fn_markers: &(usize, usize),
-    args_indexes: &[(usize, usize)],
+    obj_markers: &Span,
+    fn_markers: &Span,
+    args_indexes: &[Span],
     offset: u16,
     single_run: bool,
 ) {
@@ -71,7 +72,10 @@ pub fn std_lib_methods(
                 $args,
                 name,
                 src,
-                &(args_indexes[0].0, args_indexes.last().unwrap().1)
+                &Span {
+                    start: args_indexes[0].start,
+                    end: args_indexes.last().unwrap().end
+                }
             )
         };
         ($expected:pat,$expected_str:expr, $args_min:expr,$args_max:expr) => {
@@ -82,8 +86,8 @@ pub fn std_lib_methods(
                 $args_max,
                 name,
                 src,
-                args_indexes[0].0,
-                args_indexes.last().unwrap().1
+                args_indexes[0].start,
+                args_indexes.last().unwrap().end
             )
         };
     }

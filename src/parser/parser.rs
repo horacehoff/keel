@@ -4,6 +4,7 @@ use crate::errors::ErrType;
 use crate::errors::lalrpop_error;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
+use crate::expr::Span;
 use crate::expr::contains_var_reassign;
 use crate::functions::handle_functions;
 use crate::grammar::Token;
@@ -126,8 +127,8 @@ fn set_jmp_size(instr: &mut Instr, size: u16) {
 /// This is used for every operand that is the left-hand side of an OR operator.
 /// When `bool_or_mode` is false (the default), sub-expression comparisons emit a false-jump that jumps past the body if the sub-expression is false
 /// Returns:
-///   - `true_jump_idxs`  — indices into `output` whose targets must be set to the start of the body
-///   - `false_jump_idxs` — indices into `output` whose targets must be set to past the body
+///   - `true_jump_idxs`  - indices into `output` whose targets must be set to the start of the body
+///   - `false_jump_idxs` - indices into `output` whose targets must be set to past the body
 #[allow(clippy::too_many_arguments)]
 fn compile_short_circuit_condition(
     expr: &Expr,
@@ -641,8 +642,8 @@ pub fn get_id(
         Expr::Eq(l, r) => {
             let l_type = infer_type(l, v, state.fns, src, state.dyn_libs);
             let r_type = infer_type(r, v, state.fns, src, state.dyn_libs);
-            let is_array = matches!(l_type, DataType::Array(_))
-                && matches!(r_type, DataType::Array(_));
+            let is_array =
+                matches!(l_type, DataType::Array(_)) && matches!(r_type, DataType::Array(_));
             let is_string = l_type == DataType::String || r_type == DataType::String;
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
@@ -665,8 +666,8 @@ pub fn get_id(
         Expr::NotEq(l, r) => {
             let l_type = infer_type(l, v, state.fns, src, state.dyn_libs);
             let r_type = infer_type(r, v, state.fns, src, state.dyn_libs);
-            let is_array = matches!(l_type, DataType::Array(_))
-                && matches!(r_type, DataType::Array(_));
+            let is_array =
+                matches!(l_type, DataType::Array(_)) && matches!(r_type, DataType::Array(_));
             let is_string = l_type == DataType::String || r_type == DataType::String;
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
@@ -1516,7 +1517,7 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                // elem_id is a fresh mutable register — remove from state.const_registers just in case
+                // elem_id is a fresh mutable register -> remove from state.const_registers just in case
                 state.const_registers.retain(|_, &mut v| v != elem_id);
 
                 let v_len = v.len();
@@ -2033,7 +2034,7 @@ pub fn parse(
     Vec<Instr>,
     Vec<Data>,
     Pools,
-    Vec<(Instr, (usize, usize), u16)>,
+    Vec<(Instr, Span, u16)>,
     Vec<Vec<u16>>,
     Vec<DynamicLibFn>,
     usize,
@@ -2054,7 +2055,7 @@ pub fn parse(
         array_pool: Vec::with_capacity(20),
         string_pool: Vec::with_capacity(20),
     };
-    let mut instr_src: Vec<(Instr, (usize, usize), u16)> = Vec::new();
+    let mut instr_src: Vec<(Instr, Span, u16)> = Vec::new();
     let mut fn_registers: Vec<Vec<u16>> = Vec::new();
     let mut functions: Vec<Function> = Vec::new();
     let mut dyn_libs: Vec<Dynamiclib> = Vec::new();

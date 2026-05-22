@@ -1,5 +1,5 @@
 use crate::Instr;
-use crate::expr::Expr;
+use crate::expr::{Expr, Span};
 use crate::get_id;
 use crate::parser_data::Variable;
 use crate::parser_data::{Ctx, State};
@@ -16,9 +16,9 @@ pub fn handle_method_calls(
     obj: &Expr,
     args: &[Expr],
     namespace: &[SmolStr],
-    obj_markers: &(usize, usize),
-    fn_markers: &(usize, usize),
-    args_indexes: &[(usize, usize)],
+    obj_markers: &Span,
+    fn_markers: &Span,
+    args_indexes: &[Span],
     offset: u16,
     single_run: bool,
 ) {

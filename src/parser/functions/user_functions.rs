@@ -4,6 +4,7 @@ use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
+use crate::expr::Span;
 use crate::get_id;
 use crate::parser::compile_expr;
 use crate::parser_data::Ctx;
@@ -28,7 +29,7 @@ pub fn handle_user_function(
     ctx: Ctx<'_>,
     state: &mut State<'_>,
     args: &[Expr],
-    markers: &(usize, usize),
+    markers: &Span,
     offset: u16,
     single_run: bool,
 ) -> u16 {

@@ -11,8 +11,8 @@ pub fn repl() {
         .expect("{color_red}[ERROR]{color_reset} Cannot find keel binary path");
     let tmp = std::env::temp_dir().join("keel_repl_tmp.kl");
 
-    let mut all_lines: Vec<String> = Vec::new();
-    let mut prev_stdout = String::new();
+    let mut all_lines: Vec<String> = Vec::with_capacity(1);
+    let mut prev_stdout = String::with_capacity(1);
     let mut contents = String::with_capacity(20);
 
     loop {

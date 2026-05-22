@@ -1,4 +1,5 @@
 use crate::display::token_recognition;
+use crate::expr::Span;
 use crate::{Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use inline_colorization::*;
@@ -17,7 +18,7 @@ pub fn dev_error(file: &str, function: &str, additional_data: Arguments) -> ! {
 }
 
 pub struct ErrorCtx {
-    pub instr_src: Vec<(Instr, (usize, usize), u16)>,
+    pub instr_src: Vec<(Instr, Span, u16)>,
     pub sources: Vec<(SmolStr, String)>,
 }
 
@@ -242,23 +243,26 @@ impl From<ErrType<'_>> for SmolStr {
 #[cold]
 #[inline(never)]
 pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
-    let (_, (start, end), file_idx) = ctx
+    let (_, Span { start, end }, file_idx) = ctx
         .instr_src
         .iter()
         .find(|(x, _, _)| x == instr)
-        .unwrap_or(&(Instr::Halt(1), (0, 0), 0));
+        .unwrap_or(&(Instr::Halt(1), Span { start: 0, end: 0 }, 0));
     let src = &ctx.sources[*file_idx as usize];
     let err_message: SmolStr = t.into();
     eprintln!("{color_red}KEEL ERROR{color_reset}");
-    Report::build(ReportKind::Error, (src.0.as_str(), *start..*end))
-        .with_label(
-            Label::new((src.0.as_str(), *start..*end))
-                .with_message(err_message)
-                .with_color(Color::Red),
-        )
-        .finish()
-        .eprint((src.0.as_str(), Source::from(src.1.as_str())))
-        .unwrap();
+    Report::build(
+        ReportKind::Error,
+        (src.0.as_str(), (*start as usize)..(*end as usize)),
+    )
+    .with_label(
+        Label::new((src.0.as_str(), (*start as usize)..(*end as usize)))
+            .with_message(err_message)
+            .with_color(Color::Red),
+    )
+    .finish()
+    .eprint((src.0.as_str(), Source::from(src.1.as_str())))
+    .unwrap();
 
     #[cfg(not(debug_assertions))]
     std::process::exit(1);
@@ -269,18 +273,21 @@ pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
 
 #[cold]
 #[inline(never)]
-pub fn throw_parser_error(src: (&str, &str), (start, end): &(usize, usize), t: ErrType) -> ! {
+pub fn throw_parser_error(src: (&str, &str), Span { start, end }: &Span, t: ErrType) -> ! {
     let err_message: SmolStr = t.into();
     eprintln!("{color_red}KEEL ERROR{color_reset}");
-    Report::build(ReportKind::Error, (src.0, *start..*end))
-        .with_label(
-            Label::new((src.0, *start..*end))
-                .with_message(err_message)
-                .with_color(Color::Red),
-        )
-        .finish()
-        .eprint((src.0, Source::from(src.1)))
-        .unwrap();
+    Report::build(
+        ReportKind::Error,
+        (src.0, (*start as usize)..(*end as usize)),
+    )
+    .with_label(
+        Label::new((src.0, (*start as usize)..(*end as usize)))
+            .with_message(err_message)
+            .with_color(Color::Red),
+    )
+    .finish()
+    .eprint((src.0, Source::from(src.1)))
+    .unwrap();
 
     #[cfg(not(debug_assertions))]
     std::process::exit(1);

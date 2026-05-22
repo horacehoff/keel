@@ -292,3 +292,5 @@ print(x > 1 && x < 1);
 
 - [Standard library](docs/STD_LIB.md)
 - [File system library](docs/FS_LIB.md)
+
+**Note**: AI tools were used for the commenting process. *All* architecture, design, and code is written by me.

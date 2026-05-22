@@ -1,4 +1,4 @@
-> Keel is experimental — more optimizations are still to come.
+> Keel is experimental - more optimizations are still to come.
 
 All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`--runs 150 --warmup 10`). All benchmarks are run on the same machine.
 

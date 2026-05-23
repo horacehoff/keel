@@ -1,4 +1,5 @@
 use crate::Instr;
+use crate::data::Data;
 use crate::parse;
 
 macro_rules! run_and_check_registers {
@@ -2726,5 +2727,63 @@ pub fn type_function() {
         }
         "#,
         true.into()
+    );
+}
+
+#[test]
+pub fn array_slice() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let x = [0,1,2,3,4,5];
+            let y = x[3..5];
+            print(y[0]);
+        }
+        "#,
+        3.into()
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn array_slice_negative_index() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let x = [0,1,2,3,4,5];
+            let y = x[3..-5];
+            print(y[0]);
+        }
+        "#,
+        3.into()
+    );
+}
+
+#[test]
+pub fn string_slice() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let x = "Hello world";
+            let y = x[6..11];
+            print(y);
+        }
+        "#,
+        Data::small_str("world")
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn string_slice_negative_index() {
+    run_and_check_registers!(
+        r#"
+        function main() {
+            let x = "Hello world";
+            let y = x[-6..11];
+            print(y);
+        }
+        "#,
+        Data::small_str("world")
     );
 }

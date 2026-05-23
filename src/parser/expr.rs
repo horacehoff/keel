@@ -49,7 +49,9 @@ pub enum Expr {
 
     ReturnVal(Box<Option<Expr>>),
 
-    GetIndex(Box<Expr>, Box<Expr>, Span),
+    ArrayGetIndex(Box<Expr>, Box<Expr>, Span),
+    /// ArrayGetSlice(array, range_start, range_end, span)
+    ArrayGetSlice(Box<Expr>, Box<Expr>, Box<Expr>, Span),
     ArrayModify(Box<Expr>, Box<Expr>, Box<Expr>, Span, Span),
 
     /// ForLoop(loop_var_name, loop_array+code, obj_markers)

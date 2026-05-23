@@ -119,9 +119,14 @@ fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 }
             }
             Expr::FunctionDecl(_, x, _) => expr_stack.extend(x.iter()),
-            Expr::GetIndex(x, y, _) => {
+            Expr::ArrayGetIndex(x, y, _) => {
                 expr_stack.push(x);
                 expr_stack.push(y);
+            }
+            Expr::ArrayGetSlice(x, y, z, _) => {
+                expr_stack.push(x);
+                expr_stack.push(y);
+                expr_stack.push(z);
             }
             Expr::VarDeclare(_, x) | Expr::VarAssign(_, x, _) => expr_stack.push(x),
             Expr::ForLoop(_, code, _) => expr_stack.extend(code.iter()),
@@ -287,9 +292,17 @@ pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
                     return true;
                 }
             }
-            Expr::GetIndex(x, y, _) => {
+            Expr::ArrayGetIndex(x, y, _) => {
                 if contains_recursive_call(slice::from_ref(x), fn_name)
                     || contains_recursive_call(slice::from_ref(y), fn_name)
+                {
+                    return true;
+                }
+            }
+            Expr::ArrayGetSlice(x, y, z, _) => {
+                if contains_recursive_call(slice::from_ref(x), fn_name)
+                    || contains_recursive_call(slice::from_ref(y), fn_name)
+                    || contains_recursive_call(slice::from_ref(z), fn_name)
                 {
                     return true;
                 }
@@ -691,8 +704,14 @@ pub fn infer_type(
             DataType::Bool => DataType::Bool,
             _ => unreachable!(),
         },
-        Expr::GetIndex(array, _, _) => match infer_type(array, v, fns, src, dyn_libs) {
+        Expr::ArrayGetIndex(array, _, _) => match infer_type(array, v, fns, src, dyn_libs) {
             DataType::Array(array_type) => array_type.map_or(DataType::Null, |t| *t),
+            DataType::String => DataType::String,
+            DataType::Unknown => DataType::Unknown,
+            _ => unreachable!(),
+        },
+        Expr::ArrayGetSlice(array, _, _, _) => match infer_type(array, v, fns, src, dyn_libs) {
+            DataType::Array(array_type) => DataType::Array(array_type),
             DataType::String => DataType::String,
             DataType::Unknown => DataType::Unknown,
             _ => unreachable!(),

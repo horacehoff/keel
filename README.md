@@ -47,7 +47,6 @@ keel -h/--help     # Print help
 ```
 
 ## Near-future roadmap
-- Array slices
 - Higher-order functions 
 - Error handling
 

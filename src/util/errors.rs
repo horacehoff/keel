@@ -96,7 +96,10 @@ pub enum ErrType<'a> {
     BoolParsingError,
 
     /// IndexOutOfBounds(length, index)
-    IndexOutOfBounds(usize, usize),
+    IndexOutOfBounds(usize, i32),
+
+    /// RangeOutOfBounds(length, idx_start, idx_end)
+    RangeOutOfBounds(usize, i32, i32),
 
     InvalidFloat,
     IntTooBig,
@@ -145,6 +148,7 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::IntTooBig => "The integer is too big".into(),
             ErrType::InvalidFloat => "Invalid float".into(),
             ErrType::IndexOutOfBounds(length, index) => format_args!("Tried to get index {color_bright_red}{style_bold}{index}{color_reset}{style_reset} but the length is {color_bright_blue}{style_bold}{length}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::RangeOutOfBounds(length, idx_start, idx_end) => format_args!("Invalid range {color_bright_red}{style_bold}{idx_start}{color_reset}{style_reset}..{color_bright_red}{style_bold}{idx_end}{color_reset}{style_reset} for collection with length {color_bright_blue}{style_bold}{length}{color_reset}{style_reset}").to_smolstr(),
             ErrType::BoolParsingError => "The string could not be parsed into a boolean".into(),
             ErrType::FloatParsingError => "The string could not be parsed into a float".into(),
             ErrType::IntEmpty => "The parsing string is empty".into(),

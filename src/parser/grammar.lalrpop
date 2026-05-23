@@ -292,12 +292,12 @@ VarDeclare: Expr = {
 
 VarAssign: Expr = {
     <start: @L> <v: Var> <end: @R> "=" <e: Expression>  => Expr::VarAssign(v, Box::from(e), span!(start, end)),
-    <start: @L> <t: Term> <f: ("[" Expression "]")+> <end: @R> "=" <startb: @L> <e: Expression> <endb: @R> => {
-        let mut indices: Vec<Expr> = f.into_iter().map(|(_,x,_)| x).collect();
+    <start: @L> <t: Term> <f: BracketOp+> <end: @R> "=" <startb: @L> <e: Expression> <endb: @R> => {
+        let mut indices: Vec<Expr> = f.into_iter().map(|(x,_)| x).collect();
         let last_idx = Box::from(indices.pop().unwrap());
         let mut base = t;
         for idx in indices {
-            base = Expr::GetIndex(Box::from(base), Box::from(idx), span!(start, end));
+            base = Expr::ArrayGetIndex(Box::from(base), Box::from(idx), span!(start, end));
         }
         Expr::ArrayModify(Box::from(base), last_idx, Box::from(e), span!(start, end), span!(startb, endb))
     },
@@ -342,11 +342,21 @@ OpVarAssign: Expr = {
     )), span!(start, end)),
 }
 
+BracketOp: (Expr, Option<Expr>) = {
+    "[" <e: Expression> "]" => (e, None),
+    "[" <l: Expression> ".." <r: Expression> "]" => (l, Some(r)),
+    "[" ".." <r: Expression> "]" => (Expr::Int(0), Some(r)),
+}
+
 ArrayIndex: Expr = {
-    <start: @L> <t: Term> <f: ( "[" Expression "]")+> <end: @R> => {
+    <start: @L> <t: Term> <f: BracketOp+> <end: @R> => {
         let mut output = t;
-        for (_, idx, _) in f {
-            output = Expr::GetIndex(Box::from(output), Box::from(idx), span!(start, end));
+        for (start_idx, end_idx) in f {
+            if let Some(end_expr) = end_idx {
+                output = Expr::ArrayGetSlice(Box::from(output), Box::from(start_idx), Box::from(end_expr), span!(start,end));
+            } else {
+                output = Expr::ArrayGetIndex(Box::from(output), Box::from(start_idx), span!(start, end));
+            }
         }
         output
     }

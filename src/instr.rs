@@ -133,6 +133,13 @@ pub enum Instr {
     /// GetIndexString(str_reg_id, index_reg_id, output_reg_id)
     GetIndexString(u16, u16, u16),
 
+    /// GetSliceArray(array_reg_id, idx_start_reg_id, output_reg_id)\
+    /// idx_end_reg_id is pulled from a StoreFuncArg
+    GetSliceArray(u16, u16, u16),
+    /// GetSliceString(str_reg_id, idx_start_reg_id, output_reg_id)\
+    /// idx_end_reg_id is pulled from a StoreFuncArg
+    GetSliceString(u16, u16, u16),
+
     /// Push(array_reg_id, elem_reg_id)
     Push(u16, u16),
 

@@ -1051,7 +1051,7 @@ pub fn compile_expr(
                 state.registers.push(Data::array(array_id as u32));
             }
             // array[index]
-            Expr::GetIndex(array, index, markers) => {
+            Expr::ArrayGetIndex(array, index, markers) => {
                 let infered = infer_type(array, v, state.fns, src, state.dyn_libs);
                 if !is_type_indexable(&infered) {
                     throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
@@ -1069,11 +1069,11 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                let index_infered = infer_type(index, v, state.fns, src, state.dyn_libs);
-                if index_infered != DataType::Int {
-                    throw_parser_error(src, markers, ErrType::InvalidIndexType(&index_infered));
+                let index_inferred = infer_type(index, v, state.fns, src, state.dyn_libs);
+                if index_inferred != DataType::Int {
+                    throw_parser_error(src, markers, ErrType::InvalidIndexType(&index_inferred));
                 }
-                let f_id = get_id(
+                let index_id = get_id(
                     index,
                     v,
                     ctx,
@@ -1084,13 +1084,76 @@ pub fn compile_expr(
                     offset,
                     single_run,
                 );
-                free_register(f_id, state.free_registers, v, state.const_registers);
+                free_register(index_id, state.free_registers, v, state.const_registers);
                 let dest_reg_id = alloc_register(state.registers, state.free_registers);
 
                 let to_push = if infered == DataType::String {
-                    Instr::GetIndexString(id, f_id, dest_reg_id)
+                    Instr::GetIndexString(id, index_id, dest_reg_id)
                 } else {
-                    Instr::GetIndexArray(id, f_id, dest_reg_id)
+                    Instr::GetIndexArray(id, index_id, dest_reg_id)
+                };
+                state.instr_src.push((to_push, *markers, current_src_file));
+                output.push(to_push);
+            }
+            // array[start..end]
+            Expr::ArrayGetSlice(array, idx_start, idx_end, markers) => {
+                let infered = infer_type(array, v, state.fns, src, state.dyn_libs);
+                if !is_type_indexable(&infered) {
+                    throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
+                }
+                let id = get_id(
+                    array,
+                    v,
+                    ctx,
+                    state,
+                    &mut output,
+                    None,
+                    false,
+                    offset,
+                    single_run,
+                );
+                let idx_start_inferred = infer_type(idx_start, v, state.fns, src, state.dyn_libs);
+                if idx_start_inferred != DataType::Int {
+                    throw_parser_error(
+                        src,
+                        markers,
+                        ErrType::InvalidIndexType(&idx_start_inferred),
+                    );
+                }
+                let idx_start_id = get_id(
+                    idx_start,
+                    v,
+                    ctx,
+                    state,
+                    &mut output,
+                    None,
+                    false,
+                    offset,
+                    single_run,
+                );
+                let idx_end_inferred = infer_type(idx_end, v, state.fns, src, state.dyn_libs);
+                if idx_end_inferred != DataType::Int {
+                    throw_parser_error(src, markers, ErrType::InvalidIndexType(&idx_end_inferred));
+                }
+                let idx_end_id = get_id(
+                    idx_end,
+                    v,
+                    ctx,
+                    state,
+                    &mut output,
+                    None,
+                    false,
+                    offset,
+                    single_run,
+                );
+                output.push(Instr::StoreFuncArg(idx_end_id));
+                free_register(idx_start_id, state.free_registers, v, state.const_registers);
+                free_register(idx_end_id, state.free_registers, v, state.const_registers);
+                let dest_reg_id = alloc_register(state.registers, state.free_registers);
+                let to_push = if infered == DataType::String {
+                    Instr::GetSliceString(id, idx_start_id, dest_reg_id)
+                } else {
+                    Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
                 };
                 state.instr_src.push((to_push, *markers, current_src_file));
                 output.push(to_push);

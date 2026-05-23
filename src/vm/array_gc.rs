@@ -1,6 +1,7 @@
 use crate::Data;
 use crate::vm::ArrayPool;
 
+/// Allocates a new array in the array pool. If reusing an array, it clears it.
 pub fn alloc_array(
     array_pool: &mut ArrayPool,
     free_arrays: &mut Vec<u32>,

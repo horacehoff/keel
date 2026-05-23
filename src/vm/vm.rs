@@ -681,8 +681,8 @@ pub fn execute(
             },
             Instr::SetElementArray(array_reg_id, new_elem_reg_id, idx) => {
                 let array = unsafe { array_pool.get_unchecked_mut(r!(array_reg_id).as_array()) };
-                let index = r!(idx).as_int() as usize;
-                if index >= array.len() {
+                let index = r!(idx).as_int();
+                if (index as usize) >= array.len() || index < 0 {
                     cold_path();
                     throw_error(
                         err_ctx,
@@ -690,13 +690,13 @@ pub fn execute(
                         ErrType::IndexOutOfBounds(array.len(), index),
                     );
                 }
-                array[index] = r!(new_elem_reg_id);
+                array[index as usize] = r!(new_elem_reg_id);
             }
             Instr::SetElementString(string_reg_id, new_str_reg_id, idx) => {
-                let index = r!(idx).as_int() as usize;
+                let index = r!(idx).as_int();
                 let temp_str_reg_id = r!(string_reg_id);
                 let source_string = temp_str_reg_id.as_str(string_pool);
-                if index >= source_string.len() {
+                if (index as usize) >= source_string.len() || index < 0 {
                     cold_path();
                     throw_error(
                         err_ctx,
@@ -705,16 +705,15 @@ pub fn execute(
                     );
                 }
                 let mut temp = source_string.to_string();
-                temp.remove(index);
-                temp.insert_str(index, r!(new_str_reg_id).as_str(string_pool));
+                temp.remove(index as usize);
+                temp.insert_str(index as usize, r!(new_str_reg_id).as_str(string_pool));
                 *w!(string_reg_id) = string!(temp);
             }
-            // takes tgt from  registers, index is index, dest is registers index destination
             Instr::GetIndexArray(array_reg_id, index, dest) => {
-                let idx = r!(index).as_int() as usize;
+                let idx = r!(index).as_int();
                 let arr_id = r!(array_reg_id).as_array();
                 let array = unsafe { array_pool.get_unchecked(arr_id) };
-                if idx >= array.len() {
+                if (idx as usize) >= array.len() || idx < 0 {
                     cold_path();
                     throw_error(
                         err_ctx,
@@ -722,14 +721,52 @@ pub fn execute(
                         ErrType::IndexOutOfBounds(array.len(), idx),
                     );
                 }
-                *w!(dest) = unsafe { *array.get_unchecked(idx) };
+                *w!(dest) = unsafe { *array.get_unchecked(idx as usize) };
+            }
+            Instr::GetSliceArray(array_reg_id, idx_start_id, dest_reg_id) => {
+                let idx_start = r!(idx_start_id).as_int();
+                let idx_end = r!(args.pop().unwrap_unchecked()).as_int();
+                let arr_id = r!(array_reg_id).as_array();
+                let array = unsafe { array_pool.get_unchecked(arr_id) };
+                if (idx_end as usize) > array.len()
+                    || (idx_start as usize) >= array.len()
+                    || idx_start > idx_end
+                {
+                    cold_path();
+                    throw_error(
+                        err_ctx,
+                        &instructions[i],
+                        ErrType::RangeOutOfBounds(array.len(), idx_start, idx_end),
+                    );
+                }
+                let new_array_id = alloc_array(
+                    array_pool,
+                    &mut free_arrays,
+                    registers,
+                    &recursion_stack,
+                    &mut gc_array_threshold,
+                    &mut array_live,
+                    &mut array_gc_stack,
+                );
+                if arr_id < (new_array_id as usize) {
+                    let (left, right) =
+                        unsafe { array_pool.split_at_mut_unchecked(new_array_id as usize) };
+                    right[0]
+                        .extend_from_slice(&left[arr_id][(idx_start as usize)..(idx_end as usize)]);
+                } else {
+                    let (left, right) =
+                        unsafe { array_pool.split_at_mut_unchecked(arr_id as usize) };
+                    left[new_array_id as usize]
+                        .extend_from_slice(&right[0][(idx_start as usize)..(idx_end as usize)]);
+                }
+                *w!(dest_reg_id) = Data::array(new_array_id);
             }
             // Keel currently indexes strings by byte, meaning multi-byte characters won't get properly indexed
             Instr::GetIndexString(tgt, index, dest) => {
-                let idx = r!(index).as_int() as usize;
+                let idx = r!(index).as_int();
                 let tgt_data = r!(tgt);
                 let bytes = tgt_data.as_str(string_pool).as_bytes();
-                if idx >= bytes.len() {
+                if (idx as usize) >= bytes.len() {
                     cold_path();
                     throw_error(
                         err_ctx,
@@ -738,8 +775,27 @@ pub fn execute(
                     );
                 }
                 *w!(dest) = str!(unsafe {
-                    std::str::from_utf8_unchecked(std::slice::from_ref(bytes.get_unchecked(idx)))
+                    std::str::from_utf8_unchecked(std::slice::from_ref(
+                        bytes.get_unchecked(idx as usize),
+                    ))
                 });
+            }
+            Instr::GetSliceString(str_reg_id, idx_start, dest_reg_id) => {
+                let idx_start = r!(idx_start).as_int();
+                let idx_end = r!(args.pop().unwrap_unchecked()).as_int();
+                let s = r!(str_reg_id).as_str(string_pool).to_smolstr();
+                if (idx_end as usize) > s.len()
+                    || (idx_start as usize) >= s.len()
+                    || idx_start > idx_end
+                {
+                    cold_path();
+                    throw_error(
+                        err_ctx,
+                        &instructions[i],
+                        ErrType::RangeOutOfBounds(s.len(), idx_start, idx_end),
+                    );
+                }
+                *w!(dest_reg_id) = str!(&s[(idx_start as usize)..(idx_end as usize)])
             }
             Instr::Push(array, element) => unsafe {
                 array_pool
@@ -748,8 +804,8 @@ pub fn execute(
             },
             Instr::Remove(array, idx) => {
                 let arr = unsafe { array_pool.get_unchecked_mut(r!(array).as_array()) };
-                let index = r!(idx).as_int() as usize;
-                if index >= arr.len() {
+                let index = r!(idx).as_int();
+                if (index as usize) >= arr.len() || index < 0 {
                     cold_path();
                     throw_error(
                         err_ctx,
@@ -757,7 +813,7 @@ pub fn execute(
                         ErrType::IndexOutOfBounds(arr.len(), index),
                     );
                 }
-                arr.remove(index);
+                arr.remove(index as usize);
             }
             Instr::CallLibFunc(LibFunc::Uppercase, source_string_reg_id, dest_reg_id) => {
                 *w!(dest_reg_id) =
@@ -1063,10 +1119,12 @@ pub fn execute(
                             &mut array_gc_stack,
                         ) as usize;
                         if dest_array_id < source_array_id {
-                            let (left, right) = array_pool.split_at_mut(source_array_id);
+                            let (left, right) =
+                                unsafe { array_pool.split_at_mut_unchecked(source_array_id) };
                             left[dest_array_id].extend_from_slice(&right[0][start..end]);
                         } else {
-                            let (left, right) = array_pool.split_at_mut(dest_array_id);
+                            let (left, right) =
+                                unsafe { array_pool.split_at_mut_unchecked(dest_array_id) };
                             right[0].extend_from_slice(&left[source_array_id][start..end]);
                         }
                         sub_arrays.push(Data::array(dest_array_id as u32));

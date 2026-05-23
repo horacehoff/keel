@@ -357,6 +357,8 @@ print(last)</code></pre></td>
 
 ## Standard library operations × 100 000
 
+Almost all the functions from the standard library are tested, except file system functions to avoid IO interference.
+
 <table>
 <tr>
   <th>Keel</th>

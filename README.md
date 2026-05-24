@@ -246,6 +246,20 @@ print(fib(25));
 }
 ```
 
+If the extension is omitted, Keel will choose the correct extension based on your OS. For example:
+```keel
+// On macOS, it will try to load "my_test.dylib".
+// On Windows, it will try to load "my_test.dll".
+// On Linux, it will try to load "my_test.so".
+import "my_test" {
+    int add(int, int);
+    float add(float, float);
+    string add(string, string);
+    int sum(int[], int);
+}
+function main() {print(my_test::add(6,1));}
+```
+
 ### Arrays
 
 Arrays are homogeneous and can only hold one type.
@@ -257,6 +271,22 @@ print(nums[0]);         // 1
 print(nums.len());      // 6
 nums.push(2);
 print(nums.contains(9)); // true
+```
+
+### Slices
+
+```rs
+let nums = [3, 1, 4, 1, 5, 9];
+print(nums[..2]);  // [3,1]
+print(nums[0..2]); // [3,1]
+print(nums[2..4]); // [4,1]
+```
+
+```rs
+let msg = "Hello world";
+print(msg[..5]);   // "Hello"
+print(msg[0..5]);  // "Hello"
+print(msg[6..11]); // "world"
 ```
 
 ### Arithmetic Operations

@@ -1886,6 +1886,13 @@ pub fn compile_expr(
     output
 }
 
+#[cfg(target_os = "macos")]
+const DYLIB_EXT: &str = "dylib";
+#[cfg(target_os = "linux")]
+const DYLIB_EXT: &str = "so";
+#[cfg(target_os = "windows")]
+const DYLIB_EXT: &str = "dll";
+
 /// Recursively collects functions, dyn libs, and imported files
 fn parse_toplevel(
     code: Vec<Expr>,
@@ -1926,7 +1933,7 @@ fn parse_toplevel(
                     return_type_cache: Vec::new(),
                 });
             }
-            Expr::ImportDynLib(path, fn_signatures, markers) => {
+            Expr::ImportDylib(path, fn_signatures, markers) => {
                 let fns = fn_signatures
                     .iter()
                     .map(|(fn_name, fn_args, fn_return_type)| {
@@ -1939,6 +1946,12 @@ fn parse_toplevel(
                         let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
                         let return_type = datatype_to_c_type(fn_return_type);
                         let cif = libffi::middle::Cif::new(arg_types.clone(), return_type.clone());
+                        // If the extension is omitted, the extension is chosen based on the target OS
+                        let path = if std::path::Path::new(path.as_str()).extension().is_none() {
+                            format_args!("{path}.{DYLIB_EXT}").to_smolstr()
+                        } else {
+                            path.clone()
+                        };
                         let lib = unsafe {
                             libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
                                 throw_parser_error(

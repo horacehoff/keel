@@ -14,7 +14,7 @@ ariadne = "0.6.0"
 libloading = "0.9.0"
 libffi = "5.1.0"
 smol_str = "0.3.6"
-mimalloc = "0.1.48"
+mimalloc = "0.1.52"
 
 [build-dependencies]
 lalrpop = "0.23.1"

@@ -58,8 +58,8 @@ pub enum Expr {
     ForLoop(SmolStr, Box<[Expr]>, Span),
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
     IntForLoop(SmolStr, Box<Expr>, Box<Expr>, Box<[Expr]>, Span, Span),
-    /// Import(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
-    ImportDynLib(SmolStr, Box<[(SmolStr, Box<[DataType]>, DataType)]>, Span),
+    /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
+    ImportDylib(SmolStr, Box<[(SmolStr, Box<[DataType]>, DataType)]>, Span),
 
     /// ImportFile(path, (start, end))
     ImportFile(SmolStr, Span),

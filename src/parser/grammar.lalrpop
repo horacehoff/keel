@@ -36,7 +36,7 @@ pub FnSignature:(SmolStr, Box<[DataType]>, DataType) = {
 
 pub Import:Expr = {
     <start: @L> "import" <path: String> <b: Block<FnSignature*>> <end: @R> => {
-        Expr::ImportDynLib(path.trim_start_matches("import").trim().to_smolstr(), Box::from(b), span!(start, end))
+        Expr::ImportDylib(path.trim_start_matches("import").trim().to_smolstr(), Box::from(b), span!(start, end))
     }
 }
 

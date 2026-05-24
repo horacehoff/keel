@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::Data;
-use crate::Instr;
-use crate::NULL;
+use crate::data::Data;
+use crate::data::NULL;
 use crate::errors::dev_error;
+use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
 use crate::parser_data::Variable;
 use smol_str::SmolStr;

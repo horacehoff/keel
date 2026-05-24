@@ -1,4 +1,4 @@
-use crate::Data;
+use crate::data::Data;
 use crate::vm::ArrayPool;
 
 /// Allocates a new array in the array pool. If reusing an array, it clears it.

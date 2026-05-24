@@ -1,13 +1,15 @@
-use crate::LibFunc;
+use self::grammar::Token;
 use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::lalrpop_error;
 use crate::errors::throw_parser_error;
+#[cfg(target_arch = "wasm32")]
+use crate::errors::wasm_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::expr::contains_var_reassign;
 use crate::functions::handle_functions;
-use crate::grammar::Token;
+use crate::instr::LibFunc;
 use crate::methods::handle_method_calls;
 use crate::parser_data::*;
 use crate::registers::alloc_register;
@@ -21,11 +23,12 @@ use crate::registers::move_reg_to_reg;
 use crate::registers::move_to_id;
 use crate::type_system::check_if_returns_void;
 use crate::type_system::contains_recursive_call;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::type_system::datatype_to_c_type;
 use crate::type_system::is_type_indexable;
 use crate::type_system::mark_mutually_recursive;
 use crate::type_system::{DataType, infer_type};
-use crate::{Data, Instr};
+use crate::{data::Data, instr::Instr};
 use inline_colorization::*;
 use lalrpop_util::lalrpop_mod;
 use smol_str::SmolStr;
@@ -1933,72 +1936,77 @@ fn parse_toplevel(
                     return_type_cache: Vec::new(),
                 });
             }
+            #[cfg(target_arch = "wasm32")]
+            Expr::ImportDylib(_, _, _) => {
+                wasm_error("WASM does not support loading dynamic libraries")
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             Expr::ImportDylib(path, fn_signatures, markers) => {
                 let fns = fn_signatures
-                    .iter()
-                    .map(|(fn_name, fn_args, fn_return_type)| {
-                        let return_val = FnSignature {
-                            name: fn_name.clone(),
-                            args: fn_args.clone(),
-                            return_type: fn_return_type.clone(),
-                            id: *dyn_fn_id,
-                        };
-                        let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
-                        let return_type = datatype_to_c_type(fn_return_type);
-                        let cif = libffi::middle::Cif::new(arg_types.clone(), return_type.clone());
-                        // If the extension is omitted, the extension is chosen based on the target OS
-                        let path = if std::path::Path::new(path.as_str()).extension().is_none() {
-                            format_args!("{path}.{DYLIB_EXT}").to_smolstr()
-                        } else {
-                            path.clone()
-                        };
-                        let lib = unsafe {
-                            libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
-                                throw_parser_error(
-                                    use_line_markers,
-                                    &markers,
-                                    ErrType::Custom(
-                                        format_args!(
-                                            "Cannot load dynamic library \"{path}\": {e}"
-                                        )
-                                        .to_smolstr(),
-                                    ),
+                        .iter()
+                        .map(|(fn_name, fn_args, fn_return_type)| {
+                            let return_val = FnSignature {
+                                name: fn_name.clone(),
+                                args: fn_args.clone(),
+                                return_type: fn_return_type.clone(),
+                                id: *dyn_fn_id,
+                            };
+                            let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
+                            let return_type = datatype_to_c_type(fn_return_type);
+                            let cif = libffi::middle::Cif::new(arg_types.clone(), return_type.clone());
+                            // If the extension is omitted, the extension is chosen based on the target OS
+                            let path = if std::path::Path::new(path.as_str()).extension().is_none() {
+                                format_args!("{path}.{DYLIB_EXT}").to_smolstr()
+                            } else {
+                                path.clone()
+                            };
+                            let lib = unsafe {
+                                libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
+                                    throw_parser_error(
+                                        use_line_markers,
+                                        &markers,
+                                        ErrType::Custom(
+                                            format_args!(
+                                                "Cannot load dynamic library \"{path}\": {e}"
+                                            )
+                                            .to_smolstr(),
+                                        ),
+                                    )
+                                })
+                            };
+                            let ptr = unsafe {
+                                libffi::middle::CodePtr(
+                                    lib.get::<*const ()>(fn_name.as_bytes())
+                                        .unwrap_or_else(|e| {
+                                            throw_parser_error(
+                                                use_line_markers,
+                                                &markers,
+                                                ErrType::Custom(
+                                                    format_args!(
+                                                        "Cannot find symbol \"{fn_name}\" in \"{path}\": {e}"
+                                                    )
+                                                    .to_smolstr(),
+                                                ),
+                                            )
+                                        })
+                                        .try_as_raw_ptr()
+                                        .unwrap(),
                                 )
-                            })
-                        };
-                        let ptr = unsafe {
-                            libffi::middle::CodePtr(
-                                lib.get::<*const ()>(fn_name.as_bytes())
-                                    .unwrap_or_else(|e| {
-                                        throw_parser_error(
-                                            use_line_markers,
-                                            &markers,
-                                            ErrType::Custom(
-                                                format_args!(
-                                                    "Cannot find symbol \"{fn_name}\" in \"{path}\": {e}"
-                                                )
-                                                .to_smolstr(),
-                                            ),
-                                        )
-                                    })
-                                    .try_as_raw_ptr()
-                                    .unwrap(),
-                            )
-                        };
+                            };
 
-                        let mut types = vec![fn_return_type.clone()];
-                        types.extend(fn_args.clone());
+                            let mut types = vec![fn_return_type.clone()];
+                            types.extend(fn_args.clone());
 
-                        dyn_lib_fns.push(DynamicLibFn {
-                            types: Box::from(types),
-                            _lib: lib,
-                            ptr,
-                            cif,
-                        });
-                        *dyn_fn_id += 1;
-                        return_val
-                    })
-                    .collect();
+                            dyn_lib_fns.push(DynamicLibFn {
+                                types: Box::from(types),
+                                _lib: lib,
+                                ptr,
+                                cif,
+                            });
+                            *dyn_fn_id += 1;
+                            return_val
+                        })
+                        .collect();
                 dyn_libs.push(Dynamiclib {
                     name: std::path::PathBuf::from(path.as_str())
                         .file_prefix()
@@ -2008,6 +2016,9 @@ fn parse_toplevel(
                     fns,
                 });
             }
+            #[cfg(target_arch = "wasm32")]
+            Expr::ImportFile(_, _) => wasm_error("WASM does not support importing files"),
+            #[cfg(not(target_arch = "wasm32"))]
             Expr::ImportFile(path, markers) => {
                 let file_path = file_path
                     .parent()
@@ -2087,10 +2098,14 @@ pub fn parse(
     usize,
     Vec<(SmolStr, String)>,
 ) {
+    #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
+
     let code: Vec<Expr> = grammar::FileParser::new()
         .parse((filename, contents), contents)
         .unwrap_or_else(|x| lalrpop_error::<Token<'_>>(x, contents, filename));
+
+    #[cfg(not(target_arch = "wasm32"))]
     if debug {
         println!("PARSING TIME: {:.2?}", now.elapsed());
     }
@@ -2162,6 +2177,9 @@ pub fn parse(
             .iter()
             .find(|func| func.name == "main")
             .unwrap_or_else(|| {
+                #[cfg(target_arch = "wasm32")]
+                wasm_bindgen::throw_str("--------------\n{color_red}KEEL RUNTIME ERROR:{color_reset}\nCannot find {color_bright_blue}{style_bold}main{style_reset}{color_reset} function\n--------------");
+
                 eprintln!(
                     "--------------\n{color_red}KEEL RUNTIME ERROR:{color_reset}\nCannot find {color_bright_blue}{style_bold}main{style_reset}{color_reset} function\n--------------",
                 );

@@ -7,6 +7,7 @@ use crate::parser_data::Dynamiclib;
 use crate::parser_data::FnSignature;
 use crate::parser_data::Function;
 use crate::parser_data::Variable;
+#[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
 use smol_str::SmolStr;
 use std::cell::RefCell;
@@ -946,6 +947,7 @@ pub fn check_poly(data: DataType) -> DataType {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn datatype_to_c_type(x: &DataType) -> Type {
     match x {
         DataType::Int => libffi::middle::Type::i32(),

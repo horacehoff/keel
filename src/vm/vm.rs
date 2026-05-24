@@ -1,17 +1,19 @@
-use crate::Data;
-use crate::DynamicLibFn;
-use crate::FALSE;
-use crate::Instr;
-use crate::LibFunc;
-use crate::NULL;
-use crate::alloc_array;
+use crate::array_gc::alloc_array;
+use crate::data::Data;
+use crate::data::FALSE;
+use crate::data::NULL;
 use crate::data::TRUE;
+use crate::display::format_data;
 use crate::errors::ErrType;
 use crate::errors::ErrorCtx;
 use crate::errors::throw_error;
-use crate::format_data;
+#[cfg(target_arch = "wasm32")]
+use crate::errors::wasm_error;
 use crate::fs;
+use crate::instr::Instr;
+use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
+use crate::parser_data::DynamicLibFn;
 use crate::parser_data::Pools;
 use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
@@ -23,6 +25,7 @@ pub type ArrayPool = Vec<Vec<Data>>;
 pub type StringPool = Vec<String>;
 
 /// Converts a Keel array to a C pointer for libffi
+#[cfg(not(target_arch = "wasm32"))]
 fn array_to_c_ptr(
     data: Data,
     elem_type: &DataType,
@@ -112,8 +115,10 @@ pub fn execute(
     let mut call_frames: Vec<CallFrame> = Vec::with_capacity(allocated_call_depth);
     let mut recursion_stack: Vec<Data> = Vec::with_capacity(allocated_call_depth * registers.len());
 
-    let stdout = std::io::stdout();
-    let mut handle = stdout.lock();
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut handle = std::io::stdout().lock();
+    #[cfg(target_arch = "wasm32")]
+    let mut handle = crate::wasm_output::WasmWriter;
 
     let mut free_arrays: Vec<u32> = Vec::with_capacity(array_pool.len());
     let mut free_strings: Vec<u16> = Vec::with_capacity(string_pool.len());
@@ -259,6 +264,9 @@ pub fn execute(
                     continue;
                 }
             }
+            #[cfg(target_arch = "wasm32")]
+            Instr::CallDynamicLibFunc(_, _) => unreachable!(),
+            #[cfg(not(target_arch = "wasm32"))]
             Instr::CallDynamicLibFunc(fn_id, dest) => {
                 let func = &dyn_libs[fn_id as usize];
                 let args_len = args.len();
@@ -512,7 +520,7 @@ pub fn execute(
                 }
             }
             Instr::StrNotEqJmp(o1, o2, jump_size) => {
-                if r!(o1).as_str(&string_pool) != r!(o2).as_str(&string_pool) {
+                if r!(o1).as_str(string_pool) != r!(o2).as_str(string_pool) {
                     i += jump_size as usize;
                     continue;
                 }
@@ -528,10 +536,10 @@ pub fn execute(
                 };
             }
             Instr::StrEq(o1, o2, dest) => {
-                *w!(dest) = (r!(o1).as_str(&string_pool) == r!(o2).as_str(&string_pool)).into();
+                *w!(dest) = (r!(o1).as_str(string_pool) == r!(o2).as_str(string_pool)).into();
             }
             Instr::StrNotEq(o1, o2, dest) => {
-                *w!(dest) = (r!(o1).as_str(&string_pool) != r!(o2).as_str(&string_pool)).into();
+                *w!(dest) = (r!(o1).as_str(string_pool) != r!(o2).as_str(string_pool)).into();
             }
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r!(o1) == r!(o2) {
@@ -549,7 +557,7 @@ pub fn execute(
                 }
             }
             Instr::StrEqJmp(o1, o2, jump_size) => {
-                if r!(o1).as_str(&string_pool) == r!(o2).as_str(&string_pool) {
+                if r!(o1).as_str(string_pool) == r!(o2).as_str(string_pool) {
                     i += jump_size as usize;
                     continue;
                 }
@@ -671,7 +679,6 @@ pub fn execute(
                         )
                         .unwrap();
                     }
-                    writeln!(handle, "]").unwrap();
                 }
             }
             Instr::StoreFuncArg(id) => args.push(id),
@@ -754,8 +761,7 @@ pub fn execute(
                     right[0]
                         .extend_from_slice(&left[arr_id][(idx_start as usize)..(idx_end as usize)]);
                 } else {
-                    let (left, right) =
-                        unsafe { array_pool.split_at_mut_unchecked(arr_id as usize) };
+                    let (left, right) = unsafe { array_pool.split_at_mut_unchecked(arr_id) };
                     left[new_array_id as usize]
                         .extend_from_slice(&right[0][(idx_start as usize)..(idx_end as usize)]);
                 }
@@ -1000,6 +1006,9 @@ pub fn execute(
                 }))
                 .into();
             }
+            #[cfg(target_arch = "wasm32")]
+            Instr::CallLibFunc(LibFunc::Input, _, _) => wasm_error("WASM does not support input()"),
+            #[cfg(not(target_arch = "wasm32"))]
             Instr::CallLibFunc(LibFunc::Input, tgt, dest) => {
                 let temp_tgt = r!(tgt);
                 let str_msg = temp_tgt.as_str(string_pool);
@@ -1246,6 +1255,19 @@ pub fn execute(
                     throw_error(err_ctx, &instructions[i], e.kind().into())
                 });
             }
+            #[cfg(target_arch = "wasm32")]
+            Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
+                *w!(dest) = Data::array(alloc_array(
+                    array_pool,
+                    &mut free_arrays,
+                    registers,
+                    &recursion_stack,
+                    &mut gc_array_threshold,
+                    &mut array_live,
+                    &mut array_gc_stack,
+                ))
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
                 let array_id = alloc_array(
                     array_pool,
@@ -1282,9 +1304,12 @@ pub fn execute(
             }
             Instr::Halt(code) => {
                 cold_path();
+
+                #[cfg(not(target_arch = "wasm32"))]
                 if code != 0 {
                     std::process::exit(r!(code).as_int());
                 }
+
                 break;
             }
         }

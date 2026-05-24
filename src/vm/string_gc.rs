@@ -1,4 +1,4 @@
-use crate::Data;
+use crate::data::Data;
 use crate::vm::ArrayPool;
 use crate::vm::StringPool;
 

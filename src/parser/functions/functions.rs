@@ -1,12 +1,14 @@
-use crate::Instr;
 use crate::check_args;
 use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
+#[cfg(target_arch = "wasm32")]
+use crate::errors::wasm_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::fs_lib_functions::fs_lib_functions;
-use crate::get_id;
+use crate::instr::Instr;
+use crate::parser::get_id;
 use crate::parser_data::Ctx;
 use crate::parser_data::State;
 use crate::parser_data::Variable;
@@ -74,6 +76,9 @@ pub fn handle_functions(
             single_run,
         );
     } else if namespace == ["fs"] {
+        #[cfg(target_arch = "wasm32")]
+        wasm_error("WASM does not support the file system library");
+
         fs_lib_functions(
             name,
             output,

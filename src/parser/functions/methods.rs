@@ -1,6 +1,6 @@
-use crate::Instr;
 use crate::expr::{Expr, Span};
-use crate::get_id;
+use crate::instr::Instr;
+use crate::parser::get_id;
 use crate::parser_data::Variable;
 use crate::parser_data::{Ctx, State};
 use crate::registers::free_register;

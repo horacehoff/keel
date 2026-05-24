@@ -1,6 +1,6 @@
 use crate::display::token_recognition;
 use crate::expr::Span;
-use crate::{Instr, type_system::DataType};
+use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use inline_colorization::*;
 use lalrpop_util::ParseError;
@@ -238,8 +238,8 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::InvalidObjType(expected, received) => format_args!(
                 "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}, found {color_bright_red}{style_bold}{received}{color_reset}{style_reset}"
             ).to_smolstr(),
-            ErrType::DivisionByZero => "Division by zero".into(),
-            ErrType::ModuloByZero => "Modulo by zero".into()
+            ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
+            ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into()
         }
     }
 }
@@ -255,7 +255,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
     let src = &ctx.sources[*file_idx as usize];
     let err_message: SmolStr = t.into();
     eprintln!("{color_red}KEEL ERROR{color_reset}");
-    Report::build(
+    let report = Report::build(
         ReportKind::Error,
         (src.0.as_str(), (*start as usize)..(*end as usize)),
     )
@@ -264,16 +264,41 @@ pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
             .with_message(err_message)
             .with_color(Color::Red),
     )
-    .finish()
-    .eprint((src.0.as_str(), Source::from(src.1.as_str())))
-    .unwrap();
+    .finish();
 
-    #[cfg(not(debug_assertions))]
-    std::process::exit(1);
+    #[cfg(not(target_arch = "wasm32"))]
+    report
+        .eprint((src.0.as_str(), Source::from(src.1.as_str())))
+        .unwrap();
 
-    // This is only used for tests, to allow #[should_panic] to work
+    #[cfg(target_arch = "wasm32")]
+    report
+        .write(
+            (src.0.as_str(), Source::from(src.1.as_str())),
+            crate::wasm_output::WasmWriter,
+        )
+        .unwrap();
+
     #[cfg(debug_assertions)]
     panic!();
+
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
+    std::process::exit(1);
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen::throw_str("keel_error");
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(target_arch = "wasm32")]
+pub fn wasm_error(msg: &str) -> ! {
+    writeln!(
+        crate::wasm_output::WasmWriter,
+        "{color_red}KEEL ERROR{color_reset}\n{msg}"
+    )
+    .unwrap();
+    wasm_bindgen::throw_str("keel error");
 }
 
 #[cold]
@@ -281,7 +306,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
 pub fn throw_parser_error(src: (&str, &str), Span { start, end }: &Span, t: ErrType) -> ! {
     let err_message: SmolStr = t.into();
     eprintln!("{color_red}KEEL ERROR{color_reset}");
-    Report::build(
+    let report = Report::build(
         ReportKind::Error,
         (src.0, (*start as usize)..(*end as usize)),
     )
@@ -290,16 +315,24 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: &Span, t: ErrT
             .with_message(err_message)
             .with_color(Color::Red),
     )
-    .finish()
-    .eprint((src.0, Source::from(src.1)))
-    .unwrap();
+    .finish();
 
-    #[cfg(not(debug_assertions))]
-    std::process::exit(1);
+    #[cfg(not(target_arch = "wasm32"))]
+    report.eprint((src.0, Source::from(src.1))).unwrap();
 
-    // This is only used for tests, to allow #[should_panic] to work
+    #[cfg(target_arch = "wasm32")]
+    report
+        .write((src.0, Source::from(src.1)), crate::wasm_output::WasmWriter)
+        .unwrap();
+
     #[cfg(debug_assertions)]
     panic!();
+
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
+    std::process::exit(1);
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen::throw_str("keel_error");
 }
 
 #[cold]
@@ -311,22 +344,29 @@ where
     eprintln!("{color_red}KEEL ERROR{color_reset}");
     match x {
         ParseError::InvalidToken { location } => {
-            Report::build(ReportKind::Error, (filename, location..location + 1))
+            let report = Report::build(ReportKind::Error, (filename, location..location + 1))
                 .with_message("Invalid token")
                 .with_label(
                     Label::new((filename, location..location + 1))
                         .with_message(format_args!("This token is invalid"))
                         .with_color(Color::Red),
                 )
-                .finish()
-                .print((filename, Source::from(file)))
+                .finish();
+            #[cfg(not(target_arch = "wasm32"))]
+            report.eprint((filename, Source::from(file))).unwrap();
+            #[cfg(target_arch = "wasm32")]
+            report
+                .write(
+                    (filename, Source::from(file)),
+                    crate::wasm_output::WasmWriter,
+                )
                 .unwrap();
         }
         ParseError::UnrecognizedEof {
             location,
             expected: _,
         } => {
-            Report::build(ReportKind::Error, (filename, location..location + 1))
+            let report = Report::build(ReportKind::Error, (filename, location..location + 1))
                 .with_message("Unrecognized EOF")
                 .with_label(
                     Label::new((filename, location..location + 1))
@@ -335,8 +375,15 @@ where
                         ))
                         .with_color(Color::Red),
                 )
-                .finish()
-                .print((filename, Source::from(file)))
+                .finish();
+            #[cfg(not(target_arch = "wasm32"))]
+            report.eprint((filename, Source::from(file))).unwrap();
+            #[cfg(target_arch = "wasm32")]
+            report
+                .write(
+                    (filename, Source::from(file)),
+                    crate::wasm_output::WasmWriter,
+                )
                 .unwrap();
         }
         ParseError::UnrecognizedToken { token, expected } => {
@@ -358,18 +405,29 @@ where
                 .collect::<Vec<String>>()
                 .join(" OR ");
 
-            Report::build(ReportKind::Error, (filename, begin..end))
+            let report = Report::build(ReportKind::Error, (filename, begin..end))
                 .with_message("Unrecognized token")
                 .with_label(
                     Label::new((filename, begin..end))
                         .with_message(format_args!("Expected {}", expected_tokens))
                         .with_color(Color::Red),
                 )
-                .finish()
-                .print((filename, Source::from(file)))
+                .finish();
+            #[cfg(not(target_arch = "wasm32"))]
+            report.eprint((filename, Source::from(file))).unwrap();
+            #[cfg(target_arch = "wasm32")]
+            report
+                .write(
+                    (filename, Source::from(file)),
+                    crate::wasm_output::WasmWriter,
+                )
                 .unwrap();
         }
         _ => unreachable!(),
     }
-    std::process::exit(1);
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen::throw_str("keel_error");
+    #[cfg(not(target_arch = "wasm32"))]
+    panic!();
 }

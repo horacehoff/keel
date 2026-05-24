@@ -1,10 +1,11 @@
-use crate::Data;
-use crate::Instr;
+use crate::data::Data;
 use crate::expr::Expr;
 use crate::expr::Span;
+use crate::instr::Instr;
 use crate::type_system::DataType;
 use crate::vm::ArrayPool;
 use crate::vm::StringPool;
+#[cfg(not(target_arch = "wasm32"))]
 use libloading::Library;
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -49,8 +50,11 @@ pub struct Dynamiclib {
 pub struct DynamicLibFn {
     /// [ return_type, arg_types... ]
     pub types: Box<[DataType]>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub _lib: Library,
+    #[cfg(not(target_arch = "wasm32"))]
     pub ptr: libffi::middle::CodePtr,
+    #[cfg(not(target_arch = "wasm32"))]
     pub cif: libffi::middle::Cif,
 }
 

@@ -1,5 +1,5 @@
-use crate::Instr;
 use crate::data::Data;
+use crate::instr::Instr;
 use crate::parse;
 
 macro_rules! run_and_check_registers {
@@ -1890,7 +1890,7 @@ pub fn unused_nested_partial_branch() {
             print(label(2).uppercase());
         }
         "#,
-        crate::Data::small_str("OTHER")
+        crate::data::Data::small_str("OTHER")
     );
 }
 
@@ -1988,7 +1988,7 @@ pub fn return_flow_branch_local_return_value_type_is_preserved() {
             print(word(1).uppercase());
         }
         "#,
-        crate::Data::small_str("BRANCH")
+        crate::data::Data::small_str("BRANCH")
     );
 }
 

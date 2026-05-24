@@ -1,12 +1,12 @@
-use crate::Instr;
 use crate::check_args;
 use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
 use crate::expr::Span;
-use crate::get_id;
+use crate::instr::Instr;
 use crate::parser::compile_expr;
+use crate::parser::get_id;
 use crate::parser_data::Ctx;
 use crate::parser_data::FunctionImpl;
 use crate::parser_data::State;
@@ -150,7 +150,7 @@ pub fn handle_user_function(
         );
     }
 
-    return return_register_id;
+    return_register_id
 }
 
 fn compile_function(

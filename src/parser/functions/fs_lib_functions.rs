@@ -1,13 +1,13 @@
-use crate::Instr;
-use crate::LibFunc;
 use crate::check_args;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::functions::check_arg_type;
-use crate::get_id;
+use crate::instr::Instr;
+use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
+use crate::parser::get_id;
 use crate::parser_data::Ctx;
 use crate::parser_data::State;
 use crate::parser_data::Variable;

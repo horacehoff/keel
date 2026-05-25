@@ -679,6 +679,7 @@ pub fn execute(
                         )
                         .unwrap();
                     }
+                    writeln!(handle, "]").unwrap();
                 }
             }
             Instr::StoreFuncArg(id) => args.push(id),

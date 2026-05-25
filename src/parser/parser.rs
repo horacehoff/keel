@@ -2178,7 +2178,7 @@ pub fn parse(
             .find(|func| func.name == "main")
             .unwrap_or_else(|| {
                 #[cfg(target_arch = "wasm32")]
-                wasm_bindgen::throw_str("--------------\n{color_red}KEEL RUNTIME ERROR:{color_reset}\nCannot find {color_bright_blue}{style_bold}main{style_reset}{color_reset} function\n--------------");
+                wasm_error("Cannot find main function");
 
                 eprintln!(
                     "--------------\n{color_red}KEEL RUNTIME ERROR:{color_reset}\nCannot find {color_bright_blue}{style_bold}main{style_reset}{color_reset} function\n--------------",

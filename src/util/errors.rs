@@ -293,11 +293,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
 #[inline(never)]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_error(msg: &str) -> ! {
-    writeln!(
-        crate::wasm_output::WasmWriter,
-        "{color_red}KEEL ERROR{color_reset}\n{msg}"
-    )
-    .unwrap();
+    crate::wasm_output::print(&format!("KEEL ERROR\n{msg}\n"));
     wasm_bindgen::throw_str("keel error");
 }
 

@@ -6,7 +6,7 @@ use crate::errors::dev_error;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
 use crate::parser_data::Variable;
-use smol_str::SmolStr;
+use smol_strc::SmolStr;
 
 pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()

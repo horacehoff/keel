@@ -2,7 +2,7 @@ use crate::parser_data::{Function, Pools};
 use crate::type_system::DataType;
 use crate::{data::Data, instr::Instr};
 use inline_colorization::*;
-use smol_str::{SmolStr, ToSmolStr};
+use smol_strc::{SmolStr, ToSmolStr};
 use std::hint::unreachable_unchecked;
 
 pub fn format_data(

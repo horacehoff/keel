@@ -5,7 +5,7 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use inline_colorization::*;
 use lalrpop_util::ParseError;
 use lalrpop_util::lexer::Token;
-use smol_str::{SmolStr, ToSmolStr};
+use smol_strc::{SmolStr, ToSmolStr};
 use std::fmt::Arguments;
 
 #[cold]

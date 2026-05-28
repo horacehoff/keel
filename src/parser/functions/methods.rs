@@ -6,7 +6,7 @@ use crate::parser_data::{Ctx, State};
 use crate::registers::free_register;
 use crate::std_lib_methods::std_lib_methods;
 use crate::type_system::infer_type;
-use smol_str::SmolStr;
+use smol_strc::SmolStr;
 
 pub fn handle_method_calls(
     output: &mut Vec<Instr>,

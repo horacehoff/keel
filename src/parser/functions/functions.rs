@@ -16,7 +16,7 @@ use crate::registers::free_register;
 use crate::std_lib_functions::std_lib_functions;
 use crate::type_system::DataType;
 use crate::type_system::infer_type;
-use smol_str::SmolStr;
+use smol_strc::SmolStr;
 use std::slice;
 
 pub fn check_arg_type(

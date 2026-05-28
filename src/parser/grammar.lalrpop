@@ -4,8 +4,8 @@ use crate::expr::Expr;
 use crate::errors::throw_parser_error;
 use crate::errors::ErrType;
 use crate::type_system::DataType;
-use smol_str::SmolStr;
-use smol_str::ToSmolStr;
+use smol_strc::SmolStr;
+use smol_strc::ToSmolStr;
 use crate::util::str_to_type;
 use crate::util::parse_string;
 use crate::span;
@@ -140,7 +140,6 @@ ConditionalBlock: Expr = {
                 .concat()
             ),span!(start,end))
         }
-
     }
 }
 InlineConditionalBlock: Expr = {

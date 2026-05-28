@@ -1,6 +1,6 @@
 use crate::type_system::DataType;
-use smol_str::SmolStr;
-use smol_str::ToSmolStr;
+use smol_strc::SmolStr;
+use smol_strc::ToSmolStr;
 
 /// Strips the surrounding quotes & processes escape sequences \n \t \r \\ \" \0
 pub fn parse_string(s: &str) -> SmolStr {

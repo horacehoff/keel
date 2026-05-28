@@ -9,7 +9,7 @@ use crate::parser_data::Function;
 use crate::parser_data::Variable;
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
-use smol_str::SmolStr;
+use smol_strc::SmolStr;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::slice;

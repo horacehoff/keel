@@ -19,7 +19,7 @@ use crate::type_system::DataType;
 use crate::type_system::check_poly;
 use crate::type_system::infer_type;
 use crate::type_system::track_returns;
-use smol_str::SmolStr;
+use smol_strc::SmolStr;
 use std::rc::Rc;
 
 pub fn handle_user_function(

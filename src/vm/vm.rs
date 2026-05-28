@@ -17,7 +17,7 @@ use crate::parser_data::DynamicLibFn;
 use crate::parser_data::Pools;
 use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
-use smol_str::ToSmolStr;
+use smol_strc::ToSmolStr;
 use std::hint::cold_path;
 use std::io::Write;
 

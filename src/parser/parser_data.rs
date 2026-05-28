@@ -7,7 +7,7 @@ use crate::vm::ArrayPool;
 use crate::vm::StringPool;
 #[cfg(not(target_arch = "wasm32"))]
 use libloading::Library;
-use smol_str::SmolStr;
+use smol_strc::SmolStr;
 use std::collections::HashMap;
 use std::rc::Rc;
 

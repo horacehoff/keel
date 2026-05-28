@@ -1,6 +1,6 @@
 use crate::errors::dev_error;
 use crate::type_system::DataType;
-use smol_str::SmolStr;
+use smol_strc::SmolStr;
 use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

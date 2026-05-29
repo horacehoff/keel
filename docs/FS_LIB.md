@@ -15,7 +15,7 @@ print(fs::read("hello_world.txt"));
 
 ## Exists
 
-`fs::exists(p: String) -> String`\
+`fs::exists(p: String) -> Bool`\
 Returns whether or not the file `p` exists.
 Example:
 ```
@@ -34,7 +34,7 @@ fs::write("test.txt", "Hello, World!");
 
 ## Append
 
-`fs::write(path: String, contents: String)`\
+`fs::append(path: String, contents: String)`\
 Appends `contents` to `path`. Creates `path` if it doesn't exist.
 Example:
 ```

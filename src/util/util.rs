@@ -97,7 +97,6 @@ impl std::fmt::Display for DataType {
             },
             DataType::Null => write!(f, "Null"),
             DataType::Unknown => write!(f, "Unknown"),
-            DataType::File => write!(f, "File"),
             DataType::Poly(types) => write!(
                 f,
                 "{}",

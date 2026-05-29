@@ -29,7 +29,6 @@ pub enum DataType {
     Int,
     Bool,
     String,
-    File,
     Null,
     /// Internal inference placeholder used while breaking recursive return-type cycles
     Unknown,
@@ -49,7 +48,6 @@ impl PartialEq for DataType {
             (DataType::Int, DataType::Int) => true,
             (DataType::Bool, DataType::Bool) => true,
             (DataType::String, DataType::String) => true,
-            (DataType::File, DataType::File) => true,
             (DataType::Null, DataType::Null) => true,
             (DataType::Unknown, DataType::Unknown) => true,
             (DataType::Poly(a), DataType::Poly(b)) => a == b,
@@ -68,7 +66,6 @@ impl std::hash::Hash for DataType {
             DataType::Int => 2u8.hash(state),
             DataType::Bool => 3u8.hash(state),
             DataType::String => 4u8.hash(state),
-            DataType::File => 5u8.hash(state),
             DataType::Null => 6u8.hash(state),
             DataType::Unknown => 7u8.hash(state),
             DataType::Poly(p) => {
@@ -718,13 +715,6 @@ pub fn infer_type(
             _ => unreachable!(),
         },
         Expr::FunctionCall(args, namespace, markers, _) => {
-            if namespace.len() == 1 && &namespace[0] == "io" {
-                match namespace.last().unwrap().as_str() {
-                    "open" => return DataType::File,
-                    "delete" => return DataType::Null,
-                    _ => unreachable!(),
-                }
-            }
             match namespace.last().unwrap().as_str() {
                 "print" => DataType::Null,
                 "type" => DataType::String,

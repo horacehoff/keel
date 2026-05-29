@@ -1,21 +1,19 @@
-# KEEL INSTALLER
-
 #!/bin/sh
 
-# If any command fails, stop the script immediately
+# KEEL INSTALLER
+
 set -e
 
 INSTALL_DIR="/usr/local/bin"
 
-# Only add colors if we're in a real terminal and not in a pipe
 if [ -t 1 ]; then
     RED="\033[31m" GREEN="\033[32m" BOLD="\033[1m" RESET="\033[0m"
 else
     RED="" GREEN="" BOLD="" RESET=""
 fi
 
-info()  { printf "${BOLD}[keel]${RESET} %s\n" "$*"; }
-error() { printf "${RED}[keel] error:${RESET} %s\n" "$*" >&2; exit 1; }
+print()  { printf "${BOLD}[Keel]${RESET} %s\n" "$*"; }
+error() { printf "${RED}[Keel] Error:${RESET} %s\n" "$*" >&2; exit 1; }
 
 if command -v curl >/dev/null 2>&1; then
     # Fail silently on HTTP errors & show errors even when silent & follow redirects & show progress bar
@@ -24,14 +22,13 @@ elif command -v wget >/dev/null 2>&1; then
     # Write output to stdout & show progress bar
     DOWNLOAD_CMD="wget -O- --show-progress"
 else
-    # Curl is installed by default on macOS so the error can only appear on a Linux system
     error "curl or wget is required"
 fi
 
-# "Darwin" on macOS, "Linux" on Linux.
+# Supported OS's: "Darwin" on macOS, "Linux" on Linux
 OS=$(uname -s)
 
-# "x86_64", "arm64", "aarch64".
+# Supported archs: x86_64, arm64, aarch64
 ARCH=$(uname -m)
 
 case "$OS" in
@@ -49,7 +46,7 @@ case "$OS" in
                 if grep -q avx2 /proc/cpuinfo 2>/dev/null; then
                     ARTIFACT="keel-x86_64-linux-v3"
                 else
-                    # Fallback for older CPUs
+                    # Fallback for older CPUs -> Keel will probabky be slower
                     ARTIFACT="keel-x86_64-linux-v1"
                 fi
                 ;;
@@ -58,37 +55,33 @@ case "$OS" in
         esac
         ;;
     *)
-        # Windows will eventually be supported by a Powershell script or an installer
+        # Windows will eventually be supported by an installer
         error "Unsupported OS: $OS. On Windows, download the .zip from https://github.com/horacehoff/keel/releases/latest"
         ;;
 esac
 
-URL="https://github.com/horacehoff/keel/releases/latest/download/$ARTIFACT.tar.gz"
+print "Ground Control to Major Tom..."
+print "Downloading $ARTIFACT for $OS/$ARCH"
 
-info "Detected platform: $OS/$ARCH → downloading $ARTIFACT"
-
-# Create a temp directory
 TMP=$(mktemp -d)
 
 # Clean up the temp directory once the script exits, for ANY reason
 trap 'rm -rf "$TMP"' EXIT
 
-# Extract, decompress the gzip, and write it to $TMP/$ARTIFACT
-$DOWNLOAD_CMD "$URL" | tar -xz -C "$TMP"
+$DOWNLOAD_CMD "https://github.com/horacehoff/keel/releases/latest/download/$ARTIFACT.tar.gz" | tar -xz -C "$TMP"
 
-# If the downloaded archive contains a directory, return an error
 if [ ! -f "$TMP/$ARTIFACT" ]; then
+    # The github workflow packs the binary straight into an archive so something went very wrong here
     error "Archive downloaded but binary not found inside. Please file a bug at https://github.com/horacehoff/keel/issues"
 fi
 
-if install -m755 "$TMP/$ARTIFACT" "$INSTALL_DIR/keel" 2>/dev/null; then
+if install "$TMP/$ARTIFACT" "$INSTALL_DIR/keel" 2>/dev/null; then
     :
 elif command -v sudo >/dev/null 2>&1; then
-    info "Asking for sudo to write to $INSTALL_DIR ..."
     sudo install -m755 "$TMP/$ARTIFACT" "$INSTALL_DIR/keel"
 else
     error "Cannot write to $INSTALL_DIR and sudo is not available. Re-run as root or install sudo."
 fi
 
-printf "${GREEN}[keel]${RESET} Installed $("$INSTALL_DIR/keel" --version) in $INSTALL_DIR/keel\n"
-printf "${GREEN}[keel]${RESET} Run 'keel' to get started.\n"
+printf "${GREEN}[Keel]${RESET} Installed $("$INSTALL_DIR/keel" --version) in $INSTALL_DIR/keel\n"
+printf "${GREEN}[Keel]${RESET} Run 'keel' to get started.\n"

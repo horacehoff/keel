@@ -292,7 +292,7 @@ Returns whether or not a string represents an integer.
 Example:
 ```
 "6".is_int() // Returns true
-"Hello, World!".is_int() // Returns true
+"Hello, World!".is_int() // Returns false
 "42.0".is_int() // Returns false
 "6.7".is_int() // Returns false
 ```

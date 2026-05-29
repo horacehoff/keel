@@ -8,8 +8,8 @@ Keel is a fast, statically-typed interpreted language that aims to combine Rust-
 
 Its goal is to provide a faster alternative to Python that sits closer to low-level languages while remaining accessible to a wide audience.
 
-[Website](https://horacehoff.com/keel)
-[Try Keel in your browser](https://horacehoff.com/keel/playground)
+[Website](https://keel-lang.com)
+[Try Keel in your browser](https://keel-lang.com/playground)
 
 ## Why Keel?
 

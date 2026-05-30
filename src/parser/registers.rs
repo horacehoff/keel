@@ -124,8 +124,11 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::Remove(_, _)
         | Instr::CallLibFuncVoid(_, _, _)
         | Instr::Halt(_)
-
+        | Instr::StopErrorCatch
         => None,
+
+        Instr::StartErrorCatch(_, y) if y == u16::MAX => None,
+
         Instr::Mov(_, y)
         | Instr::SetInt(y, _)
         | Instr::SetBool(y, _)
@@ -171,14 +174,16 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::GetSliceArray(_, _, y)
         | Instr::GetIndexString(_, _, y)
         | Instr::GetSliceString(_, _, y)
-        // | Instr::IoOpen(_, y, _)
         | Instr::SetElementString(y, _, _)
         | Instr::CallDynamicLibFunc(_, y)
         | Instr::IncInt(y)
         | Instr::DecInt(y)
         | Instr::IncIntTo(_, y)
         | Instr::DecIntTo(_, y)
+        | Instr::StartErrorCatch(_,y)
         | Instr::CloneArray(_, y, _) => Some(y),
+
+
 
     }
 }
@@ -370,6 +375,8 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::CallDynamicLibFunc(_, _)
         | Instr::EmptyArray(_)
         | Instr::SetInt(_, _)
+        | Instr::StartErrorCatch(_, _)
+        | Instr::StopErrorCatch
         | Instr::SetBool(_, _) => {}
     }
 }

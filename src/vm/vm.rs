@@ -14,6 +14,7 @@ use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
 use crate::parser_data::DynamicLibFn;
+use crate::parser_data::ErrorCatch;
 use crate::parser_data::Pools;
 use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
@@ -131,6 +132,8 @@ pub fn execute(
 
     let mut gc_string_threshold: u32 = 256;
     let mut gc_array_threshold: u32 = 256;
+
+    let mut error_handles: Vec<ErrorCatch> = Vec::new();
 
     macro_rules! str {
         ($e: expr) => {
@@ -1303,6 +1306,17 @@ pub fn execute(
                     }
                 }
             }
+            Instr::StartErrorCatch(jmp_size, err_reg_id) => {
+                error_handles.push(ErrorCatch {
+                    catch_loc: (i as u32) + (jmp_size as u32),
+                    error_reg: err_reg_id,
+                    call_frames_len: call_frames.len() as u32,
+                    args_len: args.len() as u32,
+                });
+            }
+            Instr::StopErrorCatch => unsafe {
+                error_handles.pop().unwrap_unchecked();
+            },
             Instr::Halt(code) => {
                 cold_path();
 

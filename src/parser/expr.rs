@@ -70,6 +70,13 @@ pub enum Expr {
     EvalBlock(Box<[Expr]>),
     LoopBlock(Box<[Expr]>),
 
+    /// TryCatchBlock(try_code, catch_errors_with_str, catch_all)
+    TryCatchBlock(
+        Box<[Expr]>,
+        Box<[(Box<Expr>, Box<[Expr]>)]>,
+        Option<(SmolStr, Box<[Expr]>)>,
+    ),
+
     Mul(Box<Expr>, Box<Expr>, Span),
     Div(Box<Expr>, Box<Expr>, Span),
     Add(Box<Expr>, Box<Expr>, Span),

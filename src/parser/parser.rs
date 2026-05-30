@@ -1645,6 +1645,9 @@ pub fn compile_expr(
                 output.extend(compiled);
                 output.push(Instr::JmpBack(code_length));
             }
+            Expr::TryCatchBlock(e, catch_with_str, catch_all) => {
+                todo!("Code generation for the try/catch syntax isn't implemented yet!")
+            }
             Expr::VarDeclare(x, y) => {
                 let var_type = infer_type(y, v, state.fns, src, state.dyn_libs);
 

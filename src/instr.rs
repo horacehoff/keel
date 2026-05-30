@@ -107,6 +107,10 @@ pub enum Instr {
     /// For single-source ops, src register 2 is unused
     CallLibFuncVoid(LibFuncVoid, u16, u16),
 
+    /// StartErrorCatch(jump_size, error_register_id)
+    StartErrorCatch(u16, u16),
+    StopErrorCatch,
+
     /// ArrayMov(new_elem_reg_id, array_id, idx)\
     /// Replaces the idx-th element in the array (with the id array_id) with the element located in new_elem_reg_id
     ArrayElemMov(u16, u16, u16),

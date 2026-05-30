@@ -470,7 +470,6 @@ print(count)
     },
 ];
 
-
 #[cold]
 #[inline(never)]
 pub fn benchmark() {
@@ -478,7 +477,6 @@ pub fn benchmark() {
     // let temp_dir = std::env::current_dir().unwrap();
     let temp_dir = std::env::temp_dir().join(format!("keel-bench-{}", std::process::id()));
     fs::create_dir_all(&temp_dir).unwrap();
-
 
     fn has_command(cmd: &str) -> bool {
         Command::new(if cfg!(target_os = "windows") {
@@ -517,9 +515,9 @@ pub fn benchmark() {
             .arg("--command-name")
             .arg(format!("{} [keel]", program.name))
             .arg(format!(
-                "{} {}",
-                format!("'{}'", &exe.to_string_lossy()),
-                format!("'{}'", &keel_path.to_string_lossy())
+                "'{}' '{}'",
+                &exe.to_string_lossy(),
+                &keel_path.to_string_lossy()
             ));
 
         // Python
@@ -529,8 +527,8 @@ pub fn benchmark() {
             .arg("--command-name")
             .arg(format!("{} [python]", program.name))
             .arg(format!(
-                "python3.15 {}",
-                format!("'{}'", &py_path.to_string_lossy())
+                "python3.15 '{}'",
+                &py_path.to_string_lossy()
             ));
 
         // LuaJIT (-joff)
@@ -540,8 +538,8 @@ pub fn benchmark() {
             .arg("--command-name")
             .arg(format!("{} [luajit]", program.name))
             .arg(format!(
-                "luajit -joff {}",
-                format!("'{}'", &lua_path.to_string_lossy())
+                "luajit -joff '{}'",
+                &lua_path.to_string_lossy()
             ));
     }
 

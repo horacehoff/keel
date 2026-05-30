@@ -251,6 +251,12 @@ LoopBlock:Expr = {
     }
 }
 
+TryCatchBlock:Expr = {
+    "try" <o1: Block<Code>> <o2: ("catch" Expression Block<Code>)*> <o3: ("catch" Var Block<Code>)?> => {
+        Expr::TryCatchBlock(o1, Box::from(o2.into_iter().map(|(_, e, c)| (Box::from(e), c)).collect::<Vec<(Box<Expr>, Box<[Expr]>)>>()), o3.map(|(_, v, c)| (v,c)))
+    }
+}
+
 Statement: Expr = {
     ConditionalBlock => <>,
     WhileBlock => <>,

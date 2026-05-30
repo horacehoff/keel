@@ -11,6 +11,14 @@ use smol_strc::SmolStr;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+#[derive(Debug, Clone, Copy)]
+pub struct ErrorCatch {
+    pub catch_loc: u32,
+    pub error_reg: u16,
+    pub call_frames_len: u32,
+    pub args_len: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: SmolStr,

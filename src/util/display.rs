@@ -86,21 +86,6 @@ pub fn get_type_name(x: &Data) -> &str {
     }
 }
 
-pub fn token_recognition(token: &str) -> &str {
-    match token {
-        "r#\"[a-zA-Z_]+\"#" => "identifier",
-        "r#\"([0-9]*[.])?[0-9]+\"#" => "number",
-        "\"true\"" => "boolean",
-        other => {
-            if other.contains("|[^") {
-                "string"
-            } else {
-                other.trim_matches('\"')
-            }
-        }
-    }
-}
-
 pub fn print_debug(instructions: &[Instr], registers: &[Data], pools: &Pools) {
     println!("{color_yellow}---- DEBUG ----{color_reset}");
     if !pools.array_pool.is_empty() {

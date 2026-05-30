@@ -510,7 +510,7 @@ print(count)</code></pre></td>
 
 ## C FFI call overhead × 10 000 000
 
-All programs call the same shared C library function in a huge loop. The C function is intentionally trivial so the measured time reflects the cost of crossing the language–C boundary, not the C computation itself.
+All programs call the same shared C library function in a huge loop. The C function is intentionally trivial so the measured time reflects the cost of crossing the language-C boundary, not the C computation itself.
 
 **`bench_ffi.c`** (compiled with `-O2`):
 ```c

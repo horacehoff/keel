@@ -2787,3 +2787,144 @@ pub fn string_slice_negative_index() {
         Data::small_str("world")
     );
 }
+
+#[test]
+pub fn try_catch_no_error() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let result = 0;
+            try {
+                result = 1;
+            } catch e {
+                result = 2;
+            }
+            print(result);
+        }
+        ",
+        1.into()
+    );
+}
+
+#[test]
+pub fn try_catch_catches_error() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = [0,1];
+            let result = 0;
+            try {
+                print(x[5]);
+                result = 1;
+            } catch e {
+                result = 2;
+            }
+            print(result);
+        }
+        ",
+        2.into()
+    );
+}
+
+#[test]
+pub fn try_catch_filtered_match() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = [0,1];
+            let result = 0;
+            try {
+                print(x[5]);
+            } catch \"index_out_of_bounds\" {
+                result = 1;
+            } catch e {
+                result = 2;
+            }
+            print(result);
+        }
+        ",
+        1.into()
+    );
+}
+
+#[test]
+pub fn try_catch_filtered_fallthrough() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let x = [0,1];
+            let result = 0;
+            try {
+                print(x[5]);
+            } catch \"division_by_zero\" {
+                result = 1;
+            } catch e {
+                result = 2;
+            }
+            print(result);
+        }
+        ",
+        2.into()
+    );
+}
+
+#[test]
+pub fn throw_is_catchable() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let result = 0;
+            try {
+                throw(\"boom\");
+                result = 1;
+            } catch \"boom\" {
+                result = 2;
+            } catch e {
+                result = 3;
+            }
+            print(result);
+        }
+        ",
+        2.into()
+    );
+}
+
+#[test]
+pub fn try_catch_division_by_zero() {
+    run_and_check_registers!(
+        "
+        function main() {
+            let z = 0;
+            let result = 0;
+            try {
+                print(10 / z);
+            } catch \"division_by_zero\" {
+                result = 1;
+            } catch e {
+                result = 2;
+            }
+            print(result);
+        }
+        ",
+        1.into()
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn try_catch_insufficient() {
+    run!(
+        "
+        function main() {
+            let z = 0;
+            let result = 0;
+            try {
+                print(10 / z);
+            } catch \"invalid_int\" {
+                result = 1;
+            }
+            print(result);
+        }
+        "
+    );
+}

@@ -526,10 +526,7 @@ pub fn benchmark() {
         hyperfine
             .arg("--command-name")
             .arg(format!("{} [python]", program.name))
-            .arg(format!(
-                "python3.15 '{}'",
-                &py_path.to_string_lossy()
-            ));
+            .arg(format!("python3.15 '{}'", &py_path.to_string_lossy()));
 
         // LuaJIT (-joff)
         let lua_path = temp_dir.join(format!("{}.lua", program.name));
@@ -537,10 +534,7 @@ pub fn benchmark() {
         hyperfine
             .arg("--command-name")
             .arg(format!("{} [luajit]", program.name))
-            .arg(format!(
-                "luajit -joff '{}'",
-                &lua_path.to_string_lossy()
-            ));
+            .arg(format!("luajit -joff '{}'", &lua_path.to_string_lossy()));
     }
 
     let output = hyperfine.output().unwrap();

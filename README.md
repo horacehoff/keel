@@ -21,19 +21,22 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 
 [Browse examples](examples/)
 
-
 ## Installation
 
 ### macOS / Linux
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/horacehoff/keel/main/install.sh | sh
 ```
 
 ### Windows
+
 Download the latest `.zip` from the [releases page](https://github.com/horacehoff/keel/releases/latest) and add the binary to your PATH.
 
 ### Build from source
+
 Make sure [Rust](https://rustup.rs/) is installed.
+
 ```sh
 git clone https://github.com/horacehoff/keel && cd keel && cargo build --release
 ./target/release/keel myfile.kl
@@ -49,8 +52,9 @@ keel -h/--help     # Print help
 ```
 
 ## Near-future roadmap
-- Higher-order functions 
-- Error handling
+
+- Structs
+- Higher-order functions
 
 ## Language tour
 
@@ -202,9 +206,36 @@ match x {
 }
 ```
 
+### Try/Catch blocks
+
+> This is heavily subject to change, particularly once structs are implemented
+
+The list of catchable errors is available [here](docs/CATCHABLE_ERRORS.md).
+
+Errors can be caught with:
+
+```rs
+try {
+    // error-prone code here
+} catch "index_out_of_bounds" { // matches a specific error
+    // code here
+} catch "slice_out_of_bounds" {
+    // code here
+} catch e { // binds the error (a string) to a variable
+    // code here
+}
+```
+
+`catch e` is the catch-all, it handles any error not matched above and binds the error to `e`. If there is one, it must come last.
+
+If no `catch` matches, the error propagates to the enclosing try, or crashes the program if there isn't one.
+
+You can throw errors with `throw("error here")`, which raises a catchable error. In this case, it would be caught by `catch "error here"`.
+
 ### Importing other `.kl` files
 
 You can import other `.kl` files with the following syntax:
+
 ```keel
 use "fibonacci_lib.kl"
 
@@ -249,6 +280,7 @@ print(fib(25));
 ```
 
 If the extension is omitted, Keel will choose the correct extension based on your OS. For example:
+
 ```keel
 // On macOS, it will try to load "my_test.dylib".
 // On Windows, it will try to load "my_test.dll".

@@ -206,6 +206,14 @@ pub fn std_lib_functions(
             };
             output.push(Instr::Halt(halt_code));
         }
+        "throw" => {
+            check_args!(args, 1, name, src, markers);
+            check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
+            let err_reg_id = get_id(
+                &args[0], v, ctx, state, output, None, false, offset, single_run,
+            );
+            output.push(Instr::ThrowError(err_reg_id));
+        }
         fn_name => {
             return Some(handle_user_function(
                 fn_name, output, v, ctx, state, args, markers, offset, single_run,

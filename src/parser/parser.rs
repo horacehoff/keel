@@ -1645,8 +1645,29 @@ pub fn compile_expr(
                 output.extend(compiled);
                 output.push(Instr::JmpBack(code_length));
             }
-            Expr::TryCatchBlock(e, catch_with_str, catch_all) => {
-                todo!("Code generation for the try/catch syntax isn't implemented yet!")
+            Expr::TryCatchBlock(e, err_var, catch_code) => {
+                output.push(Instr::StartErrorCatch(0, 0)); // patched later on
+                let err_catch_instr = output.len() - 1;
+                let main_code = compile_expr(e, v, ctx, state, offset, single_run);
+                output.extend(main_code);
+                output.push(Instr::StopErrorCatch);
+                output.push(Instr::Jmp(0)); // jumps over the catch handler if no error arises
+                let jmp_catch_instr = output.len() - 1;
+
+                let v_len = v.len();
+                let err_reg_id = alloc_register(state.registers, state.free_registers);
+                v.push(Variable {
+                    name: err_var.clone(),
+                    register_id: err_reg_id,
+                    var_type: DataType::String,
+                });
+                output[err_catch_instr] =
+                    Instr::StartErrorCatch((output.len() - err_catch_instr) as u16, err_reg_id);
+                let catch_code = compile_expr(catch_code, v, ctx, state, offset, single_run);
+                v.truncate(v_len);
+                output.extend(catch_code);
+                output[jmp_catch_instr] = Instr::Jmp((output.len() - jmp_catch_instr) as u16);
+                free_register(err_reg_id, state.free_registers, v, state.const_registers);
             }
             Expr::VarDeclare(x, y) => {
                 let var_type = infer_type(y, v, state.fns, src, state.dyn_libs);

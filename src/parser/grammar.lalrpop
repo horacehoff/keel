@@ -10,6 +10,7 @@ use crate::util::str_to_type;
 use crate::util::parse_string;
 use crate::span;
 use crate::expr::Span;
+use inline_colorization::*;
 
 grammar(src: (&str, &str));
 
@@ -252,8 +253,54 @@ LoopBlock:Expr = {
 }
 
 TryCatchBlock:Expr = {
-    "try" <o1: Block<Code>> <o2: ("catch" Expression Block<Code>)*> <o3: ("catch" Var Block<Code>)?> => {
-        Expr::TryCatchBlock(o1, Box::from(o2.into_iter().map(|(_, e, c)| (Box::from(e), c)).collect::<Vec<(Box<Expr>, Box<[Expr]>)>>()), o3.map(|(_, v, c)| (v,c)))
+    <start: @L> "try" <o1: Block<Code>> <o2: ("catch" String Block<Code>)*> <o3: ("catch" Var Block<Code>)?> <end: @R> => {
+        // It's syntactic sugar for:
+        // try {
+        // <o1>
+        // catch e { (e is the o3 Var name, or "e" by default)
+        // if e == o2[0] {o2 code}
+        // else if ....
+        // else {o3 code OR throw(e) (if o3 is None)}
+        // }
+        if o2.is_empty() {
+            if let Some((_, v, c)) = o3 {
+                Expr::TryCatchBlock(o1, v, c)
+            } else {
+                throw_parser_error(
+                    src,
+                    &span!(start, end),
+                    ErrType::Custom(
+                        format_args!(
+                            "A {color_blue}{style_bold}try{color_reset}{style_reset} block must have at least one {color_blue}{style_bold}catch{color_reset}{style_reset}"
+                        )
+                        .to_smolstr()));
+            }
+        } else {
+            let mut error_user_var:SmolStr = "e".into();
+            let else_block_code = if let Some((_, v, c)) = o3 {
+                error_user_var = v;
+                c
+            } else {
+                let usr_var = Expr::Var(error_user_var.clone(), span!(start, end));
+                Box::from([Expr::FunctionCall(Box::from([usr_var]), Box::from(["throw".into()]), span!(start, end), Box::from([]))])
+            };
+            let mut output_code:Vec<Expr> = Vec::new();
+            let mut main_condition:Expr = Expr::Int(0); // initialize it with a throwaway value
+
+            for (i,(_, e,c)) in o2.into_iter().enumerate() {
+                if i == 0 {
+                    main_condition = Expr::Eq(Box::new(Expr::String(e)), Box::new(Expr::Var(error_user_var.clone(), span!(start, end))));
+                    output_code.extend(c);
+                } else {
+                    output_code.push(Expr::ElseIfBlock(Box::new(Expr::Eq(Box::new(Expr::String(e)), Box::new(Expr::Var(error_user_var.clone(), span!(start, end))))), c));
+                }
+            }
+            output_code.push(Expr::ElseBlock(else_block_code));
+
+            Expr::TryCatchBlock(o1, error_user_var,
+                Box::new([Expr::Condition(Box::from(main_condition), Box::from(output_code), span!(start, end))])
+            )
+        }
     }
 }
 
@@ -266,6 +313,7 @@ Statement: Expr = {
     EvalBlock => <>,
     Function => <>,
     LoopBlock => <>,
+    TryCatchBlock => <>,
     <l: Line> ";" => l,
 }
 
@@ -542,7 +590,7 @@ Integer: i32 = {
     <start: @L> <n: r"[0-9]+"> <end: @R> => match n.parse::<i64>() {
         Ok(v) if v <= i32::MAX as i64 => v as i32,
         Ok(2147483648) => i32::MIN,
-        _ => throw_parser_error(src, &span!(start, end), ErrType::IntTooBig)
+        _ => throw_parser_error(src, &span!(start, end), ErrType::InvalidInt)
     }
 };
 

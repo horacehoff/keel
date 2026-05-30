@@ -137,11 +137,7 @@ macro_rules! check_args {
             throw_parser_error(
                 $src,
                 $markers,
-                ErrType::IncorrectFuncArgCount(
-                    $fn_name,
-                    $expected_args_len as u16,
-                    $args.len() as u16,
-                ),
+                ErrType::IncorrectArgCount($fn_name, $expected_args_len as u16, $args.len() as u16),
             );
         }
     };
@@ -156,7 +152,7 @@ macro_rules! check_args_range {
             throw_parser_error(
                 $src,
                 $markers,
-                ErrType::IncorrectFuncArgCountVariable(
+                ErrType::IncorrectArgCountVariable(
                     $fn_name.into(),
                     $min_args_len as u16,
                     $max_args_len as u16,

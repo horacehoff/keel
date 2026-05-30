@@ -111,6 +111,10 @@ pub enum Instr {
     StartErrorCatch(u16, u16),
     StopErrorCatch,
 
+    /// ThrowError(error_register_id)
+    /// Throws the error (a string) located in error_register_id
+    ThrowError(u16),
+
     /// ArrayMov(new_elem_reg_id, array_id, idx)\
     /// Replaces the idx-th element in the array (with the id array_id) with the element located in new_elem_reg_id
     ArrayElemMov(u16, u16, u16),

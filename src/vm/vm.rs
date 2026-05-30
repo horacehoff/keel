@@ -164,6 +164,37 @@ pub fn execute(
         };
     }
 
+    macro_rules! error_with_catch {
+        ($err:expr) => {
+            cold_path();
+            if !error_handles.is_empty() {
+                let err_handle = unsafe { error_handles.pop().unwrap_unchecked() };
+                unsafe {
+                    args.set_len(err_handle.args_len as usize);
+                    call_frames.set_len(err_handle.call_frames_len as usize);
+                }
+                *w!(err_handle.error_reg) = str!($err.kind());
+                i = err_handle.catch_loc as usize;
+                continue;
+            }
+            throw_error(err_ctx, &instructions[i], $err);
+        };
+        ($err:expr, $label:lifetime) => {
+            cold_path();
+            if !error_handles.is_empty() {
+                let err_handle = unsafe { error_handles.pop().unwrap_unchecked() };
+                unsafe {
+                    args.set_len(err_handle.args_len as usize);
+                    call_frames.set_len(err_handle.call_frames_len as usize);
+                }
+                *w!(err_handle.error_reg) = str!($err.kind());
+                i = err_handle.catch_loc as usize;
+                continue $label;
+            }
+            throw_error(err_ctx, &instructions[i], $err);
+        };
+    }
+
     macro_rules! r {
         ($i:expr) => {
             unsafe { *registers.get_unchecked($i as usize) }
@@ -175,7 +206,7 @@ pub fn execute(
         };
     }
 
-    loop {
+    'main: loop {
         match unsafe { *instructions.get_unchecked(i) } {
             Instr::Jmp(size) => {
                 i += size as usize;
@@ -276,27 +307,20 @@ pub fn execute(
                 dyn_lib_args.clear();
                 keep_alive.clear();
 
-                for (idx, &register_id) in args.iter().enumerate() {
-                    let data = r!(register_id);
+                for idx in 0..args.len() {
+                    let data = r!(args[idx]);
                     dyn_lib_args.push({
                         match func.get_nth_arg_type(idx) {
                             DataType::Int => data.as_int() as u64,
                             DataType::Float => data.as_float().to_bits(),
                             DataType::String => {
-                                let bytes = std::ffi::CString::new(data.as_str(string_pool))
-                                    .unwrap_or_else(|_| {
-                                        cold_path();
-                                        throw_error(
-                                            err_ctx,
-                                            &instructions[i],
-                                            ErrType::Custom(
-                                                "String passed to C contains an interior null byte"
-                                                    .into(),
-                                            ),
-                                        )
-                                    })
-                                    .into_bytes_with_nul() // builds the null-terminated string
-                                    .into_boxed_slice();
+                                let bytes = if let Ok(b) =
+                                    std::ffi::CString::new(data.as_str(string_pool))
+                                {
+                                    b.into_bytes_with_nul().into_boxed_slice()
+                                } else {
+                                    error_with_catch!(ErrType::NullByteInString, 'main);
+                                };
                                 let ptr = bytes.as_ptr() as u64;
                                 keep_alive.push(bytes);
                                 ptr
@@ -308,16 +332,7 @@ pub fn execute(
                                 string_pool,
                                 &mut keep_alive,
                             ),
-                            t => {
-                                cold_path();
-                                throw_error(
-                                    err_ctx,
-                                    &instructions[i],
-                                    ErrType::Custom(
-                                        format_args!("Invalid argument type: {t:?}").to_smolstr(),
-                                    ),
-                                )
-                            }
+                            _ => unreachable!(),
                         }
                     });
                 }
@@ -348,24 +363,10 @@ pub fn execute(
                         }
                         DataType::Null => NULL,
                         DataType::Array(_) => {
-                            cold_path();
-                            throw_error(
-                                err_ctx,
-                                &instructions[i],
-                                ErrType::Custom(
-                                    "Array return types are not supported: C does not convey the length of a returned array".into(),
-                                ),
-                            )
+                            error_with_catch!(ErrType::CArrayReturnTypeNotSupported);
                         }
                         t => {
-                            cold_path();
-                            throw_error(
-                                err_ctx,
-                                &instructions[i],
-                                ErrType::Custom(
-                                    format_args!("Invalid return type: {t:?}").to_smolstr(),
-                                ),
-                            )
+                            error_with_catch!(ErrType::InvalidReturnType(t));
                         }
                     }
                 };
@@ -455,12 +456,7 @@ pub fn execute(
             Instr::DivInt(o1, o2, dest) => {
                 let b = r!(o2).as_int();
                 if b == 0 {
-                    cold_path();
-                    throw_error(
-                        err_ctx,
-                        &Instr::DivInt(o1, o2, dest),
-                        ErrType::DivisionByZero,
-                    );
+                    error_with_catch!(ErrType::DivisionByZero);
                 }
                 *w!(dest) = (r!(o1).as_int() / b).into();
             }
@@ -476,8 +472,7 @@ pub fn execute(
             Instr::ModInt(o1, o2, dest) => {
                 let b = r!(o2).as_int();
                 if b == 0 {
-                    cold_path();
-                    throw_error(err_ctx, &Instr::ModInt(o1, o2, dest), ErrType::ModuloByZero);
+                    error_with_catch!(ErrType::ModuloByZero);
                 }
                 *w!(dest) = (r!(o1).as_int() % b).into();
             }
@@ -694,12 +689,7 @@ pub fn execute(
                 let array = unsafe { array_pool.get_unchecked_mut(r!(array_reg_id).as_array()) };
                 let index = r!(idx).as_int();
                 if (index as usize) >= array.len() || index < 0 {
-                    cold_path();
-                    throw_error(
-                        err_ctx,
-                        &instructions[i],
-                        ErrType::IndexOutOfBounds(array.len(), index),
-                    );
+                    error_with_catch!(ErrType::IndexOutOfBounds(array.len(), index));
                 }
                 array[index as usize] = r!(new_elem_reg_id);
             }
@@ -708,12 +698,7 @@ pub fn execute(
                 let temp_str_reg_id = r!(string_reg_id);
                 let source_string = temp_str_reg_id.as_str(string_pool);
                 if (index as usize) >= source_string.len() || index < 0 {
-                    cold_path();
-                    throw_error(
-                        err_ctx,
-                        &instructions[i],
-                        ErrType::IndexOutOfBounds(source_string.len(), index),
-                    );
+                    error_with_catch!(ErrType::IndexOutOfBounds(source_string.len(), index));
                 }
                 let mut temp = source_string.to_string();
                 temp.remove(index as usize);
@@ -725,12 +710,7 @@ pub fn execute(
                 let arr_id = r!(array_reg_id).as_array();
                 let array = unsafe { array_pool.get_unchecked(arr_id) };
                 if (idx as usize) >= array.len() || idx < 0 {
-                    cold_path();
-                    throw_error(
-                        err_ctx,
-                        &instructions[i],
-                        ErrType::IndexOutOfBounds(array.len(), idx),
-                    );
+                    error_with_catch!(ErrType::IndexOutOfBounds(array.len(), idx));
                 }
                 *w!(dest) = unsafe { *array.get_unchecked(idx as usize) };
             }
@@ -743,12 +723,7 @@ pub fn execute(
                     || (idx_start as usize) >= array.len()
                     || idx_start > idx_end
                 {
-                    cold_path();
-                    throw_error(
-                        err_ctx,
-                        &instructions[i],
-                        ErrType::RangeOutOfBounds(array.len(), idx_start, idx_end),
-                    );
+                    error_with_catch!(ErrType::SliceOutOfBounds(array.len(), idx_start, idx_end));
                 }
                 let new_array_id = alloc_array(
                     array_pool,
@@ -777,12 +752,7 @@ pub fn execute(
                 let tgt_data = r!(tgt);
                 let bytes = tgt_data.as_str(string_pool).as_bytes();
                 if (idx as usize) >= bytes.len() {
-                    cold_path();
-                    throw_error(
-                        err_ctx,
-                        &instructions[i],
-                        ErrType::IndexOutOfBounds(bytes.len(), idx),
-                    );
+                    error_with_catch!(ErrType::IndexOutOfBounds(bytes.len(), idx));
                 }
                 *w!(dest) = str!(unsafe {
                     std::str::from_utf8_unchecked(std::slice::from_ref(
@@ -798,12 +768,7 @@ pub fn execute(
                     || (idx_start as usize) >= s.len()
                     || idx_start > idx_end
                 {
-                    cold_path();
-                    throw_error(
-                        err_ctx,
-                        &instructions[i],
-                        ErrType::RangeOutOfBounds(s.len(), idx_start, idx_end),
-                    );
+                    error_with_catch!(ErrType::SliceOutOfBounds(s.len(), idx_start, idx_end));
                 }
                 *w!(dest_reg_id) = str!(&s[(idx_start as usize)..(idx_end as usize)])
             }
@@ -816,12 +781,7 @@ pub fn execute(
                 let arr = unsafe { array_pool.get_unchecked_mut(r!(array).as_array()) };
                 let index = r!(idx).as_int();
                 if (index as usize) >= arr.len() || index < 0 {
-                    cold_path();
-                    throw_error(
-                        err_ctx,
-                        &instructions[i],
-                        ErrType::IndexOutOfBounds(arr.len(), index),
-                    );
+                    error_with_catch!(ErrType::IndexOutOfBounds(arr.len(), index));
                 }
                 arr.remove(index as usize);
             }
@@ -967,11 +927,11 @@ pub fn execute(
                     *w!(dest) = (reg.as_int() as f64).into();
                 } else if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    *w!(dest) = (str.parse::<f64>().unwrap_or_else(|_| {
-                        cold_path();
-                        throw_error(err_ctx, &instructions[i], ErrType::FloatParsingError);
-                    }))
-                    .into();
+                    *w!(dest) = if let Ok(f) = str.parse::<f64>() {
+                        f.into()
+                    } else {
+                        error_with_catch!(ErrType::InvalidFloat);
+                    }
                 }
             }
             Instr::CallLibFunc(LibFunc::Int, tgt, dest) => {
@@ -980,11 +940,11 @@ pub fn execute(
                     *w!(dest) = (reg.as_float() as i32).into();
                 } else if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    *w!(dest) = (str.parse::<i32>().unwrap_or_else(|e| {
-                        cold_path();
-                        throw_error(err_ctx, &instructions[i], (*e.kind()).into());
-                    }))
-                    .into();
+                    *w!(dest) = if let Ok(i) = str.parse::<i32>() {
+                        i.into()
+                    } else {
+                        error_with_catch!(ErrType::InvalidInt);
+                    }
                 }
             }
             Instr::CallLibFunc(LibFunc::Str, tgt, dest) => {
@@ -1004,11 +964,11 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Bool, tgt, dest) => {
                 let temp_tgt = r!(tgt);
                 let str = temp_tgt.as_str(string_pool);
-                *w!(dest) = (str.parse::<bool>().unwrap_or_else(|_| {
-                    cold_path();
-                    throw_error(err_ctx, &instructions[i], ErrType::BoolParsingError);
-                }))
-                .into();
+                *w!(dest) = if let Ok(b) = str.parse::<bool>() {
+                    b.into()
+                } else {
+                    error_with_catch!(ErrType::InvalidBool);
+                }
             }
             #[cfg(target_arch = "wasm32")]
             Instr::CallLibFunc(LibFunc::Input, _, _) => wasm_error("WASM does not support input()"),
@@ -1204,60 +1164,70 @@ pub fn execute(
             // FILE SYSTEM FUNCTIONS
             // -----
             Instr::CallLibFunc(LibFunc::FsRead, path, dest_reg_id) => {
-                *w!(dest_reg_id) = string!(
-                    fs::read_to_string(r!(path).as_str(string_pool)).unwrap_or_else(|e| {
-                        cold_path();
-                        throw_error(err_ctx, &instructions[i], e.kind().into())
-                    })
-                );
+                *w!(dest_reg_id) =
+                    string!(match fs::read_to_string(r!(path).as_str(string_pool)) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            error_with_catch!(ErrType::from(e.kind()));
+                        }
+                    });
             }
             Instr::CallLibFunc(LibFunc::FsExists, path, dest_reg_id) => {
-                *w!(dest_reg_id) = fs::exists(r!(path).as_str(string_pool))
-                    .unwrap_or_else(|e| {
-                        cold_path();
-                        throw_error(err_ctx, &instructions[i], e.kind().into())
-                    })
-                    .into()
+                *w!(dest_reg_id) = match fs::exists(r!(path).as_str(string_pool)) {
+                    Ok(b) => b.into(),
+                    Err(e) => {
+                        error_with_catch!(ErrType::from(e.kind()));
+                    }
+                }
             }
             // Overwrites a file, will create it if it doesn't exist
             Instr::CallLibFuncVoid(LibFuncVoid::FsWrite, path, contents) => {
-                fs::write(
+                if let Err(e) = fs::write(
                     r!(path).as_str(string_pool),
                     r!(contents).as_str(string_pool),
-                )
-                .unwrap_or_else(|e| {
-                    cold_path();
-                    throw_error(err_ctx, &instructions[i], e.kind().into())
-                });
+                ) {
+                    error_with_catch!(ErrType::from(e.kind()));
+                }
             }
             // Appends to a file, will create if it doesn't exist
             Instr::CallLibFuncVoid(LibFuncVoid::FsAppend, path, contents) => {
-                fs::OpenOptions::new()
+                match fs::OpenOptions::new()
                     .append(true)
                     .open(r!(path).as_str(string_pool))
-                    .unwrap_or_else(|e| {
-                        cold_path();
-                        throw_error(err_ctx, &instructions[i], e.kind().into())
-                    })
-                    .write_all(r!(contents).as_str(string_pool).as_bytes())
-                    .unwrap_or_else(|e| {
-                        cold_path();
-                        throw_error(err_ctx, &instructions[i], e.kind().into())
-                    });
+                {
+                    Ok(mut f) => {
+                        if let Err(e) = f.write_all(r!(contents).as_str(string_pool).as_bytes()) {
+                            error_with_catch!(ErrType::from(e.kind()));
+                        }
+                    }
+                    Err(e) => {
+                        error_with_catch!(ErrType::from(e.kind()));
+                    }
+                };
+                // fs::OpenOptions::new()
+                //     .append(true)
+                //     .open(r!(path).as_str(string_pool))
+                //     .unwrap_or_else(|e| {
+                //         cold_path();
+                //         throw_error(err_ctx, &instructions[i], e.kind().into())
+                //     })
+                //     .write_all(r!(contents).as_str(string_pool).as_bytes())
+                //     .unwrap_or_else(|e| {
+                //         cold_path();
+                //         throw_error(err_ctx, &instructions[i], e.kind().into())
+                //     });
             }
             // Deletes the file located at `path`, throwing an error if it doesn't exist.
             Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, _) => {
-                fs::remove_file(r!(path).as_str(string_pool)).unwrap_or_else(|e| {
-                    cold_path();
-                    throw_error(err_ctx, &instructions[i], e.kind().into())
-                });
+                if let Err(e) = fs::remove_file(r!(path).as_str(string_pool)) {
+                    error_with_catch!(ErrType::from(e.kind()));
+                }
             }
             // Deletes the empty directory located at `path`
             Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, _) => {
-                fs::remove_dir(r!(path).as_str(string_pool)).unwrap_or_else(|e| {
-                    cold_path();
-                    throw_error(err_ctx, &instructions[i], e.kind().into())
-                });
+                if let Err(e) = fs::remove_dir(r!(path).as_str(string_pool)) {
+                    error_with_catch!(ErrType::from(e.kind()));
+                }
             }
             #[cfg(target_arch = "wasm32")]
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
@@ -1317,6 +1287,11 @@ pub fn execute(
             Instr::StopErrorCatch => unsafe {
                 error_handles.pop().unwrap_unchecked();
             },
+            Instr::ThrowError(error_reg_id) => {
+                error_with_catch!(ErrType::Custom(
+                    r!(error_reg_id).as_str(string_pool).to_smolstr()
+                ));
+            }
             Instr::Halt(code) => {
                 cold_path();
 

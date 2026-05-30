@@ -1,4 +1,3 @@
-use crate::display::token_recognition;
 use crate::expr::Span;
 use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
@@ -25,20 +24,20 @@ pub struct ErrorCtx {
 impl From<std::io::ErrorKind> for ErrType<'_> {
     fn from(value: std::io::ErrorKind) -> Self {
         match value {
-            std::io::ErrorKind::AlreadyExists => ErrType::IOAlreadyExists,
-            std::io::ErrorKind::Deadlock => ErrType::IODeadlock,
-            std::io::ErrorKind::FileTooLarge => ErrType::IOFileTooLarge,
-            std::io::ErrorKind::Interrupted => ErrType::IOInterrupted,
-            std::io::ErrorKind::InvalidData => ErrType::IOInvalidData,
-            std::io::ErrorKind::InvalidFilename => ErrType::IOInvalidFilename,
-            std::io::ErrorKind::IsADirectory => ErrType::IOIsADirectory,
-            std::io::ErrorKind::NotADirectory => ErrType::IONotADirectory,
-            std::io::ErrorKind::NotFound => ErrType::IONotFound,
-            std::io::ErrorKind::PermissionDenied => ErrType::IOPermissionDenied,
-            std::io::ErrorKind::OutOfMemory => ErrType::IOOutOfMemory,
-            std::io::ErrorKind::ReadOnlyFilesystem => ErrType::IOReadOnlyFilesystem,
-            std::io::ErrorKind::StorageFull => ErrType::IOStorageFull,
-            std::io::ErrorKind::TimedOut => ErrType::IOTimedOut,
+            std::io::ErrorKind::AlreadyExists => ErrType::FsAlreadyExists,
+            std::io::ErrorKind::Deadlock => ErrType::FsDeadlock,
+            std::io::ErrorKind::FileTooLarge => ErrType::FsFileTooLarge,
+            std::io::ErrorKind::Interrupted => ErrType::FsInterrupted,
+            std::io::ErrorKind::InvalidData => ErrType::FsInvalidData,
+            std::io::ErrorKind::InvalidFilename => ErrType::FsInvalidFilename,
+            std::io::ErrorKind::IsADirectory => ErrType::FsIsADirectory,
+            std::io::ErrorKind::NotADirectory => ErrType::FsNotADirectory,
+            std::io::ErrorKind::NotFound => ErrType::FsNotFound,
+            std::io::ErrorKind::PermissionDenied => ErrType::FsPermissionDenied,
+            std::io::ErrorKind::OutOfMemory => ErrType::FsOutOfMemory,
+            std::io::ErrorKind::ReadOnlyFilesystem => ErrType::FsReadOnlyFilesystem,
+            std::io::ErrorKind::StorageFull => ErrType::FsStorageFull,
+            std::io::ErrorKind::TimedOut => ErrType::FsTimedOut,
             other => ErrType::Custom(other.to_smolstr()),
         }
     }
@@ -47,10 +46,10 @@ impl From<std::io::ErrorKind> for ErrType<'_> {
 impl From<std::num::IntErrorKind> for ErrType<'_> {
     fn from(value: std::num::IntErrorKind) -> Self {
         match value {
-            std::num::IntErrorKind::Empty => ErrType::IntEmpty,
-            std::num::IntErrorKind::InvalidDigit => ErrType::IntInvalidDigit,
-            std::num::IntErrorKind::NegOverflow => ErrType::IntNegOverflow,
-            std::num::IntErrorKind::PosOverflow => ErrType::IntPosOverflow,
+            std::num::IntErrorKind::Empty
+            | std::num::IntErrorKind::InvalidDigit
+            | std::num::IntErrorKind::NegOverflow
+            | std::num::IntErrorKind::PosOverflow => ErrType::InvalidInt,
             std::num::IntErrorKind::Zero => dev_error(
                 file!(),
                 "impl From<std::num::IntErrorKind> for ErrType<'_>",
@@ -65,44 +64,39 @@ impl From<std::num::IntErrorKind> for ErrType<'_> {
 pub enum ErrType<'a> {
     Custom(SmolStr),
 
-    // IO ERRORS
-    IOAlreadyExists,
-    IODeadlock,
-    IOFileTooLarge,
-    IOInterrupted,
-    IOInvalidData,
-    IOInvalidFilename,
+    // FS ERRORS
+    FsAlreadyExists,
+    FsDeadlock,
+    FsFileTooLarge,
+    FsInterrupted,
+    FsInvalidData,
+    FsInvalidFilename,
     /// When a file was expected...
-    IOIsADirectory,
+    FsIsADirectory,
     /// When a directory was expected...
-    IONotADirectory,
-    IONotFound,
-    IOPermissionDenied,
-    IOOutOfMemory,
-    IOReadOnlyFilesystem,
-    IOStorageFull,
-    IOTimedOut,
+    FsNotADirectory,
+    FsNotFound,
+    FsPermissionDenied,
+    FsOutOfMemory,
+    FsReadOnlyFilesystem,
+    FsStorageFull,
+    FsTimedOut,
 
-    // INT PARSING ERRORS
-    IntEmpty,
-    IntInvalidDigit,
-    IntNegOverflow,
-    IntPosOverflow,
-
-    // FLOAT PARSING ERRORS
-    FloatParsingError,
+    // NUMBER PARSING ERRORS
+    InvalidInt,
+    InvalidFloat,
 
     // BOOL PARSING ERRORS
-    BoolParsingError,
+    InvalidBool,
 
     /// IndexOutOfBounds(length, index)
     IndexOutOfBounds(usize, i32),
 
-    /// RangeOutOfBounds(length, idx_start, idx_end)
-    RangeOutOfBounds(usize, i32, i32),
+    /// SliceOutOfBounds(length, idx_start, idx_end)
+    SliceOutOfBounds(usize, i32, i32),
 
-    InvalidFloat,
-    IntTooBig,
+    NullByteInString,
+    CArrayReturnTypeNotSupported,
 
     // PARSER ERRORS
     UnknownVariable(&'a str),
@@ -115,9 +109,9 @@ pub enum ErrType<'a> {
     /// CannotPushTypeToArray(elem_type, array_type)
     CannotPushTypeToArray(&'a DataType, &'a DataType),
     CannotInferType(&'a str),
-    /// IncorrectFuncArgCount(fn_name, expected, received)
-    IncorrectFuncArgCount(&'a str, u16, u16),
-    IncorrectFuncArgCountVariable(&'a str, u16, u16, u16),
+    /// IncorrectArgCount(fn_name, expected, received)
+    IncorrectArgCount(&'a str, u16, u16),
+    IncorrectArgCountVariable(&'a str, u16, u16, u16),
     /// InvalidType(expected_type, received_type)
     InvalidType(DataType, &'a DataType),
     /// OpError(l, r, op)
@@ -136,6 +130,7 @@ pub enum ErrType<'a> {
     InvalidArgType(&'a [DataType], DataType),
     /// InvalidObjType(expected_description, received_type)
     InvalidObjType(&'a str, &'a DataType),
+    InvalidReturnType(&'a DataType),
     DivisionByZero,
     ModuloByZero,
 }
@@ -145,42 +140,37 @@ impl From<ErrType<'_>> for SmolStr {
         match value {
             ErrType::Custom(m) => m,
             ErrType::CannotReadImportedFile(filename) => format_args!("Cannot read imported file {color_bright_red}{style_bold}{filename}{color_reset}{style_reset}").to_smolstr(),
-            ErrType::IntTooBig => "The integer is too big".into(),
             ErrType::InvalidFloat => "Invalid float".into(),
             ErrType::IndexOutOfBounds(length, index) => format_args!("Tried to get index {color_bright_red}{style_bold}{index}{color_reset}{style_reset} but the length is {color_bright_blue}{style_bold}{length}{color_reset}{style_reset}").to_smolstr(),
-            ErrType::RangeOutOfBounds(length, idx_start, idx_end) => format_args!("Invalid range {color_bright_red}{style_bold}{idx_start}{color_reset}{style_reset}..{color_bright_red}{style_bold}{idx_end}{color_reset}{style_reset} for collection with length {color_bright_blue}{style_bold}{length}{color_reset}{style_reset}").to_smolstr(),
-            ErrType::BoolParsingError => "The string could not be parsed into a boolean".into(),
-            ErrType::FloatParsingError => "The string could not be parsed into a float".into(),
-            ErrType::IntEmpty => "The parsing string is empty".into(),
-            ErrType::IntInvalidDigit => "The parsing string contains an invalid digit".into(),
-            ErrType::IntPosOverflow => "The integer is too large".into(),
-            ErrType::IntNegOverflow => "The integer is too small".into(),
-            ErrType::IOAlreadyExists => "The entity (directory, file, ...) already exists".into(),
-            ErrType::IODeadlock => "This operation would result in a deadlock".into(),
-            ErrType::IOFileTooLarge => "The file is too large".into(),
-            ErrType::IOInterrupted => "This operation was interrupted".into(),
-            ErrType::IOInvalidData => "Malformed or invalid data were encountered".into(),
-            ErrType::IOInvalidFilename => "The filename is invalid or too long".into(),
-            ErrType::IOIsADirectory => {
+            ErrType::SliceOutOfBounds(length, idx_start, idx_end) => format_args!("Invalid range {color_bright_red}{style_bold}{idx_start}{color_reset}{style_reset}..{color_bright_red}{style_bold}{idx_end}{color_reset}{style_reset} for collection with length {color_bright_blue}{style_bold}{length}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::InvalidBool => "The string could not be parsed into a boolean".into(),
+            ErrType::InvalidInt => "Invalid integer".into(),
+            ErrType::FsAlreadyExists => "The entity (directory, file, ...) already exists".into(),
+            ErrType::FsDeadlock => "This operation would result in a deadlock".into(),
+            ErrType::FsFileTooLarge => "The file is too large".into(),
+            ErrType::FsInterrupted => "This operation was interrupted".into(),
+            ErrType::FsInvalidData => "Malformed or invalid data were encountered".into(),
+            ErrType::FsInvalidFilename => "The filename is invalid or too long".into(),
+            ErrType::FsIsADirectory => {
                 "This operation encountered a directory, when a non-directory was expected".into()
             }
-            ErrType::IONotADirectory => {
+            ErrType::FsNotADirectory => {
                 "This operation encountered a non-directory, when a directory was expected".into()
             }
-            ErrType::IONotFound => "The entity (directory, file, ...) was not found".into(),
-            ErrType::IOPermissionDenied => {
+            ErrType::FsNotFound => "The entity (directory, file, ...) was not found".into(),
+            ErrType::FsPermissionDenied => {
                 "This operation lacked the necessary privileges to complete".into()
             }
-            ErrType::IOOutOfMemory => {
+            ErrType::FsOutOfMemory => {
                 "This operation could not be completed, because it failed to allocate enough memory"
                     .into()
             }
-            ErrType::IOReadOnlyFilesystem => {
+            ErrType::FsReadOnlyFilesystem => {
                 "The filesystem or storage medium is read-only, but a write operation was attempted"
                     .into()
             }
-            ErrType::IOStorageFull => "Storage is full".into(),
-            ErrType::IOTimedOut => "This operation timed out".into(),
+            ErrType::FsStorageFull => "Storage is full".into(),
+            ErrType::FsTimedOut => "This operation timed out".into(),
             ErrType::UnknownFunction(f) => format_args!(
                 "Unknown function {color_bright_blue}{style_bold}{f}{color_reset}{style_reset}"
             )
@@ -207,8 +197,8 @@ impl From<ErrType<'_>> for SmolStr {
                 "Cannot infer the type of {color_bright_blue}{style_bold}{t}{color_reset}{style_reset}"
             )
             .to_smolstr(),
-            ErrType::IncorrectFuncArgCount(fn_name, expected, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects {expected} argument{} but received {received}", if expected != 1 {"s"} else {""} ).to_smolstr(),
-            ErrType::IncorrectFuncArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
+            ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects {expected} argument{} but received {received}", if expected != 1 {"s"} else {""} ).to_smolstr(),
+            ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
             ErrType::InvalidType(expected, received) => format_args!("Expected type {expected}, found {color_bright_blue}{style_bold}{received}{color_reset}{style_reset}").to_smolstr(),
             ErrType::OpError(l, r, op) => format_args!(
                 "Cannot perform operation {color_bright_blue}{style_bold}{l} {color_red}{op}{color_bright_blue} {r}{color_reset}{style_reset}").to_smolstr(),
@@ -239,7 +229,63 @@ impl From<ErrType<'_>> for SmolStr {
                 "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}, found {color_bright_red}{style_bold}{received}{color_reset}{style_reset}"
             ).to_smolstr(),
             ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
-            ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into()
+            ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
+            ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
+            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {color_bright_red}{style_bold}{t}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::CArrayReturnTypeNotSupported => "Array return types are not supported: C does not convey the length of a returned array".into(),
+        }
+    }
+}
+
+impl ErrType<'_> {
+    pub fn kind(&self) -> &str {
+        match self {
+            ErrType::Custom(e) => e.as_str(),
+            ErrType::FsAlreadyExists => "fs_already_exists",
+            ErrType::FsDeadlock => "fs_deadlock",
+            ErrType::FsFileTooLarge => "fs_file_too_large",
+            ErrType::FsInterrupted => "fs_interrupted",
+            ErrType::FsInvalidData => "fs_invalid_data",
+            ErrType::FsInvalidFilename => "fs_invalid_filename",
+            ErrType::FsIsADirectory => "fs_is_a_directory",
+            ErrType::FsNotADirectory => "fs_not_a_directory",
+            ErrType::FsNotFound => "fs_not_found",
+            ErrType::FsPermissionDenied => "fs_permission_denied",
+            ErrType::FsOutOfMemory => "fs_out_of_memory",
+            ErrType::FsReadOnlyFilesystem => "fs_read_only_filesystem",
+            ErrType::FsStorageFull => "fs_storage_full",
+            ErrType::FsTimedOut => "fs_timed_out",
+            ErrType::InvalidInt => "invalid_int",
+            ErrType::InvalidFloat => "invalid_float",
+            ErrType::InvalidBool => "invalid_bool",
+            ErrType::IndexOutOfBounds(_, _) => "index_out_of_bounds",
+            ErrType::SliceOutOfBounds(_, _, _) => "slice_out_of_bounds",
+            ErrType::UnknownVariable(_) => "unknown_variable",
+            ErrType::UnknownFunction(_) => "unknown_function",
+            ErrType::UnknownNamespace(_) => "unknown_namespace",
+            ErrType::ArrayWithDiffType => "array_with_diff_type",
+            ErrType::NotIndexable(_) => "not_indexable",
+            ErrType::InvalidIndexType(_) => "invalid_index_type",
+            ErrType::CannotPushTypeToArray(_, _) => "cannot_push_type_to_array",
+            ErrType::CannotInferType(_) => "cannot_infer_type",
+            ErrType::IncorrectArgCount(_, _, _) => "incorrect_arg_count",
+            ErrType::IncorrectArgCountVariable(_, _, _, _) => "incorrect_arg_count",
+            ErrType::InvalidType(_, _) => "invalid_type",
+            ErrType::OpError(_, _, _) => "op_error",
+            ErrType::InvalidOp(_, _) => "invalid_op",
+            ErrType::InvalidConditionalExpression => "invalid_conditional_expression",
+            ErrType::FunctionAlreadyExists(_) => "function_already_exists",
+            ErrType::CannotReadImportedFile(_) => "cannot_read_imported_file",
+            ErrType::CircularImport(_) => "circular_import",
+            ErrType::DuplicateFunctionInImport(_, _) => "duplicate_function_in_import",
+            ErrType::IsNotAnIterator(_) => "is_not_an_iterator",
+            ErrType::InvalidArgType(_, _) => "invalid_arg_type",
+            ErrType::InvalidObjType(_, _) => "invalid_obj_type",
+            ErrType::DivisionByZero => "division_by_zero",
+            ErrType::ModuloByZero => "modulo_by_zero",
+            ErrType::NullByteInString => "null_byte_in_string",
+            ErrType::CArrayReturnTypeNotSupported => "c_array_return_type_not_supported",
+            ErrType::InvalidReturnType(_) => "invalid_return_type",
         }
     }
 }
@@ -386,20 +432,46 @@ where
             let begin = token.0;
             let end = token.2;
 
-            let expected_tokens = expected
+            let expected = expected
                 .into_iter()
-                .filter_map(|x| {
-                    if x == "\"false\"" {
-                        None
-                    } else {
-                        Some(format!(
-                            "{color_bright_blue}{style_bold}{}{style_reset}{color_reset}",
-                            token_recognition(&x)
-                        ))
+                .map(|x| {
+                    {
+                        if x == "\"false\"" || x == "\"true\"" {
+                            "Boolean"
+                        } else if x == "r#\"[a-zA-Z_][a-zA-Z0-9_]*\"#" {
+                            "Variable"
+                        } else if x.contains("[^") {
+                            "String"
+                        } else if x == "r#\"[0-9]*[.][0-9]+\"#" {
+                            "Float"
+                        } else if x == "r#\"[0-9]+\"#" {
+                            "Integer"
+                        } else {
+                            x.trim_matches('\"')
+                        }
                     }
+                    .to_smolstr()
                 })
-                .collect::<Vec<String>>()
-                .join(" OR ");
+                .collect::<Vec<SmolStr>>();
+
+            const STATEMENT_KEYWORDS: [&str; 7] =
+                ["let", "if", "while", "for", "loop", "match", "return"];
+            let is_statement_set = STATEMENT_KEYWORDS
+                .iter()
+                .all(|k| expected.iter().any(|n| n == k));
+
+            let expected_tokens = if is_statement_set {
+                format_args!(
+                    "{color_bright_blue}{style_bold}Statement{style_reset}{color_reset} OR {color_bright_blue}{style_bold}{{{style_reset}{color_reset} OR {color_bright_blue}{style_bold}}}{style_reset}{color_reset}"
+                )
+            } else {
+                format_args!(
+                    "{color_bright_blue}{style_bold}{}{color_reset}{style_reset}",
+                    expected.join(&format!(
+                        "{color_reset}{style_reset} OR {color_bright_blue}{style_bold}"
+                    ))
+                )
+            };
 
             let report = Report::build(ReportKind::Error, (filename, begin..end))
                 .with_message("Unrecognized token")

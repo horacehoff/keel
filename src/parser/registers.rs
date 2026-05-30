@@ -125,6 +125,7 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::CallLibFuncVoid(_, _, _)
         | Instr::Halt(_)
         | Instr::StopErrorCatch
+        | Instr::ThrowError(_)
         => None,
 
         Instr::StartErrorCatch(_, y) if y == u16::MAX => None,
@@ -351,6 +352,7 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::RecursiveReturn(a)
         | Instr::IsFalseJmp(a, _)
         | Instr::IsTrueJmp(a, _)
+        | Instr::ThrowError(a)
         | Instr::NegBool(a, _) => f(a),
 
         Instr::ArrayElemMov(a, _, _) => f(a),

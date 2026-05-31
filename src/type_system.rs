@@ -12,7 +12,6 @@ use libffi::middle::Type;
 use smol_strc::SmolStr;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::slice;
 
 // Tracks which user-defined functions are currently being analysed for their
 // return type. Used to break mutual-recursion cycles in type inference
@@ -35,6 +34,7 @@ pub enum DataType {
     Poly(Box<[DataType]>),
     /// Fn (\[arg_types ... return_type\]) => return_type is always specified
     Fn(Box<[DataType]>),
+    Struct(u16),
 }
 
 impl PartialEq for DataType {
@@ -52,6 +52,7 @@ impl PartialEq for DataType {
             (DataType::Unknown, DataType::Unknown) => true,
             (DataType::Poly(a), DataType::Poly(b)) => a == b,
             (DataType::Fn(a), DataType::Fn(b)) => a == b,
+            (DataType::Struct(a), DataType::Struct(b)) => a == b,
             _ => false,
         }
     }
@@ -76,6 +77,10 @@ impl std::hash::Hash for DataType {
                 9u8.hash(state);
                 f.hash(state);
             }
+            DataType::Struct(s) => {
+                10u8.hash(state);
+                s.hash(state);
+            }
         }
     }
 }
@@ -85,7 +90,7 @@ pub fn is_type_indexable(x: &DataType) -> bool {
 }
 
 /// Collect all the function calls in the given code
-fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
+pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
     let mut expr_stack: Vec<&Expr> = content.iter().collect();
     while let Some(expression) = expr_stack.pop() {
         match expression {
@@ -163,179 +168,20 @@ fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
 }
 
 /// Check if the function src_fn can call target_fn
-fn can_reach(
+pub fn can_reach(
     src_fn: &str,
     target_fn: &str,
     fns: &[Function],
     visited: &mut HashSet<SmolStr>,
 ) -> bool {
     if let Some(from_fn) = fns.iter().find(|f| f.name.as_str() == src_fn) {
-        let mut callees = Vec::new();
-        collect_direct_fn_calls(&from_fn.code, &mut callees);
-        for callee in callees {
-            if callee.as_str() == target_fn {
+        for callee in &from_fn.direct_calls {
+            if callee == target_fn {
                 return true;
             }
-            if visited.insert(callee.clone()) && can_reach(&callee, target_fn, fns, visited) {
+            if visited.insert(callee.clone()) && can_reach(callee, target_fn, fns, visited) {
                 return true;
             }
-        }
-    }
-    false
-}
-
-pub fn mark_mutually_recursive(fns: &mut [Function]) {
-    for i in 0..fns.len() {
-        if fns[i].is_recursive {
-            continue;
-        }
-        let fn_name = fns[i].name.clone();
-        let mut callees = Vec::new();
-        collect_direct_fn_calls(&fns[i].code, &mut callees);
-        let mut found = false;
-        for callee in callees {
-            if callee == fn_name {
-                continue;
-            }
-            let mut visited: HashSet<SmolStr> = HashSet::new();
-            visited.insert(fn_name.clone());
-            if can_reach(&callee, &fn_name, fns, &mut visited) {
-                found = true;
-                break;
-            }
-        }
-        if found {
-            fns[i].is_recursive = true;
-        }
-    }
-}
-
-/// Check if the given code contains any function call to fn_name
-pub fn contains_recursive_call(content: &[Expr], fn_name: &str) -> bool {
-    for content in content {
-        match content {
-            Expr::FunctionCall(_, namespace, _, _) => {
-                if namespace.last().unwrap().as_str() == fn_name {
-                    return true;
-                }
-            }
-            Expr::Condition(x, y, _) | Expr::InlineCondition(x, y, _) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name)
-                    || contains_recursive_call(y, fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::ElseIfBlock(x, y) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name)
-                    || contains_recursive_call(y, fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::ElseBlock(x) | Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
-                if contains_recursive_call(x, fn_name) {
-                    return true;
-                }
-            }
-            Expr::WhileBlock(x, y) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name)
-                    || contains_recursive_call(y, fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::ForLoop(_, code, _) => {
-                if contains_recursive_call(code, fn_name) {
-                    return true;
-                }
-            }
-            Expr::IntForLoop(_, start, end, code, _, _) => {
-                if contains_recursive_call(slice::from_ref(start), fn_name)
-                    || contains_recursive_call(slice::from_ref(end), fn_name)
-                    || contains_recursive_call(code, fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::VarDeclare(_, x) | Expr::VarAssign(_, x, _) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name) {
-                    return true;
-                }
-            }
-            Expr::ArrayModify(array, index, value, _, _) => {
-                if contains_recursive_call(slice::from_ref(array), fn_name)
-                    || contains_recursive_call(slice::from_ref(index), fn_name)
-                    || contains_recursive_call(slice::from_ref(value), fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::ObjFunctionCall(x, y, _, _, _, _) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name)
-                    || contains_recursive_call(y, fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::ReturnVal(code) => {
-                if let Some(code) = code.as_ref()
-                    && contains_recursive_call(slice::from_ref(code), fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::FunctionDecl(_, x, _) => {
-                if contains_recursive_call(x, fn_name) {
-                    return true;
-                }
-            }
-            Expr::ArrayGetIndex(x, y, _) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name)
-                    || contains_recursive_call(slice::from_ref(y), fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::ArrayGetSlice(x, y, z, _) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name)
-                    || contains_recursive_call(slice::from_ref(y), fn_name)
-                    || contains_recursive_call(slice::from_ref(z), fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::Array(elems, _) => {
-                if contains_recursive_call(elems, fn_name) {
-                    return true;
-                }
-            }
-            Expr::Mul(x, y, _)
-            | Expr::Div(x, y, _)
-            | Expr::Add(x, y, _)
-            | Expr::Sub(x, y, _)
-            | Expr::Mod(x, y, _)
-            | Expr::Pow(x, y, _)
-            | Expr::Eq(x, y)
-            | Expr::NotEq(x, y)
-            | Expr::Sup(x, y, _)
-            | Expr::SupEq(x, y, _)
-            | Expr::Inf(x, y, _)
-            | Expr::InfEq(x, y, _)
-            | Expr::BoolAnd(x, y, _)
-            | Expr::BoolOr(x, y, _) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name)
-                    || contains_recursive_call(slice::from_ref(y), fn_name)
-                {
-                    return true;
-                }
-            }
-            Expr::Neg(x, _) | Expr::BoolNeg(x, _) => {
-                if contains_recursive_call(slice::from_ref(x), fn_name) {
-                    return true;
-                }
-            }
-            _ => continue,
         }
     }
     false

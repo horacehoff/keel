@@ -25,12 +25,13 @@ pub struct Function {
     pub args: Box<[SmolStr]>,
     pub code: Rc<[Expr]>,
     pub impls: Vec<FunctionImpl>,
-    pub is_recursive: bool,
+    pub is_recursive: Option<bool>,
     pub id: u16,
     pub returns_void: bool,
     pub src_file: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
+    pub direct_calls: Box<[SmolStr]>,
 }
 
 #[derive(Debug, Clone)]

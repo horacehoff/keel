@@ -16,10 +16,12 @@ use crate::registers::for_each_read_reg;
 use crate::registers::get_tgt_ids;
 use crate::registers::move_to_id;
 use crate::type_system::DataType;
+use crate::type_system::can_reach;
 use crate::type_system::check_poly;
 use crate::type_system::infer_type;
 use crate::type_system::track_returns;
 use smol_strc::SmolStr;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 pub fn handle_user_function(
@@ -43,7 +45,19 @@ pub fn handle_user_function(
             throw_parser_error(src, markers, ErrType::UnknownFunction(fn_name));
         });
     let fn_id = state.fns[function_id].id;
-    let is_recursive = state.fns[function_id].is_recursive;
+
+    // Lazily resolve mutual recursion the first time this function is compiled
+    let is_recursive = if let Some(is_recursive) = state.fns[function_id].is_recursive {
+        is_recursive
+    } else {
+        let name = state.fns[function_id].name.clone();
+        let mut visited = HashSet::new();
+        visited.insert(name.clone());
+        let is_recursive = can_reach(&name, &name, state.fns, &mut visited);
+        state.fns[function_id].is_recursive = Some(is_recursive);
+        is_recursive
+    };
+
     let fn_returns_void = state.fns[function_id].returns_void;
 
     // Check if the arguments are correct

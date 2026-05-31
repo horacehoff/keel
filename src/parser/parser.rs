@@ -22,11 +22,10 @@ use crate::registers::is_reg_free;
 use crate::registers::move_reg_to_reg;
 use crate::registers::move_to_id;
 use crate::type_system::check_if_returns_void;
-use crate::type_system::contains_recursive_call;
+use crate::type_system::collect_direct_fn_calls;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::type_system::datatype_to_c_type;
 use crate::type_system::is_type_indexable;
-use crate::type_system::mark_mutually_recursive;
 use crate::type_system::{DataType, infer_type};
 use crate::{data::Data, instr::Instr};
 use inline_colorization::*;
@@ -1848,16 +1847,19 @@ pub fn compile_expr(
                 {
                     throw_parser_error(src, markers, ErrType::FunctionAlreadyExists(&x[0]));
                 }
+                let mut callees = Vec::new();
+                collect_direct_fn_calls(y, &mut callees);
                 state.fns.push(Function {
                     name: x.first().unwrap().clone(),
                     args: x.into_iter().skip(1).cloned().collect(),
                     code: y.clone(),
                     impls: Vec::new(),
-                    is_recursive: contains_recursive_call(y, x.first().unwrap()),
+                    is_recursive: None,
                     id: state.fn_registers.len() as u16,
                     returns_void: check_if_returns_void(y),
                     src_file: current_src_file,
                     return_type_cache: Vec::new(),
+                    direct_calls: callees.into_boxed_slice(),
                 });
                 state.fn_registers.push(Vec::new());
             }
@@ -1946,18 +1948,20 @@ fn parse_toplevel(
                     );
                 }
                 fn_registers.push(Vec::new());
-                let is_recursive = contains_recursive_call(&fn_code, &namespace[0]);
                 let returns_void = check_if_returns_void(&fn_code);
+                let mut callees = Vec::new();
+                collect_direct_fn_calls(&fn_code, &mut callees);
                 fns.push(Function {
                     name: namespace[0].to_smolstr(),
                     args: namespace[1..].into(),
                     code: fn_code,
                     impls: Vec::new(),
-                    is_recursive,
+                    is_recursive: None,
                     id: (fn_registers.len() - 1) as u16,
                     returns_void,
                     src_file: src_file_idx,
                     return_type_cache: Vec::new(),
+                    direct_calls: callees.into_boxed_slice(),
                 });
             }
             #[cfg(target_arch = "wasm32")]
@@ -2173,9 +2177,6 @@ pub fn parse(
         &mut visited,
         &mut dyn_fn_id,
     );
-
-    // Detect mutual / indirect recursion cycles
-    mark_mutually_recursive(&mut functions);
 
     let ctx = Ctx {
         block_id: 0,

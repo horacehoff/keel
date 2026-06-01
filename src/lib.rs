@@ -5,8 +5,12 @@ use crate::errors::ErrorCtx;
 use crate::parser::parse;
 use crate::repl::repl;
 use inline_colorization::*;
+#[cfg(feature = "embed")]
+use std::ffi::{CStr, CString, c_char};
 use std::fs;
 use std::hint::cold_path;
+#[cfg(feature = "embed")]
+use std::panic::catch_unwind;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -14,6 +18,8 @@ use wasm_bindgen::prelude::*;
 mod array_gc;
 #[path = "./benchmark.rs"]
 mod benchmark;
+#[cfg(any(target_arch = "wasm32", feature = "embed"))]
+mod captured_output;
 #[path = "./data.rs"]
 mod data;
 #[path = "./util/display.rs"]
@@ -55,19 +61,17 @@ mod user_functions;
 mod util;
 #[path = "./vm/vm.rs"]
 mod vm;
-#[cfg(target_arch = "wasm32")]
-mod wasm_output;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn get_output() -> String {
-    wasm_output::WASM_OUTPUT.with(|o| o.take())
+    captured_output::CAPTURED_OUTPUT.with(|o| o.take())
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn run(code: &str) {
-    wasm_output::WASM_OUTPUT.with(|o| o.borrow_mut().clear());
+    captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let (
         instructions,
         mut registers,
@@ -89,6 +93,53 @@ pub fn run(code: &str) {
         allocated_arg_count,
         allocated_call_depth,
     );
+}
+
+#[cfg(feature = "embed")]
+#[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)] // WIP
+pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
+    let code = &unsafe { CStr::from_ptr(code) }
+        .to_string_lossy()
+        .to_string();
+    captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
+    let _ = catch_unwind(|| {
+        let (
+            instructions,
+            mut registers,
+            mut arrays,
+            instr_src,
+            fn_registers,
+            fn_dyn_libs,
+            allocated_arg_count,
+            allocated_call_depth,
+            sources,
+        ) = parse(code, "embedded.kl", false);
+        vm::execute(
+            &instructions,
+            &mut registers,
+            &mut arrays,
+            &ErrorCtx { instr_src, sources },
+            &fn_registers,
+            &fn_dyn_libs,
+            allocated_arg_count,
+            allocated_call_depth,
+        );
+    });
+    let output = captured_output::CAPTURED_OUTPUT.with(|o| o.take());
+    CString::new(output).unwrap_or_default().into_raw()
+}
+
+#[cfg(feature = "embed")]
+#[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)] // WIP
+pub unsafe extern "C" fn keel_free_output(output: *mut c_char) {
+    if !output.is_null() {
+        #[allow(unused_must_use)]
+        unsafe {
+            CString::from_raw(output)
+        };
+    }
 }
 
 pub fn main() {

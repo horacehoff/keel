@@ -116,10 +116,10 @@ pub fn execute(
     let mut call_frames: Vec<CallFrame> = Vec::with_capacity(allocated_call_depth);
     let mut recursion_stack: Vec<Data> = Vec::with_capacity(allocated_call_depth * registers.len());
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     let mut handle = std::io::stdout().lock();
-    #[cfg(target_arch = "wasm32")]
-    let mut handle = crate::wasm_output::WasmWriter;
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+    let mut handle = crate::captured_output::CapturedOutputWriter;
 
     let mut free_arrays: Vec<u32> = Vec::with_capacity(array_pool.len());
     let mut free_strings: Vec<u16> = Vec::with_capacity(string_pool.len());

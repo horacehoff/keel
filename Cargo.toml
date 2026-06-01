@@ -8,6 +8,10 @@ repository = "https://github.com/horacehoff/keel"
 homepage = "https://keel-lang.com"
 license = "Apache-2.0"
 
+[features]
+# default = ["embed"]
+embed = []
+
 [dependencies]
 lalrpop-util = { version = "0.23.1", features = ["lexer"] }
 inline_colorization = "0.1.6"
@@ -75,3 +79,14 @@ incremental = false
 opt-level = 3
 debug = 2
 codegen-units = 1
+
+[profile.embed]
+inherits = "release"
+panic = "unwind"
+
+[profile.embed.package."*"]
+opt-level = 3
+debug = false
+codegen-units = 1
+incremental = false
+strip = true

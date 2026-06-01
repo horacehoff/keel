@@ -55,8 +55,29 @@ keel -h/--help     # Print help
 
 - Structs
 - Higher-order functions
+- [Better embedding API with limits](#embedding-experimental)
 
 ## Language tour
+
+### Table of contents
+- [Variables & Types](#variables--types)
+- [Functions](#functions)
+- [Blocks](#blocks)
+- [Conditions](#conditions)
+- [Loops](#loops)
+  - [While loops](#while-loops)
+  - [For loops](#for-loops)
+  - [Infinite loops](#infinite-loops)
+  - [Integer range loops](#integer-range-loops)
+- [Match](#match)
+- [Try/Catch blocks](#trycatch-blocks)
+- [Importing other ".kl" files](#importing-other-kl-files)
+- [Importing dynamic libraries](#importing-dynamic-libraries)
+- [Embedding (experimental)](#embedding-experimental)
+- [Arrays](#arrays)
+- [Slices](#slices)
+- [Arithmetic Operations](#arithmetic-operations)
+- [Documentation](#documentation)
 
 ### Variables & Types
 
@@ -250,7 +271,7 @@ Imports can be nested, and circular imports trigger an error and crash the progr
 You can load functions from dynamic libraries by specifying each function's
 signature, with the following syntax:
 
-```keel
+```rust
 import "dynamic_library_path" {
   function_return_type function_name(function_arg_type_1, function_arg_type_1, ..., function_arg_type_n);
 }
@@ -258,7 +279,7 @@ import "dynamic_library_path" {
 
 For example:
 
-```keel
+```rust
 import "my_test.dylib" {
     int add(int, int);
     float add(float, float);
@@ -274,14 +295,14 @@ function fib(n) {
 }
 
 function main() {
-print(my_test::add(6, 1));
-print(fib(25));
+    print(my_test::add(6, 1));
+    print(fib(25));
 }
 ```
 
 If the extension is omitted, Keel will choose the correct extension based on your OS. For example:
 
-```keel
+```rust
 // On macOS, it will try to load "my_test.dylib".
 // On Windows, it will try to load "my_test.dll".
 // On Linux, it will try to load "my_test.so".
@@ -293,6 +314,25 @@ import "my_test" {
 }
 function main() {print(my_test::add(6,1));}
 ```
+
+### Embedding (experimental)
+> The API is subject to change
+
+Keel can be embedded in other programs through a C ABI.
+Build it as a dynamic library:
+```sh
+cargo build --profile embed --features embed
+# The library will be in target/embed/libkeel.dylib (OR .so / .dll)
+```
+
+Two functions are exposed:
+```c
+extern char* keel_run(const char* code); // Runs the code and returns the output
+extern void keel_free_output(char* output); // Frees the returned string
+```
+
+Errors are returned in the output string and don't crash the host.
+
 
 ### Arrays
 
@@ -360,3 +400,4 @@ print(x > 1 && x < 1);
 
 - [Standard library](docs/STD_LIB.md)
 - [File system library](docs/FS_LIB.md)
+- [Catchable errors](docs/CATCHABLE_ERRORS.md)

@@ -312,34 +312,37 @@ pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
     )
     .finish();
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     report
         .eprint((src.0.as_str(), Source::from(src.1.as_str())))
         .unwrap();
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
             (src.0.as_str(), Source::from(src.1.as_str())),
-            crate::wasm_output::WasmWriter,
+            crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
 
     #[cfg(debug_assertions)]
     panic!();
 
-    #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
     std::process::exit(1);
 
     #[cfg(target_arch = "wasm32")]
     wasm_bindgen::throw_str("keel_error");
+
+    #[cfg(all(feature = "embed", not(debug_assertions)))]
+    panic!();
 }
 
 #[cold]
 #[inline(never)]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_error(msg: &str) -> ! {
-    crate::wasm_output::print(&format!("KEEL ERROR\n{msg}\n"));
+    crate::captured_output::print(&format!("KEEL ERROR\n{msg}\n"));
     wasm_bindgen::throw_str("keel error");
 }
 
@@ -359,22 +362,28 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: &Span, t: ErrT
     )
     .finish();
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     report.eprint((src.0, Source::from(src.1))).unwrap();
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
-        .write((src.0, Source::from(src.1)), crate::wasm_output::WasmWriter)
+        .write(
+            (src.0, Source::from(src.1)),
+            crate::captured_output::CapturedOutputWriter,
+        )
         .unwrap();
 
     #[cfg(debug_assertions)]
     panic!();
 
-    #[cfg(not(any(debug_assertions, target_arch = "wasm32")))]
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
     std::process::exit(1);
 
     #[cfg(target_arch = "wasm32")]
     wasm_bindgen::throw_str("keel_error");
+
+    #[cfg(all(feature = "embed", not(debug_assertions)))]
+    panic!();
 }
 
 #[cold]
@@ -394,13 +403,13 @@ where
                         .with_color(Color::Red),
                 )
                 .finish();
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
             report.eprint((filename, Source::from(file))).unwrap();
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(any(target_arch = "wasm32", feature = "embed"))]
             report
                 .write(
                     (filename, Source::from(file)),
-                    crate::wasm_output::WasmWriter,
+                    crate::captured_output::CapturedOutputWriter,
                 )
                 .unwrap();
         }
@@ -418,13 +427,13 @@ where
                         .with_color(Color::Red),
                 )
                 .finish();
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
             report.eprint((filename, Source::from(file))).unwrap();
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(any(target_arch = "wasm32", feature = "embed"))]
             report
                 .write(
                     (filename, Source::from(file)),
-                    crate::wasm_output::WasmWriter,
+                    crate::captured_output::CapturedOutputWriter,
                 )
                 .unwrap();
         }
@@ -481,13 +490,13 @@ where
                         .with_color(Color::Red),
                 )
                 .finish();
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
             report.eprint((filename, Source::from(file))).unwrap();
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(any(target_arch = "wasm32", feature = "embed"))]
             report
                 .write(
                     (filename, Source::from(file)),
-                    crate::wasm_output::WasmWriter,
+                    crate::captured_output::CapturedOutputWriter,
                 )
                 .unwrap();
         }

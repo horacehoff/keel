@@ -107,7 +107,7 @@ Block<T>: T = {
 
 
 pub Function:Expr = {
-    <start: @L> "function" <o1:Var> <args: Args<Var>> <o3: Block<Code>> <end: @R> => {
+    <start: @L> "fn" <o1:Var> <args: Args<Var>> <o3: Block<Code>> <end: @R> => {
         Expr::FunctionDecl(Box::from([&[o1], args.as_slice()].concat()), Rc::from(o3), span!(start, end))
     }
 }

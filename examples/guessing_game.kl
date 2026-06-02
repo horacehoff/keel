@@ -1,4 +1,4 @@
-function main() {
+fn main() {
     let secret = 42;
     print("Guess a number between 1 and 100!");
 

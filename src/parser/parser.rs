@@ -613,6 +613,50 @@ pub fn get_id(
                 dest_reg
             }
         }
+        Expr::GetStructField(struct_expr, field, struct_span, field_span) => {
+            let t = infer_type(
+                struct_expr,
+                v,
+                state.fns,
+                state.structs,
+                src,
+                state.dyn_libs,
+            );
+            if let DataType::Struct(s_id) = t {
+                let s = &state.structs[s_id as usize];
+                let idx = s
+                    .fields
+                    .iter()
+                    .position(|f| &f.0 == field)
+                    .unwrap_or_else(|| {
+                        throw_parser_error(
+                            src,
+                            field_span,
+                            ErrType::StructUnknownField(&s.name, field),
+                        );
+                    });
+                let id = get_id(
+                    struct_expr,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                    None,
+                    false,
+                    offset,
+                    single_run,
+                );
+                let dest_reg_id = alloc_register(state.registers, state.free_registers);
+                output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
+                dest_reg_id
+            } else {
+                throw_parser_error(
+                    src,
+                    struct_span,
+                    ErrType::InvalidType(&DataType::Struct(0), &t),
+                );
+            }
+        }
         Expr::Mul(l, r, markers) => {
             uniform_op!(
                 MulFloat,
@@ -1159,49 +1203,7 @@ pub fn compile_expr(
                     throw_parser_error(src, markers, ErrType::UnknownVariable(name))
                 }
             }
-            Expr::GetStructField(struct_expr, field, struct_span, field_span) => {
-                let t = infer_type(
-                    struct_expr,
-                    v,
-                    state.fns,
-                    state.structs,
-                    src,
-                    state.dyn_libs,
-                );
-                if let DataType::Struct(s_id) = t {
-                    let s = &state.structs[s_id as usize];
-                    let idx = s
-                        .fields
-                        .iter()
-                        .position(|f| &f.0 == field)
-                        .unwrap_or_else(|| {
-                            throw_parser_error(
-                                src,
-                                field_span,
-                                ErrType::StructUnknownField(&s.name, field),
-                            );
-                        });
-                    let id = get_id(
-                        struct_expr,
-                        v,
-                        ctx,
-                        state,
-                        &mut output,
-                        None,
-                        false,
-                        offset,
-                        single_run,
-                    );
-                    let dest_reg_id = alloc_register(state.registers, state.free_registers);
-                    output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
-                } else {
-                    throw_parser_error(
-                        src,
-                        struct_span,
-                        ErrType::InvalidType(&DataType::Struct(0), &t),
-                    );
-                }
-            }
+
             // array[index]
             Expr::ArrayGetIndex(array, index, markers) => {
                 let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);

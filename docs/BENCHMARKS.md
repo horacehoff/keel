@@ -13,7 +13,7 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">function main() {
+<td><pre><code class="language-rust">fn main() {
     for _ in 0..200000 {
         let a = 0;
         let b = 1;
@@ -58,12 +58,12 @@ end</code></pre></td>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">function fib(n) {
+<td><pre><code class="language-rust">fn fib(n) {
     if n <= 1 { return n; }
     return fib(n - 1) + fib(n - 2);
 }
 
-function main() {
+fn main() {
     print(fib(30));
 }</code></pre></td>
 <td><pre><code class="language-python">def fib(n):
@@ -97,7 +97,7 @@ print(fib(30))</code></pre></td>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">function main() {
+<td><pre><code class="language-rust">fn main() {
     let count = 0;
     let result = 1;
     while count < 1000000 {
@@ -146,7 +146,7 @@ print(result)</code></pre></td>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">function main() {
+<td><pre><code class="language-rust">fn main() {
     let x = 0.0;
     for i in 0..10000000 {
         x += float(i).sqrt();
@@ -183,7 +183,7 @@ print(x)</code></pre></td>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">function main() {
+<td><pre><code class="language-rust">fn main() {
     let limit = 100000;
     let sieve = range(limit);
     sieve[0] = 0;
@@ -261,7 +261,7 @@ print(count)</code></pre></td>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">function main() {
+<td><pre><code class="language-rust">fn main() {
     let s = "the quick brown fox";
     let count = 0;
     for _ in 0..50000 {
@@ -306,7 +306,7 @@ print(count)</code></pre></td>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">function main() {
+<td><pre><code class="language-rust">fn main() {
     let last = "";
     for i in 1..1000001 {
         if i % 15 == 0 {
@@ -366,7 +366,7 @@ Almost all the functions from the standard library are tested, except file syste
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">function main() {
+<td><pre><code class="language-rust">fn main() {
     let count = 0;
     for _ in 0..100000 {
         let s = "  Hello, World!  ";
@@ -530,7 +530,7 @@ int increment(int x) {
     int increment(int);
 }
 
-function main() {
+fn main() {
     let x = 0;
     for _ in 0..10000000 {
         x = bench_ffi::increment(x);

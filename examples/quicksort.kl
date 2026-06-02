@@ -1,4 +1,4 @@
-function quicksort(arr) {
+fn quicksort(arr) {
     if arr.len() <= 1 {
         return arr;
     }
@@ -21,7 +21,7 @@ function quicksort(arr) {
     return sorted_left;
 }
 
-function main() {
+fn main() {
     let nums = [38, 27, 43, 3, 9, 82, 10];
     print(quicksort(nums));
 }

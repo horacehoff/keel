@@ -45,7 +45,7 @@ pub fn repl() {
             contents.push_str(x);
             contents.push('\n');
         }
-        contents.push_str("function main() {\n");
+        contents.push_str("fn main() {\n");
         for x in all_lines.iter().filter(|x| !x.starts_with("import")) {
             contents.push_str(x);
             contents.push('\n');

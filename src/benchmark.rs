@@ -16,7 +16,7 @@ const PROGRAMS: &[Benchmark] = &[
     Benchmark {
         name: "iter_fib_40_x_200000",
         source: r#"
-function main() {
+fn main() {
     for _ in 0..200000 {
         let a = 0;
         let b = 1;
@@ -55,12 +55,12 @@ end
     Benchmark {
         name: "rec_fib_30",
         source: r#"
-function fib(n) {
+fn fib(n) {
     if n <= 1 { return n; }
     return fib(n - 1) + fib(n - 2);
 }
 
-function main() {
+fn main() {
     print(fib(30));
 }
         "#,
@@ -84,7 +84,7 @@ print(fib(30))
     Benchmark {
         name: "multiply_branch_modulo_x_1000000",
         source: r#"
-function main() {
+fn main() {
     let count = 0;
     let result = 1;
     while count < 1000000 {
@@ -124,7 +124,7 @@ print(result)
     Benchmark {
         name: "sqrt_x_10000000",
         source: r#"
-function main() {
+fn main() {
     let x = 0.0;
     for i in 0..10000000 {
         x += float(i).sqrt();
@@ -151,7 +151,7 @@ print(x)
     Benchmark {
         name: "sieve_100000",
         source: r#"
-function main() {
+fn main() {
     let limit = 100000;
     let sieve = range(limit);
     sieve[0] = 0;
@@ -219,7 +219,7 @@ print(count)
     Benchmark {
         name: "string_ops_array_split_search_x_50000",
         source: r#"
-function main() {
+fn main() {
     let s = "the quick brown fox";
     let count = 0;
     for _ in 0..50000 {
@@ -271,7 +271,7 @@ print(count)
     Benchmark {
         name: "fizzbuzz_x_1000000",
         source: r#"
-function main() {
+fn main() {
     let last = "";
     for i in 1..1000001 {
         if i % 15 == 0 {
@@ -319,7 +319,7 @@ print(last)
     Benchmark {
         name: "stdlib_ops_x_100000",
         source: r#"
-function main() {
+fn main() {
     let count = 0;
     for _ in 0..100000 {
         let s = "  Hello, World!  ";

@@ -77,12 +77,12 @@ macro_rules! run {
 pub fn rec_fib_1() {
     run_and_check_registers!(
         "
-        function fib(n) {
+        fn fib(n) {
             if n <= 1 {return n;}
             else {return fib(n-1)+fib(n-2);}
         }
 
-        function main() {
+        fn main() {
             let x = fib(1);
             print(x);
         }
@@ -95,12 +95,12 @@ pub fn rec_fib_1() {
 pub fn rec_fib_25() {
     run_and_check_registers!(
         "
-        function fib(n) {
+        fn fib(n) {
             if n <= 1 {return n;}
             else {return fib(n-1)+fib(n-2);}
         }
 
-        function main() {
+        fn main() {
             let x = fib(25);
             print(x);
         }
@@ -113,10 +113,10 @@ pub fn rec_fib_25() {
 pub fn fn_call_in_if_in_for() {
     run_and_check_registers!(
         "
-        function is_digit(c) {
+        fn is_digit(c) {
             return c == \"0\" || c == \"1\" || c == \"2\" || c == \"3\" || c == \"4\" || c == \"5\" || c == \"6\" || c == \"7\" || c == \"8\" || c == \"9\";
         }
-        function main() {
+        fn main() {
             let count = 0;
             for x in \"3 + 4\" {
                 if x != \" \" {
@@ -136,7 +136,7 @@ pub fn fn_call_in_if_in_for() {
 pub fn while_and_condition() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
         let count = 0;
         let limit = 1000000;
         let result = 1;
@@ -158,7 +158,7 @@ pub fn while_and_condition() {
 pub fn iter_fib_40() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
         let n = 40;
         let a=0;
         let b=1;
@@ -180,7 +180,7 @@ pub fn iter_fib_40() {
 pub fn iter_fib_40_loop() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let sum = 0;
             for _ in 0..200000 {
                 let a = 0;
@@ -204,7 +204,7 @@ pub fn iter_fib_40_loop() {
 pub fn string_split_array_len() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello world";
             let parts = s.split(" ");
             print(parts.len());
@@ -218,7 +218,7 @@ pub fn string_split_array_len() {
 pub fn string_contains() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello world";
             print(s.contains("world"));
         }
@@ -231,7 +231,7 @@ pub fn string_contains() {
 pub fn for_loop_sum() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [1, 2, 3, 4, 5];
             let sum = 0;
             for x in arr {
@@ -248,7 +248,7 @@ pub fn for_loop_sum() {
 pub fn array_sort() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [3, 1, 4, 1, 5, 9, 2, 6];
             arr.sort();
             print(arr[0]);
@@ -262,7 +262,7 @@ pub fn array_sort() {
 pub fn array_push_len() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [1, 2, 3];
             arr.push(4);
             print(arr.len());
@@ -276,7 +276,7 @@ pub fn array_push_len() {
 pub fn array_partition() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = [1,2,3,0,4,5,6];
             let p = x.partition(0);
             print(p[0][0]+p[1][2]);
@@ -290,7 +290,7 @@ pub fn array_partition() {
 pub fn int_for_loop() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let sum = 0;
             for i in 0..10 {
                 sum += i;
@@ -306,7 +306,7 @@ pub fn int_for_loop() {
 pub fn string_trim() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "  hello  ";
             let t = s.trim();
             print(t.len());
@@ -320,11 +320,11 @@ pub fn string_trim() {
 pub fn recursive_factorial() {
     run_and_check_registers!(
         "
-        function fact(n) {
+        fn fact(n) {
             if n <= 1 { return 1; }
             else { return n * fact(n - 1); }
         }
-        function main() {
+        fn main() {
             print(fact(10));
         }
         ",
@@ -336,7 +336,7 @@ pub fn recursive_factorial() {
 pub fn inline_condition_true() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 10;
             let result = if x > 5 { 1 } else { 0 };
             print(result);
@@ -350,7 +350,7 @@ pub fn inline_condition_true() {
 pub fn inline_condition_false() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 3;
             let result = if x > 5 { 1 } else { 0 };
             print(result);
@@ -364,7 +364,7 @@ pub fn inline_condition_false() {
 pub fn inline_condition_else_if() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 5;
             let result = if x > 10 { 2 } else if x > 3 { 1 } else { 0 };
             print(result);
@@ -378,7 +378,7 @@ pub fn inline_condition_else_if() {
 pub fn inline_condition_as_arg() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 42;
             print(if x == 42 { 99 } else { 0 });
         }
@@ -391,7 +391,7 @@ pub fn inline_condition_as_arg() {
 pub fn float_addition() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 1.5 + 2.5;
             print(x);
         }
@@ -404,7 +404,7 @@ pub fn float_addition() {
 pub fn float_sqrt() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = float(144).sqrt();
             print(x);
         }
@@ -417,7 +417,7 @@ pub fn float_sqrt() {
 pub fn float_floor() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 3.9;
             print(x.floor());
         }
@@ -430,7 +430,7 @@ pub fn float_floor() {
 pub fn float_abs() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = -7.5;
             print(x.abs());
         }
@@ -443,7 +443,7 @@ pub fn float_abs() {
 pub fn int_to_float_conversion() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = float(42);
             print(x);
         }
@@ -456,7 +456,7 @@ pub fn int_to_float_conversion() {
 pub fn float_to_int_conversion() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = int(3.9);
             print(x);
         }
@@ -469,7 +469,7 @@ pub fn float_to_int_conversion() {
 pub fn int_to_str_conversion() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let x = str(42);
             print(x.len());
         }
@@ -482,7 +482,7 @@ pub fn int_to_str_conversion() {
 pub fn string_starts_ends_with() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello world";
             let a = s.starts_with("hello");
             let b = s.ends_with("world");
@@ -497,7 +497,7 @@ pub fn string_starts_ends_with() {
 pub fn string_replace() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello world";
             let r = s.replace("world", "keel");
             print(r.len());
@@ -511,7 +511,7 @@ pub fn string_replace() {
 pub fn string_find() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello world";
             print(s.find("world"));
         }
@@ -524,7 +524,7 @@ pub fn string_find() {
 pub fn string_repeat() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "ab";
             print(s.repeat(3).len());
         }
@@ -536,7 +536,7 @@ pub fn string_repeat() {
 pub fn array_repeat() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = [1,2];
             let t = s.repeat(3);
             print(t.len()+t[2]);
@@ -550,7 +550,7 @@ pub fn array_repeat() {
 pub fn array_contains() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [1, 2, 3, 4, 5];
             print(arr.contains(3));
         }
@@ -563,7 +563,7 @@ pub fn array_contains() {
 pub fn array_reverse() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [1, 2, 3];
             arr.reverse();
             print(arr[0]);
@@ -577,7 +577,7 @@ pub fn array_reverse() {
 pub fn array_remove() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [10, 20, 30];
             arr.remove(1);
             print(arr.len());
@@ -591,7 +591,7 @@ pub fn array_remove() {
 pub fn array_join() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let arr = ["a", "b", "c"];
             let s = arr.join(",");
             print(s.len());
@@ -605,7 +605,7 @@ pub fn array_join() {
 pub fn array_modify_index() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [1, 2, 3];
             arr[1] = 99;
             print(arr[1]);
@@ -619,7 +619,7 @@ pub fn array_modify_index() {
 pub fn break_loop() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 0;
             for i in 0..100 {
                 if i == 5 { break; }
@@ -636,7 +636,7 @@ pub fn break_loop() {
 pub fn continue_in_loop() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let sum = 0;
             for i in 0..10 {
                 if (i % 2) == 0 { continue; }
@@ -653,7 +653,7 @@ pub fn continue_in_loop() {
 pub fn nested_loops() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let count = 0;
             for i in 0..4 {
                 for j in 0..4 {
@@ -671,7 +671,7 @@ pub fn nested_loops() {
 pub fn bool_and_operator() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 5;
             print(x > 3 && x < 10);
         }
@@ -684,7 +684,7 @@ pub fn bool_and_operator() {
 pub fn bool_or_operator() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 15;
             print(x < 3 || x > 10);
         }
@@ -697,7 +697,7 @@ pub fn bool_or_operator() {
 pub fn negation() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 5;
             print(-x);
         }
@@ -710,7 +710,7 @@ pub fn negation() {
 pub fn power_operator() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 2 ^ 10;
             print(x);
         }
@@ -723,8 +723,8 @@ pub fn power_operator() {
 pub fn multi_arg_function() {
     run_and_check_registers!(
         "
-        function add(a, b) { return a + b; }
-        function main() {
+        fn add(a, b) { return a + b; }
+        fn main() {
             print(add(3, 4));
         }
         ",
@@ -736,8 +736,8 @@ pub fn multi_arg_function() {
 pub fn function_called_after_loop() {
     run_and_check_registers!(
         "
-        function double(n) { return n * 2; }
-        function main() {
+        fn double(n) { return n * 2; }
+        fn main() {
             let sum = 0;
             for i in 0..10 { sum += i; }
             print(double(sum));
@@ -751,11 +751,11 @@ pub fn function_called_after_loop() {
 pub fn recursive_fn_inside_for_loop() {
     run_and_check_registers!(
         "
-        function fib(n) {
+        fn fib(n) {
             if n <= 1 { return n; }
             return fib(n-1) + fib(n-2);
         }
-        function main() {
+        fn main() {
             let x = [0, 1, 2];
             let sum = 0;
             for i in x {
@@ -772,11 +772,11 @@ pub fn recursive_fn_inside_for_loop() {
 pub fn recursive_fib_after_loop() {
     run_and_check_registers!(
         "
-        function fib(n) {
+        fn fib(n) {
             if n <= 1 { return n; }
             return fib(n - 1) + fib(n - 2);
         }
-        function main() {
+        fn main() {
             let x = 0;
             for i in 0..100 { x += i; }
             print(fib(10));
@@ -790,7 +790,7 @@ pub fn recursive_fib_after_loop() {
 pub fn sieve_of_eratosthenes() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let limit = 100000;
             let sieve = range(limit);
             sieve[0] = 0;
@@ -821,7 +821,7 @@ pub fn sieve_of_eratosthenes() {
 pub fn collatz_steps() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let n = 27;
             let steps = 0;
             while n != 1 {
@@ -843,7 +843,7 @@ pub fn collatz_steps() {
 pub fn string_word_count() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "the quick brown fox jumps";
             let words = s.split(" ");
             print(words.len());
@@ -857,7 +857,7 @@ pub fn string_word_count() {
 pub fn range_sum() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = range(101);
             let sum = 0;
             for x in arr {
@@ -874,7 +874,7 @@ pub fn range_sum() {
 pub fn bubble_sort() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [5, 3, 8, 1, 9, 2, 7, 4, 6];
             let n = arr.len();
             for i in 0..n {
@@ -897,7 +897,7 @@ pub fn bubble_sort() {
 pub fn quicksort() {
     run_and_check_registers!(
         r#"
-        function quicksort(arr) {
+        fn quicksort(arr) {
             if arr.len() <= 1 {
                 return arr;
             }
@@ -919,7 +919,7 @@ pub fn quicksort() {
             }
             return sorted_left;
         }
-        function main() {
+        fn main() {
             let nums = [38, 27, 43, 3, 9, 82, 10];
             let sorted = quicksort(nums);
             print(sorted[0] + sorted[6]);
@@ -933,14 +933,14 @@ pub fn quicksort() {
 pub fn for_loop_called_twice() {
     run_and_check_registers!(
         "
-        function sum(arr) {
+        fn sum(arr) {
             let s = 0;
             for x in arr {
                 s += x;
             }
             return s;
         }
-        function main() {
+        fn main() {
             sum([1, 2, 3]);
             print(sum([1, 2, 3]));
         }
@@ -953,7 +953,7 @@ pub fn for_loop_called_twice() {
 pub fn two_for_loops_in_sequence() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let a = [1, 2, 3];
             let b = [10, 20, 30];
             let sum = 0;
@@ -970,13 +970,13 @@ pub fn two_for_loops_in_sequence() {
 pub fn early_return_from_for_loop() {
     run_and_check_registers!(
         "
-        function first_positive(arr) {
+        fn first_positive(arr) {
             for x in arr {
                 if x > 0 { return x; }
             }
             return 0;
         }
-        function main() {
+        fn main() {
             print(first_positive([-3, -1, 5, 8]));
         }
         ",
@@ -988,7 +988,7 @@ pub fn early_return_from_for_loop() {
 pub fn early_return_from_while_loop() {
     run_and_check_registers!(
         "
-        function find(limit) {
+        fn find(limit) {
             let i = 0;
             while i < limit {
                 if i == 7 { return i; }
@@ -996,7 +996,7 @@ pub fn early_return_from_while_loop() {
             }
             return -1;
         }
-        function main() {
+        fn main() {
             print(find(20));
         }
         ",
@@ -1008,9 +1008,9 @@ pub fn early_return_from_while_loop() {
 pub fn nested_fn_call_as_arg() {
     run_and_check_registers!(
         "
-        function double(n) { return n * 2; }
-        function inc(n)    { return n + 1; }
-        function main() {
+        fn double(n) { return n * 2; }
+        fn inc(n)    { return n + 1; }
+        fn main() {
             print(double(inc(double(3))));
         }
         ",
@@ -1022,13 +1022,13 @@ pub fn nested_fn_call_as_arg() {
 pub fn multi_loop_fn_called_twice() {
     run_and_check_registers!(
         "
-        function run(arr) {
+        fn run(arr) {
             let s = 0;
             for x in arr { s += x; }
             for x in arr { s += x; }
             print(s);
         }
-        function main() {
+        fn main() {
             run([1, 2, 3]);
             run([1, 2, 3]);
         }
@@ -1041,7 +1041,7 @@ pub fn multi_loop_fn_called_twice() {
 pub fn while_fn_called_twice() {
     run_and_check_registers!(
         "
-        function count_down(n) {
+        fn count_down(n) {
             let s = 0;
             while n > 0 {
                 s += n;
@@ -1049,7 +1049,7 @@ pub fn while_fn_called_twice() {
             }
             return s;
         }
-        function main() {
+        fn main() {
             count_down(5);
             print(count_down(5));
         }
@@ -1062,10 +1062,10 @@ pub fn while_fn_called_twice() {
 pub fn function_returns_array() {
     run_and_check_registers!(
         "
-        function make(n) {
+        fn make(n) {
             return [n, n * 2, n * 3];
         }
-        function main() {
+        fn main() {
             let arr = make(4);
             print(arr[0]+arr[1]+arr[2]);
         }
@@ -1078,11 +1078,11 @@ pub fn function_returns_array() {
 pub fn pass_array_to_function() {
     run_and_check_registers!(
         "
-        function last(arr) {
+        fn last(arr) {
             let n = arr.len();
             return arr[n - 1];
         }
-        function main() {
+        fn main() {
             print(last([7, 8, 9]));
         }
         ",
@@ -1094,7 +1094,7 @@ pub fn pass_array_to_function() {
 pub fn string_split_then_iterate() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "a,b,c,d,e";
             let parts = s.split(",");
             let count = 0;
@@ -1110,7 +1110,7 @@ pub fn string_split_then_iterate() {
 pub fn deeply_nested_conditions() {
     run_and_check_registers!(
         "
-        function classify(n) {
+        fn classify(n) {
             if n < 0 {
                 return 0;
             } else {
@@ -1125,7 +1125,7 @@ pub fn deeply_nested_conditions() {
                 }
             }
         }
-        function main() {
+        fn main() {
             print(classify(50));
         }
         ",
@@ -1137,7 +1137,7 @@ pub fn deeply_nested_conditions() {
 pub fn break_in_while_loop() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let i = 0;
             while i < 1000 {
                 if i == 42 { break; }
@@ -1154,7 +1154,7 @@ pub fn break_in_while_loop() {
 pub fn for_loop_discard_var() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let count = 0;
             for _ in [0, 0, 0, 0, 0] { count += 1; }
             print(count);
@@ -1168,12 +1168,12 @@ pub fn for_loop_discard_var() {
 pub fn int_range_loop_fn_called_twice() {
     run_and_check_registers!(
         "
-        function sum_to(n) {
+        fn sum_to(n) {
             let s = 0;
             for i in 0..n { s += i; }
             return s;
         }
-        function main() {
+        fn main() {
             sum_to(10);
             print(sum_to(10));
         }
@@ -1186,7 +1186,7 @@ pub fn int_range_loop_fn_called_twice() {
 pub fn inc_int_to_basic() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 5;
             let y = x + 1;
             print(y);
@@ -1200,7 +1200,7 @@ pub fn inc_int_to_basic() {
 pub fn dec_int_to_basic() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 5;
             let y = x - 1;
             print(y);
@@ -1214,7 +1214,7 @@ pub fn dec_int_to_basic() {
 pub fn inc_int_commutative() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 10;
             let y = 1 + x;
             print(y);
@@ -1228,7 +1228,7 @@ pub fn inc_int_commutative() {
 pub fn inc_int_to_chained() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 3;
             let y = x + 1;
             let z = y + 1;
@@ -1243,8 +1243,8 @@ pub fn inc_int_to_chained() {
 pub fn inc_int_as_function_arg() {
     run_and_check_registers!(
         "
-        function identity(n) { return n; }
-        function main() {
+        fn identity(n) { return n; }
+        fn main() {
             let x = 7;
             print(identity(x + 1));
         }
@@ -1257,8 +1257,8 @@ pub fn inc_int_as_function_arg() {
 pub fn dec_int_as_return_value() {
     run_and_check_registers!(
         "
-        function pred(n) { return n - 1; }
-        function main() {
+        fn pred(n) { return n - 1; }
+        fn main() {
             print(pred(20));
         }
         ",
@@ -1270,7 +1270,7 @@ pub fn dec_int_as_return_value() {
 pub fn inc_int_in_condition() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 9;
             let result = 0;
             if x + 1 > 9 { result = 1; }
@@ -1285,7 +1285,7 @@ pub fn inc_int_in_condition() {
 pub fn inc_int_does_not_mutate_source() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 41;
             let y = x + 1;
             print(x);
@@ -1299,7 +1299,7 @@ pub fn inc_int_does_not_mutate_source() {
 pub fn dec_int_does_not_mutate_source() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 41;
             let y = x - 1;
             print(x);
@@ -1313,7 +1313,7 @@ pub fn dec_int_does_not_mutate_source() {
 pub fn int_wraps_on_overflow() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 2147483647;
             x += 1;
             print(x);
@@ -1327,7 +1327,7 @@ pub fn int_wraps_on_overflow() {
 pub fn int_wraps_on_underflow() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = -2147483648;
             x -= 1;
             print(x);
@@ -1341,7 +1341,7 @@ pub fn int_wraps_on_underflow() {
 pub fn negative_int_literal() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = -2147483648;
             print(x);
         }
@@ -1354,7 +1354,7 @@ pub fn negative_int_literal() {
 pub fn string_exactly_6_chars() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "abcdef";
             print(s.len());
         }
@@ -1367,7 +1367,7 @@ pub fn string_exactly_6_chars() {
 pub fn string_exactly_7_chars() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "abcdefg";
             print(s.len());
         }
@@ -1380,7 +1380,7 @@ pub fn string_exactly_7_chars() {
 pub fn string_small_to_large_concat() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let a = "abc";
             let b = "defgh";
             let c = a + b;
@@ -1395,7 +1395,7 @@ pub fn string_small_to_large_concat() {
 pub fn string_escape_newline() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "a\nb";
             print(s.len());
         }
@@ -1408,7 +1408,7 @@ pub fn string_escape_newline() {
 pub fn string_escape_tab() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "a\tb";
             print(s.len());
         }
@@ -1421,7 +1421,7 @@ pub fn string_escape_tab() {
 pub fn string_escape_backslash() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "a\\b";
             print(s.len());
         }
@@ -1434,7 +1434,7 @@ pub fn string_escape_backslash() {
 pub fn string_escape_quote() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "say \"hello\"";
             print(s.len());
         }
@@ -1447,7 +1447,7 @@ pub fn string_escape_quote() {
 pub fn empty_range_for_loop() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let count = 99;
             for _ in 0..0 { count += 1; }
             print(count);
@@ -1461,7 +1461,7 @@ pub fn empty_range_for_loop() {
 pub fn while_never_executes() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 5;
             while x > 10 { x += 1; }
             print(x);
@@ -1475,7 +1475,7 @@ pub fn while_never_executes() {
 pub fn break_only_breaks_inner_loop() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let outer = 0;
             for i in 0..3 {
                 for j in 0..100 {
@@ -1494,7 +1494,7 @@ pub fn break_only_breaks_inner_loop() {
 pub fn empty_array_len() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [];
             print(arr.len());
         }
@@ -1507,7 +1507,7 @@ pub fn empty_array_len() {
 pub fn empty_array_iteration() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [];
             let count = 0;
             for _ in arr { count += 1; }
@@ -1522,7 +1522,7 @@ pub fn empty_array_iteration() {
 pub fn single_element_array_len() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [42];
             print(arr.len());
         }
@@ -1535,7 +1535,7 @@ pub fn single_element_array_len() {
 pub fn array_after_all_removes() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [1, 2, 3];
             arr.remove(0);
             arr.remove(0);
@@ -1551,15 +1551,15 @@ pub fn array_after_all_removes() {
 pub fn mutual_recursion() {
     run_and_check_registers!(
         "
-        function is_even(n) {
+        fn is_even(n) {
             if n == 0 { return true; }
             return is_odd(n - 1);
         }
-        function is_odd(n) {
+        fn is_odd(n) {
             if n == 0 { return false; }
             return is_even(n - 1);
         }
-        function main() {
+        fn main() {
             print(is_even(10));
         }
         ",
@@ -1571,7 +1571,7 @@ pub fn mutual_recursion() {
 pub fn null_literal_store_and_compare() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = null;
             print(x == null);
         }
@@ -1584,7 +1584,7 @@ pub fn null_literal_store_and_compare() {
 pub fn null_literal_as_default() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let result = null;
             result = 42;
             print(result);
@@ -1598,7 +1598,7 @@ pub fn null_literal_as_default() {
 pub fn array_push_type_inference_propagation() {
     run_and_check_registers!(
         "
-        function build_sieve(limit) {
+        fn build_sieve(limit) {
             let sieve = range(limit);
             sieve[0] = 0;
             sieve[1] = 0;
@@ -1616,7 +1616,7 @@ pub fn array_push_type_inference_propagation() {
             return sieve;
         }
 
-        function collect_primes(sieve) {
+        fn collect_primes(sieve) {
             let primes = [];
             for x in sieve {
                 if x != 0 {
@@ -1626,7 +1626,7 @@ pub fn array_push_type_inference_propagation() {
             return primes;
         }
 
-        function largest_gap(primes) {
+        fn largest_gap(primes) {
             let max = 0;
             let i = 1;
             while i < primes.len() {
@@ -1639,7 +1639,7 @@ pub fn array_push_type_inference_propagation() {
             return max;
         }
 
-        function main() {
+        fn main() {
             let primes = collect_primes(build_sieve(50));
             print(largest_gap(primes));
         }
@@ -1654,7 +1654,7 @@ pub fn split_result_survives_string_gc() {
     run_and_check_registers!(
         &format!(
             r#"
-            function longest_word(words) {{
+            fn longest_word(words) {{
                 let longest = "";
                 for word in words {{
                     if word.len() > longest.len() {{
@@ -1664,7 +1664,7 @@ pub fn split_result_survives_string_gc() {
                 return longest;
             }}
 
-            function main() {{
+            fn main() {{
                 let text = "{text}";
                 let words = text.split(" ");
                 print(longest_word(words).len());
@@ -1679,20 +1679,20 @@ pub fn split_result_survives_string_gc() {
 pub fn expr_eval_mutual_recursion() {
     run_and_check_registers!(
         r#"
-        function is_digit(c) {
+        fn is_digit(c) {
             return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9";
         }
-        function digit_value(c) {
+        fn digit_value(c) {
             if c == "0" { return 0; } if c == "1" { return 1; } if c == "2" { return 2; }
             if c == "3" { return 3; } if c == "4" { return 4; } if c == "5" { return 5; }
             if c == "6" { return 6; } if c == "7" { return 7; } if c == "8" { return 8; }
             return 9;
         }
-        function skip_spaces(expr, pos) {
+        fn skip_spaces(expr, pos) {
             while pos < expr.len() && expr[pos] == " " { pos += 1; }
             return pos;
         }
-        function parse_number(expr, pos) {
+        fn parse_number(expr, pos) {
             let value = 0;
             while pos < expr.len() && is_digit(expr[pos]) {
                 value = value * 10 + digit_value(expr[pos]);
@@ -1700,7 +1700,7 @@ pub fn expr_eval_mutual_recursion() {
             }
             return [value, pos];
         }
-        function parse_factor(expr, pos) {
+        fn parse_factor(expr, pos) {
             pos = skip_spaces(expr, pos);
             let c = expr[pos];
             if c == "(" {
@@ -1715,7 +1715,7 @@ pub fn expr_eval_mutual_recursion() {
             }
             return parse_number(expr, pos);
         }
-        function parse_term(expr, pos) {
+        fn parse_term(expr, pos) {
             let parsed = parse_factor(expr, pos);
             let value = parsed[0];
             pos = parsed[1];
@@ -1732,7 +1732,7 @@ pub fn expr_eval_mutual_recursion() {
             }
             return [value, pos];
         }
-        function parse_expr(expr, pos) {
+        fn parse_expr(expr, pos) {
             let parsed = parse_term(expr, pos);
             let value = parsed[0];
             pos = parsed[1];
@@ -1748,8 +1748,8 @@ pub fn expr_eval_mutual_recursion() {
             }
             return [value, pos];
         }
-        function eval_expr(expr) { return parse_expr(expr, 0)[0]; }
-        function main() {
+        fn eval_expr(expr) { return parse_expr(expr, 0)[0]; }
+        fn main() {
             let expressions = [
                 "17 + 5 * (31 - 12) + 144 / 3 - 8 % 5",
                 "((42 + 18) * 7 - 91) / 3 + 12 * (6 + 5)",
@@ -1779,12 +1779,12 @@ pub fn expr_eval_mutual_recursion() {
 pub fn fn_call_in_if_and_in_nested_for() {
     run_and_check_registers!(
         r#"
-        function is_digit(c) {
+        fn is_digit(c) {
             return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" ||
                    c == "5" || c == "6" || c == "7" || c == "8" || c == "9";
         }
 
-        function main() {
+        fn main() {
             let sum = 0;
             for i in 0..2 {
                 for x in "3 + 4" {
@@ -1804,14 +1804,14 @@ pub fn fn_call_in_if_and_in_nested_for() {
 pub fn branch_without_return() {
     run_and_check_registers!(
         "
-        function choose(x) {
+        fn choose(x) {
             if x > 0 {
                 let unused = 1;
             }
             return 7;
         }
 
-        function main() {
+        fn main() {
             print(choose(1));
         }
         ",
@@ -1823,14 +1823,14 @@ pub fn branch_without_return() {
 pub fn unusued_branch_wth_return() {
     run_and_check_registers!(
         "
-        function choose(x) {
+        fn choose(x) {
             if x > 0 {
                 return 1;
             }
             return 2;
         }
 
-        function main() {
+        fn main() {
             print(choose(0));
         }
         ",
@@ -1842,7 +1842,7 @@ pub fn unusued_branch_wth_return() {
 pub fn unreachable_return_after_exhaustive_condition() {
     run_and_check_registers!(
         "
-        function choose(x) {
+        fn choose(x) {
             if x > 0 {
                 return 1;
             } else {
@@ -1851,7 +1851,7 @@ pub fn unreachable_return_after_exhaustive_condition() {
             return \"bad\";
         }
 
-        function main() {
+        fn main() {
             print(choose(1));
         }
         ",
@@ -1864,13 +1864,13 @@ pub fn unreachable_return_after_exhaustive_condition() {
 pub fn partial_return_flow_with_null() {
     run!(
         r#"
-        function test(n) {
+        fn test(n) {
             if n == "" {
                 return n;
             }
         }
 
-        function main() {
+        fn main() {
             print(test(input("> ")).uppercase());
         }
         "#
@@ -1881,7 +1881,7 @@ pub fn partial_return_flow_with_null() {
 pub fn unused_nested_partial_branch() {
     run_and_check_registers!(
         r#"
-        function label(n) {
+        fn label(n) {
             if n > 0 {
                 if n == 1 {
                     return "one";
@@ -1890,7 +1890,7 @@ pub fn unused_nested_partial_branch() {
             return "other";
         }
 
-        function main() {
+        fn main() {
             print(label(2).uppercase());
         }
         "#,
@@ -1902,7 +1902,7 @@ pub fn unused_nested_partial_branch() {
 pub fn return_flow_exhaustive_condition_ignores_later_conflicting_return() {
     run_and_check_registers!(
         r#"
-        function choose(n) {
+        fn choose(n) {
             if n == 0 {
                 return 10;
             } else if n == 1 {
@@ -1913,7 +1913,7 @@ pub fn return_flow_exhaustive_condition_ignores_later_conflicting_return() {
             return "bad";
         }
 
-        function main() {
+        fn main() {
             print(choose(2) + 1);
         }
         "#,
@@ -1926,13 +1926,13 @@ pub fn return_flow_exhaustive_condition_ignores_later_conflicting_return() {
 pub fn return_flow_return_inside_for_loop_is_not_total() {
     run!(
         r#"
-        function first_word(words) {
+        fn first_word(words) {
             for word in words {
                 return word;
             }
         }
 
-        function main() {
+        fn main() {
             print(first_word(["hello"]).uppercase());
         }
         "#
@@ -1944,13 +1944,13 @@ pub fn return_flow_return_inside_for_loop_is_not_total() {
 pub fn return_flow_return_inside_while_loop_is_not_total() {
     run!(
         r#"
-        function maybe_word(n) {
+        fn maybe_word(n) {
             while n > 0 {
                 return "word";
             }
         }
 
-        function main() {
+        fn main() {
             print(maybe_word(0).uppercase());
         }
         "#
@@ -1962,14 +1962,14 @@ pub fn return_flow_return_inside_while_loop_is_not_total() {
 pub fn return_flow_branch_returns_null() {
     run!(
         "
-        function maybe_number(n) {
+        fn maybe_number(n) {
             if n > 0 {
                 return;
             }
             return 1;
         }
 
-        function main() {
+        fn main() {
             print(maybe_number(0) + 1);
         }
         "
@@ -1980,7 +1980,7 @@ pub fn return_flow_branch_returns_null() {
 pub fn return_flow_branch_local_return_value_type_is_preserved() {
     run_and_check_registers!(
         r#"
-        function word(n) {
+        fn word(n) {
             if n > 0 {
                 let value = "branch";
                 return value;
@@ -1988,7 +1988,7 @@ pub fn return_flow_branch_local_return_value_type_is_preserved() {
             return "fallback";
         }
 
-        function main() {
+        fn main() {
             print(word(1).uppercase());
         }
         "#,
@@ -2000,7 +2000,7 @@ pub fn return_flow_branch_local_return_value_type_is_preserved() {
 pub fn match_basic_int() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 2;
             let result = 0;
             match x {
@@ -2019,7 +2019,7 @@ pub fn match_basic_int() {
 pub fn match_with_wildcard() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let x = "other";
             let result = 0;
             match x {
@@ -2038,7 +2038,7 @@ pub fn match_with_wildcard() {
 pub fn match_first_arm() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 1;
             let result = 0;
             match x {
@@ -2056,7 +2056,7 @@ pub fn match_first_arm() {
 pub fn match_no_match() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 99;
             let result = 0;
             match x {
@@ -2074,7 +2074,7 @@ pub fn match_no_match() {
 pub fn match_string_arms() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let cmd = "run";
             let code = 0;
             match cmd {
@@ -2094,7 +2094,7 @@ pub fn match_string_arms() {
 pub fn match_arm_computation() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 3;
             let result = 0;
             match x {
@@ -2118,7 +2118,7 @@ pub fn match_arm_computation() {
 pub fn loop_break() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let i = 0;
             loop {
                 i += 1;
@@ -2135,7 +2135,7 @@ pub fn loop_break() {
 pub fn loop_continue() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let i = 0;
             let sum = 0;
             loop {
@@ -2155,7 +2155,7 @@ pub fn loop_continue() {
 pub fn nested_loop_blocks() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let count = 0;
             let i = 0;
             loop {
@@ -2179,7 +2179,7 @@ pub fn nested_loop_blocks() {
 pub fn nested_loop_inner_break() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let outer = 0;
             let i = 0;
             loop {
@@ -2203,8 +2203,8 @@ pub fn nested_loop_inner_break() {
 pub fn nested_fn() {
     run_and_check_registers!(
         "
-        function main() {
-            function add(a, b) {
+        fn main() {
+            fn add(a, b) {
                 return a + b;
             }
             print(add(3, 4));
@@ -2218,8 +2218,8 @@ pub fn nested_fn() {
 pub fn nested_fn_in_loop() {
     run_and_check_registers!(
         "
-        function main() {
-            function square(n) {
+        fn main() {
+            fn square(n) {
                 return n * n;
             }
             let sum = 0;
@@ -2237,7 +2237,7 @@ pub fn nested_fn_in_loop() {
 pub fn block_scope() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 1;
             {
                 let y = 2;
@@ -2254,7 +2254,7 @@ pub fn block_scope() {
 pub fn range_two_arg() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = range(5, 10);
             let sum = 0;
             for x in arr { sum += x; }
@@ -2269,7 +2269,7 @@ pub fn range_two_arg() {
 pub fn range_two_arg_index() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = range(3, 7);
             print(arr[0]);
         }
@@ -2282,7 +2282,7 @@ pub fn range_two_arg_index() {
 pub fn string_uppercase() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello";
             print(s.uppercase().len());
         }
@@ -2295,7 +2295,7 @@ pub fn string_uppercase() {
 pub fn string_lowercase() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "ABCDE";
             print(s.lowercase().len());
         }
@@ -2308,7 +2308,7 @@ pub fn string_lowercase() {
 pub fn string_is_float() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             print("3.14".is_float());
         }
         "#,
@@ -2320,7 +2320,7 @@ pub fn string_is_float() {
 pub fn string_is_float_false() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             print("42".is_float());
         }
         "#,
@@ -2332,7 +2332,7 @@ pub fn string_is_float_false() {
 pub fn string_is_int_true() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             print("42".is_int());
         }
         "#,
@@ -2344,7 +2344,7 @@ pub fn string_is_int_true() {
 pub fn string_is_int_false() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             print("hello".is_int());
         }
         "#,
@@ -2356,7 +2356,7 @@ pub fn string_is_int_false() {
 pub fn string_trim_sequence() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "--hello--";
             print(s.trim_sequence("-").len());
         }
@@ -2369,7 +2369,7 @@ pub fn string_trim_sequence() {
 pub fn string_trim_sequence_left() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "--hello";
             print(s.trim_sequence_left("-").len());
         }
@@ -2382,7 +2382,7 @@ pub fn string_trim_sequence_left() {
 pub fn string_trim_sequence_right() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello--";
             print(s.trim_sequence_right("-").len());
         }
@@ -2395,7 +2395,7 @@ pub fn string_trim_sequence_right() {
 pub fn float_round() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 3.7;
             print(x.round());
         }
@@ -2408,7 +2408,7 @@ pub fn float_round() {
 pub fn int_abs() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = -42;
             print(x.abs());
         }
@@ -2421,7 +2421,7 @@ pub fn int_abs() {
 pub fn string_reverse_method() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "abcde";
             let r = s.reverse();
             print(r.len());
@@ -2435,7 +2435,7 @@ pub fn string_reverse_method() {
 pub fn array_find() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [10, 20, 30, 40];
             print(arr.find(30));
         }
@@ -2448,7 +2448,7 @@ pub fn array_find() {
 pub fn array_find_missing() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [10, 20, 30];
             print(arr.find(99));
         }
@@ -2461,7 +2461,7 @@ pub fn array_find_missing() {
 pub fn array_sort_floats() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [3.1, 1.4, 2.7];
             arr.sort();
             print(arr[0]);
@@ -2475,7 +2475,7 @@ pub fn array_sort_floats() {
 pub fn array_sort_strings() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let arr = ["banana", "apple", "cherry"];
             arr.sort();
             print(arr[0].len());
@@ -2489,7 +2489,7 @@ pub fn array_sort_strings() {
 pub fn nested_array_index() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [[1, 2], [3, 4], [5, 6]];
             print(arr[1][1]);
         }
@@ -2502,7 +2502,7 @@ pub fn nested_array_index() {
 pub fn nested_array_set() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let arr = [[1, 2], [3, 4]];
             arr[0][1] = 99;
             print(arr[0][1]);
@@ -2516,7 +2516,7 @@ pub fn nested_array_set() {
 pub fn bool_from_string_true() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             print(bool("true"));
         }
         "#,
@@ -2528,7 +2528,7 @@ pub fn bool_from_string_true() {
 pub fn bool_from_string_false() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             print(bool("false"));
         }
         "#,
@@ -2540,7 +2540,7 @@ pub fn bool_from_string_false() {
 pub fn the_answer() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             print(the_answer());
         }
         ",
@@ -2552,7 +2552,7 @@ pub fn the_answer() {
 pub fn compound_mul_assign() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 5;
             x *= 3;
             print(x);
@@ -2566,7 +2566,7 @@ pub fn compound_mul_assign() {
 pub fn compound_div_assign() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 20;
             x /= 4;
             print(x);
@@ -2580,7 +2580,7 @@ pub fn compound_div_assign() {
 pub fn compound_mod_assign() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 17;
             x %= 5;
             print(x);
@@ -2594,7 +2594,7 @@ pub fn compound_mod_assign() {
 pub fn compound_pow_assign() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 2;
             x ^= 8;
             print(x);
@@ -2608,7 +2608,7 @@ pub fn compound_pow_assign() {
 pub fn string_index() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello";
             print(s[0] == "h");
         }
@@ -2621,7 +2621,7 @@ pub fn string_index() {
 pub fn string_set_index() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let s = "hello";
             s[0] = "He";
             print(s.len());
@@ -2635,7 +2635,7 @@ pub fn string_set_index() {
 pub fn neq_3_4() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             print(3 != 4);
         }
         ",
@@ -2647,7 +2647,7 @@ pub fn neq_3_4() {
 pub fn eq_3_4() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             print(3 == 4);
         }
         ",
@@ -2659,7 +2659,7 @@ pub fn eq_3_4() {
 pub fn array_join_sep() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let arr = ["a", "b", "c"];
             let s = arr.join("--");
             print(s.len());
@@ -2673,7 +2673,7 @@ pub fn array_join_sep() {
 pub fn array_join_no_sep() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let arr = ["a", "b", "c"];
             let s = arr.join();
             print(s.len());
@@ -2687,7 +2687,7 @@ pub fn array_join_no_sep() {
 pub fn float_div_zero() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 1.0 / 0.0;
             print(x > 9999999.0);
         }
@@ -2700,7 +2700,7 @@ pub fn float_div_zero() {
 pub fn float_negative_pow() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 2.0 ^ -1.0;
             print(x);
         }
@@ -2713,7 +2713,7 @@ pub fn float_negative_pow() {
 pub fn float_negative_pow_square() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = 4.0 ^ -0.5;
             print(x);
         }
@@ -2726,7 +2726,7 @@ pub fn float_negative_pow_square() {
 pub fn type_function() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             print(type(42)+type("hello")+type(3.14)+type(true) == "IntegerStringFloatBoolean");
         }
         "#,
@@ -2738,7 +2738,7 @@ pub fn type_function() {
 pub fn array_slice() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let x = [0,1,2,3,4,5];
             let y = x[3..5];
             print(y[0]);
@@ -2753,7 +2753,7 @@ pub fn array_slice() {
 pub fn array_slice_negative_index() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let x = [0,1,2,3,4,5];
             let y = x[3..-5];
             print(y[0]);
@@ -2767,7 +2767,7 @@ pub fn array_slice_negative_index() {
 pub fn string_slice() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let x = "Hello world";
             let y = x[6..11];
             print(y);
@@ -2782,7 +2782,7 @@ pub fn string_slice() {
 pub fn string_slice_negative_index() {
     run_and_check_registers!(
         r#"
-        function main() {
+        fn main() {
             let x = "Hello world";
             let y = x[-6..11];
             print(y);
@@ -2796,7 +2796,7 @@ pub fn string_slice_negative_index() {
 pub fn try_catch_no_error() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let result = 0;
             try {
                 result = 1;
@@ -2814,7 +2814,7 @@ pub fn try_catch_no_error() {
 pub fn try_catch_catches_error() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = [0,1];
             let result = 0;
             try {
@@ -2834,7 +2834,7 @@ pub fn try_catch_catches_error() {
 pub fn try_catch_filtered_match() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = [0,1];
             let result = 0;
             try {
@@ -2855,7 +2855,7 @@ pub fn try_catch_filtered_match() {
 pub fn try_catch_filtered_fallthrough() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let x = [0,1];
             let result = 0;
             try {
@@ -2876,7 +2876,7 @@ pub fn try_catch_filtered_fallthrough() {
 pub fn throw_is_catchable() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let result = 0;
             try {
                 throw(\"boom\");
@@ -2897,7 +2897,7 @@ pub fn throw_is_catchable() {
 pub fn try_catch_division_by_zero() {
     run_and_check_registers!(
         "
-        function main() {
+        fn main() {
             let z = 0;
             let result = 0;
             try {
@@ -2919,7 +2919,7 @@ pub fn try_catch_division_by_zero() {
 pub fn try_catch_insufficient() {
     run!(
         "
-        function main() {
+        fn main() {
             let z = 0;
             let result = 0;
             try {
@@ -2938,7 +2938,7 @@ pub fn struct_field_access() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let p = Point { x: 7, y: 3 };
             print(p.x);
         }
@@ -2952,7 +2952,7 @@ pub fn struct_field_modify() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let p = Point { x: 7, y: 3 };
             p.x = 42;
             print(p.x);
@@ -2967,7 +2967,7 @@ pub fn struct_fields_exprs() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let n = 5;
             let p = Point { x: n + 1, y: n * 2 };
             print(p.x + p.y);
@@ -2982,7 +2982,7 @@ pub fn struct_field_assign_shorthand() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let p = Point { x: 10, y: 0 };
             p.x += 5;
             print(p.x);
@@ -2998,7 +2998,7 @@ pub fn struct_nested_field_access() {
         "
         struct Test { v: int }
         struct OtherTest { test: Test, i: int }
-        function main() {
+        fn main() {
             let o = OtherTest { test: Test { v: 99 }, i: 1 };
             print(o.test.v);
         }
@@ -3013,7 +3013,7 @@ pub fn struct_nested_field_modify() {
         "
         struct Test { v: int }
         struct OtherTest { test: Test, i: int }
-        function main() {
+        fn main() {
             let o = OtherTest { test: Test { v: 99 }, i: 1 };
             o.test.v = 50;
             print(o.test.v);
@@ -3028,10 +3028,10 @@ pub fn struct_passed_to_function() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function get_x(p) {
+        fn get_x(p) {
             return p.x;
         }
-        function main() {
+        fn main() {
             let p = Point { x: 8, y: 2 };
             print(get_x(p));
         }
@@ -3045,10 +3045,10 @@ pub fn struct_functin_ret() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function make(n) {
+        fn make(n) {
             return Point { x: n, y: n + 1 };
         }
-        function main() {
+        fn main() {
             let p = make(5);
             print(p.y);
         }
@@ -3062,7 +3062,7 @@ pub fn struct_array_field_access() {
     run_and_check_registers!(
         "
         struct Container { items: int[] }
-        function main() {
+        fn main() {
             let b = Container { items: [10, 20, 30] };
             print(b.items[1]);
         }
@@ -3076,7 +3076,7 @@ pub fn struct_array_field_modify() {
     run_and_check_registers!(
         "
         struct Container { items: int[] }
-        function main() {
+        fn main() {
             let b = Container { items: [10, 20, 30] };
             b.items[2] = 99;
             print(b.items[2]);
@@ -3091,7 +3091,7 @@ pub fn struct_nested_array_field_access() {
     run_and_check_registers!(
         "
         struct Matrix { cells: int[][] }
-        function main() {
+        fn main() {
             let g = Matrix { cells: [[1, 2], [3, 4]] };
             print(g.cells[1][0]);
         }
@@ -3105,7 +3105,7 @@ pub fn struct_nested_array_field_modify() {
     run_and_check_registers!(
         "
         struct Matrix { cells: int[][] }
-        function main() {
+        fn main() {
             let g = Matrix { cells: [[1, 2], [3, 4]] };
             g.cells[0][1] = 77;
             print(g.cells[0][1]);
@@ -3120,7 +3120,7 @@ pub fn struct_structs_array_access() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let arr = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
             print(arr[1].x);
         }
@@ -3134,7 +3134,7 @@ pub fn struct_structs_array_modify() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let arr =[Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
             arr[0].y = 50;
             print(arr[0].y);
@@ -3149,7 +3149,7 @@ pub fn struct_eq_true() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let a = Point { x: 1, y: 2 };
             let b = Point { x: 1, y: 2 };
             print(a == b);
@@ -3164,7 +3164,7 @@ pub fn struct_eq_false() {
     run_and_check_registers!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let a = Point { x: 1, y: 2 };
             let b = Point { x: 1, y: 9 };
             print(a == b);
@@ -3180,7 +3180,7 @@ pub fn struct_deep_structural_eq() {
         "
         struct Inner { v: int }
         struct Outer { inner: Inner }
-        function main() {
+        fn main() {
             let a = Outer { inner: Inner { v: 5 } };
             let b = Outer { inner: Inner { v: 5 } };
             print(a == b);
@@ -3195,7 +3195,7 @@ pub fn struct_ref() {
     run_and_check_registers!(
         "
         struct Box { v: int }
-        function main() {
+        fn main() {
             let a = Box { v: 1 };
             let b = a;
             b.v = 9;
@@ -3211,7 +3211,7 @@ pub fn struct_field_condition() {
     run_and_check_registers!(
         "
         struct Point { x: int }
-        function main() {
+        fn main() {
             let p = Point { x: 7 };
             if p.x > 5 {
                 print(1);
@@ -3229,7 +3229,7 @@ pub fn struct_field_condition() {
 pub fn struct_unknown_name() {
     run!(
         "
-        function main() {
+        fn main() {
             let a = Idk { x: 1 };
         }
         "
@@ -3242,7 +3242,7 @@ pub fn struct_missing_field() {
     run!(
         "
         struct Point { x: int, y: int }
-        function main() {
+        fn main() {
             let a = Point { x: 67 };
         }
         "
@@ -3255,7 +3255,7 @@ pub fn struct_unknown_field() {
     run!(
         "
         struct Point { x: int }
-        function main() {
+        fn main() {
             let a = Point { z: 67 };
         }
         "
@@ -3268,7 +3268,7 @@ pub fn struct_field_wrong_type() {
     run!(
         "
         struct Point { x: int }
-        function main() {
+        fn main() {
             let a = Point { x: true };
         }
         "
@@ -3281,7 +3281,7 @@ pub fn struct_unknown_field_access() {
     run!(
         "
         struct Point { x: int }
-        function main() {
+        fn main() {
             let a = Point { x: 67 };
             print(a.z);
         }
@@ -3295,7 +3295,7 @@ pub fn struct_field_assign_wrong_type() {
     run!(
         "
         struct Point { x: int }
-        function main() {
+        fn main() {
             let a = Point { x: 1 };
             a.x = true;
         }

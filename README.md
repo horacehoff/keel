@@ -100,11 +100,11 @@ Built-in types: `Integer` (i32), `Float` (f64), `Boolean`, `String`, `Array<T>`.
 > It is the starting point for the execution of the program.
 
 ```rs
-function add(a, b) {
+fn add(a, b) {
     return a + b;
 }
 
-function main() {
+fn main() {
     print(add(10, 32));
 }
 ```
@@ -261,7 +261,7 @@ You can import other `.kl` files with the following syntax:
 ```keel
 use "fibonacci_lib.kl"
 
-function main() {print(fibonacci(25));}
+fn main() {print(fibonacci(25));}
 ```
 
 All top-level functions from the imported file become available immediately.
@@ -288,14 +288,14 @@ import "my_test.dylib" {
     int sum(int[], int);
 }
 
-function fib(n) {
+fn fib(n) {
     if n <= 1 {
         return n;
     }
     return fib(my_test::add(n, -1)) + fib(my_test::add(n,-2));
 }
 
-function main() {
+fn main() {
     print(my_test::add(6, 1));
     print(fib(25));
 }
@@ -313,7 +313,7 @@ import "my_test" {
     string add(string, string);
     int sum(int[], int);
 }
-function main() {print(my_test::add(6,1));}
+fn main() {print(my_test::add(6,1));}
 ```
 
 ### Embedding (experimental)

@@ -9,6 +9,7 @@ pub fn format_data(
     x: &Data,
     array_pool: &[Vec<Data>],
     string_pool: &[String],
+    struct_fields: &[(SmolStr, Vec<SmolStr>)],
     show_str: bool,
 ) -> SmolStr {
     if x.is_float() {
@@ -24,17 +25,37 @@ pub fn format_data(
             format_args!("\"{}\"", x.as_str(string_pool)).to_smolstr()
         }
     } else if x.is_array() {
-        format_args!(
-            "[{}]",
-            array_pool[x.as_array()]
+        format_args!("[{}]", unsafe {
+            array_pool
+                .get_unchecked(x.as_array())
                 .iter()
-                .map(|x| format_data(x, array_pool, string_pool, false))
+                .map(|x| format_data(x, array_pool, string_pool, struct_fields, false))
                 .collect::<Vec<SmolStr>>()
-                .join(","),
-        )
+                .join(",")
+        },)
         .to_smolstr()
     } else if x.is_null() {
         SmolStr::new_static("NULL")
+    } else if x.is_struct() {
+        let (s_name, s_fields) =
+            unsafe { struct_fields.get_unchecked(x.struct_type_id() as usize) };
+        format_args!("{} {{{}}}", s_name, unsafe {
+            array_pool
+                .get_unchecked(x.as_struct())
+                .iter()
+                .enumerate()
+                .map(|(i, x)| {
+                    format_args!(
+                        "{}:{}",
+                        s_fields.get_unchecked(i),
+                        format_data(x, array_pool, string_pool, struct_fields, false)
+                    )
+                    .to_smolstr()
+                })
+                .collect::<Vec<SmolStr>>()
+                .join(",")
+        })
+        .to_smolstr()
     } else {
         unsafe { unreachable_unchecked() }
     }
@@ -81,16 +102,23 @@ pub fn get_type_name(x: &Data) -> &str {
         "Integer"
     } else if x.is_null() {
         "Null"
+    } else if x.is_struct() {
+        "Struct"
     } else {
         unreachable!()
     }
 }
 
-pub fn print_debug(instructions: &[Instr], registers: &[Data], pools: &Pools) {
+pub fn print_debug(
+    instructions: &[Instr],
+    registers: &[Data],
+    pools: &Pools,
+    struct_fields: &[(SmolStr, Vec<SmolStr>)],
+) {
     println!("{color_yellow}---- DEBUG ----{color_reset}");
-    if !pools.array_pool.is_empty() {
+    if !pools.obj_pool.is_empty() {
         println!("{color_green}---  ARRAYS  ---{color_reset}");
-        for (i, data) in pools.array_pool.iter().enumerate() {
+        for (i, data) in pools.obj_pool.iter().enumerate() {
             println!(" {i} {data:?}")
         }
     }
@@ -99,7 +127,13 @@ pub fn print_debug(instructions: &[Instr], registers: &[Data], pools: &Pools) {
         println!(
             " [{i}] {}({})",
             get_type_name(data),
-            format_data(data, &pools.array_pool, &pools.string_pool, true)
+            format_data(
+                data,
+                &pools.obj_pool,
+                &pools.string_pool,
+                struct_fields,
+                true
+            )
         )
     }
     if instructions.is_empty() {

@@ -15,6 +15,7 @@ macro_rules! run_and_check_registers {
             allocated_arg_count,
             allocated_call_depth,
             _,
+            _,
         ) = parse($contents, filename, true);
         crate::vm::execute(
             &instructions,
@@ -25,6 +26,7 @@ macro_rules! run_and_check_registers {
                 sources: vec![(filename.into(), $contents.into())],
             },
             &fn_registers,
+            &[],
             &[],
             allocated_arg_count,
             allocated_call_depth,
@@ -52,6 +54,7 @@ macro_rules! run {
             allocated_arg_count,
             allocated_call_depth,
             _,
+            _,
         ) = parse($contents, filename, true);
         crate::vm::execute(
             &instructions,
@@ -62,6 +65,7 @@ macro_rules! run {
                 sources: vec![(filename.into(), $contents.into())],
             },
             &fn_registers,
+            &[],
             &[],
             allocated_arg_count,
             allocated_call_depth,

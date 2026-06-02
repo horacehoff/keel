@@ -12,7 +12,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()
         || matches!(
             x.last().unwrap(),
-            Instr::ArrayElemMov(_, _, _) // | Instr::IoDelete(_)
+            Instr::ObjElemMov(_, _, _) // | Instr::IoDelete(_)
             | Instr::IncInt(_)
             | Instr::DecInt(_)
         )
@@ -44,10 +44,10 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::PowFloat(_, _, y)
         | Instr::PowInt(_, _, y)
         | Instr::Eq(_, _, y)
-        | Instr::ArrayEq(_, _, y)
+        | Instr::ObjEq(_, _, y)
         | Instr::StrEq(_, _, y)
         | Instr::NotEq(_, _, y)
-        | Instr::ArrayNotEq(_, _, y)
+        | Instr::ObjNotEq(_, _, y)
         | Instr::StrNotEq(_, _, y)
         | Instr::SupFloat(_, _, y)
         | Instr::SupInt(_, _, y)
@@ -65,6 +65,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::NegInt(_, y)
         | Instr::CallLibFunc(_, _, y)
         | Instr::GetIndexArray(_, _, y)
+        | Instr::GetFieldStruct(_, _, y)
         | Instr::GetSliceArray(_, _, y)
         | Instr::GetIndexString(_, _, y)
         | Instr::GetSliceString(_, _, y)
@@ -99,10 +100,10 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::IsFalseJmp(_, _)
         | Instr::IsTrueJmp(_, _)
         | Instr::NotEqJmp(_, _, _)
-        | Instr::ArrayNotEqJmp(_, _, _)
+        | Instr::ObjNotEqJmp(_, _, _)
         | Instr::StrNotEqJmp(_, _, _)
         | Instr::EqJmp(_, _, _)
-        | Instr::ArrayEqJmp(_, _, _)
+        | Instr::ObjEqJmp(_, _, _)
         | Instr::StrEqJmp(_, _, _)
         | Instr::SupFloatJmp(_, _, _)
         | Instr::SupIntJmp(_, _, _)
@@ -115,8 +116,9 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::InfIntJmpBack(_, _, _)
         // | Instr::IoDelete(_)
         | Instr::StoreFuncArg(_)
-        | Instr::SetElementArray(_, _, _)
-        | Instr::ArrayElemMov(_, _, _)
+        | Instr::SetElementObj(_, _, _)
+        | Instr::SetFieldStruct(_, _, _)
+        | Instr::ObjElemMov(_, _, _)
         | Instr::Push(_, _)
         | Instr::Return(_) // Modifies a register, but this function doesn't know which one
         | Instr::RecursiveReturn(_) // Modifies a register, but this function doesn't know which one
@@ -151,10 +153,10 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::PowFloat(_, _, y)
         | Instr::PowInt(_, _, y)
         | Instr::Eq(_, _, y)
-        | Instr::ArrayEq(_, _, y)
+        | Instr::ObjEq(_, _, y)
         | Instr::StrEq(_, _, y)
         | Instr::NotEq(_, _, y)
-        | Instr::ArrayNotEq(_, _, y)
+        | Instr::ObjNotEq(_, _, y)
         | Instr::StrNotEq(_, _, y)
         | Instr::SupFloat(_, _, y)
         | Instr::SupInt(_, _, y)
@@ -172,6 +174,7 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::NegInt(_, y)
         | Instr::CallLibFunc(_, _, y)
         | Instr::GetIndexArray(_, _, y)
+        | Instr::GetFieldStruct(_, _, y)
         | Instr::GetSliceArray(_, _, y)
         | Instr::GetIndexString(_, _, y)
         | Instr::GetSliceString(_, _, y)
@@ -182,6 +185,7 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
         | Instr::IncIntTo(_, y)
         | Instr::DecIntTo(_, y)
         | Instr::StartErrorCatch(_,y)
+        | Instr::CloneStruct(_, y)
         | Instr::CloneArray(_, y, _) => Some(y),
 
 
@@ -198,7 +202,7 @@ pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
 }
 
 pub fn get_last_tgt_id(x: &[Instr]) -> Option<u16> {
-    debug_assert!(!(x.is_empty() || matches!(x.last().unwrap(), Instr::ArrayElemMov(_, _, _))));
+    debug_assert!(!(x.is_empty() || matches!(x.last().unwrap(), Instr::ObjElemMov(_, _, _))));
     for y in x.iter().rev() {
         if let Some(id) = get_tgt_id(*y) {
             return Some(id);
@@ -266,6 +270,10 @@ pub fn free_loop_scope_registers(
             && *template_reg >= regs_before
         {
             free_register(*template_reg, free_registers, v, const_registers);
+        } else if let Instr::CloneStruct(template_reg, _) = instr
+            && *template_reg >= regs_before
+        {
+            free_register(*template_reg, free_registers, v, const_registers);
         }
     }
 }
@@ -293,8 +301,8 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::PowInt(a, b, _)
         | Instr::Eq(a, b, _)
         | Instr::NotEq(a, b, _)
-        | Instr::ArrayEq(a, b, _)
-        | Instr::ArrayNotEq(a, b, _)
+        | Instr::ObjEq(a, b, _)
+        | Instr::ObjNotEq(a, b, _)
         | Instr::StrEq(a, b, _)
         | Instr::StrNotEq(a, b, _)
         | Instr::SupFloat(a, b, _)
@@ -313,8 +321,8 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::GetSliceString(a, b, _)
         | Instr::NotEqJmp(a, b, _)
         | Instr::EqJmp(a, b, _)
-        | Instr::ArrayNotEqJmp(a, b, _)
-        | Instr::ArrayEqJmp(a, b, _)
+        | Instr::ObjNotEqJmp(a, b, _)
+        | Instr::ObjEqJmp(a, b, _)
         | Instr::StrNotEqJmp(a, b, _)
         | Instr::StrEqJmp(a, b, _)
         | Instr::SupFloatJmp(a, b, _)
@@ -327,12 +335,13 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::InfEqIntJmp(a, b, _)
         | Instr::InfIntJmpBack(a, b, _)
         | Instr::Push(a, b)
+        | Instr::SetFieldStruct(a, b, _)
         | Instr::Remove(a, b) => {
             f(a);
             f(b);
         }
 
-        Instr::SetElementArray(a, b, c) | Instr::SetElementString(a, b, c) => {
+        Instr::SetElementObj(a, b, c) | Instr::SetElementString(a, b, c) => {
             f(a);
             f(b);
             f(c);
@@ -353,9 +362,10 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::IsFalseJmp(a, _)
         | Instr::IsTrueJmp(a, _)
         | Instr::ThrowError(a)
+        | Instr::GetFieldStruct(a, _, _)
         | Instr::NegBool(a, _) => f(a),
 
-        Instr::ArrayElemMov(a, _, _) => f(a),
+        Instr::ObjElemMov(a, _, _) => f(a),
 
         Instr::CallLibFuncVoid(func, a, b) => {
             f(a);
@@ -366,7 +376,7 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         Instr::Halt(x) if x != 0 => f(x),
         Instr::Halt(_) => {}
 
-        Instr::CloneArray(src, _, _) => f(src),
+        Instr::CloneArray(src, _, _) | Instr::CloneStruct(src, _) => f(src),
 
         Instr::Jmp(_)
         | Instr::JmpBack(_)

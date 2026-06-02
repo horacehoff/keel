@@ -1,4 +1,4 @@
-use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ArrayPool};
+use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ObjectPool};
 
 // 51 bits of total payload => 3 bits for data type & 48 bits of actual payload
 // 1111_1111_1111_1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000
@@ -12,6 +12,7 @@ const NAN_STRING_LARGE: u64 = NAN_BASE | (3 << 48);
 const NAN_ARRAY: u64 = NAN_BASE | (4 << 48);
 const NAN_NULL: u64 = NAN_BASE | (5 << 48);
 const NAN_INT: u64 = NAN_BASE | (6 << 48);
+const NAN_STRUCT: u64 = NAN_BASE | (7 << 48);
 const BOOL_TABLE: [Data; 2] = [FALSE, TRUE];
 pub const NULL: Data = Data(NAN_NULL);
 pub const FALSE: Data = Data(NAN_BOOL);
@@ -21,6 +22,10 @@ pub const TRUE: Data = Data(NAN_BOOL | 1);
 pub struct Data(pub u64);
 
 impl Data {
+    #[inline(always)]
+    pub fn tag(&self) -> u64 {
+        self.0 & !0xFFFF_FFFF // also includes type_id
+    }
     #[inline(always)]
     pub fn is_null(&self) -> bool {
         self.0 == NAN_NULL
@@ -72,8 +77,8 @@ impl Data {
     }
     #[inline(always)]
     pub fn as_array(&self) -> usize {
-        debug_assert!(self.is_array());
-        (self.0 & PAYLOAD_MASK) as usize
+        debug_assert!(self.is_array() || self.is_struct());
+        (self.0 & 0xFFFF_FFFF) as usize
     }
     #[inline(always)]
     pub fn is_array(&self) -> bool {
@@ -110,7 +115,7 @@ impl Data {
     /// Allocates a string, storing it directly inside the u64 if it's <= 6 characters or inside string_pool if it's bigger
     pub fn str(
         s: &str,
-        array_pool: &ArrayPool,
+        array_pool: &ObjectPool,
         string_pool: &mut Vec<String>,
         registers: &[Data],
         recursion_stack: &[Data],
@@ -145,7 +150,7 @@ impl Data {
     #[inline(always)]
     pub fn string(
         s: String,
-        array_pool: &ArrayPool,
+        array_pool: &ObjectPool,
         string_pool: &mut Vec<String>,
         registers: &[Data],
         recursion_stack: &[Data],
@@ -230,6 +235,23 @@ impl Data {
     pub fn get_str_pool_id(&self) -> usize {
         debug_assert!(self.is_large_str());
         (self.0 & PAYLOAD_MASK) as usize
+    }
+    #[inline(always)]
+    pub fn struct_instance(type_id: u16, id: u32) -> Data {
+        Data(NAN_STRUCT | ((type_id as u64) << 32) | id as u64)
+    }
+    #[inline(always)]
+    pub fn as_struct(&self) -> usize {
+        debug_assert!(self.is_struct());
+        (self.0 & 0xFFFF_FFFF) as usize
+    }
+    #[inline(always)]
+    pub fn struct_type_id(&self) -> u16 {
+        ((self.0 >> 32) & 0xFFFF) as u16
+    }
+    #[inline(always)]
+    pub fn is_struct(&self) -> bool {
+        (self.0 & !PAYLOAD_MASK) == NAN_STRUCT
     }
 }
 

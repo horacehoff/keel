@@ -67,7 +67,7 @@ pub fn handle_user_function(
     // Infer arg types
     let infered_arg_types = args
         .iter()
-        .map(|x| infer_type(x, v, state.fns, src, state.dyn_libs))
+        .map(|x| infer_type(x, v, state.fns, state.structs, src, state.dyn_libs))
         .collect::<Vec<DataType>>();
 
     // Try to check if function has already been compiled for these specific arg types
@@ -236,7 +236,15 @@ fn compile_function(
                 var_type: infered_type.clone(),
             });
         });
-    let fn_type = track_returns(fn_code, v, state.fns, fn_src, fn_name, state.dyn_libs);
+    let fn_type = track_returns(
+        fn_code,
+        v,
+        state.fns,
+        state.structs,
+        fn_src,
+        fn_name,
+        state.dyn_libs,
+    );
     let return_type = if !fn_type.is_empty() {
         // If function returns anything, check if it returns the same thing each time
         check_poly(DataType::Poly(Box::from(fn_type)))

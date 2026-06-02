@@ -26,7 +26,7 @@ pub fn handle_method_calls(
 
     let name = namespace[namespace.len() - 1].as_str();
 
-    let obj_type = infer_type(obj, v, state.fns, src, state.dyn_libs);
+    let obj_type = infer_type(obj, v, state.fns, state.structs, src, state.dyn_libs);
     let id = get_id(obj, v, ctx, state, output, None, false, offset, single_run);
     free_register(id, state.free_registers, v, state.const_registers);
 

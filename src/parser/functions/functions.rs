@@ -28,7 +28,14 @@ pub fn check_arg_type(
     arg_idx: usize,
     expected: &[DataType],
 ) {
-    let inferred = infer_type(&args[arg_idx], v, state.fns, ctx.src, state.dyn_libs);
+    let inferred = infer_type(
+        &args[arg_idx],
+        v,
+        state.fns,
+        state.structs,
+        ctx.src,
+        state.dyn_libs,
+    );
     let matches = if let DataType::Poly(polytype) = &inferred {
         polytype.iter().all(|x| expected.contains(x))
     } else {

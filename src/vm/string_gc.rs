@@ -1,9 +1,9 @@
 use crate::data::Data;
-use crate::vm::ArrayPool;
+use crate::vm::ObjectPool;
 use crate::vm::StringPool;
 
 pub fn string_gc(
-    array_pool: &ArrayPool,
+    array_pool: &ObjectPool,
     string_pool: &StringPool,
     free_strings: &mut Vec<u16>,
     registers: &[Data],
@@ -31,7 +31,7 @@ pub fn string_gc(
     }
 }
 
-fn track_strings(array_pool: &ArrayPool, array: &[Data], live: &mut [bool]) {
+fn track_strings(array_pool: &ObjectPool, array: &[Data], live: &mut [bool]) {
     if let Some(first) = array.first() {
         if first.is_str() {
             for x in array {

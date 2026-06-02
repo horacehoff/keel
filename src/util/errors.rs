@@ -101,7 +101,14 @@ pub enum ErrType<'a> {
     // PARSER ERRORS
     UnknownVariable(&'a str),
     UnknownFunction(&'a str),
+    UnknownStruct(&'a str),
     UnknownNamespace(&'a str),
+    UnknownType(&'a str),
+    InvalidStructFieldCount(&'a str, u16, u16),
+    /// StructMissingField(struct, field)
+    StructMissingField(&'a str, &'a str),
+    /// StructUnknownField(struct, field)
+    StructUnknownField(&'a str, &'a str),
     /// When an array holds two or more different types
     ArrayWithDiffType,
     NotIndexable(&'a DataType),
@@ -113,7 +120,7 @@ pub enum ErrType<'a> {
     IncorrectArgCount(&'a str, u16, u16),
     IncorrectArgCountVariable(&'a str, u16, u16, u16),
     /// InvalidType(expected_type, received_type)
-    InvalidType(DataType, &'a DataType),
+    InvalidType(&'a DataType, &'a DataType),
     /// OpError(l, r, op)
     OpError(&'a DataType, &'a DataType, &'a str),
     /// InvalidOp(type, op)
@@ -175,6 +182,10 @@ impl From<ErrType<'_>> for SmolStr {
                 "Unknown function {color_bright_blue}{style_bold}{f}{color_reset}{style_reset}"
             )
             .to_smolstr(),
+            ErrType::UnknownStruct(f) => format_args!(
+                "Unknown struct {color_bright_blue}{style_bold}{f}{color_reset}{style_reset}"
+            )
+            .to_smolstr(),
             ErrType::UnknownVariable(v) => format_args!(
                 "Unknown variable {color_bright_blue}{style_bold}{v}{color_reset}{style_reset}"
             )
@@ -183,6 +194,13 @@ impl From<ErrType<'_>> for SmolStr {
                 "Unknown namespace {color_bright_blue}{style_bold}{n}{color_reset}{style_reset}"
             )
             .to_smolstr(),
+            ErrType::UnknownType(t) => format_args!("Unknown type {color_red}{style_bold}{t}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::InvalidStructFieldCount(name, expected, received) => format_args!(
+                "Struct {color_bright_blue}{style_bold}{name}{color_reset}{style_reset} expects {expected} fields while this has {color_red}{style_bold}{received}{color_reset}{style_reset} fields").to_smolstr(),
+            ErrType::StructUnknownField(name, field) => format_args!(
+                "Unknown field {color_red}{style_bold}{field}{color_reset}{style_reset} in struct {color_bright_blue}{style_bold}{name}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::StructMissingField(name, field) => format_args!(
+                "Missing field {color_red}{style_bold}{field}{color_reset}{style_reset} in struct {color_bright_blue}{style_bold}{name}{color_reset}{style_reset}").to_smolstr(),
             ErrType::ArrayWithDiffType => "Arrays can only hold a single type".into(),
             ErrType::NotIndexable(t) => format_args!(
                 "The type {color_bright_blue}{style_bold}{t}{color_reset}{style_reset} cannot be indexed"
@@ -262,7 +280,12 @@ impl ErrType<'_> {
             ErrType::SliceOutOfBounds(_, _, _) => "slice_out_of_bounds",
             ErrType::UnknownVariable(_) => "unknown_variable",
             ErrType::UnknownFunction(_) => "unknown_function",
+            ErrType::UnknownStruct(_) => "unknown_struct",
             ErrType::UnknownNamespace(_) => "unknown_namespace",
+            ErrType::UnknownType(_) => "unknown_type",
+            ErrType::InvalidStructFieldCount(_, _, _) => "invalid_struct_field_count",
+            ErrType::StructMissingField(_, _) => "struct_missing_field",
+            ErrType::StructUnknownField(_, _) => "struct_unknown_field",
             ErrType::ArrayWithDiffType => "array_with_diff_type",
             ErrType::NotIndexable(_) => "not_indexable",
             ErrType::InvalidIndexType(_) => "invalid_index_type",

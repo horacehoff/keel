@@ -27,6 +27,7 @@ use crate::type_system::collect_direct_fn_calls;
 use crate::type_system::datatype_to_c_type;
 use crate::type_system::is_type_indexable;
 use crate::type_system::{DataType, infer_type};
+use crate::util::str_to_keel_type;
 use crate::{data::Data, instr::Instr};
 use inline_colorization::*;
 use lalrpop_util::lalrpop_mod;
@@ -54,10 +55,10 @@ fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_
         Instr::SupEqFloat(o1, o2, o3) if o3 == condition_id => Instr::InfFloatJmp(o1, o2, *len),
         Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::InfIntJmp(o1, o2, *len),
         Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, *len),
-        Instr::ArrayEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayNotEqJmp(o1, o2, *len),
+        Instr::ObjEq(o1, o2, o3) if o3 == condition_id => Instr::ObjNotEqJmp(o1, o2, *len),
         Instr::StrEq(o1, o2, o3) if o3 == condition_id => Instr::StrNotEqJmp(o1, o2, *len),
         Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, *len),
-        Instr::ArrayNotEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayEqJmp(o1, o2, *len),
+        Instr::ObjNotEq(o1, o2, o3) if o3 == condition_id => Instr::ObjEqJmp(o1, o2, *len),
         Instr::StrNotEq(o1, o2, o3) if o3 == condition_id => Instr::StrEqJmp(o1, o2, *len),
         _ => {
             output.push(Instr::IsFalseJmp(condition_id, *len));
@@ -85,10 +86,10 @@ fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
         Instr::SupEqFloat(o1, o2, o3) if o3 == condition_id => Instr::SupEqFloatJmp(o1, o2, 0),
         Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::SupEqIntJmp(o1, o2, 0),
         Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, 0),
-        Instr::ArrayEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayEqJmp(o1, o2, 0),
+        Instr::ObjEq(o1, o2, o3) if o3 == condition_id => Instr::ObjEqJmp(o1, o2, 0),
         Instr::StrEq(o1, o2, o3) if o3 == condition_id => Instr::StrEqJmp(o1, o2, 0),
         Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, 0),
-        Instr::ArrayNotEq(o1, o2, o3) if o3 == condition_id => Instr::ArrayNotEqJmp(o1, o2, 0),
+        Instr::ObjNotEq(o1, o2, o3) if o3 == condition_id => Instr::ObjNotEqJmp(o1, o2, 0),
         Instr::StrNotEq(o1, o2, o3) if o3 == condition_id => Instr::StrNotEqJmp(o1, o2, 0),
         _ => {
             output.push(Instr::IsTrueJmp(condition_id, 0));
@@ -116,8 +117,8 @@ fn set_jmp_size(instr: &mut Instr, size: u16) {
         | Instr::InfIntJmpBack(_, _, jump_size)
         | Instr::NotEqJmp(_, _, jump_size)
         | Instr::EqJmp(_, _, jump_size)
-        | Instr::ArrayNotEqJmp(_, _, jump_size)
-        | Instr::ArrayEqJmp(_, _, jump_size)
+        | Instr::ObjNotEqJmp(_, _, jump_size)
+        | Instr::ObjEqJmp(_, _, jump_size)
         | Instr::StrNotEqJmp(_, _, jump_size)
         | Instr::StrEqJmp(_, _, jump_size) => *jump_size = size,
         _ => unreachable!(),
@@ -243,8 +244,8 @@ pub fn get_id(
     macro_rules! uniform_op {
         ($instr: ident,$symbol:expr, $l: expr, $r: expr, $markers: expr, $type:expr) => {{
             let (t_l, t_r) = (
-                infer_type($l, v, state.fns, src, state.dyn_libs),
-                infer_type($r, v, state.fns, src, state.dyn_libs),
+                infer_type($l, v, state.fns, state.structs, src, state.dyn_libs),
+                infer_type($r, v, state.fns, state.structs, src, state.dyn_libs),
             );
             if t_l != $type || t_r != $type {
                 throw_parser_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
@@ -260,8 +261,8 @@ pub fn get_id(
         }};
         ($instr: ident, $instr2:ident,$symbol:expr, $l: expr, $r: expr, $markers: expr, $type1:expr, $type2:expr) => {{
             let (t_l, t_r) = (
-                infer_type($l, v, state.fns, src, state.dyn_libs),
-                infer_type($r, v, state.fns, src, state.dyn_libs),
+                infer_type($l, v, state.fns, state.structs, src, state.dyn_libs),
+                infer_type($r, v, state.fns, state.structs, src, state.dyn_libs),
             );
             if !((t_l == $type1 && t_r == $type1) || (t_l == $type2 && t_r == $type2)) {
                 throw_parser_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
@@ -371,17 +372,17 @@ pub fn get_id(
         }
         Expr::Array(elems, markers) => {
             if let Some(first) = elems.first() {
-                let first_type = infer_type(first, v, state.fns, src, state.dyn_libs);
-                if !elems
-                    .iter()
-                    .all(|x| infer_type(x, v, state.fns, src, state.dyn_libs) == first_type)
-                {
+                let first_type =
+                    infer_type(first, v, state.fns, state.structs, src, state.dyn_libs);
+                if !elems.iter().all(|x| {
+                    infer_type(x, v, state.fns, state.structs, src, state.dyn_libs) == first_type
+                }) {
                     throw_parser_error(src, markers, ErrType::ArrayWithDiffType);
                 }
             }
             let array_id = {
-                state.pools.array_pool.push(Vec::new());
-                state.pools.array_pool.len() - 1
+                state.pools.obj_pool.push(Vec::new());
+                state.pools.obj_pool.len() - 1
             };
             if elems.is_empty() && !single_run {
                 let array_reg = {
@@ -396,18 +397,18 @@ pub fn get_id(
                     let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
                     if !x.is_empty() {
                         let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
-                        state.pools.array_pool.get_mut(array_id).unwrap().push(NULL);
+                        state.pools.obj_pool.get_mut(array_id).unwrap().push(NULL);
 
                         output.extend(x);
-                        output.push(Instr::ArrayElemMov(
+                        output.push(Instr::ObjElemMov(
                             c_id,
                             array_id as u16,
-                            (state.pools.array_pool[array_id].len() - 1) as u16,
+                            (state.pools.obj_pool[array_id].len() - 1) as u16,
                         ));
                     } else {
                         state
                             .pools
-                            .array_pool
+                            .obj_pool
                             .get_mut(array_id)
                             .unwrap()
                             .push(state.registers.pop().unwrap());
@@ -424,13 +425,13 @@ pub fn get_id(
                     if !x.is_empty() {
                         constant_array = false;
                         let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
-                        state.pools.array_pool.get_mut(array_id).unwrap().push(NULL);
+                        state.pools.obj_pool.get_mut(array_id).unwrap().push(NULL);
                         elem_ids.push((x, c_id));
                     } else {
                         let reg_id = (state.registers.len() - 1) as u16;
                         state
                             .pools
-                            .array_pool
+                            .obj_pool
                             .get_mut(array_id)
                             .unwrap()
                             .push(state.registers.pop().unwrap());
@@ -445,18 +446,18 @@ pub fn get_id(
                         (state.registers.len() - 1) as u16
                     };
                     let dest_reg = {
-                        state.registers.push(Data::array(0));
+                        state.registers.push(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
                         (state.registers.len() - 1) as u16
                     };
                     output.push(Instr::CloneArray(
                         template_reg,
                         dest_reg,
-                        state.pools.array_pool[array_id].len() as u16,
+                        state.pools.obj_pool[array_id].len() as u16,
                     ));
                     dest_reg
                 } else {
                     let dest_reg = {
-                        state.registers.push(Data::array(0));
+                        state.registers.push(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
                         (state.registers.len() - 1) as u16
                     };
                     output.push(Instr::EmptyArray(dest_reg));
@@ -466,6 +467,150 @@ pub fn get_id(
                     }
                     dest_reg
                 }
+            }
+        }
+        Expr::Struct(name, fields, span) => {
+            let expected_struct_idx =
+                if let Some(idx) = state.structs.iter().rposition(|s| &s.name == name) {
+                    idx
+                } else {
+                    throw_parser_error(src, span, ErrType::UnknownStruct(name));
+                };
+            let type_id = state.structs[expected_struct_idx].id;
+            let expected_fields = state.structs[expected_struct_idx].fields.clone();
+            if expected_fields.len() != fields.len() {
+                throw_parser_error(
+                    src,
+                    span,
+                    ErrType::InvalidStructFieldCount(
+                        name,
+                        expected_fields.len() as u16,
+                        fields.len() as u16,
+                    ),
+                );
+            }
+            let struct_id = {
+                state.pools.obj_pool.push(Vec::with_capacity(fields.len()));
+                state.pools.obj_pool.len() - 1
+            };
+            if single_run {
+                for field_idx in 0..state.structs[expected_struct_idx].fields.len() {
+                    let field = &expected_fields[field_idx];
+                    if let Some((_, field_expr, field_span)) =
+                        fields.iter().find(|(f, _, _)| f == &field.0)
+                    {
+                        let field_type = infer_type(
+                            field_expr,
+                            v,
+                            state.fns,
+                            state.structs,
+                            src,
+                            state.dyn_libs,
+                        );
+                        if field_type != field.1 {
+                            throw_parser_error(
+                                src,
+                                field_span,
+                                ErrType::InvalidType(&field.1, &field_type),
+                            );
+                        }
+                        let compiled = compile_expr(
+                            std::slice::from_ref(field_expr),
+                            v,
+                            ctx,
+                            state,
+                            offset,
+                            single_run,
+                        );
+                        if compiled.is_empty() {
+                            state
+                                .pools
+                                .obj_pool
+                                .get_mut(struct_id)
+                                .unwrap()
+                                .push(state.registers.pop().unwrap());
+                        } else {
+                            let c_id = get_tgt_id(*compiled.last().unwrap()).unwrap();
+                            output.extend(compiled);
+                            state.pools.obj_pool.get_mut(struct_id).unwrap().push(NULL);
+                            output.push(Instr::ObjElemMov(
+                                c_id,
+                                struct_id as u16,
+                                (state.pools.obj_pool[struct_id].len() - 1) as u16,
+                            ));
+                        }
+                    } else {
+                        throw_parser_error(src, span, ErrType::StructMissingField(name, &field.0));
+                    }
+                }
+
+                state
+                    .registers
+                    .push(Data::struct_instance(type_id, struct_id as u32));
+                (state.registers.len() - 1) as u16
+            } else {
+                let mut dynamic: Vec<(Vec<Instr>, u16, u16)> = Vec::new();
+                for field_idx in 0..state.structs[expected_struct_idx].fields.len() {
+                    let field = &expected_fields[field_idx];
+                    if let Some((_, field_expr, field_span)) =
+                        fields.iter().find(|(f, _, _)| f == &field.0)
+                    {
+                        let field_type = infer_type(
+                            field_expr,
+                            v,
+                            state.fns,
+                            state.structs,
+                            src,
+                            state.dyn_libs,
+                        );
+                        if field_type != field.1 {
+                            throw_parser_error(
+                                src,
+                                field_span,
+                                ErrType::InvalidType(&field.1, &field_type),
+                            );
+                        }
+                        let compiled_field = compile_expr(
+                            slice::from_ref(field_expr),
+                            v,
+                            ctx,
+                            state,
+                            offset,
+                            single_run,
+                        );
+                        if !compiled_field.is_empty() {
+                            let c_id = get_tgt_id(*compiled_field.last().unwrap()).unwrap();
+                            state.pools.obj_pool.get_mut(struct_id).unwrap().push(NULL);
+                            dynamic.push((compiled_field, c_id, field_idx as u16));
+                        } else {
+                            state
+                                .pools
+                                .obj_pool
+                                .get_mut(struct_id)
+                                .unwrap()
+                                .push(state.registers.pop().unwrap());
+                        }
+                    } else {
+                        throw_parser_error(src, span, ErrType::StructMissingField(name, &field.0));
+                    }
+                }
+
+                let template_reg = {
+                    state
+                        .registers
+                        .push(Data::struct_instance(type_id, struct_id as u32));
+                    (state.registers.len() - 1) as u16
+                };
+                let dest_reg = {
+                    state.registers.push(Data::struct_instance(type_id, 0));
+                    (state.registers.len() - 1) as u16
+                };
+                output.push(Instr::CloneStruct(template_reg, dest_reg));
+                for (instrs, val_reg, slot) in dynamic {
+                    output.extend(instrs);
+                    output.push(Instr::SetFieldStruct(dest_reg, val_reg, slot));
+                }
+                dest_reg
             }
         }
         Expr::Mul(l, r, markers) => {
@@ -504,8 +649,8 @@ pub fn get_id(
             id
         }
         Expr::Add(l, r, markers) => {
-            let t_l = infer_type(l, v, state.fns, src, state.dyn_libs);
-            let t_r = infer_type(r, v, state.fns, src, state.dyn_libs);
+            let t_l = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
+            let t_r = infer_type(r, v, state.fns, state.structs, src, state.dyn_libs);
             if t_l != t_r
                 || !matches!(
                     t_l,
@@ -558,8 +703,8 @@ pub fn get_id(
             id
         }
         Expr::Sub(l, r, markers) => {
-            let t_l = infer_type(l, v, state.fns, src, state.dyn_libs);
-            let t_r = infer_type(r, v, state.fns, src, state.dyn_libs);
+            let t_l = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
+            let t_r = infer_type(r, v, state.fns, state.structs, src, state.dyn_libs);
             if !((t_l == DataType::Float && t_r == DataType::Float)
                 || (t_l == DataType::Int && t_r == DataType::Int))
             {
@@ -633,10 +778,10 @@ pub fn get_id(
             )
         }
         Expr::Eq(l, r) => {
-            let l_type = infer_type(l, v, state.fns, src, state.dyn_libs);
-            let r_type = infer_type(r, v, state.fns, src, state.dyn_libs);
-            let is_array =
-                matches!(l_type, DataType::Array(_)) && matches!(r_type, DataType::Array(_));
+            let l_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
+            let r_type = infer_type(r, v, state.fns, state.structs, src, state.dyn_libs);
+            let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
+                && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
             let is_string = l_type == DataType::String || r_type == DataType::String;
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
@@ -648,7 +793,7 @@ pub fn get_id(
                 alloc_register(state.registers, state.free_registers)
             };
             output.push(if is_array {
-                Instr::ArrayEq(id_l, id_r, id)
+                Instr::ObjEq(id_l, id_r, id)
             } else if is_string {
                 Instr::StrEq(id_l, id_r, id)
             } else {
@@ -657,10 +802,10 @@ pub fn get_id(
             id
         }
         Expr::NotEq(l, r) => {
-            let l_type = infer_type(l, v, state.fns, src, state.dyn_libs);
-            let r_type = infer_type(r, v, state.fns, src, state.dyn_libs);
-            let is_array =
-                matches!(l_type, DataType::Array(_)) && matches!(r_type, DataType::Array(_));
+            let l_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
+            let r_type = infer_type(r, v, state.fns, state.structs, src, state.dyn_libs);
+            let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
+                && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
             let is_string = l_type == DataType::String || r_type == DataType::String;
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
@@ -672,7 +817,7 @@ pub fn get_id(
                 alloc_register(state.registers, state.free_registers)
             };
             if is_array {
-                output.push(Instr::ArrayNotEq(id_l, id_r, id));
+                output.push(Instr::ObjNotEq(id_l, id_r, id));
             } else if is_string {
                 output.push(Instr::StrNotEq(id_l, id_r, id));
             } else {
@@ -735,7 +880,7 @@ pub fn get_id(
             uniform_op!(BoolOr, "||", l, r, markers, DataType::Bool)
         }
         Expr::Neg(l, markers) => {
-            let operand_type = infer_type(l, v, state.fns, src, state.dyn_libs);
+            let operand_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             free_register(id_l, state.free_registers, v, state.const_registers);
             let id = if let Some(tgt_register_id) = tgt_id {
@@ -753,7 +898,7 @@ pub fn get_id(
             id
         }
         Expr::BoolNeg(l, markers) => {
-            let operand_type = infer_type(l, v, state.fns, src, state.dyn_libs);
+            let operand_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             free_register(id_l, state.free_registers, v, state.const_registers);
             let id = if let Some(tgt_register_id) = tgt_id {
@@ -928,9 +1073,9 @@ pub fn get_id(
                     | Instr::InfFloatJmp(_, _, jump_size)
                     | Instr::InfIntJmp(_, _, jump_size)
                     | Instr::NotEqJmp(_, _, jump_size)
-                    | Instr::ArrayNotEqJmp(_, _, jump_size)
+                    | Instr::ObjNotEqJmp(_, _, jump_size)
                     | Instr::EqJmp(_, _, jump_size)
-                    | Instr::ArrayEqJmp(_, _, jump_size),
+                    | Instr::ObjEqJmp(_, _, jump_size),
                 ) = output.get_mut(*y)
                 {
                     *jump_size = diff as u16;
@@ -1014,47 +1159,52 @@ pub fn compile_expr(
                     throw_parser_error(src, markers, ErrType::UnknownVariable(name))
                 }
             }
-            Expr::Array(elems, markers) => {
-                let first_type = infer_type(&elems[0], v, state.fns, src, state.dyn_libs);
-                if !elems
-                    .iter()
-                    .all(|x| infer_type(x, v, state.fns, src, state.dyn_libs) == first_type)
-                {
-                    throw_parser_error(src, markers, ErrType::ArrayWithDiffType);
+            Expr::GetStructField(struct_expr, field, struct_span, field_span) => {
+                let t = infer_type(
+                    struct_expr,
+                    v,
+                    state.fns,
+                    state.structs,
+                    src,
+                    state.dyn_libs,
+                );
+                if let DataType::Struct(s_id) = t {
+                    let s = &state.structs[s_id as usize];
+                    let idx = s
+                        .fields
+                        .iter()
+                        .position(|f| &f.0 == field)
+                        .unwrap_or_else(|| {
+                            throw_parser_error(
+                                src,
+                                field_span,
+                                ErrType::StructUnknownField(&s.name, field),
+                            );
+                        });
+                    let id = get_id(
+                        struct_expr,
+                        v,
+                        ctx,
+                        state,
+                        &mut output,
+                        None,
+                        false,
+                        offset,
+                        single_run,
+                    );
+                    let dest_reg_id = alloc_register(state.registers, state.free_registers);
+                    output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
+                } else {
+                    throw_parser_error(
+                        src,
+                        struct_span,
+                        ErrType::InvalidType(&DataType::Struct(0), &t),
+                    );
                 }
-                // create a new blank array
-                let array_id = {
-                    state.pools.array_pool.push(Vec::new());
-                    state.pools.array_pool.len() - 1
-                };
-                // process each array element
-                for elem in elems {
-                    let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
-                    // if there are no instructions, then that means the element has been pushed to the registers, so pop it and push it directly to the array
-                    if x.is_empty() {
-                        state
-                            .pools
-                            .array_pool
-                            .get_mut(array_id)
-                            .unwrap()
-                            .push(state.registers.pop().unwrap());
-                    } else {
-                        // if there are instructions, then push everything, add a null to the array, and then add an instruction to move the element to the array at runtime with ArrayMov
-                        let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
-                        output.extend(x);
-                        state.pools.array_pool.get_mut(array_id).unwrap().push(NULL);
-                        output.push(Instr::ArrayElemMov(
-                            c_id,
-                            array_id as u16,
-                            (state.pools.array_pool[array_id].len() - 1) as u16,
-                        ));
-                    }
-                }
-                state.registers.push(Data::array(array_id as u32));
             }
             // array[index]
             Expr::ArrayGetIndex(array, index, markers) => {
-                let infered = infer_type(array, v, state.fns, src, state.dyn_libs);
+                let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
                 if !is_type_indexable(&infered) {
                     throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
                 }
@@ -1071,7 +1221,8 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                let index_inferred = infer_type(index, v, state.fns, src, state.dyn_libs);
+                let index_inferred =
+                    infer_type(index, v, state.fns, state.structs, src, state.dyn_libs);
                 if index_inferred != DataType::Int {
                     throw_parser_error(src, markers, ErrType::InvalidIndexType(&index_inferred));
                 }
@@ -1099,7 +1250,7 @@ pub fn compile_expr(
             }
             // array[start..end]
             Expr::ArrayGetSlice(array, idx_start, idx_end, markers) => {
-                let infered = infer_type(array, v, state.fns, src, state.dyn_libs);
+                let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
                 if !is_type_indexable(&infered) {
                     throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
                 }
@@ -1114,7 +1265,8 @@ pub fn compile_expr(
                     offset,
                     single_run,
                 );
-                let idx_start_inferred = infer_type(idx_start, v, state.fns, src, state.dyn_libs);
+                let idx_start_inferred =
+                    infer_type(idx_start, v, state.fns, state.structs, src, state.dyn_libs);
                 if idx_start_inferred != DataType::Int {
                     throw_parser_error(
                         src,
@@ -1133,7 +1285,8 @@ pub fn compile_expr(
                     offset,
                     single_run,
                 );
-                let idx_end_inferred = infer_type(idx_end, v, state.fns, src, state.dyn_libs);
+                let idx_end_inferred =
+                    infer_type(idx_end, v, state.fns, state.structs, src, state.dyn_libs);
                 if idx_end_inferred != DataType::Int {
                     throw_parser_error(src, markers, ErrType::InvalidIndexType(&idx_end_inferred));
                 }
@@ -1162,7 +1315,8 @@ pub fn compile_expr(
             }
             // x[y] = z;
             Expr::ArrayModify(array, index, value, index_markers, elem_markers) => {
-                let array_type = infer_type(array, v, state.fns, src, state.dyn_libs);
+                let array_type =
+                    infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
                 if !is_type_indexable(&array_type) {
                     throw_parser_error(src, index_markers, ErrType::NotIndexable(&array_type));
                 }
@@ -1191,7 +1345,7 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                let elem_type = infer_type(value, v, state.fns, src, state.dyn_libs);
+                let elem_type = infer_type(value, v, state.fns, state.structs, src, state.dyn_libs);
                 let elem_id = get_id(
                     value,
                     v,
@@ -1224,13 +1378,82 @@ pub fn compile_expr(
                 let to_push = if array_type == DataType::String {
                     Instr::SetElementString(id, elem_id, final_id)
                 } else {
-                    Instr::SetElementArray(id, elem_id, final_id)
+                    Instr::SetElementObj(id, elem_id, final_id)
                 };
                 state
                     .instr_src
                     .push((to_push, *index_markers, current_src_file));
                 output.push(to_push);
                 free_register(id, state.free_registers, v, state.const_registers);
+            }
+            Expr::SetStructField(struct_expr, field, new_val, struct_span, field_span) => {
+                let t = infer_type(
+                    struct_expr,
+                    v,
+                    state.fns,
+                    state.structs,
+                    src,
+                    state.dyn_libs,
+                );
+                let new_val_type =
+                    infer_type(new_val, v, state.fns, state.structs, src, state.dyn_libs);
+                let struct_id = if let DataType::Struct(id) = t {
+                    id
+                } else {
+                    throw_parser_error(
+                        src,
+                        struct_span,
+                        ErrType::InvalidType(&DataType::Struct(0), &t),
+                    );
+                };
+                let mut field_index: Option<u16> = None;
+                for (i, (f, f_t)) in state.structs[struct_id as usize].fields.iter().enumerate() {
+                    if f == field {
+                        if new_val_type != *f_t {
+                            throw_parser_error(
+                                src,
+                                field_span,
+                                ErrType::InvalidType(f_t, &new_val_type),
+                            );
+                        }
+                        field_index = Some(i as u16);
+                        break;
+                    }
+                }
+                if field_index.is_none() {
+                    throw_parser_error(
+                        src,
+                        field_span,
+                        ErrType::StructUnknownField(&state.structs[struct_id as usize].name, field),
+                    );
+                }
+                let id = get_id(
+                    struct_expr,
+                    v,
+                    ctx,
+                    state,
+                    &mut output,
+                    None,
+                    false,
+                    offset,
+                    single_run,
+                );
+                let new_elem_reg_id = get_id(
+                    new_val,
+                    v,
+                    ctx,
+                    state,
+                    &mut output,
+                    None,
+                    false,
+                    offset,
+                    single_run,
+                );
+                output.push(Instr::SetFieldStruct(
+                    id,
+                    new_elem_reg_id,
+                    field_index.unwrap(),
+                ));
             }
             Expr::Condition(main_condition, code, _) => {
                 // get first code limit (after which there are only else(if) blocks)
@@ -1390,7 +1613,8 @@ pub fn compile_expr(
                 // parse the array, get its id (the target array is the first Expr in array_code)
                 let array = array_code.first().unwrap();
                 let code = &array_code[1..];
-                let array_type = infer_type(array, v, state.fns, src, state.dyn_libs);
+                let array_type =
+                    infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
                 let array = get_id(
                     array,
                     v,
@@ -1514,13 +1738,13 @@ pub fn compile_expr(
                 //
                 //
                 // Check start and elem type
-                let t1 = infer_type(start_elem, v, state.fns, src, state.dyn_libs);
-                let t2 = infer_type(end_elem, v, state.fns, src, state.dyn_libs);
+                let t1 = infer_type(start_elem, v, state.fns, state.structs, src, state.dyn_libs);
+                let t2 = infer_type(end_elem, v, state.fns, state.structs, src, state.dyn_libs);
                 if t1 != DataType::Int {
-                    throw_parser_error(src, markers1, ErrType::InvalidType(DataType::Int, &t1));
+                    throw_parser_error(src, markers1, ErrType::InvalidType(&DataType::Int, &t1));
                 }
                 if t2 != DataType::Int {
-                    throw_parser_error(src, markers2, ErrType::InvalidType(DataType::Int, &t2));
+                    throw_parser_error(src, markers2, ErrType::InvalidType(&DataType::Int, &t2));
                 }
                 let elem_id = if single_run {
                     get_id(
@@ -1669,7 +1893,7 @@ pub fn compile_expr(
                 free_register(err_reg_id, state.free_registers, v, state.const_registers);
             }
             Expr::VarDeclare(x, y) => {
-                let var_type = infer_type(y, v, state.fns, src, state.dyn_libs);
+                let var_type = infer_type(y, v, state.fns, state.structs, src, state.dyn_libs);
 
                 let var_id = if single_run {
                     get_id(
@@ -1716,7 +1940,7 @@ pub fn compile_expr(
                 });
             }
             Expr::VarAssign(name, y, markers) => {
-                let var_type = infer_type(y, v, state.fns, src, state.dyn_libs);
+                let var_type = infer_type(y, v, state.fns, state.structs, src, state.dyn_libs);
                 let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
                     throw_parser_error(src, markers, ErrType::UnknownVariable(name));
                 });
@@ -1805,7 +2029,25 @@ pub fn compile_expr(
                 }
                 v[var_pos].var_type = var_type;
             }
-
+            Expr::StructDeclare(name, fields, span) => {
+                state.structs.push(Struct {
+                    name: name.clone(),
+                    fields: fields
+                        .iter()
+                        .map(|(f, f_t)| {
+                            (f.clone(), str_to_keel_type(f_t, state.structs, span, src))
+                        })
+                        .collect(),
+                    id: state.structs.len() as u16,
+                });
+                state.struct_fields.push((
+                    name.clone(),
+                    fields
+                        .iter()
+                        .map(|(n, _)| n.clone())
+                        .collect::<Vec<SmolStr>>(),
+                ));
+            }
             Expr::FunctionCall(args, namespace, markers, args_indexes) => {
                 let output_id = handle_functions(
                     &mut output,
@@ -1929,6 +2171,8 @@ fn parse_toplevel(
     src_file_idx: u16,
     use_line_markers: (&str, &str),
     fns: &mut Vec<Function>,
+    structs: &mut Vec<Struct>,
+    struct_fields: &mut Vec<(SmolStr, Vec<SmolStr>)>,
     fn_registers: &mut Vec<Vec<u16>>,
     dyn_libs: &mut Vec<Dynamiclib>,
     dyn_lib_fns: &mut Vec<DynamicLibFn>,
@@ -1963,6 +2207,28 @@ fn parse_toplevel(
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
                 });
+            }
+            Expr::StructDeclare(name, fields, span) => {
+                structs.push(Struct {
+                    name: name.clone(),
+                    fields: fields
+                        .iter()
+                        .map(|(f, f_t)| {
+                            (
+                                f.clone(),
+                                str_to_keel_type(f_t, structs, &span, use_line_markers),
+                            )
+                        })
+                        .collect(),
+                    id: structs.len() as u16,
+                });
+                struct_fields.push((
+                    name.clone(),
+                    fields
+                        .iter()
+                        .map(|(n, _)| n.clone())
+                        .collect::<Vec<SmolStr>>(),
+                ));
             }
             #[cfg(target_arch = "wasm32")]
             Expr::ImportDylib(_, _, _) => {
@@ -2098,6 +2364,8 @@ fn parse_toplevel(
                     (sources.len() - 1) as u16,
                     import_src,
                     fns,
+                    structs,
+                    struct_fields,
                     fn_registers,
                     dyn_libs,
                     dyn_lib_fns,
@@ -2125,6 +2393,7 @@ pub fn parse(
     usize,
     usize,
     Vec<(SmolStr, String)>,
+    Vec<(SmolStr, Vec<SmolStr>)>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
@@ -2141,12 +2410,14 @@ pub fn parse(
     let mut variables: Vec<Variable> = Vec::new();
     let mut registers: Vec<Data> = Vec::new();
     let mut pools: Pools = Pools {
-        array_pool: Vec::with_capacity(20),
+        obj_pool: Vec::with_capacity(20),
         string_pool: Vec::with_capacity(20),
     };
     let mut instr_src: Vec<(Instr, Span, u16)> = Vec::new();
     let mut fn_registers: Vec<Vec<u16>> = Vec::new();
     let mut functions: Vec<Function> = Vec::new();
+    let mut structs: Vec<Struct> = Vec::new();
+    let mut struct_fields: Vec<(SmolStr, Vec<SmolStr>)> = Vec::new();
     let mut dyn_libs: Vec<Dynamiclib> = Vec::new();
     let mut dyn_fn_id: u16 = 0;
     let mut dyn_lib_fns: Vec<DynamicLibFn> = Vec::new();
@@ -2170,6 +2441,8 @@ pub fn parse(
         0,
         main_src,
         &mut functions,
+        &mut structs,
+        &mut struct_fields,
         &mut fn_registers,
         &mut dyn_libs,
         &mut dyn_lib_fns,
@@ -2187,6 +2460,8 @@ pub fn parse(
     let mut state = State {
         registers: &mut registers,
         fns: &mut functions,
+        structs: &mut structs,
+        struct_fields: &mut struct_fields,
         pools: &mut pools,
         instr_src: &mut instr_src,
         fn_registers: &mut fn_registers,
@@ -2224,7 +2499,7 @@ pub fn parse(
         x.dedup();
     }
     if debug {
-        crate::display::print_debug(&instructions, &registers, &pools);
+        crate::display::print_debug(&instructions, &registers, &pools, &struct_fields);
     }
     (
         instructions,
@@ -2236,5 +2511,6 @@ pub fn parse(
         allocated_arg_count,
         allocated_call_depth,
         sources,
+        struct_fields,
     )
 }

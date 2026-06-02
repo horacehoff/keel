@@ -42,7 +42,7 @@ pub fn std_lib_functions(
         }
         "type" => {
             check_args!(args, 1, name, src, markers);
-            let infered = infer_type(&args[0], v, state.fns, src, state.dyn_libs);
+            let infered = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
             state.registers.push(Data::p_str(
                 &infered.to_string(),
                 &mut state.pools.string_pool,

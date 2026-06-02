@@ -82,6 +82,7 @@ pub fn run(code: &str) {
         allocated_arg_count,
         allocated_call_depth,
         sources,
+        struct_fields,
     ) = parse(code, "playground.kl", false);
     vm::execute(
         &instructions,
@@ -90,6 +91,7 @@ pub fn run(code: &str) {
         &ErrorCtx { instr_src, sources },
         &fn_registers,
         &fn_dyn_libs,
+        &struct_fields,
         allocated_arg_count,
         allocated_call_depth,
     );
@@ -114,6 +116,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
             allocated_arg_count,
             allocated_call_depth,
             sources,
+            struct_fields,
         ) = parse(code, "embedded.kl", false);
         vm::execute(
             &instructions,
@@ -122,6 +125,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
             &ErrorCtx { instr_src, sources },
             &fn_registers,
             &fn_dyn_libs,
+            &struct_fields,
             allocated_arg_count,
             allocated_call_depth,
         );
@@ -209,6 +213,7 @@ pub fn main() {
                 allocated_arg_count,
                 allocated_call_depth,
                 sources,
+                struct_fields,
             ) = parse(&contents, filename, true);
             println!("COMPILATION TIME: {:.2?}", now.elapsed());
             let now = std::time::Instant::now();
@@ -219,6 +224,7 @@ pub fn main() {
                 &ErrorCtx { instr_src, sources },
                 &fn_registers,
                 &fn_dyn_libs,
+                &struct_fields,
                 allocated_arg_count,
                 allocated_call_depth,
             );
@@ -243,6 +249,7 @@ pub fn main() {
         allocated_arg_count,
         allocated_call_depth,
         sources,
+        struct_fields,
     ) = parse(&contents, filename, false);
     vm::execute(
         &instructions,
@@ -251,6 +258,7 @@ pub fn main() {
         &ErrorCtx { instr_src, sources },
         &fn_registers,
         &fn_dyn_libs,
+        &struct_fields,
         allocated_arg_count,
         allocated_call_depth,
     );

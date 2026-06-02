@@ -6,6 +6,7 @@ use crate::expr::symbol_of_expr;
 use crate::parser_data::Dynamiclib;
 use crate::parser_data::FnSignature;
 use crate::parser_data::Function;
+use crate::parser_data::Struct;
 use crate::parser_data::Variable;
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
@@ -234,11 +235,12 @@ pub fn track_returns(
     content: &[Expr],
     v: &mut Vec<Variable>,
     fns: &mut [Function],
+    structs: &mut [Struct],
     src: (&str, &str),
     fn_name: &str,
     dyn_libs: &[Dynamiclib],
 ) -> Vec<DataType> {
-    let mut flow = track_return_flow(content, v, fns, src, fn_name, dyn_libs);
+    let mut flow = track_return_flow(content, v, fns, structs, src, fn_name, dyn_libs);
     if !flow.always_returns && !flow.types.is_empty() {
         add_return_type!(&mut flow.types, DataType::Null);
     }
@@ -254,12 +256,13 @@ fn track_scoped_returns(
     code: &[Expr],
     v: &mut Vec<Variable>,
     fns: &mut [Function],
+    structs: &mut [Struct],
     src: (&str, &str),
     fn_name: &str,
     dyn_libs: &[Dynamiclib],
 ) -> FnReturnFlow {
     let v_len = v.len();
-    let flow = track_return_flow(code, v, fns, src, fn_name, dyn_libs);
+    let flow = track_return_flow(code, v, fns, structs, src, fn_name, dyn_libs);
     v.truncate(v_len);
     flow
 }
@@ -268,6 +271,7 @@ fn track_condition_returns(
     code: &[Expr],
     v: &mut Vec<Variable>,
     fns: &mut [Function],
+    structs: &mut [Struct],
     src: (&str, &str),
     fn_name: &str,
     dyn_libs: &[Dynamiclib],
@@ -278,8 +282,15 @@ fn track_condition_returns(
         .position(|expr| matches!(expr, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
         .unwrap_or(code.len());
 
-    let first_flow =
-        track_scoped_returns(&code[..first_branch_end], v, fns, src, fn_name, dyn_libs);
+    let first_flow = track_scoped_returns(
+        &code[..first_branch_end],
+        v,
+        fns,
+        structs,
+        src,
+        fn_name,
+        dyn_libs,
+    );
     let mut all_branches_return = first_flow.always_returns;
     let mut has_else = false;
     extend_return_types!(&mut return_types, first_flow.types);
@@ -287,13 +298,15 @@ fn track_condition_returns(
     for expr in &code[first_branch_end..] {
         match expr {
             Expr::ElseIfBlock(_, branch_code) => {
-                let flow = track_scoped_returns(branch_code, v, fns, src, fn_name, dyn_libs);
+                let flow =
+                    track_scoped_returns(branch_code, v, fns, structs, src, fn_name, dyn_libs);
                 all_branches_return &= flow.always_returns;
                 extend_return_types!(&mut return_types, flow.types);
             }
             Expr::ElseBlock(branch_code) => {
                 has_else = true;
-                let flow = track_scoped_returns(branch_code, v, fns, src, fn_name, dyn_libs);
+                let flow =
+                    track_scoped_returns(branch_code, v, fns, structs, src, fn_name, dyn_libs);
                 all_branches_return &= flow.always_returns;
                 extend_return_types!(&mut return_types, flow.types);
             }
@@ -311,6 +324,7 @@ fn track_return_flow(
     content: &[Expr],
     v: &mut Vec<Variable>,
     fns: &mut [Function],
+    structs: &mut [Struct],
     src: (&str, &str),
     fn_name: &str,
     dyn_libs: &[Dynamiclib],
@@ -319,7 +333,7 @@ fn track_return_flow(
     for expr in content {
         match expr {
             Expr::Condition(_, code, _) | Expr::InlineCondition(_, code, _) => {
-                let flow = track_condition_returns(code, v, fns, src, fn_name, dyn_libs);
+                let flow = track_condition_returns(code, v, fns, structs, src, fn_name, dyn_libs);
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
                     return FnReturnFlow {
@@ -329,7 +343,7 @@ fn track_return_flow(
                 }
             }
             Expr::ElseIfBlock(_, code) | Expr::ElseBlock(code) => {
-                let flow = track_scoped_returns(code, v, fns, src, fn_name, dyn_libs);
+                let flow = track_scoped_returns(code, v, fns, structs, src, fn_name, dyn_libs);
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
                     return FnReturnFlow {
@@ -339,7 +353,7 @@ fn track_return_flow(
                 }
             }
             Expr::VarDeclare(name, expr) => {
-                let var_type = infer_type(expr, v, fns, src, dyn_libs);
+                let var_type = infer_type(expr, v, fns, structs, src, dyn_libs);
                 v.push(Variable {
                     name: name.clone(),
                     register_id: 0,
@@ -347,13 +361,13 @@ fn track_return_flow(
                 });
             }
             Expr::VarAssign(name, expr, _) => {
-                let var_type = infer_type(expr, v, fns, src, dyn_libs);
+                let var_type = infer_type(expr, v, fns, structs, src, dyn_libs);
                 if let Some(var) = v.iter_mut().rfind(|var| &var.name == name) {
                     var.var_type = var_type;
                 }
             }
             Expr::EvalBlock(code) => {
-                let flow = track_scoped_returns(code, v, fns, src, fn_name, dyn_libs);
+                let flow = track_scoped_returns(code, v, fns, structs, src, fn_name, dyn_libs);
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
                     return FnReturnFlow {
@@ -363,11 +377,11 @@ fn track_return_flow(
                 }
             }
             Expr::WhileBlock(_, code) => {
-                let flow = track_scoped_returns(code, v, fns, src, fn_name, dyn_libs);
+                let flow = track_scoped_returns(code, v, fns, structs, src, fn_name, dyn_libs);
                 extend_return_types!(&mut return_types, flow.types);
             }
             Expr::LoopBlock(code) => {
-                let flow = track_scoped_returns(code, v, fns, src, fn_name, dyn_libs);
+                let flow = track_scoped_returns(code, v, fns, structs, src, fn_name, dyn_libs);
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
                     return FnReturnFlow {
@@ -383,13 +397,14 @@ fn track_return_flow(
                     register_id: 0,
                     var_type: DataType::Int,
                 });
-                let flow = track_return_flow(code, v, fns, src, fn_name, dyn_libs);
+                let flow = track_return_flow(code, v, fns, structs, src, fn_name, dyn_libs);
                 extend_return_types!(&mut return_types, flow.types);
                 v.truncate(v_len);
             }
             Expr::ForLoop(var_name, array_code, _) => {
                 let array_expr = array_code.first().unwrap();
-                let inferred_collection_type = infer_type(array_expr, v, fns, src, dyn_libs);
+                let inferred_collection_type =
+                    infer_type(array_expr, v, fns, structs, src, dyn_libs);
                 let elem_type = match inferred_collection_type {
                     DataType::Array(inner) => inner.map_or(DataType::Unknown, |t| *t),
                     DataType::String => DataType::String,
@@ -404,7 +419,8 @@ fn track_return_flow(
                         var_type: elem_type,
                     });
                 }
-                let flow = track_return_flow(&array_code[1..], v, fns, src, fn_name, dyn_libs);
+                let flow =
+                    track_return_flow(&array_code[1..], v, fns, structs, src, fn_name, dyn_libs);
                 extend_return_types!(&mut return_types, flow.types);
                 v.truncate(v_len);
             }
@@ -416,7 +432,7 @@ fn track_return_flow(
                         .rfind(|var| &var.name == var_name)
                         .is_some_and(|var| var.var_type == DataType::Array(None))
                 {
-                    let arg_type = infer_type(&args[0], v, fns, src, dyn_libs);
+                    let arg_type = infer_type(&args[0], v, fns, structs, src, dyn_libs);
                     if let Some(var) = v.iter_mut().rfind(|var| &var.name == var_name) {
                         var.var_type = DataType::Array(Some(Box::new(arg_type)));
                     }
@@ -424,7 +440,7 @@ fn track_return_flow(
             }
             Expr::ReturnVal(return_val) => {
                 if let Some(val) = return_val.as_ref() {
-                    let infered = infer_type(val, v, fns, src, dyn_libs);
+                    let infered = infer_type(val, v, fns, structs, src, dyn_libs);
                     add_return_type!(&mut return_types, infered);
                 } else {
                     add_return_type!(&mut return_types, DataType::Null);
@@ -447,6 +463,7 @@ pub fn infer_type(
     e: &Expr,
     v: &mut Vec<Variable>,
     fns: &mut [Function],
+    structs: &mut [Struct],
     src: (&str, &str),
     dyn_libs: &[Dynamiclib],
 ) -> DataType {
@@ -469,15 +486,15 @@ pub fn infer_type(
         } else {
             let elem_type = x
                 .iter()
-                .map(|elem| infer_type(elem, v, fns, src, dyn_libs))
+                .map(|elem| infer_type(elem, v, fns, structs, src, dyn_libs))
                 .find(|elem_type| *elem_type != DataType::Unknown)
                 .unwrap_or(DataType::Unknown);
             Some(Box::from(elem_type))
         }),
         Expr::Add(x, y, markers) => {
             match (
-                infer_type(x, v, fns, src, dyn_libs),
-                infer_type(y, v, fns, src, dyn_libs),
+                infer_type(x, v, fns, structs, src, dyn_libs),
+                infer_type(y, v, fns, structs, src, dyn_libs),
             ) {
                 (DataType::Unknown, t) | (t, DataType::Unknown) => t,
                 (DataType::Float, DataType::Float) => DataType::Float,
@@ -493,8 +510,8 @@ pub fn infer_type(
         | Expr::Mod(x, y, markers)
         | Expr::Pow(x, y, markers) => {
             match (
-                infer_type(x, v, fns, src, dyn_libs),
-                infer_type(y, v, fns, src, dyn_libs),
+                infer_type(x, v, fns, structs, src, dyn_libs),
+                infer_type(y, v, fns, structs, src, dyn_libs),
             ) {
                 (DataType::Unknown, t) | (t, DataType::Unknown)
                     if matches!(t, DataType::Float | DataType::Int | DataType::Unknown) =>
@@ -515,8 +532,8 @@ pub fn infer_type(
         | Expr::Inf(x, y, markers)
         | Expr::InfEq(x, y, markers) => {
             match (
-                infer_type(x, v, fns, src, dyn_libs),
-                infer_type(y, v, fns, src, dyn_libs),
+                infer_type(x, v, fns, structs, src, dyn_libs),
+                infer_type(y, v, fns, structs, src, dyn_libs),
             ) {
                 (DataType::Unknown, DataType::Float | DataType::Int | DataType::Unknown)
                 | (DataType::Float | DataType::Int, DataType::Unknown) => DataType::Bool,
@@ -529,8 +546,8 @@ pub fn infer_type(
         }
         Expr::BoolAnd(x, y, markers) | Expr::BoolOr(x, y, markers) => {
             match (
-                infer_type(x, v, fns, src, dyn_libs),
-                infer_type(y, v, fns, src, dyn_libs),
+                infer_type(x, v, fns, structs, src, dyn_libs),
+                infer_type(y, v, fns, structs, src, dyn_libs),
             ) {
                 (DataType::Unknown, DataType::Bool | DataType::Unknown)
                 | (DataType::Bool, DataType::Unknown) => DataType::Bool,
@@ -538,28 +555,55 @@ pub fn infer_type(
                 (l, r) => throw_parser_error(src, markers, ErrType::OpError(&l, &r, "||")),
             }
         }
-        Expr::Neg(e, _) => match infer_type(e, v, fns, src, dyn_libs) {
+        Expr::Neg(e, _) => match infer_type(e, v, fns, structs, src, dyn_libs) {
             DataType::Float => DataType::Float,
             DataType::Int => DataType::Int,
             DataType::Unknown => DataType::Unknown,
             _ => unreachable!(),
         },
-        Expr::BoolNeg(e, _) => match infer_type(e, v, fns, src, dyn_libs) {
+        Expr::BoolNeg(e, _) => match infer_type(e, v, fns, structs, src, dyn_libs) {
             DataType::Bool => DataType::Bool,
             _ => unreachable!(),
         },
-        Expr::ArrayGetIndex(array, _, _) => match infer_type(array, v, fns, src, dyn_libs) {
+        Expr::ArrayGetIndex(array, _, _) => match infer_type(array, v, fns, structs, src, dyn_libs)
+        {
             DataType::Array(array_type) => array_type.map_or(DataType::Null, |t| *t),
             DataType::String => DataType::String,
             DataType::Unknown => DataType::Unknown,
             _ => unreachable!(),
         },
-        Expr::ArrayGetSlice(array, _, _, _) => match infer_type(array, v, fns, src, dyn_libs) {
-            DataType::Array(array_type) => DataType::Array(array_type),
-            DataType::String => DataType::String,
-            DataType::Unknown => DataType::Unknown,
-            _ => unreachable!(),
-        },
+        Expr::GetStructField(s, field, struct_span, field_span) => {
+            let s = infer_type(s, v, fns, structs, src, dyn_libs);
+            if let DataType::Struct(s_id) = s {
+                structs[s_id as usize]
+                    .fields
+                    .iter()
+                    .find(|x| &x.0 == field)
+                    .unwrap_or_else(|| {
+                        throw_parser_error(
+                            src,
+                            field_span,
+                            ErrType::StructUnknownField(&structs[s_id as usize].name, field),
+                        );
+                    })
+                    .1
+                    .clone()
+            } else {
+                throw_parser_error(
+                    src,
+                    struct_span,
+                    ErrType::InvalidType(&DataType::Struct(0), &s),
+                );
+            }
+        }
+        Expr::ArrayGetSlice(array, _, _, _) => {
+            match infer_type(array, v, fns, structs, src, dyn_libs) {
+                DataType::Array(array_type) => DataType::Array(array_type),
+                DataType::String => DataType::String,
+                DataType::Unknown => DataType::Unknown,
+                _ => unreachable!(),
+            }
+        }
         Expr::FunctionCall(args, namespace, markers, _) => {
             match namespace.last().unwrap().as_str() {
                 "print" => DataType::Null,
@@ -592,7 +636,7 @@ pub fn infer_type(
                     }
                     let infered_arg_types = args
                         .iter()
-                        .map(|x| infer_type(x, v, fns, src, dyn_libs))
+                        .map(|x| infer_type(x, v, fns, structs, src, dyn_libs))
                         .collect::<Vec<DataType>>();
 
                     let func = fns
@@ -639,7 +683,8 @@ pub fn infer_type(
                     RETURN_TYPE_INFERRING
                         .with(|s| s.borrow_mut().insert(SmolStr::from(function_name)));
 
-                    let fn_type = track_returns(&fn_code, v, fns, src, function_name, dyn_libs);
+                    let fn_type =
+                        track_returns(&fn_code, v, fns, structs, src, function_name, dyn_libs);
 
                     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(function_name));
 
@@ -683,7 +728,7 @@ pub fn infer_type(
                 "trim_sequence_left" => DataType::String,
                 "trim_sequence_right" => DataType::String,
                 "repeat" => {
-                    let obj_type = infer_type(obj, v, fns, src, dyn_libs);
+                    let obj_type = infer_type(obj, v, fns, structs, src, dyn_libs);
                     if obj_type == DataType::String {
                         DataType::String
                     } else if let DataType::Array(array_type) = obj_type {
@@ -698,7 +743,7 @@ pub fn infer_type(
                 "round" => DataType::Float,
                 "floor" => DataType::Float,
                 "abs" => {
-                    let obj_type = infer_type(obj, v, fns, src, dyn_libs);
+                    let obj_type = infer_type(obj, v, fns, structs, src, dyn_libs);
                     if obj_type == DataType::Float {
                         DataType::Float
                     } else if obj_type == DataType::Int {
@@ -708,7 +753,7 @@ pub fn infer_type(
                     }
                 }
                 "reverse" => {
-                    let obj_type = infer_type(obj, v, fns, src, dyn_libs);
+                    let obj_type = infer_type(obj, v, fns, structs, src, dyn_libs);
                     if obj_type == DataType::String {
                         DataType::String
                     } else if let DataType::Array(array_type) = obj_type {
@@ -719,7 +764,7 @@ pub fn infer_type(
                 }
                 "split" => DataType::Array(Some(Box::from(DataType::String))),
                 "partition" => {
-                    let obj_type = infer_type(obj, v, fns, src, dyn_libs);
+                    let obj_type = infer_type(obj, v, fns, structs, src, dyn_libs);
                     if let DataType::Array(array_type) = obj_type {
                         DataType::Array(Some(Box::from(DataType::Array(array_type))))
                     } else {
@@ -734,15 +779,15 @@ pub fn infer_type(
         Expr::Condition(_, _, _) => DataType::Null,
         Expr::InlineCondition(_, code, _) => {
             let mut types: Vec<DataType> = Vec::with_capacity(code.len());
-            types.push(infer_type(&code[0], v, fns, src, dyn_libs));
+            types.push(infer_type(&code[0], v, fns, structs, src, dyn_libs));
             for t in &code[0..] {
                 if let Expr::ElseIfBlock(_, code) = t {
-                    let infered = infer_type(&code[0], v, fns, src, dyn_libs);
+                    let infered = infer_type(&code[0], v, fns, structs, src, dyn_libs);
                     if !types.contains(&infered) {
                         types.push(infered);
                     }
                 } else if let Expr::ElseBlock(code) = t {
-                    let infered = infer_type(&code[0], v, fns, src, dyn_libs);
+                    let infered = infer_type(&code[0], v, fns, structs, src, dyn_libs);
                     if !types.contains(&infered) {
                         types.push(infered);
                     }
@@ -750,6 +795,15 @@ pub fn infer_type(
             }
             check_poly(DataType::Poly(Box::from(types)))
         }
+        Expr::Struct(name, _, span) => DataType::Struct(
+            structs
+                .iter()
+                .rfind(|s| &s.name == name)
+                .unwrap_or_else(|| {
+                    throw_parser_error(src, span, ErrType::UnknownStruct(name));
+                })
+                .id,
+        ),
         _ => unreachable!(),
     }
 }

@@ -25,8 +25,31 @@ pub File:Vec<Expr> = {
 }
 
 CType: DataType = {
-    <t: Var> => str_to_type(&t),
-    <t: Var> "[" "]" => DataType::Array(Some(Box::new(str_to_type(&t)))),
+    <start: @L> <t: Var> <end: @R> => str_to_type(&t).unwrap_or_else(|| {
+        throw_parser_error(
+                    src,
+                    &span!(start, end),
+                    ErrType::Custom(
+                        format_args!(
+                            "Unknown type {color_red}{style_bold}{t}{color_reset}{style_reset}"
+                        )
+                        .to_smolstr()));}
+    ),
+    <start: @L> <t: Var> <end: @R> "[" "]" => DataType::Array(Some(Box::new(str_to_type(&t).unwrap_or_else(|| {
+        throw_parser_error(
+                    src,
+                    &span!(start, end),
+                    ErrType::Custom(
+                        format_args!(
+                            "Unknown type {color_red}{style_bold}{t}{color_reset}{style_reset}"
+                        )
+                        .to_smolstr()));}
+    )))),
+}
+
+KeelType: SmolStr = {
+    <t: Var> => t,
+    <t: Var> "[" "]" => format_args!("{t}[]").to_smolstr()
 }
 
 pub FnSignature:(SmolStr, Box<[DataType]>, DataType) = {
@@ -42,8 +65,9 @@ pub Import:Expr = {
 }
 
 pub FileStatement:Expr = {
-    <o: Function> => o,
-    <i: Import>  => i,
+    Function => <>,
+    Import  => <>,
+    StructDeclare => <>,
     <l:@L> "use" <path: String> <r:@R> => Expr::ImportFile(path, span!(l, r)),
 }
 
@@ -88,12 +112,12 @@ pub Function:Expr = {
 }
 
 ElseIfBlock:Expr = {
-    "else" "if" <o1: Expression> <o2: Block<Code>> => Expr::ElseIfBlock(Box::from(o1), o2)
+    "else" "if" <o1: ExpressionNoBrackets> <o2: Block<Code>> => Expr::ElseIfBlock(Box::from(o1), o2)
 }
 
 
 InlineElseIfBlock:Expr = {
-    "else" "if" <o1: Expression> <o2: Block<Expression>> => Expr::ElseIfBlock(Box::from(o1), Box::from([o2]))
+    "else" "if" <o1: ExpressionNoBrackets> <o2: Block<Expression>> => Expr::ElseIfBlock(Box::from(o1), Box::from([o2]))
 }
 
 ElseBlock:Expr = {
@@ -105,7 +129,7 @@ InlineElseBlock:Expr = {
 }
 
 ConditionalBlock: Expr = {
-    <start: @L> "if" <o1: Expression> <o2: Block<Code>> <o3: ElseIfBlock*> <o4: ElseBlock?> <end: @R> => {
+    <start: @L> "if" <o1: ExpressionNoBrackets> <o2: Block<Code>> <o3: ElseIfBlock*> <o4: ElseBlock?> <end: @R> => {
         if o1 == Expr::Bool(true) {
             Expr::EvalBlock(o2)
         } else if o1 == Expr::Bool(false) {
@@ -144,7 +168,7 @@ ConditionalBlock: Expr = {
     }
 }
 InlineConditionalBlock: Expr = {
-    <start: @L> "if" <o1: Expression> <o2: Block<Expression>> <o3: InlineElseIfBlock*> <o4: InlineElseBlock?> <end: @R> => {
+    <start: @L> "if" <o1: ExpressionNoBrackets> <o2: Block<Expression>> <o3: InlineElseIfBlock*> <o4: InlineElseBlock?> <end: @R> => {
         if o1 == Expr::Bool(true) {
             o2
         } else if o1 == Expr::Bool(false) {
@@ -187,7 +211,7 @@ InlineConditionalBlock: Expr = {
 
 
 MatchBlock:Expr = {
-    <start: @L> "match" <match_obj: Expression> "{" <o2: (Expression "=>" Block<Code>)+> <o3: (r"[a-zA-Z_]+\s*=>" Block<Code>)?> "}" <end: @R> => {
+    <start: @L> "match" <match_obj: ExpressionNoBrackets> "{" <o2: (Expression "=>" Block<Code>)+> <o3: (r"[a-zA-Z_]+\s*=>" Block<Code>)?> "}" <end: @R> => {
         let mut first_condition: Option<Expr> = None;
         let mut output_code:Vec<Expr> = o2.into_iter().enumerate().flat_map(|(i,(condition,_,code))|
             if i == 0 {
@@ -216,11 +240,11 @@ MatchBlock:Expr = {
 
 
 WhileBlock: Expr = {
-    "while" <o1: Expression> <o2: Block<Code>> => Expr::WhileBlock(Box::from(o1), o2)
+    "while" <o1: ExpressionNoBrackets> <o2: Block<Code>> => Expr::WhileBlock(Box::from(o1), o2)
 }
 
 ForLoop:Expr = {
-    "for" <o1:Var> "in" <start:@L> <o2: Expression> <end:@R> <o3: Block<Code>> => {
+    "for" <o1:Var> "in" <start:@L> <o2: ExpressionNoBrackets> <end:@R> <o3: Block<Code>> => {
         let mut output = vec![o2];
         output.extend(o3);
         Expr::ForLoop(o1,output.into_boxed_slice(), span!(start,end))
@@ -228,10 +252,10 @@ ForLoop:Expr = {
 }
 
 IntForLoop:Expr = {
-    "for" <o1:Var> "in" <start1:@L> <o2: Expression> <end1:@R> ".." <start2:@L> <o3: Expression> <end2:@R> <o4: Block<Code>> => {
+    "for" <o1:Var> "in" <start1:@L> <o2: ExpressionNoBrackets> <end1:@R> ".." <start2:@L> <o3: ExpressionNoBrackets> <end2:@R> <o4: Block<Code>> => {
         Expr::IntForLoop(o1, Box::from(o2), Box::from(o3), o4, span!(start1, end1), span!(start2, end2))
     },
-    "for" <o1:Var> "in" <start1:@L> <end1:@R> ".." <start2:@L> <o2: Expression> <end2:@R> <o3: Block<Code>> => {
+    "for" <o1:Var> "in" <start1:@L> <end1:@R> ".." <start2:@L> <o2: ExpressionNoBrackets> <end2:@R> <o3: Block<Code>> => {
         Expr::IntForLoop(o1, Box::from(Expr::Int(0)), Box::from(o2), o3, span!(start1, end1), span!(start2, end2))
     },
 }
@@ -304,6 +328,22 @@ TryCatchBlock:Expr = {
     }
 }
 
+StructDeclare:Expr = {
+    <start: @L> "struct" <o1: Var> "{" <fields: Comma<(Var ":" KeelType)>> "}" <end: @R> => {
+        if fields.is_empty() {
+            throw_parser_error(
+                src,
+                &span!(start, end),
+                ErrType::Custom(
+                    format_args!("A struct must have at least one field")
+                    .to_smolstr(
+                )
+            ));
+        }
+        Expr::StructDeclare(o1, fields.into_iter().map(|(v, _, c)| (v,c)).collect::<Vec<(SmolStr, SmolStr)>>().into_boxed_slice(), span!(start,end))
+    }
+}
+
 Statement: Expr = {
     ConditionalBlock => <>,
     WhileBlock => <>,
@@ -314,6 +354,7 @@ Statement: Expr = {
     Function => <>,
     LoopBlock => <>,
     TryCatchBlock => <>,
+    StructDeclare => <>,
     <l: Line> ";" => l,
 }
 
@@ -344,16 +385,17 @@ VarDeclare: Expr = {
 }
 
 VarAssign: Expr = {
-    <start: @L> <v: Var> <end: @R> "=" <e: Expression>  => Expr::VarAssign(v, Box::from(e), span!(start, end)),
-    <start: @L> <t: Term> <f: BracketOp+> <end: @R> "=" <startb: @L> <e: Expression> <endb: @R> => {
-        let mut indices: Vec<Expr> = f.into_iter().map(|(x,_)| x).collect();
-        let last_idx = Box::from(indices.pop().unwrap());
-        let mut base = t;
-        for idx in indices {
-            base = Expr::ArrayGetIndex(Box::from(base), Box::from(idx), span!(start, end));
+    <start: @L> <t: Expression> <end: @R> "=" <start_e: @L> <e: Expression> <end_e: @R> => {
+        if let Expr::Var(n,_) = t {
+            Expr::VarAssign(n, Box::from(e), span!(start,end))
+        } else if let Expr::ArrayGetIndex(base, last_idx, _) = t {
+            Expr::ArrayModify(base, last_idx, Box::from(e), span!(start,end), span!(start_e, end_e))
+        } else if let Expr::GetStructField(struct_expr, field, struct_span, field_span) = t {
+            Expr::SetStructField(struct_expr, field, Box::from(e), struct_span, field_span)
+        } else {
+            todo!();
         }
-        Expr::ArrayModify(Box::from(base), last_idx, Box::from(e), span!(start, end), span!(startb, endb))
-    },
+    }
 }
 
 OpVarAssign: Expr = {
@@ -419,6 +461,8 @@ Expression: Expr = {
     #[precedence(level="0")]
     Term,
     ArrayIndex,
+    Struct,
+    <struct_start: @L> <l: Expression> <struct_end: @R> "." <field_start:@L> <f: Var> <field_end:@R>  => Expr::GetStructField(Box::from(l), f, span!(struct_start, struct_end),span!(field_start,field_end)),
     // method call
     <start: @L> <l:Expression> <end: @R> "."  <f:FunctionCall>  => {
         if let Expr::FunctionCall(x,y,fn_markers,indexes) = f {
@@ -538,6 +582,131 @@ Expression: Expr = {
     },
 }
 
+// Same as Expression but without structs
+ExpressionNoBrackets: Expr = {
+    #[precedence(level="0")]
+    Term,
+    ArrayIndex,
+    <struct_start: @L> <l: ExpressionNoBrackets> <struct_end: @R> <field_start: @L> "." <f: Var> <field_end: @R> => Expr::GetStructField(Box::from(l), f, span!(struct_start, struct_end), span!(field_start,field_end)),
+    // method call
+    <start: @L> <l:ExpressionNoBrackets> <end: @R> "."  <f:FunctionCall>  => {
+        if let Expr::FunctionCall(x,y,fn_markers,indexes) = f {
+            Expr::ObjFunctionCall(Box::from(l),x,y,span!(start,end),fn_markers, indexes)
+        } else {
+            unreachable!()
+        }
+    },
+
+    // OPS
+    #[precedence(level="8")] #[assoc(side="left")]
+    <start: @L> <l:ExpressionNoBrackets> "||" <r:ExpressionNoBrackets> <end: @R> => match (l,r) {
+        (Expr::Bool(l), Expr::Bool(r)) => Expr::Bool(l || r),
+        (l,r) => Expr::BoolOr(Box::from(l),Box::from(r), span!(start, end))
+    },
+
+    #[precedence(level="7")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> "&&" <r: ExpressionNoBrackets> <end: @R> => match (l,r) {
+        (Expr::Bool(l), Expr::Bool(r)) => Expr::Bool(l && r),
+        (l,r) => Expr::BoolAnd(Box::from(l),Box::from(r), span!(start, end))
+    },
+
+    #[precedence(level="6")] #[assoc(side="left")]
+    <l: ExpressionNoBrackets> "==" <r: ExpressionNoBrackets> => match (l,r) {
+        (Expr::Float(x),Expr::Float(y)) => Expr::Bool(x==y),
+        (Expr::Int(x),Expr::Int(y)) => Expr::Bool(x==y),
+        (Expr::Bool(x),Expr::Bool(y)) => Expr::Bool(x==y),
+        (Expr::String(x),Expr::String(y)) => Expr::Bool(x==y),
+        (l,r) => Expr::Eq(Box::from(l),Box::from(r)),
+    },
+    #[precedence(level="6")] #[assoc(side="left")]
+    <l: ExpressionNoBrackets> "!=" <r: ExpressionNoBrackets> => match (l,r) {
+        (Expr::Float(x),Expr::Float(y)) => Expr::Bool(x!=y),
+        (Expr::Int(x),Expr::Int(y)) => Expr::Bool(x!=y),
+        (Expr::Bool(x),Expr::Bool(y)) => Expr::Bool(x!=y),
+        (Expr::String(x),Expr::String(y)) => Expr::Bool(x!=y),
+        (l,r) => Expr::NotEq(Box::from(l),Box::from(r)),
+    },
+
+    #[precedence(level="5")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> "<" <r: ExpressionNoBrackets> <end: @R> => match (l,r) {
+        (Expr::Float(x),Expr::Float(y)) => Expr::Bool(x < y),
+        (Expr::Int(x),Expr::Int(y)) => Expr::Bool(x < y),
+        (l,r) => Expr::Inf(Box::from(l),Box::from(r), span!(start, end))
+    },
+    #[precedence(level="5")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> "<=" <r: ExpressionNoBrackets> <end: @R> => match (l,r) {
+        (Expr::Float(x),Expr::Float(y)) => Expr::Bool(x <= y),
+        (Expr::Int(x),Expr::Int(y)) => Expr::Bool(x <= y),
+        (l,r) => Expr::InfEq(Box::from(l),Box::from(r), span!(start, end))
+    },
+    #[precedence(level="5")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> ">" <r: ExpressionNoBrackets> <end: @R> => match (l,r) {
+        (Expr::Float(x),Expr::Float(y)) => Expr::Bool(x > y),
+        (Expr::Int(x),Expr::Int(y)) => Expr::Bool(x > y),
+        (l,r) => Expr::Sup(Box::from(l),Box::from(r), span!(start, end))
+    },
+    #[precedence(level="5")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> ">=" <r: ExpressionNoBrackets> <end: @R> => match (l,r) {
+        (Expr::Float(x),Expr::Float(y)) => Expr::Bool(x >= y),
+        (Expr::Int(x),Expr::Int(y)) => Expr::Bool(x >= y),
+        (l,r) => Expr::SupEq(Box::from(l),Box::from(r), span!(start, end))
+    },
+
+    #[precedence(level="4")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> "+" <r: ExpressionNoBrackets> <end: @R> => match (l, r) {
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x + y),
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x + y),
+            (Expr::String(x), Expr::String(y)) => Expr::String(format_args!("{x}{y}").to_smolstr()),
+            (Expr::Array(x,markers1), Expr::Array(y,markers2)) => Expr::Array(Box::from([x, y].concat()),span!(markers1.start, markers2.end)),
+            (l, r) => Expr::Add(Box::from(l), Box::from(r), span!(start, end)),
+    },
+    #[precedence(level="4")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> "-" <r: ExpressionNoBrackets> <end: @R> => match (l, r) {
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x - y),
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x - y),
+            (l, r) => Expr::Sub(Box::from(l), Box::from(r), span!(start, end)),
+    },
+
+    #[precedence(level="3")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> "*" <r: ExpressionNoBrackets> <end: @R> => match (l, r) {
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x * y),
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x * y),
+            (l, r) => Expr::Mul(Box::from(l), Box::from(r), span!(start, end)),
+    },
+    #[precedence(level="3")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> "/" <r: ExpressionNoBrackets> <end: @R> => match (l, r) {
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x / y),
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x / y),
+            (l, r) => Expr::Div(Box::from(l), Box::from(r), span!(start, end)),
+    },
+    #[precedence(level="3")] #[assoc(side="left")]
+    <start: @L> <l: ExpressionNoBrackets> "%" <r: ExpressionNoBrackets> <end: @R> =>  match (l, r) {
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x % y),
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x % y),
+            (l, r) => Expr::Mod(Box::from(l), Box::from(r), span!(start, end)),
+    },
+
+    #[precedence(level="2")] #[assoc(side="right")]
+    <start: @L> <l: ExpressionNoBrackets> "^" <r: ExpressionNoBrackets> <end: @R> => match (l,r) {
+        (Expr::Float(x),Expr::Float(y)) => Expr::Float(x.powf(y)),
+        (Expr::Int(x),Expr::Int(y)) => Expr::Int(x.pow(y as u32)),
+        (l,r) => Expr::Pow(Box::from(l),Box::from(r), span!(start, end))
+    },
+
+    #[precedence(level="1")] #[assoc(side="left")]
+    <start: @L> "!" <r:ExpressionNoBrackets> <end: @R> => match r {
+            Expr::Bool(x) => Expr::Bool(!x),
+            l => Expr::BoolNeg(Box::from(l), span!(start, end)),
+    },
+
+    #[precedence(level="1")] #[assoc(side="left")]
+    <start: @L> "-" <r:ExpressionNoBrackets> <end: @R> => match r {
+            Expr::Float(x) => Expr::Float(-x),
+            Expr::Int(x) => Expr::Int(x.wrapping_neg()),
+            l => Expr::Neg(Box::from(l), span!(start, end)),
+    },
+}
+
 Term: Expr = {
     "(" <e: Expression> ")" => e,
     <i: Integer> => Expr::Int(i),
@@ -575,6 +744,12 @@ FunctionCall: Expr = {
                 Box::from([o1])
             }
         }, span!(start, end), arg_markers.into_boxed_slice())
+    }
+}
+
+Struct:Expr = {
+    <start: @L> <o1: Var> "{" <fields: Comma<(Var ":" Expression @L @R)>> "}" <end: @R> => {
+        Expr::Struct(o1, fields.into_iter().map(|(v,_,e,start,end)| (v,e,span!(start,end))).collect::<Vec<(SmolStr, Expr, Span)>>().into_boxed_slice(), span!(start,end))
     }
 }
 

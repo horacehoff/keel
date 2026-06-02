@@ -1,3 +1,9 @@
+use std::hint::cold_path;
+
+use crate::errors::ErrType;
+use crate::errors::throw_parser_error;
+use crate::expr::Span;
+use crate::parser_data::Struct;
 use crate::type_system::DataType;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
@@ -60,8 +66,35 @@ pub fn parse_string(s: &str) -> SmolStr {
     SmolStr::from(processed)
 }
 
-pub fn str_to_type(s: &str) -> DataType {
+pub fn str_to_type(s: &str) -> Option<DataType> {
     if s == "int" {
+        Some(DataType::Int)
+    } else if s == "float" {
+        Some(DataType::Float)
+    } else if s == "bool" {
+        Some(DataType::Bool)
+    } else if s == "string" {
+        Some(DataType::String)
+    } else {
+        cold_path();
+        None
+    }
+}
+
+pub fn str_to_keel_type(s: &str, structs: &[Struct], span: &Span, src: (&str, &str)) -> DataType {
+    let b = s.as_bytes();
+    if b[b.len() - 1] == b']' && b[b.len() - 2] == b'[' {
+        DataType::Array(if b.len() == 2 {
+            None
+        } else {
+            Some(Box::from(str_to_keel_type(
+                &s[..s.len() - 2],
+                structs,
+                span,
+                src,
+            )))
+        })
+    } else if s == "int" {
         DataType::Int
     } else if s == "float" {
         DataType::Float
@@ -70,7 +103,11 @@ pub fn str_to_type(s: &str) -> DataType {
     } else if s == "string" {
         DataType::String
     } else {
-        unreachable!()
+        if let Some(s) = structs.iter().rposition(|candidate| candidate.name == s) {
+            DataType::Struct(s as u16)
+        } else {
+            throw_parser_error(src, span, ErrType::UnknownType(s));
+        }
     }
 }
 

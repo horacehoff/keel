@@ -21,8 +21,8 @@ pub enum Instr {
     InfIntJmpBack(u16, u16, u16),
     NotEqJmp(u16, u16, u16),
     EqJmp(u16, u16, u16),
-    ArrayNotEqJmp(u16, u16, u16),
-    ArrayEqJmp(u16, u16, u16),
+    ObjNotEqJmp(u16, u16, u16),
+    ObjEqJmp(u16, u16, u16),
     StrNotEqJmp(u16, u16, u16),
     StrEqJmp(u16, u16, u16),
 
@@ -61,8 +61,8 @@ pub enum Instr {
     DecIntTo(u16, u16),
     Eq(u16, u16, u16),
     NotEq(u16, u16, u16),
-    ArrayEq(u16, u16, u16),
-    ArrayNotEq(u16, u16, u16),
+    ObjEq(u16, u16, u16),
+    ObjNotEq(u16, u16, u16),
     StrEq(u16, u16, u16),
     StrNotEq(u16, u16, u16),
     SupFloat(u16, u16, u16),
@@ -117,7 +117,7 @@ pub enum Instr {
 
     /// ArrayMov(new_elem_reg_id, array_id, idx)\
     /// Replaces the idx-th element in the array (with the id array_id) with the element located in new_elem_reg_id
-    ArrayElemMov(u16, u16, u16),
+    ObjElemMov(u16, u16, u16),
 
     /// EmptyArray(array_reg_id)
     /// Allocates a fresh empty array and stores its address in array_reg_id
@@ -127,19 +127,27 @@ pub enum Instr {
     /// Allocates a fresh array with exact capacity len and clones the array in src_reg to dest_reg
     CloneArray(u16, u16, u16),
 
+    CloneStruct(u16, u16),
+
     /// SetElementArray(array_reg_id, new_elem_reg_id, idx)\
     /// Replaces the idx-th element in the array located in array_reg_id with the element located in new_elem_reg_id
-    SetElementArray(u16, u16, u16),
+    SetElementObj(u16, u16, u16),
 
     /// SetElementString(string_reg_id, new_str_reg_id, idx)\
     /// Replaces the idx-th char in the string located in string_reg_id with the string located in new_str_reg_id
     SetElementString(u16, u16, u16),
+
+    /// SetFieldStruct(struct_reg_id, new_elem_reg_id, idx)
+    SetFieldStruct(u16, u16, u16),
 
     /// GetIndexArray(array_reg_id, index_reg_id, output_reg_id)
     GetIndexArray(u16, u16, u16),
 
     /// GetIndexString(str_reg_id, index_reg_id, output_reg_id)
     GetIndexString(u16, u16, u16),
+
+    /// GetFieldStruct(struct_reg_id, index, output_reg_id)
+    GetFieldStruct(u16, u16, u16),
 
     /// GetSliceArray(array_reg_id, idx_start_reg_id, output_reg_id)\
     /// idx_end_reg_id is pulled from a StoreFuncArg

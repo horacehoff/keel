@@ -18,8 +18,16 @@ pub enum Expr {
     String(SmolStr),
     /// Var(name, start, end)
     Var(SmolStr, Span),
-    /// Array(contents, start, end)
+    /// Array(contents, span)
     Array(Box<[Expr]>, Span),
+    /// Struct(name, fields, span)
+    Struct(SmolStr, Box<[(SmolStr, Expr, Span)]>, Span),
+    /// StructDeclare(name, fields, span)
+    StructDeclare(SmolStr, Box<[(SmolStr, SmolStr)]>, Span),
+    /// GetStructField(struct_expr, field, struct_span, field_span)
+    GetStructField(Box<Expr>, SmolStr, Span, Span),
+    /// SetStructField(struct_expr, field, new_expr, struct_span, field_span)
+    SetStructField(Box<Expr>, SmolStr, Box<Expr>, Span, Span),
     /// VarDeclare(name, value),
     VarDeclare(SmolStr, Box<Expr>),
     /// VarDeclare(name, value, start, end)

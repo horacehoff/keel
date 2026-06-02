@@ -3,7 +3,7 @@ use crate::expr::Expr;
 use crate::expr::Span;
 use crate::instr::Instr;
 use crate::type_system::DataType;
-use crate::vm::ArrayPool;
+use crate::vm::ObjectPool;
 use crate::vm::StringPool;
 #[cfg(not(target_arch = "wasm32"))]
 use libloading::Library;
@@ -78,9 +78,16 @@ impl DynamicLibFn {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Struct {
+    pub name: SmolStr,
+    pub fields: Box<[(SmolStr, DataType)]>,
+    pub id: u16,
+}
+
 #[derive(Clone)]
 pub struct Pools {
-    pub array_pool: ArrayPool,
+    pub obj_pool: ObjectPool,
     pub string_pool: StringPool,
 }
 
@@ -95,6 +102,8 @@ pub struct Ctx<'a> {
 pub struct State<'a> {
     pub registers: &'a mut Vec<Data>,
     pub fns: &'a mut Vec<Function>,
+    pub structs: &'a mut Vec<Struct>,
+    pub struct_fields: &'a mut Vec<(SmolStr, Vec<SmolStr>)>,
     pub pools: &'a mut Pools,
     /// Vec<(instruction, markers, file_id)>
     pub instr_src: &'a mut Vec<(Instr, Span, u16)>,

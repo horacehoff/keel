@@ -249,7 +249,7 @@ pub fn execute(
             }
             Instr::Mov(tgt, dest) => *w!(dest) = r!(tgt),
             Instr::SetInt(dest, n) => *w!(dest) = n.into(),
-            Instr::SetBool(dest, b) => *w!(dest) = b.into(),
+            Instr::SetBool(b, dest) => *w!(dest) = b.into(),
             Instr::CallFunc(new_loc, return_id) => {
                 call_frames.push(CallFrame {
                     return_addr: i as u32,

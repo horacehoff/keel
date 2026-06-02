@@ -53,7 +53,7 @@ keel -h/--help     # Print help
 
 ## Near-future roadmap
 
-- Structs
+- Struct methods
 - Higher-order functions
 - [Better embedding API with limits](#embedding-experimental)
 
@@ -76,6 +76,7 @@ keel -h/--help     # Print help
 - [Embedding (experimental)](#embedding-experimental)
 - [Arrays](#arrays)
 - [Slices](#slices)
+- [Structs](#structs)
 - [Arithmetic Operations](#arithmetic-operations)
 - [Documentation](#documentation)
 
@@ -362,6 +363,37 @@ print(msg[..5]);   // "Hello"
 print(msg[0..5]);  // "Hello"
 print(msg[6..11]); // "world"
 ```
+
+### Structs
+
+```rs
+struct TestStruct {
+    x: int[][],
+    y:bool
+}
+
+struct MyStruct {
+    first_field:float,
+    second_field:TestStruct[],
+    third_field:string
+}
+
+let x = MyStruct {
+    first_field:10.0,
+    second_field:[
+        TestStruct {
+            x: [[0,1,2], [3,4,5]],
+            y:false
+    }],
+    third_field: "Hello, World!"
+};
+x.third_field = x.third_field.uppercase();
+x.second_field[0].x[0][0] += 99;
+print(x.third_field); // "HELLO, WORLD!"
+print(x.second_field[0]); // TestStruct {x:[[99,1,2],[3,4,5]],y:false}
+print(x); // MyStruct {first_field:10,second_field:[TestStruct {x:[[99,1,2],[3,4,5]],y:false}],third_field:"HELLO, WORLD!"}
+```
+
 
 ### Arithmetic Operations
 

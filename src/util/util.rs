@@ -163,7 +163,7 @@ impl std::fmt::Display for DataType {
                 )
             }
             DataType::Struct(s) => {
-                write!(f, "{} {{}}", s)
+                write!(f, "Struct({})", s)
             }
         }
     }

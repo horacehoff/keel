@@ -32,7 +32,7 @@ pub enum Instr {
     SetInt(u16, i32),
     /// SetBool(dest_reg_id, val)\
     /// Writes val directly into dest_reg_id
-    SetBool(u16, bool),
+    SetBool(bool, u16),
 
     // OPS
     AddFloat(u16, u16, u16),

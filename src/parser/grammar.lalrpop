@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::rc::Rc;
 use crate::expr::Expr;
+use crate::expr::var_assign;
 use crate::errors::throw_parser_error;
 use crate::errors::ErrType;
 use crate::type_system::DataType;
@@ -49,7 +50,7 @@ CType: DataType = {
 
 KeelType: SmolStr = {
     <t: Var> => t,
-    <t: Var> "[" "]" => format_args!("{t}[]").to_smolstr()
+    <t: KeelType> "[" "]" => format_args!("{t}[]").to_smolstr()
 }
 
 pub FnSignature:(SmolStr, Box<[DataType]>, DataType) = {
@@ -385,56 +386,23 @@ VarDeclare: Expr = {
 }
 
 VarAssign: Expr = {
-    <start: @L> <t: Expression> <end: @R> "=" <start_e: @L> <e: Expression> <end_e: @R> => {
-        if let Expr::Var(n,_) = t {
-            Expr::VarAssign(n, Box::from(e), span!(start,end))
-        } else if let Expr::ArrayGetIndex(base, last_idx, _) = t {
-            Expr::ArrayModify(base, last_idx, Box::from(e), span!(start,end), span!(start_e, end_e))
-        } else if let Expr::GetStructField(struct_expr, field, struct_span, field_span) = t {
-            Expr::SetStructField(struct_expr, field, Box::from(e), struct_span, field_span)
-        } else {
-            todo!();
-        }
-    }
+    <start: @L> <t: Expression> <end: @R> "=" <start_e: @L> <e: Expression> <end_e: @R> =>
+        var_assign(t, e, span!(start, end), span!(start_e, end_e)),
 }
 
 OpVarAssign: Expr = {
-    <start: @L> <v: Var> <end: @R> "+=" <e: Expression> <op_end: @R> => Expr::VarAssign(v.clone(), Box::from(
-    Expr::Add(
-        Box::from(Expr::Var(v, span!(start, end))),
-        Box::from(e),
-        span!(start,op_end)
-    )), span!(start, end)),
-    <start: @L> <v: Var> <end: @R> "-=" <e: Expression> <op_end: @R> => Expr::VarAssign(v.clone(), Box::from(
-    Expr::Sub(
-        Box::from(Expr::Var(v, span!(start, end))),
-        Box::from(e),
-        span!(start,op_end)
-    )), span!(start, end)),
-    <start: @L> <v: Var> <end: @R> "*=" <e: Expression> <op_end: @R> => Expr::VarAssign(v.clone(), Box::from(
-    Expr::Mul(
-        Box::from(Expr::Var(v, span!(start, end))),
-        Box::from(e),
-        span!(start,op_end)
-    )), span!(start, end)),
-    <start: @L> <v: Var> <end: @R> "/=" <e: Expression> <op_end: @R> => Expr::VarAssign(v.clone(), Box::from(
-    Expr::Div(
-        Box::from(Expr::Var(v, span!(start, end))),
-        Box::from(e),
-        span!(start,op_end)
-    )), span!(start, end)),
-    <start: @L> <v: Var> <end: @R> "%=" <e: Expression> <op_end: @R> => Expr::VarAssign(v.clone(), Box::from(
-    Expr::Mod(
-        Box::from(Expr::Var(v, span!(start, end))),
-        Box::from(e),
-        span!(start,op_end)
-    )), span!(start, end)),
-    <start: @L> <v: Var> <end: @R> "^=" <e: Expression> <op_end: @R> => Expr::VarAssign(v.clone(), Box::from(
-    Expr::Pow(
-        Box::from(Expr::Var(v, span!(start, end))),
-        Box::from(e),
-        span!(start,op_end)
-    )), span!(start, end)),
+    <start: @L> <t: Expression> <end: @R> "+=" <start_e: @L> <e: Expression> <end_e: @R> =>
+        var_assign(t.clone(), Expr::Add(Box::from(t), Box::from(e), span!(start, end_e)), span!(start, end), span!(start_e, end_e)),
+    <start: @L> <t: Expression> <end: @R> "-=" <start_e: @L> <e: Expression> <end_e: @R> =>
+        var_assign(t.clone(), Expr::Sub(Box::from(t), Box::from(e), span!(start, end_e)), span!(start, end), span!(start_e, end_e)),
+    <start: @L> <t: Expression> <end: @R> "*=" <start_e: @L> <e: Expression> <end_e: @R> =>
+        var_assign(t.clone(), Expr::Mul(Box::from(t), Box::from(e), span!(start, end_e)), span!(start, end), span!(start_e, end_e)),
+    <start: @L> <t: Expression> <end: @R> "/=" <start_e: @L> <e: Expression> <end_e: @R> =>
+        var_assign(t.clone(), Expr::Div(Box::from(t), Box::from(e), span!(start, end_e)), span!(start, end), span!(start_e, end_e)),
+    <start: @L> <t: Expression> <end: @R> "%=" <start_e: @L> <e: Expression> <end_e: @R> =>
+        var_assign(t.clone(), Expr::Mod(Box::from(t), Box::from(e), span!(start, end_e)), span!(start, end), span!(start_e, end_e)),
+    <start: @L> <t: Expression> <end: @R> "^=" <start_e: @L> <e: Expression> <end_e: @R> =>
+        var_assign(t.clone(), Expr::Pow(Box::from(t), Box::from(e), span!(start, end_e)), span!(start, end), span!(start_e, end_e)),
 }
 
 BracketOp: (Expr, Option<Expr>) = {
@@ -443,24 +411,17 @@ BracketOp: (Expr, Option<Expr>) = {
     "[" ".." <r: Expression> "]" => (Expr::Int(0), Some(r)),
 }
 
-ArrayIndex: Expr = {
-    <start: @L> <t: Term> <f: BracketOp+> <end: @R> => {
-        let mut output = t;
-        for (start_idx, end_idx) in f {
-            if let Some(end_expr) = end_idx {
-                output = Expr::ArrayGetSlice(Box::from(output), Box::from(start_idx), Box::from(end_expr), span!(start,end));
-            } else {
-                output = Expr::ArrayGetIndex(Box::from(output), Box::from(start_idx), span!(start, end));
-            }
-        }
-        output
-    }
-}
-
 Expression: Expr = {
     #[precedence(level="0")]
     Term,
-    ArrayIndex,
+    <start: @L> <l: Expression> <f: BracketOp> <end: @R> => {
+        let (start_idx, end_idx) = f;
+        if let Some(end_expr) = end_idx {
+            Expr::ArrayGetSlice(Box::from(l), Box::from(start_idx), Box::from(end_expr), span!(start, end))
+        } else {
+            Expr::ArrayGetIndex(Box::from(l), Box::from(start_idx), span!(start, end))
+        }
+    },
     Struct,
     <struct_start: @L> <l: Expression> <struct_end: @R> "." <field_start:@L> <f: Var> <field_end:@R>  => Expr::GetStructField(Box::from(l), f, span!(struct_start, struct_end),span!(field_start,field_end)),
     // method call
@@ -586,7 +547,14 @@ Expression: Expr = {
 ExpressionNoBrackets: Expr = {
     #[precedence(level="0")]
     Term,
-    ArrayIndex,
+    <start: @L> <l: ExpressionNoBrackets> <f: BracketOp> <end: @R> => {
+        let (start_idx, end_idx) = f;
+        if let Some(end_expr) = end_idx {
+            Expr::ArrayGetSlice(Box::from(l), Box::from(start_idx), Box::from(end_expr), span!(start, end))
+        } else {
+            Expr::ArrayGetIndex(Box::from(l), Box::from(start_idx), span!(start, end))
+        }
+    },
     <struct_start: @L> <l: ExpressionNoBrackets> <struct_end: @R> <field_start: @L> "." <f: Var> <field_end: @R> => Expr::GetStructField(Box::from(l), f, span!(struct_start, struct_end), span!(field_start,field_end)),
     // method call
     <start: @L> <l:ExpressionNoBrackets> <end: @R> "."  <f:FunctionCall>  => {

@@ -2932,3 +2932,373 @@ pub fn try_catch_insufficient() {
         "
     );
 }
+
+#[test]
+pub fn struct_field_access() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let p = Point { x: 7, y: 3 };
+            print(p.x);
+        }
+        ",
+        7.into()
+    );
+}
+
+#[test]
+pub fn struct_field_modify() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let p = Point { x: 7, y: 3 };
+            p.x = 42;
+            print(p.x);
+        }
+        ",
+        42.into()
+    );
+}
+
+#[test]
+pub fn struct_fields_exprs() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let n = 5;
+            let p = Point { x: n + 1, y: n * 2 };
+            print(p.x + p.y);
+        }
+        ",
+        16.into()
+    );
+}
+
+#[test]
+pub fn struct_field_assign_shorthand() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let p = Point { x: 10, y: 0 };
+            p.x += 5;
+            print(p.x);
+        }
+        ",
+        15.into()
+    );
+}
+
+#[test]
+pub fn struct_nested_field_access() {
+    run_and_check_registers!(
+        "
+        struct Test { v: int }
+        struct OtherTest { test: Test, i: int }
+        function main() {
+            let o = OtherTest { test: Test { v: 99 }, i: 1 };
+            print(o.test.v);
+        }
+        ",
+        99.into()
+    );
+}
+
+#[test]
+pub fn struct_nested_field_modify() {
+    run_and_check_registers!(
+        "
+        struct Test { v: int }
+        struct OtherTest { test: Test, i: int }
+        function main() {
+            let o = OtherTest { test: Test { v: 99 }, i: 1 };
+            o.test.v = 50;
+            print(o.test.v);
+        }
+        ",
+        50.into()
+    );
+}
+
+#[test]
+pub fn struct_passed_to_function() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function get_x(p) {
+            return p.x;
+        }
+        function main() {
+            let p = Point { x: 8, y: 2 };
+            print(get_x(p));
+        }
+        ",
+        8.into()
+    );
+}
+
+#[test]
+pub fn struct_functin_ret() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function make(n) {
+            return Point { x: n, y: n + 1 };
+        }
+        function main() {
+            let p = make(5);
+            print(p.y);
+        }
+        ",
+        6.into()
+    );
+}
+
+#[test]
+pub fn struct_array_field_access() {
+    run_and_check_registers!(
+        "
+        struct Container { items: int[] }
+        function main() {
+            let b = Container { items: [10, 20, 30] };
+            print(b.items[1]);
+        }
+        ",
+        20.into()
+    );
+}
+
+#[test]
+pub fn struct_array_field_modify() {
+    run_and_check_registers!(
+        "
+        struct Container { items: int[] }
+        function main() {
+            let b = Container { items: [10, 20, 30] };
+            b.items[2] = 99;
+            print(b.items[2]);
+        }
+        ",
+        99.into()
+    );
+}
+
+#[test]
+pub fn struct_nested_array_field_access() {
+    run_and_check_registers!(
+        "
+        struct Matrix { cells: int[][] }
+        function main() {
+            let g = Matrix { cells: [[1, 2], [3, 4]] };
+            print(g.cells[1][0]);
+        }
+        ",
+        3.into()
+    );
+}
+
+#[test]
+pub fn struct_nested_array_field_modify() {
+    run_and_check_registers!(
+        "
+        struct Matrix { cells: int[][] }
+        function main() {
+            let g = Matrix { cells: [[1, 2], [3, 4]] };
+            g.cells[0][1] = 77;
+            print(g.cells[0][1]);
+        }
+        ",
+        77.into()
+    );
+}
+
+#[test]
+pub fn struct_structs_array_access() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let arr = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
+            print(arr[1].x);
+        }
+        ",
+        3.into()
+    );
+}
+
+#[test]
+pub fn struct_structs_array_modify() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let arr =[Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
+            arr[0].y = 50;
+            print(arr[0].y);
+        }
+        ",
+        50.into()
+    );
+}
+
+#[test]
+pub fn struct_eq_true() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let a = Point { x: 1, y: 2 };
+            let b = Point { x: 1, y: 2 };
+            print(a == b);
+        }
+        ",
+        true.into()
+    );
+}
+
+#[test]
+pub fn struct_eq_false() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let a = Point { x: 1, y: 2 };
+            let b = Point { x: 1, y: 9 };
+            print(a == b);
+        }
+        ",
+        false.into()
+    );
+}
+
+#[test]
+pub fn struct_deep_structural_eq() {
+    run_and_check_registers!(
+        "
+        struct Inner { v: int }
+        struct Outer { inner: Inner }
+        function main() {
+            let a = Outer { inner: Inner { v: 5 } };
+            let b = Outer { inner: Inner { v: 5 } };
+            print(a == b);
+        }
+        ",
+        true.into()
+    );
+}
+
+#[test]
+pub fn struct_ref() {
+    run_and_check_registers!(
+        "
+        struct Box { v: int }
+        function main() {
+            let a = Box { v: 1 };
+            let b = a;
+            b.v = 9;
+            print(a.v);
+        }
+        ",
+        9.into()
+    );
+}
+
+#[test]
+pub fn struct_field_condition() {
+    run_and_check_registers!(
+        "
+        struct Point { x: int }
+        function main() {
+            let p = Point { x: 7 };
+            if p.x > 5 {
+                print(1);
+            } else {
+                print(0);
+            }
+        }
+        ",
+        1.into()
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn struct_unknown_name() {
+    run!(
+        "
+        function main() {
+            let a = Idk { x: 1 };
+        }
+        "
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn struct_missing_field() {
+    run!(
+        "
+        struct Point { x: int, y: int }
+        function main() {
+            let a = Point { x: 67 };
+        }
+        "
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn struct_unknown_field() {
+    run!(
+        "
+        struct Point { x: int }
+        function main() {
+            let a = Point { z: 67 };
+        }
+        "
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn struct_field_wrong_type() {
+    run!(
+        "
+        struct Point { x: int }
+        function main() {
+            let a = Point { x: true };
+        }
+        "
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn struct_unknown_field_access() {
+    run!(
+        "
+        struct Point { x: int }
+        function main() {
+            let a = Point { x: 67 };
+            print(a.z);
+        }
+        "
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn struct_field_assign_wrong_type() {
+    run!(
+        "
+        struct Point { x: int }
+        function main() {
+            let a = Point { x: 1 };
+            a.x = true;
+        }
+        "
+    );
+}

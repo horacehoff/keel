@@ -147,6 +147,7 @@ pub unsafe extern "C" fn keel_free_output(output: *mut c_char) {
 }
 
 pub fn main() {
+    #[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|info| {
         eprintln!("{color_red}KEEL ERROR{color_reset}\n{info}");
     }));

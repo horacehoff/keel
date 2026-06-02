@@ -27,7 +27,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     match matching_elem {
         Instr::Mov(_, y)
         | Instr::SetInt(y, _)
-        | Instr::SetBool(y, _)
+        | Instr::SetBool(_, y)
         | Instr::CallFunc(_, y)
         | Instr::AddFloat(_, _, y)
         | Instr::AddInt(_, _, y)
@@ -134,7 +134,7 @@ pub fn get_tgt_id(x: Instr) -> Option<u16> {
 
         Instr::Mov(_, y)
         | Instr::SetInt(y, _)
-        | Instr::SetBool(y, _)
+        | Instr::SetBool(_, y)
         | Instr::CallFunc(_, y)
         | Instr::CallFuncRecursive(_, y)
         | Instr::SaveFrame(_, y, _)
@@ -399,7 +399,7 @@ pub fn move_reg_to_reg(output: &mut Vec<Instr>, src_id: u16, dest_id: u16, v: Da
     if v.is_int() {
         output.push(Instr::SetInt(dest_id, v.as_int()));
     } else if v.is_bool() {
-        output.push(Instr::SetBool(dest_id, v.as_bool()));
+        output.push(Instr::SetBool(v.as_bool(), dest_id));
     } else {
         output.push(Instr::Mov(src_id, dest_id));
     }

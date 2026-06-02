@@ -140,3 +140,15 @@ pub fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
         _ => false,
     })
 }
+
+pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) -> Expr {
+    if let Expr::Var(n, _) = target {
+        Expr::VarAssign(n, Box::from(value), expr_span)
+    } else if let Expr::ArrayGetIndex(base, idx, _) = target {
+        Expr::ArrayModify(base, idx, Box::from(value), expr_span, value_span)
+    } else if let Expr::GetStructField(obj, field, obj_span, field_span) = target {
+        Expr::SetStructField(obj, field, Box::from(value), obj_span, field_span)
+    } else {
+        todo!()
+    }
+}

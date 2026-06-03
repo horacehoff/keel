@@ -35,6 +35,7 @@ use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::slice;
 
 lalrpop_mod!(pub grammar);
@@ -477,14 +478,14 @@ pub fn get_id(
                     throw_parser_error(src, span, ErrType::UnknownStruct(name));
                 };
             let type_id = state.structs[expected_struct_idx].id;
-            let expected_fields = state.structs[expected_struct_idx].fields.clone();
-            if expected_fields.len() != fields.len() {
+            let expected_fields_len = state.structs[expected_struct_idx].fields.len();
+            if expected_fields_len != fields.len() {
                 throw_parser_error(
                     src,
                     span,
                     ErrType::InvalidStructFieldCount(
                         name,
-                        expected_fields.len() as u16,
+                        expected_fields_len as u16,
                         fields.len() as u16,
                     ),
                 );
@@ -494,8 +495,8 @@ pub fn get_id(
                 state.pools.obj_pool.len() - 1
             };
             if single_run {
-                for field_idx in 0..state.structs[expected_struct_idx].fields.len() {
-                    let field = &expected_fields[field_idx];
+                for field_idx in 0..expected_fields_len {
+                    let field = &state.structs[expected_struct_idx].fields[field_idx];
                     if let Some((_, field_expr, field_span)) =
                         fields.iter().find(|(f, _, _)| f == &field.0)
                     {
@@ -550,8 +551,8 @@ pub fn get_id(
                 (state.registers.len() - 1) as u16
             } else {
                 let mut dynamic: Vec<(Vec<Instr>, u16, u16)> = Vec::new();
-                for field_idx in 0..state.structs[expected_struct_idx].fields.len() {
-                    let field = &expected_fields[field_idx];
+                for field_idx in 0..expected_fields_len {
+                    let field = &state.structs[expected_struct_idx].fields[field_idx];
                     if let Some((_, field_expr, field_span)) =
                         fields.iter().find(|(f, _, _)| f == &field.0)
                     {
@@ -656,6 +657,119 @@ pub fn get_id(
                     ErrType::InvalidType(&DataType::Struct(0), &t),
                 );
             }
+        }
+        // array[index]
+        Expr::ArrayGetIndex(array, index, markers) => {
+            let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
+            if !is_type_indexable(&infered) {
+                throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
+            }
+
+            let id = get_id(
+                array,
+                v,
+                ctx,
+                state,
+                output,
+                None,
+                false,
+                offset,
+                single_run,
+            );
+
+            let index_inferred =
+                infer_type(index, v, state.fns, state.structs, src, state.dyn_libs);
+            if index_inferred != DataType::Int {
+                throw_parser_error(src, markers, ErrType::InvalidIndexType(&index_inferred));
+            }
+            let index_id = get_id(
+                index,
+                v,
+                ctx,
+                state,
+                output,
+                None,
+                false,
+                offset,
+                single_run,
+            );
+            free_register(index_id, state.free_registers, v, state.const_registers);
+            let dest_reg_id = alloc_register(state.registers, state.free_registers);
+
+            let to_push = if infered == DataType::String {
+                Instr::GetIndexString(id, index_id, dest_reg_id)
+            } else {
+                Instr::GetIndexArray(id, index_id, dest_reg_id)
+            };
+            state.instr_src.push((to_push, *markers, ctx.current_src_file));
+            output.push(to_push);
+            dest_reg_id
+        }
+        // array[start..end]
+        Expr::ArrayGetSlice(array, idx_start, idx_end, markers) => {
+            let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
+            if !is_type_indexable(&infered) {
+                throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
+            }
+            let id = get_id(
+                array,
+                v,
+                ctx,
+                state,
+                output,
+                None,
+                false,
+                offset,
+                single_run,
+            );
+            let idx_start_inferred =
+                infer_type(idx_start, v, state.fns, state.structs, src, state.dyn_libs);
+            if idx_start_inferred != DataType::Int {
+                throw_parser_error(
+                    src,
+                    markers,
+                    ErrType::InvalidIndexType(&idx_start_inferred),
+                );
+            }
+            let idx_start_id = get_id(
+                idx_start,
+                v,
+                ctx,
+                state,
+                output,
+                None,
+                false,
+                offset,
+                single_run,
+            );
+            let idx_end_inferred =
+                infer_type(idx_end, v, state.fns, state.structs, src, state.dyn_libs);
+            if idx_end_inferred != DataType::Int {
+                throw_parser_error(src, markers, ErrType::InvalidIndexType(&idx_end_inferred));
+            }
+            let idx_end_id = get_id(
+                idx_end,
+                v,
+                ctx,
+                state,
+                output,
+                None,
+                false,
+                offset,
+                single_run,
+            );
+            output.push(Instr::StoreFuncArg(idx_end_id));
+            free_register(idx_start_id, state.free_registers, v, state.const_registers);
+            free_register(idx_end_id, state.free_registers, v, state.const_registers);
+            let dest_reg_id = alloc_register(state.registers, state.free_registers);
+            let to_push = if infered == DataType::String {
+                Instr::GetSliceString(id, idx_start_id, dest_reg_id)
+            } else {
+                Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
+            };
+            state.instr_src.push((to_push, *markers, ctx.current_src_file));
+            output.push(to_push);
+            dest_reg_id
         }
         Expr::Mul(l, r, markers) => {
             uniform_op!(
@@ -1204,117 +1318,7 @@ pub fn compile_expr(
                 }
             }
 
-            // array[index]
-            Expr::ArrayGetIndex(array, index, markers) => {
-                let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
-                if !is_type_indexable(&infered) {
-                    throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
-                }
 
-                let id = get_id(
-                    array,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-
-                let index_inferred =
-                    infer_type(index, v, state.fns, state.structs, src, state.dyn_libs);
-                if index_inferred != DataType::Int {
-                    throw_parser_error(src, markers, ErrType::InvalidIndexType(&index_inferred));
-                }
-                let index_id = get_id(
-                    index,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-                free_register(index_id, state.free_registers, v, state.const_registers);
-                let dest_reg_id = alloc_register(state.registers, state.free_registers);
-
-                let to_push = if infered == DataType::String {
-                    Instr::GetIndexString(id, index_id, dest_reg_id)
-                } else {
-                    Instr::GetIndexArray(id, index_id, dest_reg_id)
-                };
-                state.instr_src.push((to_push, *markers, current_src_file));
-                output.push(to_push);
-            }
-            // array[start..end]
-            Expr::ArrayGetSlice(array, idx_start, idx_end, markers) => {
-                let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
-                if !is_type_indexable(&infered) {
-                    throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
-                }
-                let id = get_id(
-                    array,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-                let idx_start_inferred =
-                    infer_type(idx_start, v, state.fns, state.structs, src, state.dyn_libs);
-                if idx_start_inferred != DataType::Int {
-                    throw_parser_error(
-                        src,
-                        markers,
-                        ErrType::InvalidIndexType(&idx_start_inferred),
-                    );
-                }
-                let idx_start_id = get_id(
-                    idx_start,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-                let idx_end_inferred =
-                    infer_type(idx_end, v, state.fns, state.structs, src, state.dyn_libs);
-                if idx_end_inferred != DataType::Int {
-                    throw_parser_error(src, markers, ErrType::InvalidIndexType(&idx_end_inferred));
-                }
-                let idx_end_id = get_id(
-                    idx_end,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-                output.push(Instr::StoreFuncArg(idx_end_id));
-                free_register(idx_start_id, state.free_registers, v, state.const_registers);
-                free_register(idx_end_id, state.free_registers, v, state.const_registers);
-                let dest_reg_id = alloc_register(state.registers, state.free_registers);
-                let to_push = if infered == DataType::String {
-                    Instr::GetSliceString(id, idx_start_id, dest_reg_id)
-                } else {
-                    Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
-                };
-                state.instr_src.push((to_push, *markers, current_src_file));
-                output.push(to_push);
-            }
             // x[y] = z;
             Expr::ArrayModify(array, index, value, index_markers, elem_markers) => {
                 let array_type =
@@ -2178,7 +2182,7 @@ fn parse_toplevel(
     fn_registers: &mut Vec<Vec<u16>>,
     dyn_libs: &mut Vec<Dynamiclib>,
     dyn_lib_fns: &mut Vec<DynamicLibFn>,
-    sources: &mut Vec<(SmolStr, String)>,
+    sources: &mut Vec<(SmolStr, Rc<String>)>,
     visited_files: &mut HashSet<PathBuf>,
     dyn_fn_id: &mut u16,
 ) {
@@ -2249,7 +2253,7 @@ fn parse_toplevel(
                             };
                             let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
                             let return_type = datatype_to_c_type(fn_return_type);
-                            let cif = libffi::middle::Cif::new(arg_types.clone(), return_type.clone());
+                            let cif = libffi::middle::Cif::new(arg_types, return_type);
                             // If the extension is omitted, the extension is chosen based on the target OS
                             let path = if std::path::Path::new(path.as_str()).extension().is_none() {
                                 format_args!("{path}.{DYLIB_EXT}").to_smolstr()
@@ -2338,14 +2342,14 @@ fn parse_toplevel(
                     );
                 }
                 visited_files.insert(file_path.clone());
-                let file_contents = std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
+                let file_contents = Rc::new(std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
                     let current_src = &sources[src_file_idx as usize];
                     throw_parser_error(
                         (current_src.0.as_str(), current_src.1.as_str()),
                         &markers,
                         ErrType::CannotReadImportedFile(path.as_str()),
                     );
-                });
+                }));
                 let file_name: SmolStr = file_path.to_str().unwrap_or(path.as_str()).into();
                 sources.push((file_name.clone(), file_contents.clone()));
 
@@ -2382,7 +2386,7 @@ fn parse_toplevel(
 }
 
 pub fn parse(
-    contents: &str,
+    contents: String,
     filename: &str,
     debug: bool,
 ) -> (
@@ -2394,15 +2398,15 @@ pub fn parse(
     Vec<DynamicLibFn>,
     usize,
     usize,
-    Vec<(SmolStr, String)>,
+    Vec<(SmolStr, Rc<String>)>,
     Vec<(SmolStr, Vec<SmolStr>)>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
 
     let code: Vec<Expr> = grammar::FileParser::new()
-        .parse((filename, contents), contents)
-        .unwrap_or_else(|x| lalrpop_error::<Token<'_>>(x, contents, filename));
+        .parse((filename, &contents), &contents)
+        .unwrap_or_else(|x| lalrpop_error::<Token<'_>>(x, &contents, filename));
 
     #[cfg(not(target_arch = "wasm32"))]
     if debug {
@@ -2429,14 +2433,15 @@ pub fn parse(
     let mut free_registers = Vec::new();
 
     // sources[0] = main file
-    let mut sources: Vec<(SmolStr, String)> = vec![(SmolStr::from(filename), contents.to_string())];
+    let contents = Rc::new(contents);
+    let mut sources: Vec<(SmolStr, Rc<String>)> = vec![(SmolStr::from(filename), contents.clone())];
     let main_path = PathBuf::from(filename)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(filename));
     let mut visited: HashSet<PathBuf> = HashSet::new();
     visited.insert(main_path.clone());
 
-    let main_src: (&str, &str) = (filename, contents);
+    let main_src: (&str, &str) = (filename, &contents);
     parse_toplevel(
         code,
         &main_path,
@@ -2455,7 +2460,7 @@ pub fn parse(
 
     let ctx = Ctx {
         block_id: 0,
-        src: (filename, contents),
+        src: (filename, &contents),
         is_parsing_recursive: false,
         current_src_file: 0,
     };

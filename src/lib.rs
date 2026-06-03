@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
+#![warn(clippy::implicit_clone)]
+#![warn(clippy::redundant_clone)]
 
 use crate::errors::ErrorCtx;
 use crate::parser::parse;
@@ -215,7 +217,7 @@ pub fn main() {
                 allocated_call_depth,
                 sources,
                 struct_fields,
-            ) = parse(&contents, filename, true);
+            ) = parse(contents, filename, true);
             println!("COMPILATION TIME: {:.2?}", now.elapsed());
             let now = std::time::Instant::now();
             vm::execute(
@@ -235,7 +237,7 @@ pub fn main() {
             );
             return;
         } else if next == Some(String::from("--debug-parser")) {
-            parse(&contents, filename, false);
+            parse(contents, filename, false);
             return;
         }
     }
@@ -251,7 +253,7 @@ pub fn main() {
         allocated_call_depth,
         sources,
         struct_fields,
-    ) = parse(&contents, filename, false);
+    ) = parse(contents, filename, false);
     vm::execute(
         &instructions,
         &mut registers,

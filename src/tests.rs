@@ -16,14 +16,14 @@ macro_rules! run_and_check_registers {
             allocated_call_depth,
             _,
             _,
-        ) = parse($contents, filename, true);
+        ) = parse(String::from($contents), filename, true);
         crate::vm::execute(
             &instructions,
             &mut registers,
             &mut arrays,
             &crate::errors::ErrorCtx {
                 instr_src,
-                sources: vec![(filename.into(), $contents.into())],
+                sources: vec![(filename.into(), std::rc::Rc::new(String::from($contents)))],
             },
             &fn_registers,
             &[],
@@ -55,14 +55,14 @@ macro_rules! run {
             allocated_call_depth,
             _,
             _,
-        ) = parse($contents, filename, true);
+        ) = parse(String::from($contents), filename, true);
         crate::vm::execute(
             &instructions,
             &mut registers,
             &mut arrays,
             &crate::errors::ErrorCtx {
                 instr_src,
-                sources: vec![(filename.into(), $contents.into())],
+                sources: vec![(filename.into(), std::rc::Rc::new(String::from($contents)))],
             },
             &fn_registers,
             &[],

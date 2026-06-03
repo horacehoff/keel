@@ -6,6 +6,7 @@ use lalrpop_util::ParseError;
 use lalrpop_util::lexer::Token;
 use smol_strc::{SmolStr, ToSmolStr};
 use std::fmt::Arguments;
+use std::rc::Rc;
 
 #[cold]
 #[inline(always)]
@@ -18,7 +19,7 @@ pub fn dev_error(file: &str, function: &str, additional_data: Arguments) -> ! {
 
 pub struct ErrorCtx {
     pub instr_src: Vec<(Instr, Span, u16)>,
-    pub sources: Vec<(SmolStr, String)>,
+    pub sources: Vec<(SmolStr, Rc<String>)>,
 }
 
 impl From<std::io::ErrorKind> for ErrType<'_> {

@@ -113,7 +113,7 @@ pub struct State<'a> {
     pub allocated_call_depth: &'a mut usize,
     pub const_registers: &'a mut HashMap<Data, u16>,
     pub free_registers: &'a mut Vec<u16>,
-    pub sources: &'a mut Vec<(SmolStr, String)>,
+    pub sources: &'a mut Vec<(SmolStr, Rc<String>)>,
 }
 
 #[derive(Debug, Clone)]

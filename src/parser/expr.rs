@@ -19,32 +19,32 @@ pub enum Expr {
     /// Var(name, start, end)
     Var(SmolStr, Span),
     /// Array(contents, span)
-    Array(Box<[Expr]>, Span),
+    Array(Box<[Self]>, Span),
     /// Struct(name, fields, span)
-    Struct(SmolStr, Box<[(SmolStr, Expr, Span)]>, Span),
+    Struct(SmolStr, Box<[(SmolStr, Self, Span)]>, Span),
     /// StructDeclare(name, fields, span)
     StructDeclare(SmolStr, Box<[(SmolStr, SmolStr)]>, Span),
     /// GetStructField(struct_expr, field, struct_span, field_span)
-    GetStructField(Box<Expr>, SmolStr, Span, Span),
+    GetStructField(Box<Self>, SmolStr, Span, Span),
     /// SetStructField(struct_expr, field, new_expr, struct_span, field_span)
-    SetStructField(Box<Expr>, SmolStr, Box<Expr>, Span, Span),
+    SetStructField(Box<Self>, SmolStr, Box<Self>, Span, Span),
     /// VarDeclare(name, value),
-    VarDeclare(SmolStr, Box<Expr>),
+    VarDeclare(SmolStr, Box<Self>),
     /// VarDeclare(name, value, start, end)
-    VarAssign(SmolStr, Box<Expr>, Span),
+    VarAssign(SmolStr, Box<Self>, Span),
     /// Condition(condition, code (contains else_if_blocks and potentially else_block), start, end)
-    Condition(Box<Expr>, Box<[Expr]>, Span),
+    Condition(Box<Self>, Box<[Self]>, Span),
     /// InlineCondition - expression-form if/else, always produces a value, must have an else branch
-    InlineCondition(Box<Expr>, Box<[Expr]>, Span),
-    ElseIfBlock(Box<Expr>, Box<[Expr]>),
-    ElseBlock(Box<[Expr]>),
+    InlineCondition(Box<Self>, Box<[Self]>, Span),
+    ElseIfBlock(Box<Self>, Box<[Self]>),
+    ElseBlock(Box<[Self]>),
 
-    WhileBlock(Box<Expr>, Box<[Expr]>),
+    WhileBlock(Box<Self>, Box<[Self]>),
     /// FunctionCall(args, (optional namespace + name), start, end, (arg_start,arg_end))
-    FunctionCall(Box<[Expr]>, Box<[SmolStr]>, Span, Box<[Span]>),
+    FunctionCall(Box<[Self]>, Box<[SmolStr]>, Span, Box<[Span]>),
     ObjFunctionCall(
-        Box<Expr>,
-        Box<[Expr]>,
+        Box<Self>,
+        Box<[Self]>,
         Box<[SmolStr]>,
         // obj_span
         Span,
@@ -53,19 +53,19 @@ pub enum Expr {
         Box<[Span]>,
     ),
     /// FunctionDecl(name+args, code, start, end)
-    FunctionDecl(Box<[SmolStr]>, Rc<[Expr]>, Span),
+    FunctionDecl(Box<[SmolStr]>, Rc<[Self]>, Span),
 
-    ReturnVal(Box<Option<Expr>>),
+    ReturnVal(Box<Option<Self>>),
 
-    ArrayGetIndex(Box<Expr>, Box<Expr>, Span),
+    ArrayGetIndex(Box<Self>, Box<Self>, Span),
     /// ArrayGetSlice(array, range_start, range_end, span)
-    ArrayGetSlice(Box<Expr>, Box<Expr>, Box<Expr>, Span),
-    ArrayModify(Box<Expr>, Box<Expr>, Box<Expr>, Span, Span),
+    ArrayGetSlice(Box<Self>, Box<Self>, Box<Self>, Span),
+    ArrayModify(Box<Self>, Box<Self>, Box<Self>, Span, Span),
 
     /// ForLoop(loop_var_name, loop_array+code, obj_markers)
-    ForLoop(SmolStr, Box<[Expr]>, Span),
+    ForLoop(SmolStr, Box<[Self]>, Span),
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
-    IntForLoop(SmolStr, Box<Expr>, Box<Expr>, Box<[Expr]>, Span, Span),
+    IntForLoop(SmolStr, Box<Self>, Box<Self>, Box<[Self]>, Span, Span),
     /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
     ImportDylib(SmolStr, Box<[(SmolStr, Box<[DataType]>, DataType)]>, Span),
 
@@ -75,28 +75,28 @@ pub enum Expr {
     Break,
     Continue,
 
-    EvalBlock(Box<[Expr]>),
-    LoopBlock(Box<[Expr]>),
+    EvalBlock(Box<[Self]>),
+    LoopBlock(Box<[Self]>),
 
     /// TryCatchBlock(try_code, err_var, catch_code)
-    TryCatchBlock(Box<[Expr]>, SmolStr, Box<[Expr]>),
+    TryCatchBlock(Box<[Self]>, SmolStr, Box<[Self]>),
 
-    Mul(Box<Expr>, Box<Expr>, Span),
-    Div(Box<Expr>, Box<Expr>, Span),
-    Add(Box<Expr>, Box<Expr>, Span),
-    Sub(Box<Expr>, Box<Expr>, Span),
-    Mod(Box<Expr>, Box<Expr>, Span),
-    Pow(Box<Expr>, Box<Expr>, Span),
-    Eq(Box<Expr>, Box<Expr>),
-    NotEq(Box<Expr>, Box<Expr>),
-    Sup(Box<Expr>, Box<Expr>, Span),
-    SupEq(Box<Expr>, Box<Expr>, Span),
-    Inf(Box<Expr>, Box<Expr>, Span),
-    InfEq(Box<Expr>, Box<Expr>, Span),
-    BoolAnd(Box<Expr>, Box<Expr>, Span),
-    BoolOr(Box<Expr>, Box<Expr>, Span),
-    BoolNeg(Box<Expr>, Span),
-    Neg(Box<Expr>, Span),
+    Mul(Box<Self>, Box<Self>, Span),
+    Div(Box<Self>, Box<Self>, Span),
+    Add(Box<Self>, Box<Self>, Span),
+    Sub(Box<Self>, Box<Self>, Span),
+    Mod(Box<Self>, Box<Self>, Span),
+    Pow(Box<Self>, Box<Self>, Span),
+    Eq(Box<Self>, Box<Self>),
+    NotEq(Box<Self>, Box<Self>),
+    Sup(Box<Self>, Box<Self>, Span),
+    SupEq(Box<Self>, Box<Self>, Span),
+    Inf(Box<Self>, Box<Self>, Span),
+    InfEq(Box<Self>, Box<Self>, Span),
+    BoolAnd(Box<Self>, Box<Self>, Span),
+    BoolOr(Box<Self>, Box<Self>, Span),
+    BoolNeg(Box<Self>, Span),
+    Neg(Box<Self>, Span),
 }
 
 #[cold]
@@ -106,7 +106,7 @@ pub fn symbol_of_expr(expr: &Expr) -> &str {
         Expr::Mul(_, _, _) => "*",
         Expr::Div(_, _, _) => "/",
         Expr::Add(_, _, _) => "+",
-        Expr::Sub(_, _, _) => "-",
+        Expr::Sub(_, _, _) | Expr::Neg(_, _) => "-",
         Expr::Mod(_, _, _) => "%",
         Expr::Pow(_, _, _) => "^",
         Expr::Eq(_, _) => "==",
@@ -117,7 +117,6 @@ pub fn symbol_of_expr(expr: &Expr) -> &str {
         Expr::InfEq(_, _, _) => "<=",
         Expr::BoolAnd(_, _, _) => "&&",
         Expr::BoolOr(_, _, _) => "||",
-        Expr::Neg(_, _) => "-",
         other => dev_error(
             "parser.rs",
             "symbol_of_expr",
@@ -133,10 +132,11 @@ pub fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
         | Expr::WhileBlock(_, body)
         | Expr::EvalBlock(body)
         | Expr::LoopBlock(body)
-        | Expr::InlineCondition(_, body, _) => contains_var_reassign(name, body),
-        Expr::ElseIfBlock(_, body) | Expr::ElseBlock(body) => contains_var_reassign(name, body),
-        Expr::ForLoop(_, body, _) => contains_var_reassign(name, body),
-        Expr::IntForLoop(_, _, _, body, _, _) => contains_var_reassign(name, body),
+        | Expr::InlineCondition(_, body, _)
+        | Expr::ElseIfBlock(_, body)
+        | Expr::ElseBlock(body)
+        | Expr::ForLoop(_, body, _)
+        | Expr::IntForLoop(_, _, _, body, _, _) => contains_var_reassign(name, body),
         _ => false,
     })
 }

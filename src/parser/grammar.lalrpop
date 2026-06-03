@@ -29,7 +29,7 @@ CType: DataType = {
     <start: @L> <t: Var> <end: @R> => str_to_type(&t).unwrap_or_else(|| {
         throw_parser_error(
                     src,
-                    &span!(start, end),
+                    span!(start, end),
                     ErrType::Custom(
                         format_args!(
                             "Unknown type {color_red}{style_bold}{t}{color_reset}{style_reset}"
@@ -39,7 +39,7 @@ CType: DataType = {
     <start: @L> <t: Var> <end: @R> "[" "]" => DataType::Array(Some(Box::new(str_to_type(&t).unwrap_or_else(|| {
         throw_parser_error(
                     src,
-                    &span!(start, end),
+                    span!(start, end),
                     ErrType::Custom(
                         format_args!(
                             "Unknown type {color_red}{style_bold}{t}{color_reset}{style_reset}"
@@ -232,7 +232,7 @@ MatchBlock:Expr = {
         ).collect();
 
         if let Some((_,wildcard_code)) = o3 {
-            output_code.push(Expr::ElseBlock(wildcard_code))
+            output_code.push(Expr::ElseBlock(wildcard_code));
         }
 
         Expr::Condition(Box::from(Expr::Eq(Box::from(match_obj), Box::from(first_condition.unwrap()))),Box::from(output_code),span!(start,end))
@@ -293,7 +293,7 @@ TryCatchBlock:Expr = {
             } else {
                 throw_parser_error(
                     src,
-                    &span!(start, end),
+                    span!(start, end),
                     ErrType::Custom(
                         format_args!(
                             "A {color_blue}{style_bold}try{color_reset}{style_reset} block must have at least one {color_blue}{style_bold}catch{color_reset}{style_reset}"
@@ -334,7 +334,7 @@ StructDeclare:Expr = {
         if fields.is_empty() {
             throw_parser_error(
                 src,
-                &span!(start, end),
+                span!(start, end),
                 ErrType::Custom(
                     format_args!("A struct must have at least one field")
                     .to_smolstr(
@@ -726,14 +726,14 @@ Array:Expr = {
 }
 
 Float: f64 = {
-    <start: @L> <n: r"[0-9]*[.][0-9]+"> <end: @R> => f64::from_str(n).unwrap_or_else(|_| {throw_parser_error(src, &span!(start, end), ErrType::InvalidFloat)})
+    <start: @L> <n: r"[0-9]*[.][0-9]+"> <end: @R> => f64::from_str(n).unwrap_or_else(|_| {throw_parser_error(src, span!(start, end), ErrType::InvalidFloat)})
 }
 
 Integer: i32 = {
     <start: @L> <n: r"[0-9]+"> <end: @R> => match n.parse::<i64>() {
         Ok(v) if v <= i32::MAX as i64 => v as i32,
         Ok(2147483648) => i32::MIN,
-        _ => throw_parser_error(src, &span!(start, end), ErrType::InvalidInt)
+        _ => throw_parser_error(src, span!(start, end), ErrType::InvalidInt)
     }
 };
 

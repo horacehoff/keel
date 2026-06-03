@@ -23,69 +23,69 @@ pub struct Data(pub u64);
 
 impl Data {
     #[inline(always)]
-    pub fn tag(&self) -> u64 {
+    pub const fn tag(self) -> u64 {
         self.0 & !0xFFFF_FFFF // also includes type_id
     }
     #[inline(always)]
-    pub fn is_null(&self) -> bool {
+    pub const fn is_null(self) -> bool {
         self.0 == NAN_NULL
     }
     #[inline(always)]
-    pub fn bool(b: bool) -> Data {
-        Data(NAN_BOOL | b as u64)
+    pub const fn bool(b: bool) -> Self {
+        Self(NAN_BOOL | b as u64)
     }
     #[inline(always)]
-    pub fn as_bool(&self) -> bool {
+    pub fn as_bool(self) -> bool {
         debug_assert!(self.is_bool());
         (self.0 & 1) != 0
     }
     #[inline(always)]
-    pub fn is_bool(&self) -> bool {
+    pub const fn is_bool(self) -> bool {
         (self.0 & !PAYLOAD_MASK) == NAN_BOOL
     }
     #[inline(always)]
-    pub fn float(n: f64) -> Data {
-        Data(n.to_bits())
+    pub const fn float(n: f64) -> Self {
+        Self(n.to_bits())
     }
     #[inline(always)]
-    pub fn as_float(&self) -> f64 {
+    pub const fn as_float(self) -> f64 {
         debug_assert!(self.is_float());
         f64::from_bits(self.0)
     }
     #[inline(always)]
-    pub fn is_float(&self) -> bool {
+    pub const fn is_float(self) -> bool {
         (self.0 & NAN_BASE) != NAN_BASE
     }
     #[inline(always)]
     /// Convert the given integer to a NaN-boxed integer.
     /// Integers are stored in the lower 32 bits
-    pub fn int(n: i32) -> Data {
-        Data(NAN_INT | (n as u32 as u64))
+    pub const fn int(n: i32) -> Self {
+        Self(NAN_INT | (n as u32 as u64))
     }
     #[inline(always)]
-    pub fn as_int(&self) -> i32 {
+    pub const fn as_int(self) -> i32 {
         debug_assert!(self.is_int());
         self.0 as i32
     }
     #[inline(always)]
-    pub fn is_int(&self) -> bool {
+    pub const fn is_int(self) -> bool {
         (self.0 & !PAYLOAD_MASK) == NAN_INT
     }
     #[inline(always)]
-    pub fn array(id: u32) -> Data {
-        Data(NAN_ARRAY | id as u64)
+    pub const fn array(id: u32) -> Self {
+        Self(NAN_ARRAY | id as u64)
     }
     #[inline(always)]
-    pub fn as_array(&self) -> usize {
+    pub const fn as_array(self) -> usize {
         debug_assert!(self.is_array() || self.is_struct());
         (self.0 & 0xFFFF_FFFF) as usize
     }
     #[inline(always)]
-    pub fn is_array(&self) -> bool {
+    pub const fn is_array(self) -> bool {
         (self.0 & !PAYLOAD_MASK) == NAN_ARRAY
     }
     #[inline(always)]
-    pub fn small_str(s: &str) -> Data {
+    pub fn small_str(s: &str) -> Self {
         debug_assert!(s.len() <= 6);
         let bytes = s.as_bytes();
         let mut payload: u64 = 0;
@@ -93,22 +93,22 @@ impl Data {
         for (i, byte) in bytes.iter().enumerate() {
             payload |= (*byte as u64) << (i * 8);
         }
-        Data(NAN_STRING_SMALL | (payload & PAYLOAD_MASK))
+        Self(NAN_STRING_SMALL | (payload & PAYLOAD_MASK))
     }
     #[inline(always)]
-    pub fn large_str_id(id: u64) -> Data {
-        Data(NAN_STRING_LARGE | id)
+    pub const fn large_str_id(id: u64) -> Self {
+        Self(NAN_STRING_LARGE | id)
     }
     #[inline(always)]
     /// Same as str(), except this never runs the GC because this function is called by the parser
-    pub fn p_str(s: &str, string_pool: &mut Vec<String>) -> Data {
+    pub fn p_str(s: &str, string_pool: &mut Vec<String>) -> Self {
         let len = s.len();
         if len <= 6 {
-            Data::small_str(s)
+            Self::small_str(s)
         } else {
             let string_pool_id = string_pool.len() as u64;
-            string_pool.push(s.to_string());
-            Data(NAN_STRING_LARGE | string_pool_id)
+            string_pool.push(s.to_owned());
+            Self(NAN_STRING_LARGE | string_pool_id)
         }
     }
     #[inline(always)]
@@ -117,14 +117,14 @@ impl Data {
         s: &str,
         array_pool: &ObjectPool,
         string_pool: &mut Vec<String>,
-        registers: &[Data],
-        recursion_stack: &[Data],
+        registers: &[Self],
+        recursion_stack: &[Self],
         free_strings: &mut Vec<u16>,
         gc_string_threshold: &mut u32,
         string_live: &mut Vec<bool>,
-    ) -> Data {
+    ) -> Self {
         if s.len() <= 6 {
-            Data::small_str(s)
+            Self::small_str(s)
         } else {
             if free_strings.is_empty() && string_pool.len() >= (*gc_string_threshold as usize) {
                 raise_string_gc_threshold(gc_string_threshold, string_pool.len());
@@ -138,12 +138,12 @@ impl Data {
                 );
             }
             if let Some(id) = free_strings.pop() {
-                string_pool[id as usize] = s.to_string();
-                Data(NAN_STRING_LARGE | (id as u64))
+                s.clone_into(&mut string_pool[id as usize]);
+                Self(NAN_STRING_LARGE | (id as u64))
             } else {
                 let string_pool_id = string_pool.len() as u64;
-                string_pool.push(s.to_string());
-                Data(NAN_STRING_LARGE | string_pool_id)
+                string_pool.push(s.to_owned());
+                Self(NAN_STRING_LARGE | string_pool_id)
             }
         }
     }
@@ -152,14 +152,14 @@ impl Data {
         s: String,
         array_pool: &ObjectPool,
         string_pool: &mut Vec<String>,
-        registers: &[Data],
-        recursion_stack: &[Data],
+        registers: &[Self],
+        recursion_stack: &[Self],
         free_strings: &mut Vec<u16>,
         gc_string_threshold: &mut u32,
         string_live: &mut Vec<bool>,
-    ) -> Data {
+    ) -> Self {
         if s.len() <= 6 {
-            Data::small_str(&s)
+            Self::small_str(&s)
         } else {
             if free_strings.is_empty() && string_pool.len() >= (*gc_string_threshold as usize) {
                 raise_string_gc_threshold(gc_string_threshold, string_pool.len());
@@ -174,11 +174,11 @@ impl Data {
             }
             if let Some(id) = free_strings.pop() {
                 string_pool[id as usize] = s;
-                Data(NAN_STRING_LARGE | (id as u64))
+                Self(NAN_STRING_LARGE | (id as u64))
             } else {
                 let string_pool_id = string_pool.len() as u64;
                 string_pool.push(s);
-                Data(NAN_STRING_LARGE | string_pool_id)
+                Self(NAN_STRING_LARGE | string_pool_id)
             }
         }
     }
@@ -188,7 +188,7 @@ impl Data {
         if (self.0 & !PAYLOAD_MASK) == NAN_STRING_SMALL {
             let payload = self.0 & PAYLOAD_MASK;
             let len = ((64 - payload.leading_zeros()) as usize + 7) >> 3;
-            let ptr = self as *const Data as *const u8;
+            let ptr = self as *const Self as *const u8;
             unsafe {
                 let slice = std::slice::from_raw_parts(ptr, len);
                 std::str::from_utf8_unchecked(slice)
@@ -199,58 +199,58 @@ impl Data {
         }
     }
     #[inline(always)]
-    pub fn is_str(&self) -> bool {
+    pub const fn is_str(self) -> bool {
         // this works because NAN_TAG_STRING_LARGE == NAN_TAG_STRING_SMALL + (1 << 48)
         (self.0 & !PAYLOAD_MASK).wrapping_sub(NAN_STRING_SMALL) <= const { 1u64 << 48 }
     }
     /// Increments the integer stored in this Data in-place. Wraps.
     #[inline(always)]
-    pub fn inc_int(&mut self) {
+    pub const fn inc_int(&mut self) {
         debug_assert!(self.is_int());
         self.0 = NAN_INT | (self.0.wrapping_add(1) & 0xFFFF_FFFF);
     }
     /// Decrements the integer stored in this Data in-place. Wraps.
     #[inline(always)]
-    pub fn dec_int(&mut self) {
+    pub const fn dec_int(&mut self) {
         debug_assert!(self.is_int());
         self.0 = NAN_INT | (self.0.wrapping_sub(1) & 0xFFFF_FFFF);
     }
     /// Writes src + 1 into self. Wraps.
     #[inline(always)]
-    pub fn inc_into(&mut self, src: Data) {
+    pub const fn inc_into(&mut self, src: Self) {
         debug_assert!(src.is_int());
         self.0 = NAN_INT | (src.0.wrapping_add(1) & 0xFFFF_FFFF);
     }
     /// Writes src - 1 into self. Wraps.
     #[inline(always)]
-    pub fn dec_into(&mut self, src: Data) {
+    pub const fn dec_into(&mut self, src: Self) {
         debug_assert!(src.is_int());
         self.0 = NAN_INT | (src.0.wrapping_sub(1) & 0xFFFF_FFFF);
     }
     #[inline(always)]
-    pub fn is_large_str(&self) -> bool {
+    pub const fn is_large_str(self) -> bool {
         (self.0 & !PAYLOAD_MASK) == NAN_STRING_LARGE
     }
     #[inline(always)]
-    pub fn get_str_pool_id(&self) -> usize {
+    pub const fn get_str_pool_id(self) -> usize {
         debug_assert!(self.is_large_str());
         (self.0 & PAYLOAD_MASK) as usize
     }
     #[inline(always)]
-    pub fn struct_instance(type_id: u16, id: u32) -> Data {
-        Data(NAN_STRUCT | ((type_id as u64) << 32) | id as u64)
+    pub const fn struct_instance(type_id: u16, id: u32) -> Self {
+        Self(NAN_STRUCT | ((type_id as u64) << 32) | id as u64)
     }
     #[inline(always)]
-    pub fn as_struct(&self) -> usize {
+    pub const fn as_struct(self) -> usize {
         debug_assert!(self.is_struct());
         (self.0 & 0xFFFF_FFFF) as usize
     }
     #[inline(always)]
-    pub fn struct_type_id(&self) -> u16 {
+    pub const fn struct_type_id(self) -> u16 {
         ((self.0 >> 32) & 0xFFFF) as u16
     }
     #[inline(always)]
-    pub fn is_struct(&self) -> bool {
+    pub const fn is_struct(self) -> bool {
         (self.0 & !PAYLOAD_MASK) == NAN_STRUCT
     }
 }
@@ -258,7 +258,7 @@ impl Data {
 impl From<f64> for Data {
     #[inline(always)]
     fn from(value: f64) -> Self {
-        Data::float(value)
+        Self::float(value)
     }
 }
 impl From<Data> for f64 {
@@ -271,7 +271,7 @@ impl From<Data> for f64 {
 impl From<i32> for Data {
     #[inline(always)]
     fn from(value: i32) -> Self {
-        Data::int(value)
+        Self::int(value)
     }
 }
 impl From<Data> for i32 {

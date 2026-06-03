@@ -22,7 +22,7 @@ pub fn fs_lib_functions(
     ctx: Ctx<'_>,
     state: &mut State<'_>,
     args: &[Expr],
-    markers: &Span,
+    markers: Span,
     args_indexes: &[Span],
     offset: u16,
     single_run: bool,
@@ -44,7 +44,7 @@ pub fn fs_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         "exists" => {
             check_args!(args, 1, name, src, markers);
@@ -60,7 +60,7 @@ pub fn fs_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         "write" => {
             check_args!(args, 2, name, src, markers);
@@ -81,7 +81,7 @@ pub fn fs_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         "append" => {
             check_args!(args, 2, name, src, markers);
@@ -102,7 +102,7 @@ pub fn fs_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         "delete" => {
             check_args!(args, 1, name, src, markers);
@@ -114,7 +114,7 @@ pub fn fs_lib_functions(
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, 0));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         "delete_dir" => {
             check_args!(args, 1, name, src, markers);
@@ -126,7 +126,7 @@ pub fn fs_lib_functions(
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, 0));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         name => {
             throw_parser_error(src, markers, ErrType::UnknownFunction(name));

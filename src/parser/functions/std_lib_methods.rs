@@ -26,8 +26,8 @@ pub fn std_lib_methods(
     state: &mut State<'_>,
     obj: &Expr,
     args: &[Expr],
-    obj_markers: &Span,
-    fn_markers: &Span,
+    obj_markers: Span,
+    fn_markers: Span,
     args_indexes: &[Span],
     offset: u16,
     single_run: bool,
@@ -72,7 +72,7 @@ pub fn std_lib_methods(
                 $args,
                 name,
                 src,
-                &Span {
+                Span {
                     start: args_indexes[0].start,
                     end: args_indexes.last().unwrap().end
                 }
@@ -150,7 +150,7 @@ pub fn std_lib_methods(
             if obj_type == DataType::String && arg_type != DataType::String {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
                 );
             }
@@ -178,7 +178,7 @@ pub fn std_lib_methods(
             if arg_type != DataType::String {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
                 );
             }
@@ -198,14 +198,14 @@ pub fn std_lib_methods(
                 if **array_elem_type != arg_type {
                     throw_parser_error(
                         src,
-                        &args_indexes[0],
+                        args_indexes[0],
                         ErrType::InvalidType(array_elem_type, &arg_type),
                     );
                 }
             } else if obj_type == DataType::String && arg_type != DataType::String {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
                 );
             }
@@ -219,7 +219,7 @@ pub fn std_lib_methods(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *fn_markers, current_src_file))
+                .push((*output.last().unwrap(), fn_markers, current_src_file));
         }
         "is_float" => {
             check!(DataType::String, "String", 0);
@@ -260,7 +260,7 @@ pub fn std_lib_methods(
             if arg_type != DataType::String {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
                 );
             }
@@ -279,7 +279,7 @@ pub fn std_lib_methods(
             if arg_type != DataType::String {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
                 );
             }
@@ -298,7 +298,7 @@ pub fn std_lib_methods(
             if arg_type != DataType::Int {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&DataType::Int, &arg_type),
                 );
             }
@@ -320,7 +320,7 @@ pub fn std_lib_methods(
             {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(array_elem_type, &arg_type),
                 );
             }
@@ -390,7 +390,7 @@ pub fn std_lib_methods(
             if obj_type != arg_type {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
                 );
             }
@@ -410,7 +410,7 @@ pub fn std_lib_methods(
             {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&array_elem_type, &arg_type),
                 );
             }
@@ -439,7 +439,7 @@ pub fn std_lib_methods(
                 if arg_type != DataType::String {
                     throw_parser_error(
                         src,
-                        &args_indexes[0],
+                        args_indexes[0],
                         ErrType::InvalidType(&DataType::String, &arg_type),
                     );
                 }
@@ -458,7 +458,7 @@ pub fn std_lib_methods(
             if arg_type != DataType::Int {
                 throw_parser_error(
                     src,
-                    &args_indexes[0],
+                    args_indexes[0],
                     ErrType::InvalidType(&DataType::Int, &arg_type),
                 );
             }
@@ -469,7 +469,7 @@ pub fn std_lib_methods(
             output.push(Instr::Remove(id, arg_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *fn_markers, current_src_file));
+                .push((*output.last().unwrap(), fn_markers, current_src_file));
         }
         "sort" => {
             check!(DataType::Array(_), "Array", 0);

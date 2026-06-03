@@ -81,7 +81,7 @@ pub fn str_to_type(s: &str) -> Option<DataType> {
     }
 }
 
-pub fn str_to_keel_type(s: &str, structs: &[Struct], span: &Span, src: (&str, &str)) -> DataType {
+pub fn str_to_keel_type(s: &str, structs: &[Struct], span: Span, src: (&str, &str)) -> DataType {
     let b = s.as_bytes();
     if b[b.len() - 1] == b']' && b[b.len() - 2] == b'[' {
         DataType::Array(if b.len() == 2 {
@@ -102,12 +102,10 @@ pub fn str_to_keel_type(s: &str, structs: &[Struct], span: &Span, src: (&str, &s
         DataType::Bool
     } else if s == "string" {
         DataType::String
+    } else if let Some(s) = structs.iter().rposition(|candidate| candidate.name == s) {
+        DataType::Struct(s as u16)
     } else {
-        if let Some(s) = structs.iter().rposition(|candidate| candidate.name == s) {
-            DataType::Struct(s as u16)
-        } else {
-            throw_parser_error(src, span, ErrType::UnknownType(s));
-        }
+        throw_parser_error(src, span, ErrType::UnknownType(s));
     }
 }
 
@@ -124,17 +122,17 @@ macro_rules! span {
 impl std::fmt::Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DataType::Float => write!(f, "Float"),
-            DataType::Int => write!(f, "Integer"),
-            DataType::Bool => write!(f, "Boolean"),
-            DataType::String => write!(f, "String"),
-            DataType::Array(array_type) => match array_type {
-                Some(t) => write!(f, "Array<{}>", t),
+            Self::Float => write!(f, "Float"),
+            Self::Int => write!(f, "Integer"),
+            Self::Bool => write!(f, "Boolean"),
+            Self::String => write!(f, "String"),
+            Self::Array(array_type) => match array_type {
+                Some(t) => write!(f, "Array<{t}>"),
                 None => write!(f, "Array<?>"),
             },
-            DataType::Null => write!(f, "Null"),
-            DataType::Unknown => write!(f, "Unknown"),
-            DataType::Poly(types) => write!(
+            Self::Null => write!(f, "Null"),
+            Self::Unknown => write!(f, "Unknown"),
+            Self::Poly(types) => write!(
                 f,
                 "{}",
                 types
@@ -143,7 +141,7 @@ impl std::fmt::Display for DataType {
                     .collect::<Vec<String>>()
                     .join("|")
             ),
-            DataType::Fn(t) => {
+            Self::Fn(t) => {
                 write!(
                     f,
                     "({}) -> {}",
@@ -154,7 +152,7 @@ impl std::fmt::Display for DataType {
                         .join(", "),
                     {
                         let x = t.last().unwrap();
-                        if x == &DataType::Null {
+                        if x == &Self::Null {
                             SmolStr::new_static("")
                         } else {
                             x.to_smolstr()
@@ -162,8 +160,8 @@ impl std::fmt::Display for DataType {
                     }
                 )
             }
-            DataType::Struct(s) => {
-                write!(f, "Struct({})", s)
+            Self::Struct(s) => {
+                write!(f, "Struct({s})")
             }
         }
     }

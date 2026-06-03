@@ -15,7 +15,7 @@ struct Benchmark {
 const PROGRAMS: &[Benchmark] = &[
     Benchmark {
         name: "iter_fib_40_x_200000",
-        source: r#"
+        source: r"
 fn main() {
     for _ in 0..200000 {
         let a = 0;
@@ -28,8 +28,8 @@ fn main() {
         }
     }
 }
-        "#,
-        python: r#"
+        ",
+        python: r"
 for _ in range(200000):
     a = 0
     b = 1
@@ -38,8 +38,8 @@ for _ in range(200000):
         c = a + b
         a = b
         b = c
-                "#,
-        lua: r#"
+                ",
+        lua: r"
 for _ = 1, 200000 do
     local a = 0
     local b = 1
@@ -50,11 +50,11 @@ for _ = 1, 200000 do
         b = c
     end
 end
-        "#,
+        ",
     },
     Benchmark {
         name: "rec_fib_30",
-        source: r#"
+        source: r"
 fn fib(n) {
     if n <= 1 { return n; }
     return fib(n - 1) + fib(n - 2);
@@ -63,27 +63,27 @@ fn fib(n) {
 fn main() {
     print(fib(30));
 }
-        "#,
-        python: r#"
+        ",
+        python: r"
 def fib(n):
     if n <= 1:
         return n
     return fib(n - 1) + fib(n - 2)
 
 print(fib(30))
-"#,
-        lua: r#"
+",
+        lua: r"
 local function fib(n)
     if n <= 1 then return n end
     return fib(n - 1) + fib(n - 2)
 end
 
 print(fib(30))
-"#,
+",
     },
     Benchmark {
         name: "multiply_branch_modulo_x_1000000",
-        source: r#"
+        source: r"
 fn main() {
     let count = 0;
     let result = 1;
@@ -96,8 +96,8 @@ fn main() {
     }
     print(result);
 }
-        "#,
-        python: r#"
+        ",
+        python: r"
 count = 0
 result = 1
 while count < 1000000:
@@ -106,9 +106,9 @@ while count < 1000000:
         result %= 1000000
     count += 1
 print(result)
-"#,
+",
 
-        lua: r#"
+        lua: r"
 local count = 0
 local result = 1
 while count < 1000000 do
@@ -119,11 +119,11 @@ while count < 1000000 do
     count = count + 1
 end
 print(result)
-"#,
+",
     },
     Benchmark {
         name: "sqrt_x_10000000",
-        source: r#"
+        source: r"
 fn main() {
     let x = 0.0;
     for i in 0..10000000 {
@@ -131,26 +131,26 @@ fn main() {
     }
     print(x);
 }
-        "#,
-        python: r#"
+        ",
+        python: r"
 import math
 x = 0.0
 for i in range(10000000):
     x += math.sqrt(float(i))
 print(x)
-"#,
+",
 
-        lua: r#"
+        lua: r"
 local x = 0.0
 for i = 0, 9999999 do
     x = x + math.sqrt(i)
 end
 print(x)
-"#,
+",
     },
     Benchmark {
         name: "sieve_100000",
-        source: r#"
+        source: r"
 fn main() {
     let limit = 100000;
     let sieve = range(limit);
@@ -173,8 +173,8 @@ fn main() {
     }
     print(count);
 }
-        "#,
-        python: r#"
+        ",
+        python: r"
 limit = 100000
 sieve = list(range(limit))
 sieve[0] = 0
@@ -189,8 +189,8 @@ while i * i <= limit:
     i += 1
 count = sum(1 for x in sieve if x != 0)
 print(count)
-"#,
-        lua: r#"
+",
+        lua: r"
 local limit = 100000
 local sieve = {}
 for i = 0, limit - 1 do
@@ -214,7 +214,7 @@ for x = 0, limit - 1 do
     if sieve[x] ~= 0 then count = count + 1 end
 end
 print(count)
-"#,
+",
     },
     Benchmark {
         name: "string_ops_array_split_search_x_50000",
@@ -486,8 +486,7 @@ pub fn benchmark() {
         })
         .arg(cmd)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
     }
 
     if !has_command("python3") || !has_command("luajit") {
@@ -560,7 +559,7 @@ pub fn benchmark() {
     let mut results: Vec<(String, f64)> = Vec::new();
     for line in csv_content.lines().skip(1) {
         let mut cols = line.split(',');
-        let name = cols.next().unwrap().to_string();
+        let name = cols.next().unwrap().to_owned();
         let mean = cols.next().unwrap().parse::<f64>().unwrap() * 1000.0;
         results.push((name, mean));
     }

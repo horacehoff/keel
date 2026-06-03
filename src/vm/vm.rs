@@ -208,7 +208,7 @@ pub fn execute(
                 i = err_handle.catch_loc as usize;
                 continue;
             }
-            throw_error(err_ctx, &instructions[i], $err);
+            throw_error(err_ctx, instructions[i], $err);
         };
         ($err:expr, $label:lifetime) => {
             cold_path();
@@ -222,7 +222,7 @@ pub fn execute(
                 i = err_handle.catch_loc as usize;
                 continue $label;
             }
-            throw_error(err_ctx, &instructions[i], $err);
+            throw_error(err_ctx, instructions[i], $err);
         };
     }
 
@@ -405,10 +405,10 @@ pub fn execute(
                 *w!(dest) = (r!(o1).as_int() + r!(o2).as_int()).into();
             }
             Instr::AddStr(o1, o2, dest) => {
-                let _d1 = r!(o1);
-                let _d2 = r!(o2);
-                let l = _d1.as_str(string_pool);
-                let r = _d2.as_str(string_pool);
+                let d1 = r!(o1);
+                let d2 = r!(o2);
+                let l = d1.as_str(string_pool);
+                let r = d2.as_str(string_pool);
                 let mut s = String::with_capacity(l.len() + r.len());
                 s.push_str(l);
                 s.push_str(r);
@@ -708,7 +708,7 @@ pub fn execute(
                         write!(
                             handle,
                             "{}",
-                            format_data(item, obj_pool, string_pool, struct_fields, false)
+                            format_data(*item, obj_pool, string_pool, struct_fields, false)
                         )
                         .unwrap();
                     }
@@ -717,7 +717,7 @@ pub fn execute(
                     let s = unsafe { obj_pool.get_unchecked(tgt.as_struct()) };
                     let (s_name, s_fields) =
                         unsafe { struct_fields.get_unchecked(tgt.struct_type_id() as usize) };
-                    write!(handle, "{} {{", s_name).unwrap();
+                    write!(handle, "{s_name} {{").unwrap();
                     for (idx, item) in s.iter().enumerate() {
                         if idx != 0 {
                             write!(handle, ",").unwrap();
@@ -726,7 +726,7 @@ pub fn execute(
                             handle,
                             "{}:{}",
                             unsafe { s_fields.get_unchecked(idx) },
-                            format_data(item, obj_pool, string_pool, struct_fields, false)
+                            format_data(*item, obj_pool, string_pool, struct_fields, false)
                         )
                         .unwrap();
                     }
@@ -753,7 +753,7 @@ pub fn execute(
                 if (index as usize) >= source_string.len() || index < 0 {
                     error_with_catch!(ErrType::IndexOutOfBounds(source_string.len(), index));
                 }
-                let mut temp = source_string.to_string();
+                let mut temp = source_string.to_owned();
                 temp.remove(index as usize);
                 temp.insert_str(index as usize, r!(new_str_reg_id).as_str(string_pool));
                 *w!(string_reg_id) = string!(temp);
@@ -832,7 +832,7 @@ pub fn execute(
                 {
                     error_with_catch!(ErrType::SliceOutOfBounds(s.len(), idx_start, idx_end));
                 }
-                *w!(dest_reg_id) = str!(&s[(idx_start as usize)..(idx_end as usize)])
+                *w!(dest_reg_id) = str!(&s[(idx_start as usize)..(idx_end as usize)]);
             }
             Instr::Push(array, element) => unsafe {
                 obj_pool
@@ -887,6 +887,7 @@ pub fn execute(
                     *w!(dest) = if let Some(idx) = str.find(element) {
                         idx as i32
                     } else {
+                        cold_path();
                         -1
                     }
                     .into();
@@ -899,9 +900,10 @@ pub fn execute(
                     {
                         idx as i32
                     } else {
+                        cold_path();
                         -1
                     }
-                    .into()
+                    .into();
                 }
             }
             Instr::CallLibFunc(LibFunc::IsFloat, tgt, dest) => {
@@ -910,7 +912,7 @@ pub fn execute(
                 *w!(dest) = (num.parse::<i64>().is_err() && num.parse::<f64>().is_ok()).into();
             }
             Instr::CallLibFunc(LibFunc::IsInt, tgt, dest) => {
-                *w!(dest) = r!(tgt).as_str(string_pool).parse::<i64>().is_ok().into()
+                *w!(dest) = r!(tgt).as_str(string_pool).parse::<i64>().is_ok().into();
             }
             Instr::CallLibFunc(LibFunc::TrimLeft, tgt, dest) => {
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim_start());
@@ -981,7 +983,7 @@ pub fn execute(
                 unsafe { obj_pool.get_unchecked_mut(r!(tgt).as_array()) }.reverse();
             }
             Instr::CallLibFunc(LibFunc::SqrtFloat, tgt, dest) => {
-                *w!(dest) = r!(tgt).as_float().sqrt().into()
+                *w!(dest) = r!(tgt).as_float().sqrt().into();
             }
             Instr::CallLibFunc(LibFunc::Float, tgt, dest) => {
                 let reg = r!(tgt);
@@ -1021,7 +1023,7 @@ pub fn execute(
                     str!(if value.as_bool() { "true" } else { "false" })
                 } else {
                     str!(&format_data(
-                        &value,
+                        value,
                         obj_pool,
                         string_pool,
                         struct_fields,
@@ -1051,7 +1053,7 @@ pub fn execute(
                 *w!(dest) = str!(line.trim_end_matches(['\n', '\r']));
             }
             Instr::CallLibFunc(LibFunc::Floor, tgt, dest) => {
-                *w!(dest) = r!(tgt).as_float().floor().into()
+                *w!(dest) = r!(tgt).as_float().floor().into();
             }
             #[allow(unused_must_use)]
             Instr::CallLibFunc(LibFunc::TheAnswer, _, dest) => {
@@ -1065,9 +1067,9 @@ pub fn execute(
                 let reg = r!(tgt);
                 if reg.is_array() {
                     *w!(dest) =
-                        (unsafe { obj_pool.get_unchecked(reg.as_array()) }.len() as i32).into()
+                        (unsafe { obj_pool.get_unchecked(reg.as_array()) }.len() as i32).into();
                 } else if reg.is_str() {
-                    *w!(dest) = (reg.as_str(string_pool).len() as i32).into()
+                    *w!(dest) = (reg.as_str(string_pool).len() as i32).into();
                 }
             }
             Instr::CallLibFunc(LibFunc::StartsWith, source_register, dest_register) => {
@@ -1118,11 +1120,11 @@ pub fn execute(
                             if part.len() <= 6 {
                                 Data::small_str(part)
                             } else if let Some(id) = free_strings.pop() {
-                                string_pool[id as usize] = part.to_string();
+                                part.clone_into(&mut string_pool[id as usize]);
                                 Data::large_str_id(id as u64)
                             } else {
                                 let id = string_pool.len() as u64;
-                                string_pool.push(part.to_string());
+                                string_pool.push(part.to_owned());
                                 Data::large_str_id(id)
                             }
                         });
@@ -1185,11 +1187,7 @@ pub fn execute(
                 }
             }
             Instr::CallLibFunc(LibFunc::Range, max, dest) => {
-                let min = if let Some(reg_id) = args.pop() {
-                    r!(reg_id).as_int()
-                } else {
-                    0
-                };
+                let min = args.pop().map_or(0, |reg_id| r!(reg_id).as_int());
                 let max = r!(max).as_int();
                 let output_array_id = alloc_array(
                     obj_pool,
@@ -1270,7 +1268,7 @@ pub fn execute(
                     Err(e) => {
                         error_with_catch!(ErrType::from(e.kind()));
                     }
-                };
+                }
                 // fs::OpenOptions::new()
                 //     .append(true)
                 //     .open(r!(path).as_str(string_pool))

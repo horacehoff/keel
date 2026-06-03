@@ -38,7 +38,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::slice;
 
-lalrpop_mod!(pub grammar);
+lalrpop_mod!(#[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
+    pub grammar
+);
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is false)
 #[inline(always)]
@@ -368,7 +370,7 @@ pub fn get_id(
             {
                 *register_id
             } else {
-                throw_parser_error(src, markers, ErrType::UnknownVariable(name))
+                throw_parser_error(src, *markers, ErrType::UnknownVariable(name))
             }
         }
         Expr::Array(elems, markers) => {
@@ -378,7 +380,7 @@ pub fn get_id(
                 if !elems.iter().all(|x| {
                     infer_type(x, v, state.fns, state.structs, src, state.dyn_libs) == first_type
                 }) {
-                    throw_parser_error(src, markers, ErrType::ArrayWithDiffType);
+                    throw_parser_error(src, *markers, ErrType::ArrayWithDiffType);
                 }
             }
             let array_id = {
@@ -396,7 +398,14 @@ pub fn get_id(
             if single_run {
                 for elem in elems {
                     let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
-                    if !x.is_empty() {
+                    if x.is_empty() {
+                        state
+                            .pools
+                            .obj_pool
+                            .get_mut(array_id)
+                            .unwrap()
+                            .push(state.registers.pop().unwrap());
+                    } else {
                         let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
                         state.pools.obj_pool.get_mut(array_id).unwrap().push(NULL);
 
@@ -406,13 +415,6 @@ pub fn get_id(
                             array_id as u16,
                             (state.pools.obj_pool[array_id].len() - 1) as u16,
                         ));
-                    } else {
-                        state
-                            .pools
-                            .obj_pool
-                            .get_mut(array_id)
-                            .unwrap()
-                            .push(state.registers.pop().unwrap());
                     }
                 }
                 state.registers.push(Data::array(array_id as u32));
@@ -423,12 +425,7 @@ pub fn get_id(
                 let mut elem_ids: Vec<(Vec<Instr>, u16)> = Vec::with_capacity(elems.len());
                 for elem in elems {
                     let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
-                    if !x.is_empty() {
-                        constant_array = false;
-                        let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
-                        state.pools.obj_pool.get_mut(array_id).unwrap().push(NULL);
-                        elem_ids.push((x, c_id));
-                    } else {
+                    if x.is_empty() {
                         let reg_id = (state.registers.len() - 1) as u16;
                         state
                             .pools
@@ -437,6 +434,11 @@ pub fn get_id(
                             .unwrap()
                             .push(state.registers.pop().unwrap());
                         elem_ids.push((Vec::new(), reg_id));
+                    } else {
+                        constant_array = false;
+                        let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
+                        state.pools.obj_pool.get_mut(array_id).unwrap().push(NULL);
+                        elem_ids.push((x, c_id));
                     }
                 }
 
@@ -471,18 +473,16 @@ pub fn get_id(
             }
         }
         Expr::Struct(name, fields, span) => {
-            let expected_struct_idx =
-                if let Some(idx) = state.structs.iter().rposition(|s| &s.name == name) {
-                    idx
-                } else {
-                    throw_parser_error(src, span, ErrType::UnknownStruct(name));
-                };
+            let Some(expected_struct_idx) = state.structs.iter().rposition(|s| &s.name == name)
+            else {
+                throw_parser_error(src, *span, ErrType::UnknownStruct(name));
+            };
             let type_id = state.structs[expected_struct_idx].id;
             let expected_fields_len = state.structs[expected_struct_idx].fields.len();
             if expected_fields_len != fields.len() {
                 throw_parser_error(
                     src,
-                    span,
+                    *span,
                     ErrType::InvalidStructFieldCount(
                         name,
                         expected_fields_len as u16,
@@ -511,7 +511,7 @@ pub fn get_id(
                         if field_type != field.1 {
                             throw_parser_error(
                                 src,
-                                field_span,
+                                *field_span,
                                 ErrType::InvalidType(&field.1, &field_type),
                             );
                         }
@@ -541,7 +541,7 @@ pub fn get_id(
                             ));
                         }
                     } else {
-                        throw_parser_error(src, span, ErrType::StructMissingField(name, &field.0));
+                        throw_parser_error(src, *span, ErrType::StructMissingField(name, &field.0));
                     }
                 }
 
@@ -567,7 +567,7 @@ pub fn get_id(
                         if field_type != field.1 {
                             throw_parser_error(
                                 src,
-                                field_span,
+                                *field_span,
                                 ErrType::InvalidType(&field.1, &field_type),
                             );
                         }
@@ -579,20 +579,20 @@ pub fn get_id(
                             offset,
                             single_run,
                         );
-                        if !compiled_field.is_empty() {
-                            let c_id = get_tgt_id(*compiled_field.last().unwrap()).unwrap();
-                            state.pools.obj_pool.get_mut(struct_id).unwrap().push(NULL);
-                            dynamic.push((compiled_field, c_id, field_idx as u16));
-                        } else {
+                        if compiled_field.is_empty() {
                             state
                                 .pools
                                 .obj_pool
                                 .get_mut(struct_id)
                                 .unwrap()
                                 .push(state.registers.pop().unwrap());
+                        } else {
+                            let c_id = get_tgt_id(*compiled_field.last().unwrap()).unwrap();
+                            state.pools.obj_pool.get_mut(struct_id).unwrap().push(NULL);
+                            dynamic.push((compiled_field, c_id, field_idx as u16));
                         }
                     } else {
-                        throw_parser_error(src, span, ErrType::StructMissingField(name, &field.0));
+                        throw_parser_error(src, *span, ErrType::StructMissingField(name, &field.0));
                     }
                 }
 
@@ -632,7 +632,7 @@ pub fn get_id(
                     .unwrap_or_else(|| {
                         throw_parser_error(
                             src,
-                            field_span,
+                            *field_span,
                             ErrType::StructUnknownField(&s.name, field),
                         );
                     });
@@ -653,7 +653,7 @@ pub fn get_id(
             } else {
                 throw_parser_error(
                     src,
-                    struct_span,
+                    *struct_span,
                     ErrType::InvalidType(&DataType::Struct(0), &t),
                 );
             }
@@ -662,36 +662,20 @@ pub fn get_id(
         Expr::ArrayGetIndex(array, index, markers) => {
             let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
             if !is_type_indexable(&infered) {
-                throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
+                throw_parser_error(src, *markers, ErrType::NotIndexable(&infered));
             }
 
             let id = get_id(
-                array,
-                v,
-                ctx,
-                state,
-                output,
-                None,
-                false,
-                offset,
-                single_run,
+                array, v, ctx, state, output, None, false, offset, single_run,
             );
 
             let index_inferred =
                 infer_type(index, v, state.fns, state.structs, src, state.dyn_libs);
             if index_inferred != DataType::Int {
-                throw_parser_error(src, markers, ErrType::InvalidIndexType(&index_inferred));
+                throw_parser_error(src, *markers, ErrType::InvalidIndexType(&index_inferred));
             }
             let index_id = get_id(
-                index,
-                v,
-                ctx,
-                state,
-                output,
-                None,
-                false,
-                offset,
-                single_run,
+                index, v, ctx, state, output, None, false, offset, single_run,
             );
             free_register(index_id, state.free_registers, v, state.const_registers);
             let dest_reg_id = alloc_register(state.registers, state.free_registers);
@@ -701,7 +685,9 @@ pub fn get_id(
             } else {
                 Instr::GetIndexArray(id, index_id, dest_reg_id)
             };
-            state.instr_src.push((to_push, *markers, ctx.current_src_file));
+            state
+                .instr_src
+                .push((to_push, *markers, ctx.current_src_file));
             output.push(to_push);
             dest_reg_id
         }
@@ -709,54 +695,30 @@ pub fn get_id(
         Expr::ArrayGetSlice(array, idx_start, idx_end, markers) => {
             let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
             if !is_type_indexable(&infered) {
-                throw_parser_error(src, markers, ErrType::NotIndexable(&infered));
+                throw_parser_error(src, *markers, ErrType::NotIndexable(&infered));
             }
             let id = get_id(
-                array,
-                v,
-                ctx,
-                state,
-                output,
-                None,
-                false,
-                offset,
-                single_run,
+                array, v, ctx, state, output, None, false, offset, single_run,
             );
             let idx_start_inferred =
                 infer_type(idx_start, v, state.fns, state.structs, src, state.dyn_libs);
             if idx_start_inferred != DataType::Int {
                 throw_parser_error(
                     src,
-                    markers,
+                    *markers,
                     ErrType::InvalidIndexType(&idx_start_inferred),
                 );
             }
             let idx_start_id = get_id(
-                idx_start,
-                v,
-                ctx,
-                state,
-                output,
-                None,
-                false,
-                offset,
-                single_run,
+                idx_start, v, ctx, state, output, None, false, offset, single_run,
             );
             let idx_end_inferred =
                 infer_type(idx_end, v, state.fns, state.structs, src, state.dyn_libs);
             if idx_end_inferred != DataType::Int {
-                throw_parser_error(src, markers, ErrType::InvalidIndexType(&idx_end_inferred));
+                throw_parser_error(src, *markers, ErrType::InvalidIndexType(&idx_end_inferred));
             }
             let idx_end_id = get_id(
-                idx_end,
-                v,
-                ctx,
-                state,
-                output,
-                None,
-                false,
-                offset,
-                single_run,
+                idx_end, v, ctx, state, output, None, false, offset, single_run,
             );
             output.push(Instr::StoreFuncArg(idx_end_id));
             free_register(idx_start_id, state.free_registers, v, state.const_registers);
@@ -767,7 +729,9 @@ pub fn get_id(
             } else {
                 Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
             };
-            state.instr_src.push((to_push, *markers, ctx.current_src_file));
+            state
+                .instr_src
+                .push((to_push, *markers, ctx.current_src_file));
             output.push(to_push);
             dest_reg_id
         }
@@ -778,7 +742,7 @@ pub fn get_id(
                 "*",
                 l,
                 r,
-                markers,
+                *markers,
                 DataType::Float,
                 DataType::Int
             )
@@ -787,7 +751,7 @@ pub fn get_id(
             if let Expr::Int(n) = r.as_ref()
                 && *n == 0
             {
-                throw_parser_error(src, markers, ErrType::DivisionByZero);
+                throw_parser_error(src, *markers, ErrType::DivisionByZero);
             }
             let id = uniform_op!(
                 DivFloat,
@@ -795,7 +759,7 @@ pub fn get_id(
                 "/",
                 l,
                 r,
-                markers,
+                *markers,
                 DataType::Float,
                 DataType::Int
             );
@@ -815,7 +779,7 @@ pub fn get_id(
                     DataType::String | DataType::Array(_) | DataType::Float | DataType::Int
                 )
             {
-                throw_parser_error(src, markers, ErrType::OpError(&t_l, &t_r, "+"));
+                throw_parser_error(src, *markers, ErrType::OpError(&t_l, &t_r, "+"));
             }
             // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
             if t_l == DataType::Int
@@ -866,7 +830,7 @@ pub fn get_id(
             if !((t_l == DataType::Float && t_r == DataType::Float)
                 || (t_l == DataType::Int && t_r == DataType::Int))
             {
-                throw_parser_error(src, markers, ErrType::OpError(&t_l, &t_r, "-"));
+                throw_parser_error(src, *markers, ErrType::OpError(&t_l, &t_r, "-"));
             }
             // var-1 uses the dedicated DecInt/DecIntTo instructions
             if t_l == DataType::Int
@@ -904,7 +868,7 @@ pub fn get_id(
             if let Expr::Int(n) = r.as_ref()
                 && *n == 0
             {
-                throw_parser_error(src, markers, ErrType::ModuloByZero);
+                throw_parser_error(src, *markers, ErrType::ModuloByZero);
             }
             let id = uniform_op!(
                 ModFloat,
@@ -912,7 +876,7 @@ pub fn get_id(
                 "%",
                 l,
                 r,
-                markers,
+                *markers,
                 DataType::Float,
                 DataType::Int
             );
@@ -930,7 +894,7 @@ pub fn get_id(
                 "^",
                 l,
                 r,
-                markers,
+                *markers,
                 DataType::Float,
                 DataType::Int
             )
@@ -990,7 +954,7 @@ pub fn get_id(
                 ">",
                 l,
                 r,
-                markers,
+                *markers,
                 DataType::Float,
                 DataType::Int
             )
@@ -1002,7 +966,7 @@ pub fn get_id(
                 ">=",
                 l,
                 r,
-                markers,
+                *markers,
                 DataType::Float,
                 DataType::Int
             )
@@ -1014,7 +978,7 @@ pub fn get_id(
                 "<",
                 l,
                 r,
-                markers,
+                *markers,
                 DataType::Float,
                 DataType::Int
             )
@@ -1026,16 +990,16 @@ pub fn get_id(
                 "<=",
                 l,
                 r,
-                markers,
+                *markers,
                 DataType::Float,
                 DataType::Int
             )
         }
         Expr::BoolAnd(l, r, markers) => {
-            uniform_op!(BoolAnd, "&&", l, r, markers, DataType::Bool)
+            uniform_op!(BoolAnd, "&&", l, r, *markers, DataType::Bool)
         }
         Expr::BoolOr(l, r, markers) => {
-            uniform_op!(BoolOr, "||", l, r, markers, DataType::Bool)
+            uniform_op!(BoolOr, "||", l, r, *markers, DataType::Bool)
         }
         Expr::Neg(l, markers) => {
             let operand_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
@@ -1047,11 +1011,11 @@ pub fn get_id(
                 alloc_register(state.registers, state.free_registers)
             };
             if operand_type == DataType::Float {
-                output.push(Instr::NegFloat(id_l, id))
+                output.push(Instr::NegFloat(id_l, id));
             } else if operand_type == DataType::Int {
-                output.push(Instr::NegInt(id_l, id))
+                output.push(Instr::NegInt(id_l, id));
             } else {
-                throw_parser_error(src, markers, ErrType::InvalidOp(&operand_type, "-"));
+                throw_parser_error(src, *markers, ErrType::InvalidOp(&operand_type, "-"));
             }
             id
         }
@@ -1065,7 +1029,7 @@ pub fn get_id(
                 alloc_register(state.registers, state.free_registers)
             };
             if operand_type != DataType::Bool {
-                throw_parser_error(src, markers, ErrType::InvalidOp(&operand_type, "!"));
+                throw_parser_error(src, *markers, ErrType::InvalidOp(&operand_type, "!"));
             }
             output.push(Instr::NegBool(id_l, id));
             id
@@ -1207,7 +1171,7 @@ pub fn get_id(
                 }
             }
             if !else_exists {
-                throw_parser_error(src, markers, ErrType::InvalidConditionalExpression);
+                throw_parser_error(src, *markers, ErrType::InvalidConditionalExpression);
             }
 
             for y in jmp_markers {
@@ -1249,7 +1213,7 @@ pub fn get_id(
             state,
             args,
             namespace,
-            markers,
+            *markers,
             args_indexes,
             offset,
             single_run,
@@ -1266,11 +1230,11 @@ pub fn get_id(
                 offset + output.len() as u16,
                 single_run,
             );
-            if !output_code.is_empty() {
+            if output_code.is_empty() {
+                (state.registers.len() - 1) as u16
+            } else {
                 output.extend(output_code);
                 get_last_tgt_id(output).unwrap_or((state.registers.len() - 1) as u16)
-            } else {
-                (state.registers.len() - 1) as u16
             }
         }
     }
@@ -1314,17 +1278,16 @@ pub fn compile_expr(
                         alloc_register(state.registers, state.free_registers),
                     ));
                 } else {
-                    throw_parser_error(src, markers, ErrType::UnknownVariable(name))
+                    throw_parser_error(src, *markers, ErrType::UnknownVariable(name))
                 }
             }
-
 
             // x[y] = z;
             Expr::ArrayModify(array, index, value, index_markers, elem_markers) => {
                 let array_type =
                     infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
                 if !is_type_indexable(&array_type) {
-                    throw_parser_error(src, index_markers, ErrType::NotIndexable(&array_type));
+                    throw_parser_error(src, *index_markers, ErrType::NotIndexable(&array_type));
                 }
                 // Get the id of the source array/string (may be a nested GetIndex)
                 let id = get_id(
@@ -1376,7 +1339,7 @@ pub fn compile_expr(
                 {
                     throw_parser_error(
                         src,
-                        elem_markers,
+                        *elem_markers,
                         ErrType::CannotPushTypeToArray(&elem_type, &array_type),
                     );
                 }
@@ -1403,12 +1366,10 @@ pub fn compile_expr(
                 );
                 let new_val_type =
                     infer_type(new_val, v, state.fns, state.structs, src, state.dyn_libs);
-                let struct_id = if let DataType::Struct(id) = t {
-                    id
-                } else {
+                let DataType::Struct(struct_id) = t else {
                     throw_parser_error(
                         src,
-                        struct_span,
+                        *struct_span,
                         ErrType::InvalidType(&DataType::Struct(0), &t),
                     );
                 };
@@ -1418,7 +1379,7 @@ pub fn compile_expr(
                         if new_val_type != *f_t {
                             throw_parser_error(
                                 src,
-                                field_span,
+                                *field_span,
                                 ErrType::InvalidType(f_t, &new_val_type),
                             );
                         }
@@ -1429,7 +1390,7 @@ pub fn compile_expr(
                 if field_index.is_none() {
                     throw_parser_error(
                         src,
-                        field_span,
+                        *field_span,
                         ErrType::StructUnknownField(&state.structs[struct_id as usize].name, field),
                     );
                 }
@@ -1670,14 +1631,14 @@ pub fn compile_expr(
                         var_type: match array_type {
                             DataType::String => DataType::String,
                             DataType::Array(a_type) => a_type.map_or(DataType::Null, |t| *t),
-                            t => throw_parser_error(src, markers, ErrType::IsNotAnIterator(&t)),
+                            t => throw_parser_error(src, *markers, ErrType::IsNotAnIterator(&t)),
                         },
                     });
                 }
                 let loop_id = block_id + 1;
 
                 // accounts for the GetIndexArray/GetIndexString instruction
-                let pending = if real_var { 1 } else { 0 };
+                let pending = real_var as u16;
 
                 let regs_before = state.registers.len() as u16;
                 let mut cond_code = compile_expr(
@@ -1747,10 +1708,10 @@ pub fn compile_expr(
                 let t1 = infer_type(start_elem, v, state.fns, state.structs, src, state.dyn_libs);
                 let t2 = infer_type(end_elem, v, state.fns, state.structs, src, state.dyn_libs);
                 if t1 != DataType::Int {
-                    throw_parser_error(src, markers1, ErrType::InvalidType(&DataType::Int, &t1));
+                    throw_parser_error(src, *markers1, ErrType::InvalidType(&DataType::Int, &t1));
                 }
                 if t2 != DataType::Int {
-                    throw_parser_error(src, markers2, ErrType::InvalidType(&DataType::Int, &t2));
+                    throw_parser_error(src, *markers2, ErrType::InvalidType(&DataType::Int, &t2));
                 }
                 let elem_id = if single_run {
                     get_id(
@@ -1948,7 +1909,7 @@ pub fn compile_expr(
             Expr::VarAssign(name, y, markers) => {
                 let var_type = infer_type(y, v, state.fns, state.structs, src, state.dyn_libs);
                 let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
-                    throw_parser_error(src, markers, ErrType::UnknownVariable(name));
+                    throw_parser_error(src, *markers, ErrType::UnknownVariable(name));
                 });
                 let id = v[var_pos].register_id;
 
@@ -2041,7 +2002,7 @@ pub fn compile_expr(
                     fields: fields
                         .iter()
                         .map(|(f, f_t)| {
-                            (f.clone(), str_to_keel_type(f_t, state.structs, span, src))
+                            (f.clone(), str_to_keel_type(f_t, state.structs, *span, src))
                         })
                         .collect(),
                     id: state.structs.len() as u16,
@@ -2062,7 +2023,7 @@ pub fn compile_expr(
                     state,
                     args,
                     namespace,
-                    markers,
+                    *markers,
                     args_indexes,
                     offset,
                     single_run,
@@ -2080,8 +2041,8 @@ pub fn compile_expr(
                     obj,
                     args,
                     namespace,
-                    obj_markers,
-                    fn_markers,
+                    *obj_markers,
+                    *fn_markers,
                     args_indexes,
                     offset,
                     single_run,
@@ -2093,7 +2054,7 @@ pub fn compile_expr(
                     .iter()
                     .any(|func| &func.name == x.first().unwrap())
                 {
-                    throw_parser_error(src, markers, ErrType::FunctionAlreadyExists(&x[0]));
+                    throw_parser_error(src, *markers, ErrType::FunctionAlreadyExists(&x[0]));
                 }
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(y, &mut callees);
@@ -2193,7 +2154,7 @@ fn parse_toplevel(
                     let func_file = &sources[func.src_file as usize].0;
                     throw_parser_error(
                         use_line_markers,
-                        &markers,
+                        markers,
                         ErrType::DuplicateFunctionInImport(&namespace[0], func_file.as_str()),
                     );
                 }
@@ -2222,7 +2183,7 @@ fn parse_toplevel(
                         .map(|(f, f_t)| {
                             (
                                 f.clone(),
-                                str_to_keel_type(f_t, structs, &span, use_line_markers),
+                                str_to_keel_type(f_t, structs, span, use_line_markers),
                             )
                         })
                         .collect(),
@@ -2264,7 +2225,7 @@ fn parse_toplevel(
                                 libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
                                     throw_parser_error(
                                         use_line_markers,
-                                        &markers,
+                                        markers,
                                         ErrType::Custom(
                                             format_args!(
                                                 "Cannot load dynamic library \"{path}\": {e}"
@@ -2280,7 +2241,7 @@ fn parse_toplevel(
                                         .unwrap_or_else(|e| {
                                             throw_parser_error(
                                                 use_line_markers,
-                                                &markers,
+                                                markers,
                                                 ErrType::Custom(
                                                     format_args!(
                                                         "Cannot find symbol \"{fn_name}\" in \"{path}\": {e}"
@@ -2322,14 +2283,14 @@ fn parse_toplevel(
             Expr::ImportFile(path, markers) => {
                 let file_path = file_path
                     .parent()
-                    .unwrap_or(Path::new("."))
+                    .unwrap_or_else(|| Path::new("."))
                     .join(path.as_str())
                     .canonicalize()
                     .unwrap_or_else(|_| {
                         let current_src = &sources[src_file_idx as usize];
                         throw_parser_error(
                             (current_src.0.as_str(), current_src.1.as_str()),
-                            &markers,
+                            markers,
                             ErrType::CannotReadImportedFile(path.as_str()),
                         );
                     });
@@ -2337,19 +2298,20 @@ fn parse_toplevel(
                     let current_src = &sources[src_file_idx as usize];
                     throw_parser_error(
                         (current_src.0.as_str(), current_src.1.as_str()),
-                        &markers,
+                        markers,
                         ErrType::CircularImport(file_path.to_str().unwrap_or(path.as_str())),
                     );
                 }
                 visited_files.insert(file_path.clone());
-                let file_contents = Rc::new(std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
-                    let current_src = &sources[src_file_idx as usize];
-                    throw_parser_error(
-                        (current_src.0.as_str(), current_src.1.as_str()),
-                        &markers,
-                        ErrType::CannotReadImportedFile(path.as_str()),
-                    );
-                }));
+                let file_contents =
+                    Rc::new(std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
+                        let current_src = &sources[src_file_idx as usize];
+                        throw_parser_error(
+                            (current_src.0.as_str(), current_src.1.as_str()),
+                            markers,
+                            ErrType::CannotReadImportedFile(path.as_str()),
+                        );
+                    }));
                 let file_name: SmolStr = file_path.to_str().unwrap_or(path.as_str()).into();
                 sources.push((file_name.clone(), file_contents.clone()));
 
@@ -2501,8 +2463,8 @@ pub fn parse(
         true
     );
     instructions.push(Instr::Halt(0));
-    for x in fn_registers.iter_mut() {
-        x.sort();
+    for x in &mut fn_registers {
+        x.sort_unstable();
         x.dedup();
     }
     if debug {

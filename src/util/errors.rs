@@ -216,7 +216,7 @@ impl From<ErrType<'_>> for SmolStr {
                 "Cannot infer the type of {color_bright_blue}{style_bold}{t}{color_reset}{style_reset}"
             )
             .to_smolstr(),
-            ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects {expected} argument{} but received {received}", if expected != 1 {"s"} else {""} ).to_smolstr(),
+            ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects {expected} argument{} but received {received}", if expected == 1 {""} else {"s"}).to_smolstr(),
             ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
             ErrType::InvalidType(expected, received) => format_args!("Expected type {expected}, found {color_bright_blue}{style_bold}{received}{color_reset}{style_reset}").to_smolstr(),
             ErrType::OpError(l, r, op) => format_args!(
@@ -292,8 +292,8 @@ impl ErrType<'_> {
             ErrType::InvalidIndexType(_) => "invalid_index_type",
             ErrType::CannotPushTypeToArray(_, _) => "cannot_push_type_to_array",
             ErrType::CannotInferType(_) => "cannot_infer_type",
-            ErrType::IncorrectArgCount(_, _, _) => "incorrect_arg_count",
-            ErrType::IncorrectArgCountVariable(_, _, _, _) => "incorrect_arg_count",
+            ErrType::IncorrectArgCount(_, _, _)
+            | ErrType::IncorrectArgCountVariable(_, _, _, _) => "incorrect_arg_count",
             ErrType::InvalidType(_, _) => "invalid_type",
             ErrType::OpError(_, _, _) => "op_error",
             ErrType::InvalidOp(_, _) => "invalid_op",
@@ -316,11 +316,11 @@ impl ErrType<'_> {
 
 #[cold]
 #[inline(never)]
-pub fn throw_error(ctx: &ErrorCtx, instr: &Instr, t: ErrType) -> ! {
+pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
     let (_, Span { start, end }, file_idx) = ctx
         .instr_src
         .iter()
-        .find(|(x, _, _)| x == instr)
+        .find(|(x, _, _)| x == &instr)
         .unwrap_or(&(Instr::Halt(1), Span { start: 0, end: 0 }, 0));
     let src = &ctx.sources[*file_idx as usize];
     let err_message: SmolStr = t.into();
@@ -372,19 +372,16 @@ pub fn wasm_error(msg: &str) -> ! {
 
 #[cold]
 #[inline(never)]
-pub fn throw_parser_error(src: (&str, &str), Span { start, end }: &Span, t: ErrType) -> ! {
+pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ErrType) -> ! {
     let err_message: SmolStr = t.into();
     eprintln!("{color_red}KEEL ERROR{color_reset}");
-    let report = Report::build(
-        ReportKind::Error,
-        (src.0, (*start as usize)..(*end as usize)),
-    )
-    .with_label(
-        Label::new((src.0, (*start as usize)..(*end as usize)))
-            .with_message(err_message)
-            .with_color(Color::Red),
-    )
-    .finish();
+    let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
+        .with_label(
+            Label::new((src.0, (start as usize)..(end as usize)))
+                .with_message(err_message)
+                .with_color(Color::Red),
+        )
+        .finish();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     report.eprint((src.0, Source::from(src.1))).unwrap();
@@ -510,7 +507,7 @@ where
                 .with_message("Unrecognized token")
                 .with_label(
                     Label::new((filename, begin..end))
-                        .with_message(format_args!("Expected {}", expected_tokens))
+                        .with_message(format_args!("Expected {expected_tokens}"))
                         .with_color(Color::Red),
                 )
                 .finish();

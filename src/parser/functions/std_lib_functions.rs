@@ -25,7 +25,7 @@ pub fn std_lib_functions(
     ctx: Ctx<'_>,
     state: &mut State<'_>,
     args: &[Expr],
-    markers: &Span,
+    markers: Span,
     args_indexes: &[Span],
     offset: u16,
     single_run: bool,
@@ -71,7 +71,7 @@ pub fn std_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         "int" => {
             check_args!(args, 1, name, src, markers);
@@ -95,7 +95,7 @@ pub fn std_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         "str" => {
             check_args!(args, 1, name, src, markers);
@@ -123,7 +123,7 @@ pub fn std_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), *markers, current_src_file));
+                .push((*output.last().unwrap(), markers, current_src_file));
         }
         "input" => {
             check_args_range!(args, 0, 1, name, src, markers);
@@ -196,13 +196,13 @@ pub fn std_lib_functions(
         }
         "exit" => {
             check_args_range!(args, 0, 1, name, src, markers);
-            let halt_code = if !args.is_empty() {
+            let halt_code = if args.is_empty() {
+                0
+            } else {
                 check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
                 get_id(
                     &args[0], v, ctx, state, output, None, false, offset, single_run,
                 )
-            } else {
-                0
             };
             output.push(Instr::Halt(halt_code));
         }

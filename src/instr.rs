@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 #[repr(u8)]
 pub enum Instr {
     Print(u16),

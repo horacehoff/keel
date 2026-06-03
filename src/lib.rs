@@ -1,8 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-#![allow(clippy::type_complexity)]
-#![warn(clippy::implicit_clone)]
-#![warn(clippy::redundant_clone)]
-
 use crate::errors::ErrorCtx;
 use crate::parser::parse;
 use crate::repl::repl;
@@ -233,7 +228,7 @@ pub fn main() {
             );
             println!(
                 "EXECUTION TIME: {:.3}ms",
-                now.elapsed().as_nanos() / 1000000
+                now.elapsed().as_nanos() / 1_000_000
             );
             return;
         } else if next == Some(String::from("--debug-parser")) {

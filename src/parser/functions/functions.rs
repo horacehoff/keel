@@ -44,7 +44,7 @@ pub fn check_arg_type(
     if !matches {
         throw_parser_error(
             ctx.src,
-            &args_indexes[arg_idx],
+            args_indexes[arg_idx],
             ErrType::InvalidArgType(expected, inferred),
         );
     }
@@ -59,7 +59,7 @@ pub fn handle_functions(
     // method call data
     args: &[Expr],
     namespace: &[SmolStr],
-    markers: &Span,
+    markers: Span,
     args_indexes: &[Span],
     offset: u16,
     single_run: bool,
@@ -127,7 +127,7 @@ pub fn handle_functions(
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
         state.instr_src.push((
             Instr::CallDynamicLibFunc(dyn_id, register_id),
-            *markers,
+            markers,
             current_src_file,
         ));
     } else {

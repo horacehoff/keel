@@ -31,7 +31,7 @@ pub fn handle_user_function(
     ctx: Ctx<'_>,
     state: &mut State<'_>,
     args: &[Expr],
-    markers: &Span,
+    markers: Span,
     offset: u16,
     single_run: bool,
 ) -> u16 {
@@ -130,10 +130,10 @@ pub fn handle_user_function(
             offset,
             single_run,
         );
-        if output.len() != start_len {
-            move_to_id(output, tgt_id);
+        if output.len() == start_len {
+            output.push(Instr::Mov(arg_id, tgt_id));
         } else {
-            output.push(Instr::Mov(arg_id, tgt_id))
+            move_to_id(output, tgt_id);
         }
     }
     if !is_recursive {
@@ -144,10 +144,10 @@ pub fn handle_user_function(
             .extend(get_tgt_ids(&output[saveframe_loc..]));
     }
 
-    let return_register_id = if !fn_returns_void {
-        alloc_register(state.registers, state.free_registers)
-    } else {
+    let return_register_id = if fn_returns_void {
         0
+    } else {
+        alloc_register(state.registers, state.free_registers)
     };
     if is_recursive {
         output.push(Instr::CallFuncRecursive(loc, return_register_id));
@@ -188,13 +188,13 @@ fn compile_function(
     // Errors inside of the function body are reported using the function's file
     let fn_src_file = state.fns[function_id].src_file;
 
-    let fn_src: (&str, &str) = if fn_src_file != current_src_file {
+    let fn_src: (&str, &str) = if fn_src_file == current_src_file {
+        (src.0, src.1)
+    } else {
         (
             &state.sources[fn_src_file as usize].0.clone(),
             &state.sources[fn_src_file as usize].1.clone(),
         )
-    } else {
-        (src.0, src.1)
     };
 
     // Local vector vars and recorded_types to allow the inner body to type-check correctly
@@ -245,12 +245,12 @@ fn compile_function(
         fn_name,
         state.dyn_libs,
     );
-    let return_type = if !fn_type.is_empty() {
-        // If function returns anything, check if it returns the same thing each time
-        check_poly(DataType::Poly(Box::from(fn_type)))
-    } else {
+    let return_type = if fn_type.is_empty() {
         // If function doesn't return anything, return nothing
         DataType::Null
+    } else {
+        // If function returns anything, check if it returns the same thing each time
+        check_poly(DataType::Poly(Box::from(fn_type)))
     };
 
     v.truncate(v_len_before_args);

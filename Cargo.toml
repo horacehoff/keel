@@ -8,6 +8,35 @@ repository = "https://github.com/horacehoff/keel"
 homepage = "https://keel-lang.com"
 license = "Apache-2.0"
 
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = 1 }
+implicit_clone = "warn"
+str_to_string = "warn"
+format_push_string = "warn"
+verbose_file_reads = "warn"
+mem_forget = "warn"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+too_many_lines = "allow"
+redundant_closure_for_method_calls = "allow"
+doc_markdown = "allow"
+option_if_let_else = "allow"
+inline_always = "allow"
+similar_names = "allow"
+many_single_char_names = "allow"
+clone_on_ref_ptr = "allow"
+wildcard_imports = "allow"
+items_after_statements = "allow"
+ref_as_ptr = "allow"
+ptr_as_ptr = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+redundant_clone = "warn"
+
 [features]
 # default = ["embed"]
 embed = []

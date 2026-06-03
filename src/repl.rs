@@ -22,10 +22,10 @@ pub fn repl() {
         stdin()
             .read_line(&mut s)
             .expect("{color_red}[ERROR]{color_reset} Incorrect input string");
-        if let Some('\n') = s.chars().next_back() {
+        if s.ends_with('\n') {
             s.pop();
         }
-        if let Some('\r') = s.chars().next_back() {
+        if s.ends_with('\r') {
             s.pop();
         }
         if s.is_empty() {
@@ -35,7 +35,7 @@ pub fn repl() {
             s.push(';');
         }
         if s.contains("exit()") && !s.contains('"') {
-            println!("{color_blue}[KEEL TIP]{color_reset} To exit, press Ctrl+C")
+            println!("{color_blue}[KEEL TIP]{color_reset} To exit, press Ctrl+C");
         }
 
         all_lines.push(s);

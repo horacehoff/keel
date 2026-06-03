@@ -91,7 +91,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
 }
 
 /// Returns the ID of the register that will be modified by the given instruction
-pub fn get_tgt_id(x: Instr) -> Option<u16> {
+pub const fn get_tgt_id(x: Instr) -> Option<u16> {
     match x {
         // ↓ INSTRUCTIONS THAT DON'T MODIFY ANY REGISTER ↓
         Instr::Print(_)
@@ -212,12 +212,10 @@ pub fn get_last_tgt_id(x: &[Instr]) -> Option<u16> {
 }
 
 pub fn alloc_register(registers: &mut Vec<Data>, free_registers: &mut Vec<u16>) -> u16 {
-    if let Some(id) = free_registers.pop() {
-        id
-    } else {
+    free_registers.pop().unwrap_or_else(|| {
         registers.push(NULL);
         (registers.len() - 1) as u16
-    }
+    })
 }
 
 pub fn free_register(
@@ -363,9 +361,8 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
         | Instr::IsTrueJmp(a, _)
         | Instr::ThrowError(a)
         | Instr::GetFieldStruct(a, _, _)
-        | Instr::NegBool(a, _) => f(a),
-
-        Instr::ObjElemMov(a, _, _) => f(a),
+        | Instr::NegBool(a, _)
+        | Instr::ObjElemMov(a, _, _) => f(a),
 
         Instr::CallLibFuncVoid(func, a, b) => {
             f(a);
@@ -374,11 +371,11 @@ pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
             }
         }
         Instr::Halt(x) if x != 0 => f(x),
-        Instr::Halt(_) => {}
 
         Instr::CloneArray(src, _, _) | Instr::CloneStruct(src, _) => f(src),
 
-        Instr::Jmp(_)
+        Instr::Halt(_)
+        | Instr::Jmp(_)
         | Instr::JmpBack(_)
         | Instr::VoidReturn
         | Instr::CallFunc(_, _)

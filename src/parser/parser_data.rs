@@ -9,6 +9,7 @@ use crate::vm::StringPool;
 use libloading::Library;
 use smol_strc::SmolStr;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
@@ -114,6 +115,7 @@ pub struct State<'a> {
     pub const_registers: &'a mut HashMap<Data, u16>,
     pub free_registers: &'a mut Vec<u16>,
     pub sources: &'a mut Vec<(SmolStr, Rc<String>)>,
+    pub reserved_registers: HashSet<u16>,
 }
 
 #[derive(Debug, Clone)]

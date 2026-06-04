@@ -114,7 +114,13 @@ pub fn handle_functions(
             let arg_id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
             output.push(Instr::StoreFuncArg(arg_id));
             // This may break stuff
-            free_register(arg_id, state.free_registers, v, state.const_registers);
+            free_register(
+                arg_id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             *state.allocated_arg_count += 1;
         }
 

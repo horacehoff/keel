@@ -41,7 +41,13 @@ pub fn std_lib_methods(
                 let arg_id = get_id(&arg, v, ctx, state, output, None, false, offset, single_run);
                 output.push(Instr::StoreFuncArg(arg_id));
                 *state.allocated_arg_count += 1;
-                free_register(arg_id, state.free_registers, v, state.const_registers);
+                free_register(
+                    arg_id,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
             }
         };
     }
@@ -97,7 +103,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Uppercase,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "lowercase" => {
@@ -105,7 +115,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Lowercase,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "starts_with" => {
@@ -114,7 +128,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::StartsWith,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "ends_with" => {
@@ -123,7 +141,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::EndsWith,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "replace" => {
@@ -132,7 +154,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Replace,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "len" => {
@@ -140,7 +166,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Len,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "contains" => {
@@ -160,7 +190,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Contains,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "trim" => {
@@ -168,7 +202,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Trim,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "trim_sequence" => {
@@ -187,7 +225,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimSequence,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "find" => {
@@ -215,7 +257,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Find,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
             state
                 .instr_src
@@ -226,7 +272,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::IsFloat,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "is_int" => {
@@ -234,7 +284,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::IsInt,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "trim_left" => {
@@ -242,7 +296,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimLeft,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "trim_right" => {
@@ -250,7 +308,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimRight,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "trim_sequence_left" => {
@@ -269,7 +331,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimSequenceLeft,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "trim_sequence_right" => {
@@ -288,7 +354,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimSequenceRight,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "repeat" => {
@@ -308,7 +378,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Repeat,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "push" => {
@@ -336,7 +410,13 @@ pub fn std_lib_methods(
             let arg_id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(id, state.free_registers, v, state.const_registers);
+            free_register(
+                id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::Push(id, arg_id));
         }
         "sqrt" => {
@@ -344,7 +424,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::SqrtFloat,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "round" => {
@@ -352,7 +436,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Round,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "floor" => {
@@ -360,7 +448,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Floor,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "abs" => {
@@ -368,7 +460,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Abs,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "reverse" => {
@@ -377,7 +473,11 @@ pub fn std_lib_methods(
                 output.push(Instr::CallLibFunc(
                     LibFunc::Reverse,
                     id,
-                    alloc_register(state.registers, state.free_registers),
+                    alloc_register(
+                        state.registers,
+                        state.free_registers,
+                        &state.reserved_registers,
+                    ),
                 ));
             } else {
                 output.push(Instr::CallLibFuncVoid(LibFuncVoid::Reverse, id, 0));
@@ -398,7 +498,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Split,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "partition" => {
@@ -418,7 +522,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Split,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "join" => {
@@ -448,7 +556,11 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::JoinStringArray,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "remove" => {
@@ -465,7 +577,13 @@ pub fn std_lib_methods(
             let arg_id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(arg_id, state.free_registers, v, state.const_registers);
+            free_register(
+                arg_id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::Remove(id, arg_id));
             state
                 .instr_src

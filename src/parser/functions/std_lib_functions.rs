@@ -37,7 +37,13 @@ pub fn std_lib_functions(
             for arg in args {
                 let id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
                 output.push(Instr::Print(id));
-                free_register(id, state.free_registers, v, state.const_registers);
+                free_register(
+                    id,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
             }
         }
         "type" => {
@@ -63,11 +69,21 @@ pub fn std_lib_functions(
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(id, state.free_registers, v, state.const_registers);
+            free_register(
+                id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFunc(
                 LibFunc::Float,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
             state
                 .instr_src
@@ -87,11 +103,21 @@ pub fn std_lib_functions(
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(id, state.free_registers, v, state.const_registers);
+            free_register(
+                id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFunc(
                 LibFunc::Int,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
             state
                 .instr_src
@@ -102,11 +128,21 @@ pub fn std_lib_functions(
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(id, state.free_registers, v, state.const_registers);
+            free_register(
+                id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFunc(
                 LibFunc::Str,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "bool" => {
@@ -115,11 +151,21 @@ pub fn std_lib_functions(
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(id, state.free_registers, v, state.const_registers);
+            free_register(
+                id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFunc(
                 LibFunc::Bool,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
             state
                 .instr_src
@@ -138,11 +184,21 @@ pub fn std_lib_functions(
                     &args[0], v, ctx, state, output, None, false, offset, single_run,
                 )
             };
-            free_register(id, state.free_registers, v, state.const_registers);
+            free_register(
+                id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFunc(
                 LibFunc::Input,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "range" => {
@@ -165,17 +221,28 @@ pub fn std_lib_functions(
                 *state.allocated_arg_count += 1;
                 id_second_arg
             };
-            free_register(id_first_arg, state.free_registers, v, state.const_registers);
+            free_register(
+                id_first_arg,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             free_register(
                 source_reg_id,
                 state.free_registers,
                 v,
                 state.const_registers,
+                &state.reserved_registers,
             );
             output.push(Instr::CallLibFunc(
                 LibFunc::Range,
                 source_reg_id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "the_answer" => {
@@ -183,7 +250,11 @@ pub fn std_lib_functions(
             output.push(Instr::CallLibFunc(
                 LibFunc::TheAnswer,
                 0,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "argv" => {
@@ -191,7 +262,11 @@ pub fn std_lib_functions(
             output.push(Instr::CallLibFunc(
                 LibFunc::Argv,
                 0,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
         }
         "exit" => {

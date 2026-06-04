@@ -169,12 +169,34 @@ fn compile_short_circuit_condition(
                 let id_r = get_id(
                     right, v, ctx, state, output, None, false, offset, single_run,
                 );
-                free_register(id_l, state.free_registers, v, state.const_registers);
-                free_register(id_r, state.free_registers, v, state.const_registers);
-                let id = alloc_register(state.registers, state.free_registers);
+                free_register(
+                    id_l,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
+                free_register(
+                    id_r,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
+                let id = alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                );
                 output.push(Instr::BoolAnd(id_l, id_r, id));
                 add_cmp_true(id, output);
-                free_register(id, state.free_registers, v, state.const_registers);
+                free_register(
+                    id,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
                 (vec![output.len() - 1], Vec::new())
             } else {
                 // normal && -> if either side is false, jump past the body
@@ -192,11 +214,23 @@ fn compile_short_circuit_condition(
             let cond_id = get_id(expr, v, ctx, state, output, None, false, offset, single_run);
             if bool_or_mode {
                 add_cmp_true(cond_id, output);
-                free_register(cond_id, state.free_registers, v, state.const_registers);
+                free_register(
+                    cond_id,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
                 (vec![output.len() - 1], Vec::new())
             } else {
                 add_cmp_false(cond_id, &mut 0, output, false);
-                free_register(cond_id, state.free_registers, v, state.const_registers);
+                free_register(
+                    cond_id,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
                 (Vec::new(), vec![output.len() - 1])
             }
         }
@@ -255,10 +289,27 @@ pub fn get_id(
             }
             let id_l = get_id($l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id($r, v, ctx, state, output, None, false, offset, single_run);
-            free_register(id_l, state.free_registers, v, state.const_registers);
-            free_register(id_r, state.free_registers, v, state.const_registers);
-            let id =
-                tgt_id.unwrap_or_else(|| alloc_register(state.registers, state.free_registers));
+            free_register(
+                id_l,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                id_r,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            let id = tgt_id.unwrap_or_else(|| {
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                )
+            });
             output.push(Instr::$instr(id_l, id_r, id));
             id
         }};
@@ -272,10 +323,27 @@ pub fn get_id(
             }
             let id_l = get_id($l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id($r, v, ctx, state, output, None, false, offset, single_run);
-            free_register(id_l, state.free_registers, v, state.const_registers);
-            free_register(id_r, state.free_registers, v, state.const_registers);
-            let id =
-                tgt_id.unwrap_or_else(|| alloc_register(state.registers, state.free_registers));
+            free_register(
+                id_l,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                id_r,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            let id = tgt_id.unwrap_or_else(|| {
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                )
+            });
             output.push(if t_l == $type1 {
                 Instr::$instr(id_l, id_r, id)
             } else {
@@ -384,7 +452,7 @@ pub fn get_id(
                 }
             }
             let array_id = {
-                state.pools.obj_pool.push(Vec::new());
+                state.pools.obj_pool.push(Vec::with_capacity(elems.len()));
                 state.pools.obj_pool.len() - 1
             };
             if elems.is_empty() && !single_run {
@@ -552,7 +620,8 @@ pub fn get_id(
                     .push(Data::struct_instance(type_id, struct_id as u32));
                 (state.registers.len() - 1) as u16
             } else {
-                let mut dynamic: Vec<(Vec<Instr>, u16, u16)> = Vec::new();
+                let mut dynamic: Vec<(Vec<Instr>, u16, u16)> =
+                    Vec::with_capacity(expected_fields_len);
                 for field_idx in 0..expected_fields_len {
                     let field = &state.structs[expected_struct_idx].fields[field_idx];
                     if let Some((_, field_expr, field_span)) =
@@ -653,7 +722,11 @@ pub fn get_id(
                     offset,
                     single_run,
                 );
-                let dest_reg_id = alloc_register(state.registers, state.free_registers);
+                let dest_reg_id = alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                );
                 output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
                 dest_reg_id
             } else {
@@ -683,8 +756,18 @@ pub fn get_id(
             let index_id = get_id(
                 index, v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(index_id, state.free_registers, v, state.const_registers);
-            let dest_reg_id = alloc_register(state.registers, state.free_registers);
+            free_register(
+                index_id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            let dest_reg_id = alloc_register(
+                state.registers,
+                state.free_registers,
+                &state.reserved_registers,
+            );
 
             let to_push = if infered == DataType::String {
                 Instr::GetIndexString(id, index_id, dest_reg_id)
@@ -727,9 +810,25 @@ pub fn get_id(
                 idx_end, v, ctx, state, output, None, false, offset, single_run,
             );
             output.push(Instr::StoreFuncArg(idx_end_id));
-            free_register(idx_start_id, state.free_registers, v, state.const_registers);
-            free_register(idx_end_id, state.free_registers, v, state.const_registers);
-            let dest_reg_id = alloc_register(state.registers, state.free_registers);
+            free_register(
+                idx_start_id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                idx_end_id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            let dest_reg_id = alloc_register(
+                state.registers,
+                state.free_registers,
+                &state.reserved_registers,
+            );
             let to_push = if infered == DataType::String {
                 Instr::GetSliceString(id, idx_start_id, dest_reg_id)
             } else {
@@ -801,8 +900,13 @@ pub fn get_id(
                 && let Some(src_var) = v.iter().rfind(|x| x.name == *src_name)
             {
                 let src_id = src_var.register_id;
-                let id =
-                    tgt_id.unwrap_or_else(|| alloc_register(state.registers, state.free_registers));
+                let id = tgt_id.unwrap_or_else(|| {
+                    alloc_register(
+                        state.registers,
+                        state.free_registers,
+                        &state.reserved_registers,
+                    )
+                });
                 output.push(if src_id == id {
                     Instr::IncInt(id)
                 } else {
@@ -812,12 +916,28 @@ pub fn get_id(
             }
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
-            free_register(id_l, state.free_registers, v, state.const_registers);
-            free_register(id_r, state.free_registers, v, state.const_registers);
+            free_register(
+                id_l,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                id_r,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             let id = if let Some(tgt_register_id) = tgt_id {
                 tgt_register_id
             } else {
-                alloc_register(state.registers, state.free_registers)
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                )
             };
             if matches!(t_l, DataType::Array(_)) {
                 output.push(Instr::AddArray(id_l, id_r, id));
@@ -845,8 +965,13 @@ pub fn get_id(
                 && let Some(src_var) = v.iter().rfind(|x| x.name == *src_name)
             {
                 let src_id = src_var.register_id;
-                let id =
-                    tgt_id.unwrap_or_else(|| alloc_register(state.registers, state.free_registers));
+                let id = tgt_id.unwrap_or_else(|| {
+                    alloc_register(
+                        state.registers,
+                        state.free_registers,
+                        &state.reserved_registers,
+                    )
+                });
                 output.push(if src_id == id {
                     Instr::DecInt(id)
                 } else {
@@ -856,12 +981,28 @@ pub fn get_id(
             }
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
-            free_register(id_l, state.free_registers, v, state.const_registers);
-            free_register(id_r, state.free_registers, v, state.const_registers);
+            free_register(
+                id_l,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                id_r,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             let id = if let Some(tgt_register_id) = tgt_id {
                 tgt_register_id
             } else {
-                alloc_register(state.registers, state.free_registers)
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                )
             };
             output.push(if t_l == DataType::Float {
                 Instr::SubFloat(id_l, id_r, id)
@@ -913,12 +1054,28 @@ pub fn get_id(
             let is_string = l_type == DataType::String || r_type == DataType::String;
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
-            free_register(id_l, state.free_registers, v, state.const_registers);
-            free_register(id_r, state.free_registers, v, state.const_registers);
+            free_register(
+                id_l,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                id_r,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             let id = if let Some(tgt_register_id) = tgt_id {
                 tgt_register_id
             } else {
-                alloc_register(state.registers, state.free_registers)
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                )
             };
             output.push(if is_array {
                 Instr::ObjEq(id_l, id_r, id)
@@ -937,12 +1094,28 @@ pub fn get_id(
             let is_string = l_type == DataType::String || r_type == DataType::String;
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
-            free_register(id_l, state.free_registers, v, state.const_registers);
-            free_register(id_r, state.free_registers, v, state.const_registers);
+            free_register(
+                id_l,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                id_r,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             let id = if let Some(tgt_register_id) = tgt_id {
                 tgt_register_id
             } else {
-                alloc_register(state.registers, state.free_registers)
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                )
             };
             if is_array {
                 output.push(Instr::ObjNotEq(id_l, id_r, id));
@@ -1010,11 +1183,21 @@ pub fn get_id(
         Expr::Neg(l, markers) => {
             let operand_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
-            free_register(id_l, state.free_registers, v, state.const_registers);
+            free_register(
+                id_l,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             let id = if let Some(tgt_register_id) = tgt_id {
                 tgt_register_id
             } else {
-                alloc_register(state.registers, state.free_registers)
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                )
             };
             if operand_type == DataType::Float {
                 output.push(Instr::NegFloat(id_l, id));
@@ -1028,11 +1211,21 @@ pub fn get_id(
         Expr::BoolNeg(l, markers) => {
             let operand_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
-            free_register(id_l, state.free_registers, v, state.const_registers);
+            free_register(
+                id_l,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             let id = if let Some(tgt_register_id) = tgt_id {
                 tgt_register_id
             } else {
-                alloc_register(state.registers, state.free_registers)
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                )
             };
             if operand_type != DataType::Bool {
                 throw_parser_error(src, *markers, ErrType::InvalidOp(&operand_type, "!"));
@@ -1041,7 +1234,11 @@ pub fn get_id(
             id
         }
         Expr::InlineCondition(main_condition, code, markers) => {
-            let return_id = alloc_register(state.registers, state.free_registers);
+            let return_id = alloc_register(
+                state.registers,
+                state.free_registers,
+                &state.reserved_registers,
+            );
 
             // get first code limit (after which there are only else(if) blocks)
             let main_code_limit = code
@@ -1087,6 +1284,7 @@ pub fn get_id(
                 state.free_registers,
                 v,
                 state.const_registers,
+                &state.reserved_registers,
             );
             let is_empty = cond_code.is_empty();
             output.extend(cond_code);
@@ -1111,7 +1309,13 @@ pub fn get_id(
                         condition, v, ctx, state, output, None, false, offset, single_run,
                     );
                     add_cmp_false(condition_id, &mut 0, output, false);
-                    free_register(condition_id, state.free_registers, v, state.const_registers);
+                    free_register(
+                        condition_id,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                        &state.reserved_registers,
+                    );
                     cmp_markers.push(output.len() - 1);
                     let v_len = v.len();
                     let regs_before = state.registers.len() as u16;
@@ -1130,6 +1334,7 @@ pub fn get_id(
                         state.free_registers,
                         v,
                         state.const_registers,
+                        &state.reserved_registers,
                     );
                     let is_empty = cond_code.is_empty();
                     output.extend(cond_code);
@@ -1163,6 +1368,7 @@ pub fn get_id(
                         state.free_registers,
                         v,
                         state.const_registers,
+                        &state.reserved_registers,
                     );
                     let is_empty = cond_code.is_empty();
                     output.extend(cond_code);
@@ -1209,7 +1415,13 @@ pub fn get_id(
                     *jump_size = diff as u16;
                 }
             }
-            free_register(condition_id, state.free_registers, v, state.const_registers);
+            free_register(
+                condition_id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             return_id
         }
         Expr::FunctionCall(args, namespace, markers, args_indexes) => handle_functions(
@@ -1283,7 +1495,11 @@ pub fn compile_expr(
                 {
                     output.push(Instr::Mov(
                         *register_id,
-                        alloc_register(state.registers, state.free_registers),
+                        alloc_register(
+                            state.registers,
+                            state.free_registers,
+                            &state.reserved_registers,
+                        ),
                     ));
                 } else {
                     throw_parser_error(src, *markers, ErrType::UnknownVariable(name))
@@ -1334,7 +1550,13 @@ pub fn compile_expr(
                     offset,
                     single_run,
                 );
-                free_register(elem_id, state.free_registers, v, state.const_registers);
+                free_register(
+                    elem_id,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
                 if {
                     if let DataType::Array(Some(array_type)) = &array_type
                         && array_type.as_ref() != &elem_type
@@ -1361,7 +1583,13 @@ pub fn compile_expr(
                     .instr_src
                     .push((to_push, *index_markers, current_src_file));
                 output.push(to_push);
-                free_register(id, state.free_registers, v, state.const_registers);
+                free_register(
+                    id,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
             }
             Expr::SetStructField(struct_expr, field, new_val, struct_span, field_span) => {
                 let t = infer_type(
@@ -1494,7 +1722,13 @@ pub fn compile_expr(
                             offset,
                             single_run,
                         );
-                        free_register(condition_id, state.free_registers, v, state.const_registers);
+                        free_register(
+                            condition_id,
+                            state.free_registers,
+                            v,
+                            state.const_registers,
+                            &state.reserved_registers,
+                        );
                         add_cmp_false(condition_id, &mut 0, &mut output, false);
                         conditional_false_jmp_idxs.push(vec![output.len() - 1]);
                         let v_len = v.len();
@@ -1602,7 +1836,11 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                let array_len_id = alloc_register(state.registers, state.free_registers);
+                let array_len_id = alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                );
 
                 output.push(Instr::CallLibFunc(LibFunc::Len, array, array_len_id));
 
@@ -1611,19 +1849,31 @@ pub fn compile_expr(
                     state.registers.push(0.into());
                     (state.registers.len() - 1) as u16
                 } else {
-                    let id = alloc_register(state.registers, state.free_registers);
+                    let id = alloc_register(
+                        state.registers,
+                        state.free_registers,
+                        &state.reserved_registers,
+                    );
                     output.push(Instr::SetInt(id, 0));
                     id
                 };
 
                 // do the 'i < len' condition, set up the condition's id (true/false)
-                let condition_id = alloc_register(state.registers, state.free_registers);
+                let condition_id = alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                );
 
                 output.push(Instr::InfInt(index_id, array_len_id, condition_id));
 
                 // set up the variable for the current element (for current_element_id in ... {}) => current_element_id = array[index]
                 let current_element_id = if real_var {
-                    alloc_register(state.registers, state.free_registers)
+                    alloc_register(
+                        state.registers,
+                        state.free_registers,
+                        &state.reserved_registers,
+                    )
                 } else {
                     0
                 };
@@ -1665,6 +1915,7 @@ pub fn compile_expr(
                     state.free_registers,
                     v,
                     state.const_registers,
+                    &state.reserved_registers,
                 );
 
                 // add the condition ('i < len') jumping logic
@@ -1689,15 +1940,34 @@ pub fn compile_expr(
                 output.push(Instr::JmpBack(len));
 
                 if single_run {
-                    free_register(array_len_id, state.free_registers, v, state.const_registers);
-                    free_register(index_id, state.free_registers, v, state.const_registers);
-                    free_register(condition_id, state.free_registers, v, state.const_registers);
+                    free_register(
+                        array_len_id,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                        &state.reserved_registers,
+                    );
+                    free_register(
+                        index_id,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                        &state.reserved_registers,
+                    );
+                    free_register(
+                        condition_id,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                        &state.reserved_registers,
+                    );
                     if real_var {
                         free_register(
                             current_element_id,
                             state.free_registers,
                             v,
                             state.const_registers,
+                            &state.reserved_registers,
                         );
                     }
                 }
@@ -1746,7 +2016,11 @@ pub fn compile_expr(
                         single_run,
                     );
                     let start_val = state.registers[start_elem_id as usize];
-                    let elem_id = alloc_register(state.registers, state.free_registers);
+                    let elem_id = alloc_register(
+                        state.registers,
+                        state.free_registers,
+                        &state.reserved_registers,
+                    );
                     if state.const_registers.values().any(|&v| v == start_elem_id)
                         && start_val.is_int()
                     {
@@ -1792,6 +2066,7 @@ pub fn compile_expr(
                     state.free_registers,
                     v,
                     state.const_registers,
+                    &state.reserved_registers,
                 );
                 let compiled_loop_code_len = compiled_loop_code.len() as u16;
 
@@ -1821,15 +2096,28 @@ pub fn compile_expr(
                 v.truncate(v_len);
 
                 if single_run {
-                    free_register(end_elem_id, state.free_registers, v, state.const_registers);
-                    free_register(elem_id, state.free_registers, v, state.const_registers);
+                    free_register(
+                        end_elem_id,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                        &state.reserved_registers,
+                    );
+                    free_register(
+                        elem_id,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                        &state.reserved_registers,
+                    );
                 }
             }
             Expr::LoopBlock(code) => {
                 let loop_id = block_id + 1;
                 let v_len = v.len();
                 let regs_before = state.registers.len() as u16;
-                let mut compiled = compile_expr(code, v, ctx, state, output.len() as u16, false);
+                let mut compiled =
+                    compile_expr(code, v, ctx, state, offset + output.len() as u16, false);
                 v.truncate(v_len);
                 free_loop_scope_registers(
                     regs_before,
@@ -1837,6 +2125,7 @@ pub fn compile_expr(
                     state.free_registers,
                     v,
                     state.const_registers,
+                    &state.reserved_registers,
                 );
                 let code_length = compiled.len() as u16;
                 parse_loop_flow_control(&mut compiled, loop_id, code_length + 1, false, true);
@@ -1853,7 +2142,11 @@ pub fn compile_expr(
                 let jmp_catch_instr = output.len() - 1;
 
                 let v_len = v.len();
-                let err_reg_id = alloc_register(state.registers, state.free_registers);
+                let err_reg_id = alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                );
                 v.push(Variable {
                     name: err_var.clone(),
                     register_id: err_reg_id,
@@ -1865,7 +2158,13 @@ pub fn compile_expr(
                 v.truncate(v_len);
                 output.extend(catch_code);
                 output[jmp_catch_instr] = Instr::Jmp((output.len() - jmp_catch_instr) as u16);
-                free_register(err_reg_id, state.free_registers, v, state.const_registers);
+                free_register(
+                    err_reg_id,
+                    state.free_registers,
+                    v,
+                    state.const_registers,
+                    &state.reserved_registers,
+                );
             }
             Expr::VarDeclare(x, y) => {
                 let var_type = infer_type(y, v, state.fns, state.structs, src, state.dyn_libs);
@@ -1895,7 +2194,11 @@ pub fn compile_expr(
                         single_run,
                     );
                     if contains_var_reassign(x, &input[idx + 1..]) {
-                        let mutable_id = alloc_register(state.registers, state.free_registers);
+                        let mutable_id = alloc_register(
+                            state.registers,
+                            state.free_registers,
+                            &state.reserved_registers,
+                        );
                         move_reg_to_reg(
                             &mut output,
                             src_id,
@@ -2000,7 +2303,13 @@ pub fn compile_expr(
                     output.push(Instr::Mov(obj_id, id));
                 }
                 if is_reg_free(v, obj_id, name) {
-                    free_register(obj_id, state.free_registers, v, state.const_registers);
+                    free_register(
+                        obj_id,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                        &state.reserved_registers,
+                    );
                 }
                 v[var_pos].var_type = var_type;
             }
@@ -2037,7 +2346,13 @@ pub fn compile_expr(
                     single_run,
                 );
                 if let Some(id) = output_id {
-                    free_register(id, state.free_registers, v, state.const_registers);
+                    free_register(
+                        id,
+                        state.free_registers,
+                        v,
+                        state.const_registers,
+                        &state.reserved_registers,
+                    );
                 }
             }
             Expr::ObjFunctionCall(obj, args, namespace, obj_markers, fn_markers, args_indexes) => {
@@ -2448,6 +2763,7 @@ pub fn parse(
         const_registers: &mut const_registers,
         free_registers: &mut free_registers,
         sources: &mut sources,
+        reserved_registers: HashSet::new(),
     };
     let mut instructions = compile_expr(
         &state.fns

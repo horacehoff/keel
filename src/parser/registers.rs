@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::data::Data;
 use crate::data::NULL;
@@ -226,11 +227,25 @@ pub fn get_last_tgt_id(x: &[Instr]) -> Option<u16> {
     None
 }
 
-pub fn alloc_register(registers: &mut Vec<Data>, free_registers: &mut Vec<u16>) -> u16 {
-    free_registers.pop().unwrap_or_else(|| {
+pub fn alloc_register(
+    registers: &mut Vec<Data>,
+    free_registers: &mut Vec<u16>,
+    reserved_registers: &HashSet<u16>,
+) -> u16 {
+    if reserved_registers.is_empty() {
+        free_registers.pop().unwrap_or_else(|| {
+            registers.push(NULL);
+            (registers.len() - 1) as u16
+        })
+    } else if let Some(pos) = free_registers
+        .iter()
+        .rposition(|reg| !reserved_registers.contains(reg))
+    {
+        free_registers.swap_remove(pos)
+    } else {
         registers.push(NULL);
         (registers.len() - 1) as u16
-    })
+    }
 }
 
 pub fn free_register(
@@ -238,9 +253,11 @@ pub fn free_register(
     free_registers: &mut Vec<u16>,
     v: &[Variable],
     const_registers: &HashMap<Data, u16>,
+    reserved_registers: &HashSet<u16>,
 ) {
     if !v.iter().any(|var| var.register_id == id)
         && !const_registers.values().any(|&reg| reg == id)
+        && !reserved_registers.contains(&id)
         && !free_registers.contains(&id)
     {
         free_registers.push(id);
@@ -254,10 +271,11 @@ pub fn free_scope_registers(
     free_registers: &mut Vec<u16>,
     v: &[Variable],
     const_registers: &HashMap<Data, u16>,
+    avoid: &HashSet<u16>,
 ) {
     for id in get_tgt_ids(scope_instrs) {
         if id >= regs_before {
-            free_register(id, free_registers, v, const_registers);
+            free_register(id, free_registers, v, const_registers, avoid);
         }
     }
 }
@@ -269,6 +287,7 @@ pub fn free_loop_scope_registers(
     free_registers: &mut Vec<u16>,
     v: &[Variable],
     const_registers: &HashMap<Data, u16>,
+    avoid: &HashSet<u16>,
 ) {
     free_scope_registers(
         regs_before,
@@ -276,17 +295,18 @@ pub fn free_loop_scope_registers(
         free_registers,
         v,
         const_registers,
+        avoid,
     );
     // Free CloneArray template registers
     for instr in scope_instrs {
         if let Instr::CloneArray(template_reg, _, _) = instr
             && *template_reg >= regs_before
         {
-            free_register(*template_reg, free_registers, v, const_registers);
+            free_register(*template_reg, free_registers, v, const_registers, avoid);
         } else if let Instr::CloneStruct(template_reg, _) = instr
             && *template_reg >= regs_before
         {
-            free_register(*template_reg, free_registers, v, const_registers);
+            free_register(*template_reg, free_registers, v, const_registers, avoid);
         }
     }
 }

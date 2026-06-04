@@ -37,17 +37,15 @@ pub fn format_data(
     } else if x.is_null() {
         SmolStr::new_static("NULL")
     } else if x.is_struct() {
-        let (s_name, s_fields) =
-            unsafe { struct_fields.get_unchecked(x.struct_type_id() as usize) };
+        let s_name = unsafe { &struct_fields.get_unchecked(x.struct_type_id() as usize).0 };
         format_args!("{} {{{}}}", s_name, unsafe {
             array_pool
                 .get_unchecked(x.as_struct())
                 .iter()
-                .enumerate()
-                .map(|(i, x)| {
+                .map(|x| {
                     format_args!(
-                        "{}:{}",
-                        s_fields.get_unchecked(i),
+                        "{}",
+                        // s_fields.get_unchecked(i),
                         format_data(*x, array_pool, string_pool, struct_fields, false)
                     )
                     .to_smolstr()

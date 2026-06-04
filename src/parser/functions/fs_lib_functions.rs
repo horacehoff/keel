@@ -36,11 +36,21 @@ pub fn fs_lib_functions(
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(id, state.free_registers, v, state.const_registers);
+            free_register(
+                id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFunc(
                 LibFunc::FsRead,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
             state
                 .instr_src
@@ -52,11 +62,21 @@ pub fn fs_lib_functions(
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(id, state.free_registers, v, state.const_registers);
+            free_register(
+                id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFunc(
                 LibFunc::FsExists,
                 id,
-                alloc_register(state.registers, state.free_registers),
+                alloc_register(
+                    state.registers,
+                    state.free_registers,
+                    &state.reserved_registers,
+                ),
             ));
             state
                 .instr_src
@@ -72,8 +92,20 @@ pub fn fs_lib_functions(
             let contents = get_id(
                 &args[1], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(filepath, state.free_registers, v, state.const_registers);
-            free_register(contents, state.free_registers, v, state.const_registers);
+            free_register(
+                filepath,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                contents,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFuncVoid(
                 LibFuncVoid::FsWrite,
                 filepath,
@@ -93,8 +125,20 @@ pub fn fs_lib_functions(
             let contents = get_id(
                 &args[1], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(filepath, state.free_registers, v, state.const_registers);
-            free_register(contents, state.free_registers, v, state.const_registers);
+            free_register(
+                filepath,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            free_register(
+                contents,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFuncVoid(
                 LibFuncVoid::FsAppend,
                 filepath,
@@ -110,7 +154,13 @@ pub fn fs_lib_functions(
             let path = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(path, state.free_registers, v, state.const_registers);
+            free_register(
+                path,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, 0));
             state
                 .instr_src
@@ -122,7 +172,13 @@ pub fn fs_lib_functions(
             let path = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(path, state.free_registers, v, state.const_registers);
+            free_register(
+                path,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, 0));
             state
                 .instr_src

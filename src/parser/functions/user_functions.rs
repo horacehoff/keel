@@ -147,7 +147,11 @@ pub fn handle_user_function(
     let return_register_id = if fn_returns_void {
         0
     } else {
-        alloc_register(state.registers, state.free_registers)
+        alloc_register(
+            state.registers,
+            state.free_registers,
+            &state.reserved_registers,
+        )
     };
     if is_recursive {
         output.push(Instr::CallFuncRecursive(loc, return_register_id));
@@ -196,6 +200,8 @@ fn compile_function(
             &state.sources[fn_src_file as usize].1.clone(),
         )
     };
+
+    let reg_len = state.registers.len() as u16;
 
     // Local vector vars and recorded_types to allow the inner body to type-check correctly
     let mut v_temp: Vec<Variable> = fn_args
@@ -286,6 +292,13 @@ fn compile_function(
         offset + output.len() as u16,
         false,
     );
+
+    state
+        .reserved_registers
+        .extend(reg_len..(state.registers.len() as u16));
+    state
+        .free_registers
+        .retain(|reg| !state.reserved_registers.contains(reg));
 
     if is_recursive {
         let all_written_regs: Vec<u16> = get_tgt_ids(&parsed);

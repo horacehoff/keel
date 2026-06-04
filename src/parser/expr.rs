@@ -69,8 +69,8 @@ pub enum Expr {
     /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
     ImportDylib(SmolStr, Box<[(SmolStr, Box<[DataType]>, DataType)]>, Span),
 
-    /// ImportFile(path, (start, end))
-    ImportFile(SmolStr, Span),
+    /// ImportFile(path,alias ,(start, end))
+    ImportFile(SmolStr, Option<SmolStr>, Span),
 
     Break,
     Continue,

@@ -8,6 +8,21 @@ use crate::instr::LibFuncVoid;
 use crate::parser_data::Variable;
 use smol_strc::SmolStr;
 
+pub fn get_expr_tgt_id(x: &[Instr], fallback_reg: u16) -> Option<u16> {
+    if x.is_empty() {
+        return None;
+    }
+    if matches!(x.last().unwrap(), Instr::ObjElemMov(_, _, _)) {
+        return Some(fallback_reg);
+    }
+    match x[0] {
+        Instr::EmptyArray(dest) | Instr::CloneArray(_, dest, _) | Instr::CloneStruct(_, dest) => {
+            Some(dest)
+        }
+        _ => get_last_tgt_id(x),
+    }
+}
+
 pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()
         || matches!(

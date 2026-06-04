@@ -16,8 +16,8 @@ use crate::registers::alloc_register;
 use crate::registers::free_loop_scope_registers;
 use crate::registers::free_register;
 use crate::registers::free_scope_registers;
+use crate::registers::get_expr_tgt_id;
 use crate::registers::get_last_tgt_id;
-use crate::registers::get_tgt_id;
 use crate::registers::is_reg_free;
 use crate::registers::move_reg_to_reg;
 use crate::registers::move_to_id;
@@ -406,7 +406,7 @@ pub fn get_id(
                             .unwrap()
                             .push(state.registers.pop().unwrap());
                     } else {
-                        let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
+                        let c_id = get_expr_tgt_id(&x, (state.registers.len() - 1) as u16).unwrap();
                         state.pools.obj_pool.get_mut(array_id).unwrap().push(NULL);
 
                         output.extend(x);
@@ -436,7 +436,7 @@ pub fn get_id(
                         elem_ids.push((Vec::new(), reg_id));
                     } else {
                         constant_array = false;
-                        let c_id = get_tgt_id(*x.last().unwrap()).unwrap();
+                        let c_id = get_expr_tgt_id(&x, (state.registers.len() - 1) as u16).unwrap();
                         state.pools.obj_pool.get_mut(array_id).unwrap().push(NULL);
                         elem_ids.push((x, c_id));
                     }
@@ -531,7 +531,9 @@ pub fn get_id(
                                 .unwrap()
                                 .push(state.registers.pop().unwrap());
                         } else {
-                            let c_id = get_tgt_id(*compiled.last().unwrap()).unwrap();
+                            let c_id =
+                                get_expr_tgt_id(&compiled, (state.registers.len() - 1) as u16)
+                                    .unwrap();
                             output.extend(compiled);
                             state.pools.obj_pool.get_mut(struct_id).unwrap().push(NULL);
                             output.push(Instr::ObjElemMov(
@@ -587,7 +589,11 @@ pub fn get_id(
                                 .unwrap()
                                 .push(state.registers.pop().unwrap());
                         } else {
-                            let c_id = get_tgt_id(*compiled_field.last().unwrap()).unwrap();
+                            let c_id = get_expr_tgt_id(
+                                &compiled_field,
+                                (state.registers.len() - 1) as u16,
+                            )
+                            .unwrap();
                             state.pools.obj_pool.get_mut(struct_id).unwrap().push(NULL);
                             dynamic.push((compiled_field, c_id, field_idx as u16));
                         }
@@ -1233,8 +1239,10 @@ pub fn get_id(
             if output_code.is_empty() {
                 (state.registers.len() - 1) as u16
             } else {
+                let result_id = get_expr_tgt_id(&output_code, (state.registers.len() - 1) as u16)
+                    .unwrap_or((state.registers.len() - 1) as u16);
                 output.extend(output_code);
-                get_last_tgt_id(output).unwrap_or((state.registers.len() - 1) as u16)
+                result_id
             }
         }
     }
@@ -2280,7 +2288,7 @@ fn parse_toplevel(
             #[cfg(target_arch = "wasm32")]
             Expr::ImportFile(_, _) => wasm_error("WASM does not support importing files"),
             #[cfg(not(target_arch = "wasm32"))]
-            Expr::ImportFile(path, markers) => {
+            Expr::ImportFile(path, _alias, markers) => {
                 let file_path = file_path
                     .parent()
                     .unwrap_or_else(|| Path::new("."))

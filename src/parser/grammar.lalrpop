@@ -69,7 +69,7 @@ pub FileStatement:Expr = {
     Function => <>,
     Import  => <>,
     StructDeclare => <>,
-    <l:@L> "use" <path: String> <r:@R> => Expr::ImportFile(path, span!(l, r)),
+    <l:@L> "use" <path: String> <alias: ("as" Var)?> <r:@R> => Expr::ImportFile(path,alias.map(|(_,a)|a), span!(l, r)),
 }
 
 Comma<T>: Vec<T> = {

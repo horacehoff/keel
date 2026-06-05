@@ -13,7 +13,6 @@ const NAN_ARRAY: u64 = NAN_BASE | (4 << 48);
 const NAN_NULL: u64 = NAN_BASE | (5 << 48);
 const NAN_INT: u64 = NAN_BASE | (6 << 48);
 const NAN_STRUCT: u64 = NAN_BASE | (7 << 48);
-const BOOL_TABLE: [Data; 2] = [FALSE, TRUE];
 pub const NULL: Data = Data(NAN_NULL);
 pub const FALSE: Data = Data(NAN_BOOL);
 pub const TRUE: Data = Data(NAN_BOOL | 1);
@@ -284,7 +283,7 @@ impl From<Data> for i32 {
 impl From<bool> for Data {
     #[inline(always)]
     fn from(value: bool) -> Self {
-        BOOL_TABLE[value as usize]
+        Self(NAN_BOOL | (value as u64))
     }
 }
 impl From<Data> for bool {
@@ -293,21 +292,3 @@ impl From<Data> for bool {
         value.as_bool()
     }
 }
-// impl From<&str> for Data {
-//     #[inline(always)]
-//     fn from(value: &str) -> Self {
-//         Data::str(value)
-//     }
-// }
-// impl From<String> for Data {
-//     #[inline(always)]
-//     fn from(value: String) -> Self {
-//         Data::str(&value)
-//     }
-// }
-// impl From<SmolStr> for Data {
-//     #[inline(always)]
-//     fn from(value: SmolStr) -> Self {
-//         Data::str(&value)
-//     }
-// }

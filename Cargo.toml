@@ -47,6 +47,9 @@ inline_colorization = "0.1.6"
 smol_strc = "0.3.6"
 ariadne = "0.6.0"
 memchr = "2.8.1"
+lexical-core = "1.0.6"
+zmij = "1.0.21"
+ahash = "0.8.12"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.9.0"

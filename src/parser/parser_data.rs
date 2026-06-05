@@ -5,6 +5,7 @@ use crate::instr::Instr;
 use crate::type_system::DataType;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
+use ahash::RandomState;
 #[cfg(not(target_arch = "wasm32"))]
 use libloading::Library;
 use smol_strc::SmolStr;
@@ -112,10 +113,10 @@ pub struct State<'a> {
     pub dyn_libs: &'a mut Vec<Dynamiclib>,
     pub allocated_arg_count: &'a mut usize,
     pub allocated_call_depth: &'a mut usize,
-    pub const_registers: &'a mut HashMap<Data, u16>,
+    pub const_registers: &'a mut HashMap<Data, u16, RandomState>,
     pub free_registers: &'a mut Vec<u16>,
     pub sources: &'a mut Vec<(SmolStr, Rc<String>)>,
-    pub reserved_registers: HashSet<u16>,
+    pub reserved_registers: HashSet<u16, RandomState>,
 }
 
 #[derive(Debug, Clone)]

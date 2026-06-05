@@ -29,6 +29,7 @@ use crate::type_system::is_type_indexable;
 use crate::type_system::{DataType, infer_type};
 use crate::util::str_to_keel_type;
 use crate::{data::Data, instr::Instr};
+use ahash::RandomState;
 use inline_colorization::*;
 use lalrpop_util::lalrpop_mod;
 use smol_strc::SmolStr;
@@ -2719,7 +2720,7 @@ pub fn parse(
     let mut dyn_lib_fns: Vec<DynamicLibFn> = Vec::new();
     let mut allocated_arg_count = 0;
     let mut allocated_call_depth = 0;
-    let mut const_registers = HashMap::new();
+    let mut const_registers: HashMap<Data, u16, RandomState> = HashMap::default();
     let mut free_registers = Vec::new();
 
     // sources[0] = main file
@@ -2768,7 +2769,7 @@ pub fn parse(
         const_registers: &mut const_registers,
         free_registers: &mut free_registers,
         sources: &mut sources,
-        reserved_registers: HashSet::new(),
+        reserved_registers: HashSet::default(),
     };
     let mut instructions = compile_expr(
         &state.fns

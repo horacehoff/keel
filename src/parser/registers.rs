@@ -7,6 +7,7 @@ use crate::errors::dev_error;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
 use crate::parser_data::Variable;
+use ahash::RandomState;
 use smol_strc::SmolStr;
 
 pub fn get_expr_tgt_id(x: &[Instr], fallback_reg: u16) -> Option<u16> {
@@ -230,7 +231,7 @@ pub fn get_last_tgt_id(x: &[Instr]) -> Option<u16> {
 pub fn alloc_register(
     registers: &mut Vec<Data>,
     free_registers: &mut Vec<u16>,
-    reserved_registers: &HashSet<u16>,
+    reserved_registers: &HashSet<u16, RandomState>,
 ) -> u16 {
     if reserved_registers.is_empty() {
         free_registers.pop().unwrap_or_else(|| {
@@ -252,8 +253,8 @@ pub fn free_register(
     id: u16,
     free_registers: &mut Vec<u16>,
     v: &[Variable],
-    const_registers: &HashMap<Data, u16>,
-    reserved_registers: &HashSet<u16>,
+    const_registers: &HashMap<Data, u16, RandomState>,
+    reserved_registers: &HashSet<u16, RandomState>,
 ) {
     if !v.iter().any(|var| var.register_id == id)
         && !const_registers.values().any(|&reg| reg == id)
@@ -270,8 +271,8 @@ pub fn free_scope_registers(
     scope_instrs: &[Instr],
     free_registers: &mut Vec<u16>,
     v: &[Variable],
-    const_registers: &HashMap<Data, u16>,
-    avoid: &HashSet<u16>,
+    const_registers: &HashMap<Data, u16, RandomState>,
+    avoid: &HashSet<u16, RandomState>,
 ) {
     for id in get_tgt_ids(scope_instrs) {
         if id >= regs_before {
@@ -286,8 +287,8 @@ pub fn free_loop_scope_registers(
     scope_instrs: &[Instr],
     free_registers: &mut Vec<u16>,
     v: &[Variable],
-    const_registers: &HashMap<Data, u16>,
-    avoid: &HashSet<u16>,
+    const_registers: &HashMap<Data, u16, RandomState>,
+    avoid: &HashSet<u16, RandomState>,
 ) {
     free_scope_registers(
         regs_before,

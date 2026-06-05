@@ -18,6 +18,7 @@ use crate::parser_data::ErrorCatch;
 use crate::parser_data::Pools;
 use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
+use lexical_core::FormattedSize;
 use memchr::memmem;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
@@ -1003,7 +1004,7 @@ pub fn execute(
                     *w!(dest) = (reg.as_int() as f64).into();
                 } else if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    *w!(dest) = if let Ok(f) = str.parse::<f64>() {
+                    *w!(dest) = if let Ok(f) = lexical_core::parse::<f64>(str.as_bytes()) {
                         f.into()
                     } else {
                         error_with_catch!(ErrType::InvalidFloat);
@@ -1016,23 +1017,26 @@ pub fn execute(
                     *w!(dest) = (reg.as_float() as i32).into();
                 } else if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    *w!(dest) = if let Ok(i) = str.parse::<i32>() {
+                    *w!(dest) = if let Ok(i) = lexical_core::parse::<i32>(str.as_bytes()) {
                         i.into()
                     } else {
+                        cold_path();
                         error_with_catch!(ErrType::InvalidInt);
                     }
                 }
             }
             Instr::CallLibFunc(LibFunc::Str, tgt, dest) => {
                 let value = r!(tgt);
-                *w!(dest) = if value.is_str() {
-                    value
-                } else if value.is_int() {
-                    string!(value.as_int().to_string())
+                *w!(dest) = if value.is_int() {
+                    let mut buffer = [0u8; i32::FORMATTED_SIZE_DECIMAL];
+                    let digits = lexical_core::write(value.as_int(), &mut buffer);
+                    str!(unsafe { str::from_utf8_unchecked(digits) })
                 } else if value.is_float() {
-                    string!(value.as_float().to_string())
+                    str!(zmij::Buffer::new().format(value.as_float()))
                 } else if value.is_bool() {
-                    str!(if value.as_bool() { "true" } else { "false" })
+                    Data::small_str(if value.as_bool() { "true" } else { "false" })
+                } else if value.is_str() {
+                    value
                 } else {
                     str!(&format_data(
                         value,
@@ -1046,9 +1050,12 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Bool, tgt, dest) => {
                 let temp_tgt = r!(tgt);
                 let str = temp_tgt.as_str(string_pool);
-                *w!(dest) = if let Ok(b) = str.parse::<bool>() {
-                    b.into()
+                *w!(dest) = if str == "true" {
+                    TRUE
+                } else if str == "false" {
+                    FALSE
                 } else {
+                    cold_path();
                     error_with_catch!(ErrType::InvalidBool);
                 }
             }

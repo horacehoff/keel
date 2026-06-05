@@ -4,5 +4,5 @@
 test.kl
 *.dylib
 *.c
-*.py
+docs/benchmarks.py
 /lib_testing

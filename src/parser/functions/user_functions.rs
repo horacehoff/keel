@@ -201,8 +201,6 @@ fn compile_function(
         )
     };
 
-    let reg_len = state.registers.len() as u16;
-
     // Local vector vars and recorded_types to allow the inner body to type-check correctly
     let mut v_temp: Vec<Variable> = fn_args
         .iter()
@@ -265,7 +263,7 @@ fn compile_function(
     let func = state.fns.get_mut(function_id).unwrap();
     func.impls.push(FunctionImpl {
         loc,
-        args_loc: Box::from(args_loc),
+        args_loc: Box::from(args_loc.as_slice()),
         arg_types: Box::from(infered_arg_types),
     });
     // Cache the return type
@@ -293,9 +291,19 @@ fn compile_function(
         false,
     );
 
-    state
-        .reserved_registers
-        .extend(reg_len..(state.registers.len() as u16));
+    let mut reserved_registers = get_tgt_ids(&parsed);
+    reserved_registers.extend(args_loc);
+    for instr in &parsed {
+        match instr {
+            Instr::CloneArray(template_reg, _, _) | Instr::CloneStruct(template_reg, _) => {
+                reserved_registers.push(*template_reg);
+            }
+            _ => {}
+        }
+    }
+    reserved_registers.sort_unstable();
+    reserved_registers.dedup();
+    state.reserved_registers.extend(reserved_registers);
     state
         .free_registers
         .retain(|reg| !state.reserved_registers.contains(reg));

@@ -241,6 +241,7 @@ dependencies = [
  "lalrpop-util",
  "libffi",
  "libloading",
+ "memchr",
  "mimalloc",
  "smol_strc",
  "wasm-bindgen",

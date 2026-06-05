@@ -2314,16 +2314,18 @@ pub fn compile_expr(
                 v[var_pos].var_type = var_type;
             }
             Expr::StructDeclare(name, fields, span) => {
+                let struct_id = state.structs.len() as u16;
                 state.structs.push(Struct {
+                    // pushing it first allows structs to be recursive
                     name: name.clone(),
-                    fields: fields
-                        .iter()
-                        .map(|(f, f_t)| {
-                            (f.clone(), str_to_keel_type(f_t, state.structs, *span, src))
-                        })
-                        .collect(),
-                    id: state.structs.len() as u16,
+                    fields: Box::from([]),
+                    id: struct_id,
                 });
+                let parsed_fields = fields
+                    .iter()
+                    .map(|(f, f_t)| (f.clone(), str_to_keel_type(f_t, state.structs, *span, src)))
+                    .collect();
+                state.structs[struct_id as usize].fields = parsed_fields;
                 state.struct_fields.push((
                     name.clone(),
                     fields
@@ -2499,19 +2501,22 @@ fn parse_toplevel(
                 });
             }
             Expr::StructDeclare(name, fields, span) => {
+                let struct_id = structs.len() as u16;
                 structs.push(Struct {
                     name: name.clone(),
-                    fields: fields
-                        .iter()
-                        .map(|(f, f_t)| {
-                            (
-                                f.clone(),
-                                str_to_keel_type(f_t, structs, span, use_line_markers),
-                            )
-                        })
-                        .collect(),
-                    id: structs.len() as u16,
+                    fields: Box::from([]),
+                    id: struct_id,
                 });
+                let parsed_fields = fields
+                    .iter()
+                    .map(|(f, f_t)| {
+                        (
+                            f.clone(),
+                            str_to_keel_type(f_t, structs, span, use_line_markers),
+                        )
+                    })
+                    .collect();
+                structs[struct_id as usize].fields = parsed_fields;
                 struct_fields.push((
                     name.clone(),
                     fields

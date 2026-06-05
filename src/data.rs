@@ -126,7 +126,7 @@ impl Data {
         if s.len() <= 6 {
             Self::small_str(s)
         } else {
-            if free_strings.is_empty() && string_pool.len() >= (*gc_string_threshold as usize) {
+            if string_pool.len() >= (*gc_string_threshold as usize) && free_strings.is_empty() {
                 raise_string_gc_threshold(gc_string_threshold, string_pool.len());
                 string_gc(
                     array_pool,
@@ -161,7 +161,7 @@ impl Data {
         if s.len() <= 6 {
             Self::small_str(&s)
         } else {
-            if free_strings.is_empty() && string_pool.len() >= (*gc_string_threshold as usize) {
+            if string_pool.len() >= (*gc_string_threshold as usize) && free_strings.is_empty() {
                 raise_string_gc_threshold(gc_string_threshold, string_pool.len());
                 string_gc(
                     array_pool,

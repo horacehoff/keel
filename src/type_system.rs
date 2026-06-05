@@ -94,8 +94,9 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
     let mut expr_stack: Vec<&Expr> = content.iter().collect();
     while let Some(expression) = expr_stack.pop() {
         match expression {
-            Expr::FunctionCall(_, namespace, _, _) => {
+            Expr::FunctionCall(args, namespace, _, _) => {
                 calls.push(namespace.last().unwrap().clone());
+                expr_stack.extend(args.iter());
             }
             Expr::Condition(x, y, _)
             | Expr::InlineCondition(x, y, _)
@@ -135,6 +136,18 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 expr_stack.push(value);
             }
             Expr::Array(elems, _) => expr_stack.extend(elems.iter()),
+            Expr::Struct(_, fields, _) => {
+                expr_stack.extend(fields.iter().map(|(_, expr, _)| expr));
+            }
+            Expr::GetStructField(expr, _, _, _) => expr_stack.push(expr),
+            Expr::SetStructField(expr, _, value, _, _) => {
+                expr_stack.push(expr);
+                expr_stack.push(value);
+            }
+            Expr::TryCatchBlock(try_code, _, catch_code) => {
+                expr_stack.extend(try_code.iter());
+                expr_stack.extend(catch_code.iter());
+            }
             Expr::ArrayGetIndex(x, y, _)
             | Expr::Mul(x, y, _)
             | Expr::Div(x, y, _)

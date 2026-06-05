@@ -18,6 +18,7 @@ use crate::parser_data::ErrorCatch;
 use crate::parser_data::Pools;
 use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
+use memchr::memmem;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::hint::cold_path;
@@ -861,7 +862,10 @@ pub fn execute(
                     let str = reg.as_str(string_pool);
                     let temp_arg = r!(args.pop().unwrap_unchecked());
                     let arg = temp_arg.as_str(string_pool);
-                    *w!(dest) = str.contains(arg).into();
+                    // *w!(dest) = str.contains(arg).into();
+                    *w!(dest) = memmem::find(str.as_bytes(), arg.as_bytes())
+                        .is_some()
+                        .into();
                 } else if reg.is_array() {
                     let arg = r!(args.pop().unwrap_unchecked());
                     *w!(dest) = unsafe { obj_pool.get_unchecked(reg.as_array()) }
@@ -884,7 +888,15 @@ pub fn execute(
                     let str = reg.as_str(string_pool);
                     let temp_elem = r!(args.pop().unwrap_unchecked());
                     let element = temp_elem.as_str(string_pool);
-                    *w!(dest) = if let Some(idx) = str.find(element) {
+                    // *w!(dest) = if let Some(idx) = str.find(element) {
+                    //     idx as i32
+                    // } else {
+                    //     cold_path();
+                    //     -1
+                    // }
+                    // .into();
+                    *w!(dest) = if let Some(idx) = memmem::find(str.as_bytes(), element.as_bytes())
+                    {
                         idx as i32
                     } else {
                         cold_path();
@@ -1107,15 +1119,13 @@ pub fn execute(
                     let source = source.as_str(string_pool);
                     let separator_data = r!(separator);
                     let separator = separator_data.as_str(string_pool);
-                    let output_len = if separator.is_empty() {
-                        source.len() + 2
-                    } else {
-                        source.matches(separator).count() + 1
-                    };
                     let output = unsafe { obj_pool.get_unchecked_mut(output_str_reg_id as usize) };
                     output.clear();
-                    output.reserve(output_len);
-                    for part in source.split(separator) {
+                    output.reserve(source.len() / 4);
+                    let separator_len = separator.len();
+                    let mut i = 0;
+                    for part_i in memmem::find_iter(source.as_bytes(), separator.as_bytes()) {
+                        let part = &source[i..part_i];
                         output.push({
                             if part.len() <= 6 {
                                 Data::small_str(part)
@@ -1128,7 +1138,21 @@ pub fn execute(
                                 Data::large_str_id(id)
                             }
                         });
+                        i = part_i + separator_len;
                     }
+                    let part = &source[i..];
+                    output.push({
+                        if part.len() <= 6 {
+                            Data::small_str(part)
+                        } else if let Some(id) = free_strings.pop() {
+                            part.clone_into(&mut string_pool[id as usize]);
+                            Data::large_str_id(id as u64)
+                        } else {
+                            let id = string_pool.len() as u64;
+                            string_pool.push(part.to_owned());
+                            Data::large_str_id(id)
+                        }
+                    });
                     raise_string_gc_threshold(&mut gc_string_threshold, string_pool.len());
                     *w!(dest_register) = Data::array(output_str_reg_id);
                 } else if source.is_array() {

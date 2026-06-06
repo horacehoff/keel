@@ -48,7 +48,7 @@ pub fn std_lib_functions(
         }
         "type" => {
             check_args!(args, 1, name, src, markers);
-            let infered = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let infered = infer_type(&args[0], v, ctx, state);
             state.registers.push(Data::p_str(
                 &infered.to_string(),
                 &mut state.pools.string_pool,
@@ -290,9 +290,26 @@ pub fn std_lib_functions(
             output.push(Instr::ThrowError(err_reg_id));
         }
         fn_name => {
-            return Some(handle_user_function(
-                fn_name, output, v, ctx, state, args, markers, offset, single_run,
-            ));
+            if let Some((_, fn_id)) = state
+                .namespace
+                .fns
+                .iter_mut()
+                .find(|(func_name, _)| func_name == fn_name)
+            {
+                return Some(handle_user_function(
+                    fn_name,
+                    *fn_id as usize,
+                    output,
+                    v,
+                    ctx,
+                    state,
+                    args,
+                    markers,
+                    offset,
+                    single_run,
+                ));
+            }
+            throw_parser_error(src, markers, ErrType::UnknownFunction(fn_name));
         }
     }
     None

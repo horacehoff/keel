@@ -26,6 +26,7 @@ use std::rc::Rc;
 
 pub fn handle_user_function(
     fn_name: &str,
+    fn_id: usize,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -36,42 +37,42 @@ pub fn handle_user_function(
     single_run: bool,
 ) -> u16 {
     let src = ctx.src;
-    // Lookup function by name in function registry
-    let function_id = state
-        .fns
-        .iter_mut()
-        .position(|func| func.name == fn_name)
-        .unwrap_or_else(|| {
-            throw_parser_error(src, markers, ErrType::UnknownFunction(fn_name));
-        });
-    let fn_id = state.fns[function_id].id;
+    // let fn_id = state
+    //     .namespace
+    //     .fns
+    //     .iter_mut()
+    //     .find(|(func_name, _)| func_name == fn_name)
+    //     .unwrap_or_else(|| {
+    //         throw_parser_error(src, markers, ErrType::UnknownFunction(fn_name));
+    //     })
+    //     .1 as usize;
 
     // Lazily resolve mutual recursion the first time this function is compiled
-    let is_recursive = if let Some(is_recursive) = state.fns[function_id].is_recursive {
+    let is_recursive = if let Some(is_recursive) = state.fns[fn_id].is_recursive {
         is_recursive
     } else {
-        let name = state.fns[function_id].name.clone();
+        let name = state.fns[fn_id].name.clone();
         let mut visited = HashSet::new();
         visited.insert(name.clone());
         let is_recursive = can_reach(&name, &name, state.fns, &mut visited);
-        state.fns[function_id].is_recursive = Some(is_recursive);
+        state.fns[fn_id].is_recursive = Some(is_recursive);
         is_recursive
     };
 
-    let fn_returns_void = state.fns[function_id].returns_void;
+    let fn_returns_void = state.fns[fn_id].returns_void;
 
     // Check if the arguments are correct
-    let args_len = state.fns[function_id].args.len();
+    let args_len = state.fns[fn_id].args.len();
     check_args!(args, args_len, fn_name, src, markers);
 
     // Infer arg types
     let infered_arg_types = args
         .iter()
-        .map(|x| infer_type(x, v, state.fns, state.structs, src, state.dyn_libs))
+        .map(|x| infer_type(x, v, ctx, state))
         .collect::<Vec<DataType>>();
 
     // Try to check if function has already been compiled for these specific arg types
-    let fn_impl_idx = state.fns[function_id]
+    let fn_impl_idx = state.fns[fn_id]
         .impls
         .iter()
         .position(|fn_impl| *fn_impl.arg_types == infered_arg_types);
@@ -80,28 +81,28 @@ pub fn handle_user_function(
         // If it hasn't, compile it (which adds it to the function's implementation list)
 
         // Clone only when actually compiling a new specialisation
-        let fn_args: Box<[SmolStr]> = state.fns[function_id].args.clone();
-        let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[function_id].code);
+        let fn_args: Box<[SmolStr]> = state.fns[fn_id].args.clone();
+        let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[fn_id].code);
         compile_function(
             output,
             v,
             ctx,
             state,
-            function_id,
+            fn_id,
             &fn_args,
             fn_name,
             &infered_arg_types,
             args,
             &fn_code,
-            fn_id,
+            fn_id as u16,
             is_recursive,
             offset,
         );
     }
     // Re-derive index after possible mutation
-    let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.fns[function_id].impls.len() - 1);
-    let loc = state.fns[function_id].impls[fn_impl_idx].loc;
-    let args_loc_len = state.fns[function_id].impls[fn_impl_idx].args_loc.len();
+    let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
+    let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+    let args_loc_len = state.fns[fn_id].impls[fn_impl_idx].args_loc.len();
 
     let saveframe_loc = output.len();
     let callsite_id = if is_recursive {
@@ -116,7 +117,7 @@ pub fn handle_user_function(
     // Move evaluated call args into the expected arg slots
     #[allow(clippy::needless_range_loop)]
     for i in 0..args_loc_len {
-        let tgt_id = state.fns[function_id].impls[fn_impl_idx].args_loc[i];
+        let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
 
         let start_len = output.len();
         let arg_id = get_id(
@@ -139,7 +140,7 @@ pub fn handle_user_function(
     if !is_recursive {
         state
             .fn_registers
-            .get_mut(fn_id as usize)
+            .get_mut(fn_id)
             .unwrap()
             .extend(get_tgt_ids(&output[saveframe_loc..]));
     }
@@ -240,15 +241,7 @@ fn compile_function(
                 var_type: infered_type.clone(),
             });
         });
-    let fn_type = track_returns(
-        fn_code,
-        v,
-        state.fns,
-        state.structs,
-        fn_src,
-        fn_name,
-        state.dyn_libs,
-    );
+    let fn_type = track_returns(fn_code, v, ctx, state, fn_name);
     let return_type = if fn_type.is_empty() {
         // If function doesn't return anything, return nothing
         DataType::Null

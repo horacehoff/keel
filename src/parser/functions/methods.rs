@@ -22,11 +22,9 @@ pub fn handle_method_calls(
     offset: u16,
     single_run: bool,
 ) {
-    let src = ctx.src;
-
     let name = namespace[namespace.len() - 1].as_str();
 
-    let obj_type = infer_type(obj, v, state.fns, state.structs, src, state.dyn_libs);
+    let obj_type = infer_type(obj, v, ctx, state);
     let id = get_id(obj, v, ctx, state, output, None, false, offset, single_run);
     free_register(
         id,

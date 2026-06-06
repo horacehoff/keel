@@ -176,7 +176,7 @@ pub fn std_lib_methods(
         "contains" => {
             check!(DataType::Array(_) | DataType::String, "Array or String", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if obj_type == DataType::String && arg_type != DataType::String {
                 throw_parser_error(
                     src,
@@ -212,7 +212,7 @@ pub fn std_lib_methods(
         "trim_sequence" => {
             check!(DataType::String, "String", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::String {
                 throw_parser_error(
                     src,
@@ -235,7 +235,7 @@ pub fn std_lib_methods(
         "find" => {
             check!(DataType::String | DataType::Array(_), "Array or String", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if let DataType::Array(Some(array_elem_type)) = &obj_type {
                 if **array_elem_type != arg_type {
                     throw_parser_error(
@@ -318,7 +318,7 @@ pub fn std_lib_methods(
         "trim_sequence_left" => {
             check!(DataType::String, "String", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::String {
                 throw_parser_error(
                     src,
@@ -341,7 +341,7 @@ pub fn std_lib_methods(
         "trim_sequence_right" => {
             check!(DataType::String, "String", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::String {
                 throw_parser_error(
                     src,
@@ -364,7 +364,7 @@ pub fn std_lib_methods(
         "repeat" => {
             check!(DataType::String | DataType::Array(_), "Array or String", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::Int {
                 throw_parser_error(
                     src,
@@ -388,7 +388,7 @@ pub fn std_lib_methods(
         "push" => {
             check!(DataType::Array(_), "Array", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if let DataType::Array(Some(array_elem_type)) = &obj_type
                 && **array_elem_type != arg_type
             {
@@ -486,7 +486,7 @@ pub fn std_lib_methods(
         "split" => {
             check!(DataType::String, "String", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if obj_type != arg_type {
                 throw_parser_error(
                     src,
@@ -508,7 +508,7 @@ pub fn std_lib_methods(
         "partition" => {
             check!(DataType::Array(_), "Array", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if let DataType::Array(Some(array_elem_type)) = obj_type
                 && *array_elem_type != arg_type
             {
@@ -542,8 +542,7 @@ pub fn std_lib_methods(
             }
             check_args_range!(args, 0, 1, "join", src, fn_markers);
             if !args.is_empty() {
-                let arg_type =
-                    infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+                let arg_type = infer_type(&args[0], v, ctx, state);
                 if arg_type != DataType::String {
                     throw_parser_error(
                         src,
@@ -566,7 +565,7 @@ pub fn std_lib_methods(
         "remove" => {
             check!(DataType::Array(_), "Array", 1);
 
-            let arg_type = infer_type(&args[0], v, state.fns, state.structs, src, state.dyn_libs);
+            let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::Int {
                 throw_parser_error(
                     src,

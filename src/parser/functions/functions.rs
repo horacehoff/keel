@@ -8,6 +8,7 @@ use crate::expr::Expr;
 use crate::expr::Span;
 use crate::fs_lib_functions::fs_lib_functions;
 use crate::instr::Instr;
+use crate::parser::Namespace;
 use crate::parser::get_id;
 use crate::parser_data::Ctx;
 use crate::parser_data::State;
@@ -16,6 +17,7 @@ use crate::registers::free_register;
 use crate::std_lib_functions::std_lib_functions;
 use crate::type_system::DataType;
 use crate::type_system::infer_type;
+use crate::user_functions::handle_user_function;
 use smol_strc::SmolStr;
 use std::slice;
 
@@ -28,14 +30,7 @@ pub fn check_arg_type(
     arg_idx: usize,
     expected: &[DataType],
 ) {
-    let inferred = infer_type(
-        &args[arg_idx],
-        v,
-        state.fns,
-        state.structs,
-        ctx.src,
-        state.dyn_libs,
-    );
+    let inferred = infer_type(&args[arg_idx], v, ctx, state);
     let matches = if let DataType::Poly(polytype) = &inferred {
         polytype.iter().all(|x| expected.contains(x))
     } else {
@@ -48,6 +43,18 @@ pub fn check_arg_type(
             ErrType::InvalidArgType(expected, inferred),
         );
     }
+}
+
+fn walk_namespace_fn(root: &Namespace, path: &[SmolStr], fn_name: &str) -> Option<u16> {
+    let mut current = root;
+    for sub in path {
+        current = current.children.iter().find(|n| n.name == *sub)?;
+    }
+    current
+        .fns
+        .iter()
+        .find(|(n, _)| n.as_str() == fn_name)
+        .map(|(_, id)| *id)
 }
 
 pub fn handle_functions(
@@ -136,19 +143,30 @@ pub fn handle_functions(
             markers,
             current_src_file,
         ));
-    } else {
-        throw_parser_error(
-            src,
+    } else if let Some(fn_id) = walk_namespace_fn(state.namespace, namespace, name) {
+        return Some(handle_user_function(
+            name,
+            fn_id as usize,
+            output,
+            v,
+            ctx,
+            state,
+            args,
             markers,
-            ErrType::UnknownNamespace(
-                namespace
-                    .iter()
-                    .map(|x| (*x).to_string())
-                    .collect::<Vec<String>>()
-                    .join("::")
-                    .as_str(),
-            ),
-        );
+            offset,
+            single_run,
+        ));
     }
-    None
+    throw_parser_error(
+        src,
+        markers,
+        ErrType::UnknownNamespace(
+            namespace
+                .iter()
+                .map(|x| (*x).to_string())
+                .collect::<Vec<String>>()
+                .join("::")
+                .as_str(),
+        ),
+    );
 }

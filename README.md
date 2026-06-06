@@ -259,12 +259,12 @@ You can throw errors with `throw("error here")`, which raises a catchable error.
 You can import other `.kl` files with the following syntax:
 
 ```keel
-use "fibonacci_lib.kl"
+import "fibonacci_lib.kl" // all functions/structs are available under fibonacci_lib::
+import "other_lib.kl" as mylib // all functions/structs are available under mylib::
 
-fn main() {print(fibonacci(25));}
+fn main() {print(mylib::my_func(42));}
 ```
 
-All top-level functions from the imported file become available immediately.
 Imports can be nested, and circular imports trigger an error and crash the program.
 
 ### Importing dynamic libraries
@@ -273,7 +273,7 @@ You can load functions from dynamic libraries by specifying each function's
 signature, with the following syntax:
 
 ```rust
-import "dynamic_library_path" {
+dylib "dynamic_library_path" {
   function_return_type function_name(function_arg_type_1, function_arg_type_1, ..., function_arg_type_n);
 }
 ```
@@ -281,7 +281,7 @@ import "dynamic_library_path" {
 For example:
 
 ```rust
-import "my_test.dylib" {
+dylib "my_test.dylib" {
     int add(int, int);
     float add(float, float);
     string add(string, string);
@@ -307,7 +307,7 @@ If the extension is omitted, Keel will choose the correct extension based on you
 // On macOS, it will try to load "my_test.dylib".
 // On Windows, it will try to load "my_test.dll".
 // On Linux, it will try to load "my_test.so".
-import "my_test" {
+dylib "my_test" {
     int add(int, int);
     float add(float, float);
     string add(string, string);

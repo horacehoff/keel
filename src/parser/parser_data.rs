@@ -2,6 +2,7 @@ use crate::data::Data;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::instr::Instr;
+use crate::parser::Namespace;
 use crate::type_system::DataType;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
@@ -13,7 +14,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct ErrorCatch {
     pub catch_loc: u32,
     pub error_reg: u16,
@@ -21,14 +22,13 @@ pub struct ErrorCatch {
     pub args_len: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Function {
     pub name: SmolStr,
     pub args: Box<[SmolStr]>,
     pub code: Rc<[Expr]>,
     pub impls: Vec<FunctionImpl>,
     pub is_recursive: Option<bool>,
-    pub id: u16,
     pub returns_void: bool,
     pub src_file: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
@@ -36,7 +36,7 @@ pub struct Function {
     pub direct_calls: Box<[SmolStr]>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FunctionImpl {
     pub loc: u16,
     pub args_loc: Box<[u16]>,
@@ -80,14 +80,13 @@ impl DynamicLibFn {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Struct {
     pub name: SmolStr,
     pub fields: Box<[(SmolStr, DataType)]>,
     pub id: u16,
 }
 
-#[derive(Clone)]
 pub struct Pools {
     pub obj_pool: ObjectPool,
     pub string_pool: StringPool,
@@ -117,9 +116,10 @@ pub struct State<'a> {
     pub free_registers: &'a mut Vec<u16>,
     pub sources: &'a mut Vec<(SmolStr, Rc<String>)>,
     pub reserved_registers: HashSet<u16, RandomState>,
+    pub namespace: &'a mut Namespace,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Variable {
     pub name: SmolStr,
     pub register_id: u16,

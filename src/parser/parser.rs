@@ -267,6 +267,18 @@ fn parse_loop_flow_control(
     });
 }
 
+pub fn walk_namespace_struct(root: &Namespace, path: &[SmolStr], fn_name: &str) -> Option<usize> {
+    let mut current = root;
+    for sub in path {
+        current = current.children.iter().find(|n| n.name == *sub)?;
+    }
+    current
+        .structs
+        .iter()
+        .find(|(n, _)| n.as_str() == fn_name)
+        .map(|(_, id)| *id as usize)
+}
+
 pub fn get_id(
     input: &Expr,
     v: &mut Vec<Variable>,
@@ -281,10 +293,7 @@ pub fn get_id(
     let src = ctx.src;
     macro_rules! uniform_op {
         ($instr: ident,$symbol:expr, $l: expr, $r: expr, $markers: expr, $type:expr) => {{
-            let (t_l, t_r) = (
-                infer_type($l, v, state.fns, state.structs, src, state.dyn_libs),
-                infer_type($r, v, state.fns, state.structs, src, state.dyn_libs),
-            );
+            let (t_l, t_r) = (infer_type($l, v, ctx, state), infer_type($r, v, ctx, state));
             if t_l != $type || t_r != $type {
                 throw_parser_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
             }
@@ -315,10 +324,7 @@ pub fn get_id(
             id
         }};
         ($instr: ident, $instr2:ident,$symbol:expr, $l: expr, $r: expr, $markers: expr, $type1:expr, $type2:expr) => {{
-            let (t_l, t_r) = (
-                infer_type($l, v, state.fns, state.structs, src, state.dyn_libs),
-                infer_type($r, v, state.fns, state.structs, src, state.dyn_libs),
-            );
+            let (t_l, t_r) = (infer_type($l, v, ctx, state), infer_type($r, v, ctx, state));
             if !((t_l == $type1 && t_r == $type1) || (t_l == $type2 && t_r == $type2)) {
                 throw_parser_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
             }
@@ -444,11 +450,11 @@ pub fn get_id(
         }
         Expr::Array(elems, markers) => {
             if let Some(first) = elems.first() {
-                let first_type =
-                    infer_type(first, v, state.fns, state.structs, src, state.dyn_libs);
-                if !elems.iter().all(|x| {
-                    infer_type(x, v, state.fns, state.structs, src, state.dyn_libs) == first_type
-                }) {
+                let first_type = infer_type(first, v, ctx, state);
+                if !elems
+                    .iter()
+                    .all(|x| infer_type(x, v, ctx, state) == first_type)
+                {
                     throw_parser_error(src, *markers, ErrType::ArrayWithDiffType);
                 }
             }
@@ -541,8 +547,10 @@ pub fn get_id(
                 }
             }
         }
-        Expr::Struct(name, fields, span) => {
-            let Some(expected_struct_idx) = state.structs.iter().rposition(|s| &s.name == name)
+        Expr::Struct(namespace, fields, span) => {
+            let name = &namespace[namespace.len() - 1];
+            let namespace = &namespace[..(namespace.len() - 1)];
+            let Some(expected_struct_idx) = walk_namespace_struct(state.namespace, namespace, name)
             else {
                 throw_parser_error(src, *span, ErrType::UnknownStruct(name));
             };
@@ -565,18 +573,11 @@ pub fn get_id(
             };
             if single_run {
                 for field_idx in 0..expected_fields_len {
-                    let field = &state.structs[expected_struct_idx].fields[field_idx];
-                    if let Some((_, field_expr, field_span)) =
-                        fields.iter().find(|(f, _, _)| f == &field.0)
-                    {
-                        let field_type = infer_type(
-                            field_expr,
-                            v,
-                            state.fns,
-                            state.structs,
-                            src,
-                            state.dyn_libs,
-                        );
+                    if let Some((_, field_expr, field_span)) = fields.iter().find(|(f, _, _)| {
+                        f == &state.structs[expected_struct_idx].fields[field_idx].0
+                    }) {
+                        let field_type = infer_type(field_expr, v, ctx, state);
+                        let field = &state.structs[expected_struct_idx].fields[field_idx];
                         if field_type != field.1 {
                             throw_parser_error(
                                 src,
@@ -612,7 +613,14 @@ pub fn get_id(
                             ));
                         }
                     } else {
-                        throw_parser_error(src, *span, ErrType::StructMissingField(name, &field.0));
+                        throw_parser_error(
+                            src,
+                            *span,
+                            ErrType::StructMissingField(
+                                name,
+                                &state.structs[expected_struct_idx].fields[field_idx].0,
+                            ),
+                        );
                     }
                 }
 
@@ -624,18 +632,11 @@ pub fn get_id(
                 let mut dynamic: Vec<(Vec<Instr>, u16, u16)> =
                     Vec::with_capacity(expected_fields_len);
                 for field_idx in 0..expected_fields_len {
-                    let field = &state.structs[expected_struct_idx].fields[field_idx];
-                    if let Some((_, field_expr, field_span)) =
-                        fields.iter().find(|(f, _, _)| f == &field.0)
-                    {
-                        let field_type = infer_type(
-                            field_expr,
-                            v,
-                            state.fns,
-                            state.structs,
-                            src,
-                            state.dyn_libs,
-                        );
+                    if let Some((_, field_expr, field_span)) = fields.iter().find(|(f, _, _)| {
+                        f == &state.structs[expected_struct_idx].fields[field_idx].0
+                    }) {
+                        let field_type = infer_type(field_expr, v, ctx, state);
+                        let field = &state.structs[expected_struct_idx].fields[field_idx];
                         if field_type != field.1 {
                             throw_parser_error(
                                 src,
@@ -668,7 +669,14 @@ pub fn get_id(
                             dynamic.push((compiled_field, c_id, field_idx as u16));
                         }
                     } else {
-                        throw_parser_error(src, *span, ErrType::StructMissingField(name, &field.0));
+                        throw_parser_error(
+                            src,
+                            *span,
+                            ErrType::StructMissingField(
+                                name,
+                                &state.structs[expected_struct_idx].fields[field_idx].0,
+                            ),
+                        );
                     }
                 }
 
@@ -691,14 +699,7 @@ pub fn get_id(
             }
         }
         Expr::GetStructField(struct_expr, field, struct_span, field_span) => {
-            let t = infer_type(
-                struct_expr,
-                v,
-                state.fns,
-                state.structs,
-                src,
-                state.dyn_libs,
-            );
+            let t = infer_type(struct_expr, v, ctx, state);
             if let DataType::Struct(s_id) = t {
                 let s = &state.structs[s_id as usize];
                 let idx = s
@@ -740,7 +741,7 @@ pub fn get_id(
         }
         // array[index]
         Expr::ArrayGetIndex(array, index, markers) => {
-            let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
+            let infered = infer_type(array, v, ctx, state);
             if !is_type_indexable(&infered) {
                 throw_parser_error(src, *markers, ErrType::NotIndexable(&infered));
             }
@@ -749,8 +750,7 @@ pub fn get_id(
                 array, v, ctx, state, output, None, false, offset, single_run,
             );
 
-            let index_inferred =
-                infer_type(index, v, state.fns, state.structs, src, state.dyn_libs);
+            let index_inferred = infer_type(index, v, ctx, state);
             if index_inferred != DataType::Int {
                 throw_parser_error(src, *markers, ErrType::InvalidIndexType(&index_inferred));
             }
@@ -783,15 +783,14 @@ pub fn get_id(
         }
         // array[start..end]
         Expr::ArrayGetSlice(array, idx_start, idx_end, markers) => {
-            let infered = infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
+            let infered = infer_type(array, v, ctx, state);
             if !is_type_indexable(&infered) {
                 throw_parser_error(src, *markers, ErrType::NotIndexable(&infered));
             }
             let id = get_id(
                 array, v, ctx, state, output, None, false, offset, single_run,
             );
-            let idx_start_inferred =
-                infer_type(idx_start, v, state.fns, state.structs, src, state.dyn_libs);
+            let idx_start_inferred = infer_type(idx_start, v, ctx, state);
             if idx_start_inferred != DataType::Int {
                 throw_parser_error(
                     src,
@@ -802,8 +801,7 @@ pub fn get_id(
             let idx_start_id = get_id(
                 idx_start, v, ctx, state, output, None, false, offset, single_run,
             );
-            let idx_end_inferred =
-                infer_type(idx_end, v, state.fns, state.structs, src, state.dyn_libs);
+            let idx_end_inferred = infer_type(idx_end, v, ctx, state);
             if idx_end_inferred != DataType::Int {
                 throw_parser_error(src, *markers, ErrType::InvalidIndexType(&idx_end_inferred));
             }
@@ -877,8 +875,8 @@ pub fn get_id(
             id
         }
         Expr::Add(l, r, markers) => {
-            let t_l = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
-            let t_r = infer_type(r, v, state.fns, state.structs, src, state.dyn_libs);
+            let t_l = infer_type(l, v, ctx, state);
+            let t_r = infer_type(r, v, ctx, state);
             if t_l != t_r
                 || !matches!(
                     t_l,
@@ -952,8 +950,8 @@ pub fn get_id(
             id
         }
         Expr::Sub(l, r, markers) => {
-            let t_l = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
-            let t_r = infer_type(r, v, state.fns, state.structs, src, state.dyn_libs);
+            let t_l = infer_type(l, v, ctx, state);
+            let t_r = infer_type(r, v, ctx, state);
             if !((t_l == DataType::Float && t_r == DataType::Float)
                 || (t_l == DataType::Int && t_r == DataType::Int))
             {
@@ -1048,8 +1046,8 @@ pub fn get_id(
             )
         }
         Expr::Eq(l, r) => {
-            let l_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
-            let r_type = infer_type(r, v, state.fns, state.structs, src, state.dyn_libs);
+            let l_type = infer_type(l, v, ctx, state);
+            let r_type = infer_type(r, v, ctx, state);
             let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
                 && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
             let is_string = l_type == DataType::String || r_type == DataType::String;
@@ -1088,8 +1086,8 @@ pub fn get_id(
             id
         }
         Expr::NotEq(l, r) => {
-            let l_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
-            let r_type = infer_type(r, v, state.fns, state.structs, src, state.dyn_libs);
+            let l_type = infer_type(l, v, ctx, state);
+            let r_type = infer_type(r, v, ctx, state);
             let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
                 && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
             let is_string = l_type == DataType::String || r_type == DataType::String;
@@ -1182,7 +1180,7 @@ pub fn get_id(
             uniform_op!(BoolOr, "||", l, r, *markers, DataType::Bool)
         }
         Expr::Neg(l, markers) => {
-            let operand_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
+            let operand_type = infer_type(l, v, ctx, state);
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             free_register(
                 id_l,
@@ -1210,7 +1208,7 @@ pub fn get_id(
             id
         }
         Expr::BoolNeg(l, markers) => {
-            let operand_type = infer_type(l, v, state.fns, state.structs, src, state.dyn_libs);
+            let operand_type = infer_type(l, v, ctx, state);
             let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
             free_register(
                 id_l,
@@ -1509,8 +1507,7 @@ pub fn compile_expr(
 
             // x[y] = z;
             Expr::ArrayModify(array, index, value, index_markers, elem_markers) => {
-                let array_type =
-                    infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
+                let array_type = infer_type(array, v, ctx, state);
                 if !is_type_indexable(&array_type) {
                     throw_parser_error(src, *index_markers, ErrType::NotIndexable(&array_type));
                 }
@@ -1539,7 +1536,7 @@ pub fn compile_expr(
                     single_run,
                 );
 
-                let elem_type = infer_type(value, v, state.fns, state.structs, src, state.dyn_libs);
+                let elem_type = infer_type(value, v, ctx, state);
                 let elem_id = get_id(
                     value,
                     v,
@@ -1593,16 +1590,8 @@ pub fn compile_expr(
                 );
             }
             Expr::SetStructField(struct_expr, field, new_val, struct_span, field_span) => {
-                let t = infer_type(
-                    struct_expr,
-                    v,
-                    state.fns,
-                    state.structs,
-                    src,
-                    state.dyn_libs,
-                );
-                let new_val_type =
-                    infer_type(new_val, v, state.fns, state.structs, src, state.dyn_libs);
+                let t = infer_type(struct_expr, v, ctx, state);
+                let new_val_type = infer_type(new_val, v, ctx, state);
                 let DataType::Struct(struct_id) = t else {
                     throw_parser_error(
                         src,
@@ -1823,8 +1812,7 @@ pub fn compile_expr(
                 // parse the array, get its id (the target array is the first Expr in array_code)
                 let array = array_code.first().unwrap();
                 let code = &array_code[1..];
-                let array_type =
-                    infer_type(array, v, state.fns, state.structs, src, state.dyn_libs);
+                let array_type = infer_type(array, v, ctx, state);
                 let array = get_id(
                     array,
                     v,
@@ -1984,8 +1972,8 @@ pub fn compile_expr(
                 //
                 //
                 // Check start and elem type
-                let t1 = infer_type(start_elem, v, state.fns, state.structs, src, state.dyn_libs);
-                let t2 = infer_type(end_elem, v, state.fns, state.structs, src, state.dyn_libs);
+                let t1 = infer_type(start_elem, v, ctx, state);
+                let t2 = infer_type(end_elem, v, ctx, state);
                 if t1 != DataType::Int {
                     throw_parser_error(src, *markers1, ErrType::InvalidType(&DataType::Int, &t1));
                 }
@@ -2168,7 +2156,7 @@ pub fn compile_expr(
                 );
             }
             Expr::VarDeclare(x, y) => {
-                let var_type = infer_type(y, v, state.fns, state.structs, src, state.dyn_libs);
+                let var_type = infer_type(y, v, ctx, state);
 
                 let var_id = if single_run {
                     get_id(
@@ -2219,7 +2207,7 @@ pub fn compile_expr(
                 });
             }
             Expr::VarAssign(name, y, markers) => {
-                let var_type = infer_type(y, v, state.fns, state.structs, src, state.dyn_libs);
+                let var_type = infer_type(y, v, ctx, state);
                 let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
                     throw_parser_error(src, *markers, ErrType::UnknownVariable(name));
                 });
@@ -2334,6 +2322,10 @@ pub fn compile_expr(
                         .map(|(n, _)| n.clone())
                         .collect::<Vec<SmolStr>>(),
                 ));
+                state
+                    .namespace
+                    .structs
+                    .push((name.clone(), (state.structs.len() - 1) as u16));
             }
             Expr::FunctionCall(args, namespace, markers, args_indexes) => {
                 let output_id = handle_functions(
@@ -2384,19 +2376,23 @@ pub fn compile_expr(
                 }
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(y, &mut callees);
+                let fn_name = x.first().unwrap();
                 state.fns.push(Function {
-                    name: x.first().unwrap().clone(),
+                    name: fn_name.clone(),
                     args: x.into_iter().skip(1).cloned().collect(),
                     code: y.clone(),
                     impls: Vec::new(),
                     is_recursive: None,
-                    id: state.fn_registers.len() as u16,
                     returns_void: check_if_returns_void(y),
                     src_file: current_src_file,
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
                 });
                 state.fn_registers.push(Vec::new());
+                state
+                    .namespace
+                    .fns
+                    .push((fn_name.clone(), (state.fns.len() - 1) as u16));
             }
             Expr::ReturnVal(val) => {
                 if let Some(x) = &**val {
@@ -2457,6 +2453,14 @@ const DYLIB_EXT: &str = "so";
 #[cfg(target_os = "windows")]
 const DYLIB_EXT: &str = "dll";
 
+#[derive(Debug)]
+pub struct Namespace {
+    pub fns: Vec<(SmolStr, u16)>,
+    pub structs: Vec<(SmolStr, u16)>,
+    pub name: SmolStr,
+    pub children: Vec<Self>,
+}
+
 /// Recursively collects functions, dyn libs, and imported files
 fn parse_toplevel(
     code: Vec<Expr>,
@@ -2472,34 +2476,38 @@ fn parse_toplevel(
     sources: &mut Vec<(SmolStr, Rc<String>)>,
     visited_files: &mut HashSet<PathBuf>,
     dyn_fn_id: &mut u16,
+    namespace: &mut Namespace,
 ) {
     for expr in code {
         match expr {
-            Expr::FunctionDecl(namespace, fn_code, markers) => {
-                if let Some(func) = fns.iter().find(|f| f.name == namespace[0]) {
+            Expr::FunctionDecl(fn_namespace, fn_code, markers) => {
+                if let Some(func) = fns.iter().find(|f| f.name == fn_namespace[0]) {
                     let func_file = &sources[func.src_file as usize].0;
                     throw_parser_error(
                         use_line_markers,
                         markers,
-                        ErrType::DuplicateFunctionInImport(&namespace[0], func_file.as_str()),
+                        ErrType::DuplicateFunctionInImport(&fn_namespace[0], func_file.as_str()),
                     );
                 }
                 fn_registers.push(Vec::new());
                 let returns_void = check_if_returns_void(&fn_code);
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(&fn_code, &mut callees);
+
                 fns.push(Function {
-                    name: namespace[0].to_smolstr(),
-                    args: namespace[1..].into(),
+                    name: fn_namespace[0].clone(),
+                    args: fn_namespace[1..].into(),
                     code: fn_code,
                     impls: Vec::new(),
                     is_recursive: None,
-                    id: (fn_registers.len() - 1) as u16,
                     returns_void,
                     src_file: src_file_idx,
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
                 });
+                namespace
+                    .fns
+                    .push((fn_namespace[0].clone(), (fns.len() - 1) as u16));
             }
             Expr::StructDeclare(name, fields, span) => {
                 let struct_id = structs.len() as u16;
@@ -2525,6 +2533,7 @@ fn parse_toplevel(
                         .map(|(n, _)| n.clone())
                         .collect::<Vec<SmolStr>>(),
                 ));
+                namespace.structs.push((name, struct_id));
             }
             #[cfg(target_arch = "wasm32")]
             Expr::ImportDylib(_, _, _) => {
@@ -2609,7 +2618,7 @@ fn parse_toplevel(
             #[cfg(target_arch = "wasm32")]
             Expr::ImportFile(_, _) => wasm_error("WASM does not support importing files"),
             #[cfg(not(target_arch = "wasm32"))]
-            Expr::ImportFile(path, _alias, markers) => {
+            Expr::ImportFile(path, alias, markers) => {
                 let file_path = file_path
                     .parent()
                     .unwrap_or_else(|| Path::new("."))
@@ -2655,6 +2664,19 @@ fn parse_toplevel(
                     });
 
                 let import_src: (&str, &str) = (file_name.as_str(), file_contents.as_str());
+                let child_name = alias.unwrap_or_else(|| {
+                    file_path
+                        .file_prefix()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(path.as_str())
+                        .to_smolstr()
+                });
+                let mut child_namespace = Namespace {
+                    name: child_name,
+                    fns: Vec::new(),
+                    structs: Vec::new(),
+                    children: Vec::new(),
+                };
                 parse_toplevel(
                     file_code,
                     &file_path,
@@ -2669,7 +2691,9 @@ fn parse_toplevel(
                     sources,
                     visited_files,
                     dyn_fn_id,
+                    &mut child_namespace,
                 );
+                namespace.children.push(child_namespace);
             }
             _ => {}
         }
@@ -2731,7 +2755,12 @@ pub fn parse(
         .unwrap_or_else(|_| PathBuf::from(filename));
     let mut visited: HashSet<PathBuf> = HashSet::new();
     visited.insert(main_path.clone());
-
+    let mut namespace = Namespace {
+        name: SmolStr::new_static(""),
+        children: Vec::new(),
+        fns: Vec::new(),
+        structs: Vec::new(),
+    };
     let main_src: (&str, &str) = (filename, &contents);
     parse_toplevel(
         code,
@@ -2747,7 +2776,10 @@ pub fn parse(
         &mut sources,
         &mut visited,
         &mut dyn_fn_id,
+        &mut namespace,
     );
+    // dbg!(&namespace);
+    // dbg!(&functions);
 
     let ctx = Ctx {
         block_id: 0,
@@ -2770,6 +2802,7 @@ pub fn parse(
         free_registers: &mut free_registers,
         sources: &mut sources,
         reserved_registers: HashSet::default(),
+        namespace: &mut namespace,
     };
     let mut instructions = compile_expr(
         &state.fns

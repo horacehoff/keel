@@ -21,7 +21,7 @@ pub enum Expr {
     /// Array(contents, span)
     Array(Box<[Self]>, Span),
     /// Struct(name, fields, span)
-    Struct(SmolStr, Box<[(SmolStr, Self, Span)]>, Span),
+    Struct(Box<[SmolStr]>, Box<[(SmolStr, Self, Span)]>, Span),
     /// StructDeclare(name, fields, span)
     StructDeclare(SmolStr, Box<[(SmolStr, SmolStr)]>, Span),
     /// GetStructField(struct_expr, field, struct_span, field_span)

@@ -60,8 +60,8 @@ pub FnSignature:(SmolStr, Box<[DataType]>, DataType) = {
 }
 
 pub Import:Expr = {
-    <start: @L> "import" <path: String> <b: Block<FnSignature*>> <end: @R> => {
-        Expr::ImportDylib(path.trim_start_matches("import").trim().to_smolstr(), Box::from(b), span!(start, end))
+    <start: @L> "dylib" <path: String> <b: Block<FnSignature*>> <end: @R> => {
+        Expr::ImportDylib(path.trim_start_matches("dylib").trim().to_smolstr(), Box::from(b), span!(start, end))
     }
 }
 
@@ -69,7 +69,7 @@ pub FileStatement:Expr = {
     Function => <>,
     Import  => <>,
     StructDeclare => <>,
-    <l:@L> "use" <path: String> <alias: ("as" Var)?> <r:@R> => Expr::ImportFile(path,alias.map(|(_,a)|a), span!(l, r)),
+    <l:@L> "import" <path: String> <alias: ("as" Var)?> <r:@R> => Expr::ImportFile(path,alias.map(|(_,a)|a), span!(l, r)),
 }
 
 Comma<T>: Vec<T> = {
@@ -716,8 +716,16 @@ FunctionCall: Expr = {
 }
 
 Struct:Expr = {
-    <start: @L> <o1: Var> "{" <fields: Comma<(Var ":" Expression @L @R)>> "}" <end: @R> => {
-        Expr::Struct(o1, fields.into_iter().map(|(v,_,e,start,end)| (v,e,span!(start,end))).collect::<Vec<(SmolStr, Expr, Span)>>().into_boxed_slice(), span!(start,end))
+    <start: @L> <namespace: ItemBefore<Var, "::">+?> <o1: Var> "{" <fields: Comma<(Var ":" @L Expression @R)>> "}" <end: @R> => {
+        Expr::Struct({
+            if let Some(ns) = namespace {
+                let mut namespace = ns;
+                namespace.push(o1);
+                namespace.into_boxed_slice()
+            } else {
+                Box::from([o1])
+            }
+        }, fields.into_iter().map(|(v,_,start,e,end)| (v,e,span!(start,end))).collect::<Vec<(SmolStr, Expr, Span)>>().into_boxed_slice(), span!(start,end))
     }
 }
 

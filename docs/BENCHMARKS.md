@@ -8,7 +8,7 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [iter_fib.kl](examples/benchmarks/iter_fib/iter_fib.kl) | [iter_fib.py](examples/benchmarks/iter_fib/iter_fib.py) | [iter_fib.lua](examples/benchmarks/iter_fib/iter_fib.lua) |
+| [iter_fib.kl](/examples/benchmarks/iter_fib/iter_fib.kl) | [iter_fib.py](/examples/benchmarks/iter_fib/iter_fib.py) | [iter_fib.lua](/examples/benchmarks/iter_fib/iter_fib.lua) |
 | 76.1ms | 740ms | 72.5ms |
 
 
@@ -16,7 +16,7 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [fib.kl](examples/benchmarks/fib/fib.kl) | [fib.py](examples/benchmarks/fib/fib.py) | [fib.lua](examples/benchmarks/fib/fib.lua) |
+| [fib.kl](/examples/benchmarks/fib/fib.kl) | [fib.py](/examples/benchmarks/fib/fib.py) | [fib.lua](/examples/benchmarks/fib/fib.lua) |
 | 212.0ms | 507.4ms | 183.4ms |
 
 
@@ -27,12 +27,12 @@ Based on [this benchmark from The Computer Language Benchmarks Game](https://ben
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [nbody_lua.kl](examples/benchmarks/nbody/nbody_lua.kl) | [nbody_lua.py](examples/benchmarks/nbody/nbody_lua.py) | [nbody_lua.lua](examples/benchmarks/nbody/nbody_lua.lua) |
+| [nbody_lua.kl](/examples/benchmarks/nbody/nbody_lua.kl) | [nbody_lua.py](/examples/benchmarks/nbody/nbody_lua.py) | [nbody_lua.lua](/examples/benchmarks/nbody/nbody_lua.lua) |
 | 469.8ms | 2649ms | 458.5ms |
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [nbody_py.kl](examples/benchmarks/nbody/nbody_py.kl) | [nbody_py.py](examples/benchmarks/nbody/nbody_py.py) | [nbody_py.lua](examples/benchmarks/nbody/nbody_py.lua) |
+| [nbody_py.kl](/examples/benchmarks/nbody/nbody_py.kl) | [nbody_py.py](/examples/benchmarks/nbody/nbody_py.py) | [nbody_py.lua](/examples/benchmarks/nbody/nbody_py.lua) |
 | 582.4ms | 2726ms | 581.2ms |
 
 

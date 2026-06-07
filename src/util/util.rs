@@ -1,5 +1,4 @@
 use std::hint::cold_path;
-
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
 use crate::expr::Span;
@@ -13,7 +12,7 @@ pub fn parse_string(s: &str) -> SmolStr {
     let inner = &s[1..s.len() - 1]; // Strip the surrounding quotes
 
     // Return the stripped string directly if it doesn't contain any escape sequences
-    let Some(first_escape) = inner.find('\\') else {
+    let Some(first_escape) = memchr::memchr(b'\\', inner.as_bytes()) else {
         return SmolStr::from(inner);
     };
     let mut processed = String::with_capacity(inner.len());
@@ -22,7 +21,7 @@ pub fn parse_string(s: &str) -> SmolStr {
     processed.push_str(&inner[..first_escape]);
     let mut to_process = &inner[first_escape..];
     loop {
-        match to_process.find('\\') {
+        match memchr::memchr(b'\\', to_process.as_bytes()) {
             None => {
                 // there are no escape sequences left
                 processed.push_str(to_process);

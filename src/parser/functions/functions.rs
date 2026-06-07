@@ -156,8 +156,8 @@ pub fn handle_functions(
             offset,
             single_run,
         ));
-    }
-    throw_parser_error(
+    } else {
+        throw_parser_error(
         src,
         markers,
         ErrType::UnknownNamespace(
@@ -168,5 +168,7 @@ pub fn handle_functions(
                 .join("::")
                 .as_str(),
         ),
-    );
+        );
+    }
+    None
 }

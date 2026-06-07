@@ -6,3 +6,4 @@ test.kl
 *.c
 docs/benchmarks.py
 /lib_testing
+/testing

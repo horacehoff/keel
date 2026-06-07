@@ -1,0 +1,12 @@
+fn main() {
+    for _ in 0..200000 {
+        let a = 0;
+        let b = 1;
+        let c = 0;
+        for i in 0..45 {
+            c = a + b;
+            a = b;
+            b = c;
+        }
+    }
+}

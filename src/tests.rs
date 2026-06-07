@@ -3302,3 +3302,177 @@ pub fn struct_field_assign_wrong_type() {
         "
     );
 }
+
+#[test]
+pub fn nbody() {
+    run_and_check_registers!(
+        r#"
+        struct Body {
+            x: float,
+            y: float,
+            z: float,
+            vx: float,
+            vy: float,
+            vz: float,
+            mass: float
+        }
+
+        fn combinations(l) {
+            let result = [];
+            for x in ..l.len() - 1 {
+                let ls = l[x+1..l.len()];
+                for y in ls {
+                    result.push([l[x], y]);
+                }
+            }
+            return result;
+        }
+
+        fn advance(dt, n, bodies, pairs) {
+            for _ in ..n {
+                for pair in pairs {
+                    let b1 = pair[0];
+                    let b2 = pair[1];
+                    let dx = b1.x - b2.x;
+                    let dy = b1.y - b2.y;
+                    let dz = b1.z - b2.z;
+                    let mag = dt * ((dx * dx + dy * dy + dz * dz) ^ -1.5);
+                    let b1m = b1.mass * mag;
+                    let b2m = b2.mass * mag;
+                    b1.vx -= dx * b2m;
+                    b1.vy -= dy * b2m;
+                    b1.vz -= dz * b2m;
+                    b2.vx += dx * b1m;
+                    b2.vy += dy * b1m;
+                    b2.vz += dz * b1m;
+                }
+                for body in bodies {
+                    body.x += dt * body.vx;
+                    body.y += dt * body.vy;
+                    body.z += dt * body.vz;
+                }
+            }
+        }
+
+        fn report_energy(bodies, pairs) {
+            let e = 0.0;
+            for pair in pairs {
+                let b1 = pair[0];
+                let b2 = pair[1];
+                let dx = b1.x - b2.x;
+                let dy = b1.y - b2.y;
+                let dz = b1.z - b2.z;
+                e -= (b1.mass * b2.mass) / (dx * dx + dy * dy + dz * dz).sqrt();
+            }
+            for body in bodies {
+                e += body.mass * (body.vx * body.vx + body.vy * body.vy + body.vz * body.vz) / 2.0;
+            }
+            print(e);
+        }
+
+        fn offset_momentum(ref, bodies) {
+            let px = 0.0;
+            let py = 0.0;
+            let pz = 0.0;
+            for body in bodies {
+                px -= body.vx * body.mass;
+                py -= body.vy * body.mass;
+                pz -= body.vz * body.mass;
+            }
+            ref.vx = px / ref.mass;
+            ref.vy = py / ref.mass;
+            ref.vz = pz / ref.mass;
+        }
+
+        fn main() {
+            let PI = 3.14159265358979323;
+            let SOLAR_MASS = 4.0 * PI * PI;
+            let DAYS_PER_YEAR = 365.24;
+
+            let sun = Body {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                vx: 0.0,
+                vy: 0.0,
+                vz: 0.0,
+                mass: SOLAR_MASS
+            };
+
+            let jupiter = Body {
+                x: 4.84143144246472090,
+                y: -1.16032004402742839,
+                z: -0.103622044471123109,
+                vx: 0.00166007664274403694 * DAYS_PER_YEAR,
+                vy: 0.00769901118419740425 * DAYS_PER_YEAR,
+                vz: -0.0000690460016974260023 * DAYS_PER_YEAR,
+                mass: 0.000954791938424326609 * SOLAR_MASS
+            };
+
+            let saturn = Body {
+                x: 8.34336671824457987,
+                y: 4.12479856412430479,
+                z: -0.403523417114321381,
+                vx: -0.00276742510726862411 * DAYS_PER_YEAR,
+                vy: 0.00499852801234917238 * DAYS_PER_YEAR,
+                vz: 0.0000230417297573763929 * DAYS_PER_YEAR,
+                mass: 0.000285885980666130812 * SOLAR_MASS
+            };
+
+            let uranus = Body {
+                x: 12.8943695621391310,
+                y: -15.1111514016986312,
+                z: -0.223307578892655734,
+                vx: 0.00296460137564761618 * DAYS_PER_YEAR,
+                vy: 0.00237847173959480950 * DAYS_PER_YEAR,
+                vz: -0.0000296589568540237556 * DAYS_PER_YEAR,
+                mass: 0.0000436624404335156298 * SOLAR_MASS
+            };
+
+            let neptune = Body {
+                x: 15.3796971148509165,
+                y: -25.9193146099879641,
+                z: 0.179258772950371181,
+                vx: 0.00268067772490389322 * DAYS_PER_YEAR,
+                vy: 0.00162824170038242295 * DAYS_PER_YEAR,
+                vz: -0.0000951592254519715870 * DAYS_PER_YEAR,
+                mass: 0.0000515138902046611451 * SOLAR_MASS
+            };
+
+            let bodies = [sun, jupiter, saturn, uranus, neptune];
+            let pairs = combinations(bodies);
+
+            offset_momentum(sun, bodies);
+            report_energy(bodies, pairs);
+            advance(0.01, 10, bodies, pairs);
+            report_energy(bodies, pairs);
+        }
+        "#,
+        (-0.1690730217146998).into()
+    );
+}
+
+#[test]
+pub fn loop_function_reg_interference() {
+    run_and_check_registers!(
+        r#"
+        struct Test { v: int }
+        fn f(s) { return 0; }
+
+        fn run(x) {
+            let j = 0;
+            loop {
+                f(x);
+                j += 1;
+                if j >= 1 { break; }
+            }
+            return j;
+        }
+
+        fn main() {
+            print(run(Test { v: 42 }));
+        }
+        "#,
+        1.into()
+    );
+}

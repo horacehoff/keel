@@ -49,7 +49,9 @@ ariadne = "0.6.0"
 memchr = "2.8.1"
 lexical-core = "1.0.6"
 zmij = "1.0.21"
-ahash = "0.8.12"
+ahash = {version="0.8.12", features = ["compile-time-rng"]}
+logos = "0.16.1"
+winnow = { version = "1.0.3", features = ["simd"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.9.0"

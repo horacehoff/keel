@@ -13,8 +13,6 @@ use wasm_bindgen::prelude::*;
 
 #[path = "./vm/array_gc.rs"]
 mod array_gc;
-#[path = "./benchmark.rs"]
-mod benchmark;
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
 #[path = "./data.rs"]
@@ -23,6 +21,8 @@ mod data;
 mod display;
 #[path = "./util/errors.rs"]
 mod errors;
+#[path = "./parser/experimental_parser.rs"]
+mod experimental_parser;
 #[path = "./parser/expr.rs"]
 mod expr;
 #[path = "./parser/functions/fs_lib_functions.rs"]
@@ -144,6 +144,9 @@ pub unsafe extern "C" fn keel_free_output(output: *mut c_char) {
 }
 
 pub fn main() {
+    // experimental_parser::experimental_parser();
+    // return;
+
     #[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|info| {
         eprintln!("{color_red}KEEL ERROR{color_reset}\n{info}");
@@ -162,7 +165,7 @@ pub fn main() {
     if next_arg == "--help" || next_arg == "-h" {
         cold_path();
         println!(
-            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel [-v | --version]\n  keel file.kl [--bench [--verbose]]",
+            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel [-v | --version]",
             util::KEEL_LOGO
         );
         return;
@@ -172,17 +175,11 @@ pub fn main() {
         cold_path();
         if args.len() > 1 {
             eprintln!(
-                "{color_red}KEEL ERROR{color_reset}\nInvalid arguments\nUsage:\n  keel -v\n  keel program.kl [--bench [--verbose]]"
+                "{color_red}KEEL ERROR{color_reset}\nInvalid arguments\nUsage:\n  keel [-v | --version]"
             );
             return;
         }
         println!("Keel {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-
-    if next_arg == "--bench" {
-        cold_path();
-        crate::benchmark::benchmark();
         return;
     }
 

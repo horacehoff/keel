@@ -1,143 +1,42 @@
+# Keel benchmarks
 > Keel is still experimental, and more optimizations are still to come.
 
 All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`--runs 150 --warmup 10`). All benchmarks are run on a 2021 M1 Pro Macbook Pro with 16GBs of ram.
 
----
 
-## Iterative Fibonacci - fib(40) × 200 000
+## Iterative fib(46) x 200000
 
-<table>
-<tr>
-  <th>Keel</th>
-  <th>Python 3</th>
-  <th>LuaJIT (-joff)</th>
-</tr>
-<tr>
-<td><pre><code class="language-rust">fn main() {
-    for _ in 0..200000 {
-        let a = 0;
-        let b = 1;
-        let c = 0;
-        for i in 0..39 {
-            c = a + b;
-            a = b;
-            b = c;
-        }
-    }
-}</code></pre></td>
-<td><pre><code class="language-python">for _ in range(200000):
-    a, b, c = 0, 1, 0
-    for i in range(39):
-        c = a + b
-        a = b
-        b = c</code></pre></td>
-<td><pre><code class="language-lua">for r = 0, 199999 do
-    local a, b, c = 0, 1, 0
-    for i = 0, 38 do
-        c = a + b
-        a = b
-        b = c
-    end
-end</code></pre></td>
-</tr>
-<tr>
-  <td><b>59.1ms</b></td>
-  <td>668ms</td>
-  <td>60.2ms</td>
-</tr>
-</table>
+| Keel | Python 3.14.5 | LuaJIT (-joff) |
+| --- | --- | --- |
+| [iter_fib.kl](examples/benchmarks/iter_fib/iter_fib.kl) | [iter_fib.py](examples/benchmarks/iter_fib/iter_fib.py) | [iter_fib.lua](examples/benchmarks/iter_fib/iter_fib.lua) |
+| 76.1ms | 740ms | 72.5ms |
 
----
 
-## Recursive Fibonacci - fib(30)
+## Recursive fib(10,15,20,25,30,33)
 
-<table>
-<tr>
-  <th>Keel</th>
-  <th>Python 3</th>
-  <th>LuaJIT (-joff)</th>
-</tr>
-<tr>
-<td><pre><code class="language-rust">fn fib(n) {
-    if n <= 1 { return n; }
-    return fib(n - 1) + fib(n - 2);
-}
+| Keel | Python 3.14.5 | LuaJIT (-joff) |
+| --- | --- | --- |
+| [fib.kl](examples/benchmarks/fib/fib.kl) | [fib.py](examples/benchmarks/fib/fib.py) | [fib.lua](examples/benchmarks/fib/fib.lua) |
+| 212.0ms | 507.4ms | 183.4ms |
 
-fn main() {
-    print(fib(30));
-}</code></pre></td>
-<td><pre><code class="language-python">def fib(n):
-    if n <= 1:
-        return n
-    return fib(n - 1) + fib(n - 2)
 
-print(fib(30))</code></pre></td>
-<td><pre><code class="language-lua">local function fib(n)
-    if n <= 1 then return n end
-    return fib(n - 1) + fib(n - 2)
-end
+## N-body (N=500000)
+Based on [this benchmark from The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/nbody.html#nbody).\
+`nbody_lua` is based on [the fastest Lua implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-lua-2.html).\
+`nbody_py` is based on [the fastest Python implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-python3-1.html).
 
-print(fib(30))</code></pre></td>
-</tr>
-<tr>
-  <td><b>41.1ms</b></td>
-  <td>111.8ms</td>
-  <td>36.5ms</td>
-</tr>
-</table>
+| Keel | Python 3.14.5 | LuaJIT (-joff) |
+| --- | --- | --- |
+| [nbody_lua.kl](examples/benchmarks/nbody/nbody_lua.kl) | [nbody_lua.py](examples/benchmarks/nbody/nbody_lua.py) | [nbody_lua.lua](examples/benchmarks/nbody/nbody_lua.lua) |
+| 469.8ms | 2649ms | 458.5ms |
 
----
+| Keel | Python 3.14.5 | LuaJIT (-joff) |
+| --- | --- | --- |
+| [nbody_py.kl](examples/benchmarks/nbody/nbody_py.kl) | [nbody_py.py](examples/benchmarks/nbody/nbody_py.py) | [nbody_py.lua](examples/benchmarks/nbody/nbody_py.lua) |
+| 582.4ms | 2726ms | 581.2ms |
 
-## Multiply, condition, modulo × 1 000 000
 
-<table>
-<tr>
-  <th>Keel</th>
-  <th>Python 3</th>
-  <th>LuaJIT (-joff)</th>
-</tr>
-<tr>
-<td><pre><code class="language-rust">fn main() {
-    let count = 0;
-    let result = 1;
-    while count < 1000000 {
-        result *= 2;
-        if result > 1000000 {
-            result %= 1000000;
-        }
-        count += 1;
-    }
-    print(result);
-}</code></pre></td>
-<td><pre><code class="language-python">count = 0
-result = 1
-while count < 1000000:
-    result *= 2
-    if result > 1000000:
-        result %= 1000000
-    count += 1
-print(result)</code></pre></td>
-<td><pre><code class="language-lua">local count = 0
-local result = 1
-while count < 1000000 do
-    result = result * 2
-    if result > 1000000 then
-        result = result % 1000000
-    end
-    count = count + 1
-end
-print(result)</code></pre></td>
-</tr>
-<tr>
-  <td><b>18.5ms</b></td>
-  <td>136ms</td>
-  <td>25.6ms</td>
-</tr>
-</table>
-
----
-
-## Sqrt from 0 to 9999999
+## Sqrt (N=0 to 9999999)
 
 <table>
 <tr>
@@ -172,85 +71,6 @@ print(x)</code></pre></td>
 </tr>
 </table>
 
----
-
-## Sieve of Eratosthenes up to 100 000
-
-<table>
-<tr>
-  <th>Keel</th>
-  <th>Python 3</th>
-  <th>LuaJIT (-joff)</th>
-</tr>
-<tr>
-<td><pre><code class="language-rust">fn main() {
-    let limit = 100000;
-    let sieve = range(limit);
-    sieve[0] = 0;
-    sieve[1] = 0;
-    let i = 2;
-    while i * i <= limit {
-        if sieve[i] != 0 {
-            let j = i * i;
-            while j < limit {
-                sieve[j] = 0;
-                j += i;
-            }
-        }
-        i += 1;
-    }
-    let count = 0;
-    for x in sieve {
-        if x != 0 { count += 1; }
-    }
-    print(count);
-}</code></pre></td>
-<td><pre><code class="language-python">limit = 100000
-sieve = list(range(limit))
-sieve[0] = 0
-sieve[1] = 0
-i = 2
-while i * i <= limit:
-    if sieve[i]:
-        j = i * i
-        while j < limit:
-            sieve[j] = 0
-            j += i
-    i += 1
-count = sum(1 for x in sieve if x)
-print(count)</code></pre></td>
-<td><pre><code class="language-lua">local limit = 100000
-local sieve = {}
-for i = 0, limit - 1 do
-    sieve[i] = i
-end
-sieve[0] = 0
-sieve[1] = 0
-local i = 2
-while i * i <= limit do
-    if sieve[i] ~= 0 then
-        local j = i * i
-        while j < limit do
-            sieve[j] = 0
-            j = j + i
-        end
-    end
-    i = i + 1
-end
-local count = 0
-for _, v in pairs(sieve) do
-    if v ~= 0 then count = count + 1 end
-end
-print(count)</code></pre></td>
-</tr>
-<tr>
-  <td><b>6.2ms</b></td>
-  <td>40ms</td>
-  <td>7ms</td>
-</tr>
-</table>
-
----
 
 ## String.split(), Array.contains() × 50 000
 
@@ -289,13 +109,12 @@ end
 print(count)</code></pre></td>
 </tr>
 <tr>
-  <td><b>7.7ms</b></td>
-  <td>32ms</td>
-  <td>27ms</td>
+  <td><b>6.7ms</b></td>
+  <td>28.2ms</td>
+  <td>27.6ms</td>
 </tr>
 </table>
 
----
 
 ## FizzBuzz - 1 000 000 iterations
 
@@ -347,13 +166,12 @@ end
 print(last)</code></pre></td>
 </tr>
 <tr>
-  <td><b>26.9ms</b></td>
-  <td>171ms</td>
-  <td>82.4ms</td>
+  <td><b>24.5ms</b></td>
+  <td>149.2ms</td>
+  <td>84.2ms</td>
 </tr>
 </table>
 
----
 
 ## Standard library operations × 100 000
 
@@ -506,7 +324,6 @@ print(count)</code></pre></td>
 </tr>
 </table>
 
----
 
 ## C FFI call overhead × 10 000 000
 
@@ -526,7 +343,7 @@ int increment(int x) {
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
-<td><pre><code class="language-rust">import "./bench_ffi.dylib" {
+<td><pre><code class="language-rust">dylib "./bench_ffi.dylib" {
     int increment(int);
 }
 

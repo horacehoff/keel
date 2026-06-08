@@ -1,14 +1,14 @@
+use crate::compiler::walk_namespace_struct;
+use crate::compiler_data::Ctx;
+use crate::compiler_data::FnSignature;
+use crate::compiler_data::Function;
+use crate::compiler_data::State;
+use crate::compiler_data::Variable;
 use crate::errors::ErrType;
 use crate::errors::dev_error;
 use crate::errors::throw_parser_error;
 use crate::expr::Expr;
 use crate::expr::symbol_of_expr;
-use crate::parser::walk_namespace_struct;
-use crate::parser_data::Ctx;
-use crate::parser_data::FnSignature;
-use crate::parser_data::Function;
-use crate::parser_data::State;
-use crate::parser_data::Variable;
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
 use smol_strc::SmolStr;

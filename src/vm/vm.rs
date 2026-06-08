@@ -1,4 +1,7 @@
 use crate::array_gc::alloc_array;
+use crate::compiler_data::DynamicLibFn;
+use crate::compiler_data::ErrorCatch;
+use crate::compiler_data::Pools;
 use crate::data::Data;
 use crate::data::FALSE;
 use crate::data::NULL;
@@ -13,9 +16,6 @@ use crate::fs;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use crate::parser_data::DynamicLibFn;
-use crate::parser_data::ErrorCatch;
-use crate::parser_data::Pools;
 use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
 use lexical_core::FormattedSize;

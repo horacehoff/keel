@@ -1,11 +1,11 @@
-use std::hint::cold_path;
+use crate::compiler_data::Struct;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
 use crate::expr::Span;
-use crate::parser_data::Struct;
 use crate::type_system::DataType;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
+use std::hint::cold_path;
 
 /// Strips the surrounding quotes & processes escape sequences \n \t \r \\ \" \0
 pub fn parse_string(s: &str) -> SmolStr {

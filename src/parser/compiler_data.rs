@@ -1,8 +1,8 @@
+use crate::compiler::Namespace;
 use crate::data::Data;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::instr::Instr;
-use crate::parser::Namespace;
 use crate::type_system::DataType;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;

@@ -1,4 +1,4 @@
-use crate::parser_data::{Function, Pools};
+use crate::compiler_data::{Function, Pools};
 use crate::type_system::DataType;
 use crate::{data::Data, instr::Instr};
 use inline_colorization::*;

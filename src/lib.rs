@@ -1,5 +1,5 @@
+use crate::compiler::compile;
 use crate::errors::ErrorCtx;
-use crate::parser::parse;
 use crate::repl::repl;
 use inline_colorization::*;
 #[cfg(feature = "embed")]
@@ -15,6 +15,10 @@ use wasm_bindgen::prelude::*;
 mod array_gc;
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
+#[path = "./parser/compiler.rs"]
+mod compiler;
+#[path = "./parser/compiler_data.rs"]
+mod compiler_data;
 #[path = "./data.rs"]
 mod data;
 #[path = "./util/display.rs"]
@@ -33,10 +37,6 @@ mod functions;
 mod instr;
 #[path = "./parser/functions/methods.rs"]
 mod methods;
-#[path = "./parser/parser.rs"]
-mod parser;
-#[path = "./parser/parser_data.rs"]
-mod parser_data;
 #[path = "./parser/registers.rs"]
 mod registers;
 #[path = "./repl.rs"]
@@ -80,7 +80,7 @@ pub fn run(code: &str) {
         allocated_call_depth,
         sources,
         struct_fields,
-    ) = parse(code, "playground.kl", false);
+    ) = compile(code, "playground.kl", false);
     vm::execute(
         &instructions,
         &mut registers,
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
             allocated_call_depth,
             sources,
             struct_fields,
-        ) = parse(code, "embedded.kl", false);
+        ) = compile(code, "embedded.kl", false);
         vm::execute(
             &instructions,
             &mut registers,
@@ -144,8 +144,8 @@ pub unsafe extern "C" fn keel_free_output(output: *mut c_char) {
 }
 
 pub fn main() {
-    // experimental_parser::experimental_parser();
-    // return;
+    experimental_parser::experimental_parser();
+    return;
 
     #[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|info| {
@@ -209,7 +209,7 @@ pub fn main() {
                 allocated_call_depth,
                 sources,
                 struct_fields,
-            ) = parse(contents, filename, true);
+            ) = compile(contents, filename, true);
             println!("COMPILATION TIME: {:.2?}", now.elapsed());
             let now = std::time::Instant::now();
             vm::execute(
@@ -229,7 +229,7 @@ pub fn main() {
             );
             return;
         } else if next == Some(String::from("--debug-parser")) {
-            parse(contents, filename, false);
+            compile(contents, filename, false);
             return;
         }
     }
@@ -245,7 +245,7 @@ pub fn main() {
         allocated_call_depth,
         sources,
         struct_fields,
-    ) = parse(contents, filename, false);
+    ) = compile(contents, filename, false);
     vm::execute(
         &instructions,
         &mut registers,

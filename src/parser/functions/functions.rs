@@ -1,4 +1,9 @@
 use crate::check_args;
+use crate::compiler::Namespace;
+use crate::compiler::get_id;
+use crate::compiler_data::Ctx;
+use crate::compiler_data::State;
+use crate::compiler_data::Variable;
 use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::throw_parser_error;
@@ -8,11 +13,6 @@ use crate::expr::Expr;
 use crate::expr::Span;
 use crate::fs_lib_functions::fs_lib_functions;
 use crate::instr::Instr;
-use crate::parser::Namespace;
-use crate::parser::get_id;
-use crate::parser_data::Ctx;
-use crate::parser_data::State;
-use crate::parser_data::Variable;
 use crate::registers::free_register;
 use crate::std_lib_functions::std_lib_functions;
 use crate::type_system::DataType;
@@ -158,16 +158,16 @@ pub fn handle_functions(
         ));
     } else {
         throw_parser_error(
-        src,
-        markers,
-        ErrType::UnknownNamespace(
-            namespace
-                .iter()
-                .map(|x| (*x).to_string())
-                .collect::<Vec<String>>()
-                .join("::")
-                .as_str(),
-        ),
+            src,
+            markers,
+            ErrType::UnknownNamespace(
+                namespace
+                    .iter()
+                    .map(|x| (*x).to_string())
+                    .collect::<Vec<String>>()
+                    .join("::")
+                    .as_str(),
+            ),
         );
     }
     None

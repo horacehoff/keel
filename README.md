@@ -53,6 +53,8 @@ keel -h/--help     # Print help
 
 ## Near-future roadmap
 
+- Replace the LALRPOP parser with a handwritten parser and Logos lexer (in progress)
+- Better module system (in progress)
 - Struct methods
 - Higher-order functions
 - [Better embedding API with limits](#embedding-experimental)

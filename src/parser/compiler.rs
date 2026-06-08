@@ -1,4 +1,5 @@
 use self::grammar::Token;
+use crate::compiler_data::*;
 use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::lalrpop_error;
@@ -11,7 +12,6 @@ use crate::expr::contains_var_reassign;
 use crate::functions::handle_functions;
 use crate::instr::LibFunc;
 use crate::methods::handle_method_calls;
-use crate::parser_data::*;
 use crate::registers::alloc_register;
 use crate::registers::free_loop_scope_registers;
 use crate::registers::free_register;
@@ -2700,7 +2700,7 @@ fn parse_toplevel(
     }
 }
 
-pub fn parse(
+pub fn compile(
     contents: String,
     filename: &str,
     debug: bool,

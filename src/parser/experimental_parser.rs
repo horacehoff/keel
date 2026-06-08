@@ -1,165 +1,346 @@
+use core::range::Range;
 use std::hint::cold_path;
 
 use crate::expr::{Expr, Span};
-use logos::Logos;
-use smol_strc::SmolStr;
-use winnow::combinator::alt;
-use winnow::error::ParserError;
-use winnow::stream::Stream;
-use winnow::stream::{ContainsToken, TokenSlice};
-use winnow::{Parser, Result};
+use logos::{Logos, SpannedIter};
+use smol_strc::{SmolStr, ToSmolStr};
+use std::iter::Peekable;
 
-fn parse_int(input: &mut Input<'_>) -> Result<Expr> {
-    let t = input.next_token().ok_or_else(|| {
-        cold_path();
-        ParserError::from_input(input)
-    })?;
-    if let Token::Int(i) = t.token {
-        Ok(Expr::Int(i))
-    } else {
-        cold_path();
-        Err(ParserError::from_input(input))
+trait KeelParser<'a> {
+    fn next_token(&mut self) -> (Token<'a>, Range<usize>);
+    fn peek_token(&mut self) -> Token<'a>;
+    fn peek_token_start(&mut self) -> u32;
+    fn peek_token_opt(&mut self) -> Option<Token<'a>>;
+    fn peek_span_opt(&mut self) -> Option<Range<usize>>;
+}
+
+type TokenIter<'a> = Peekable<SpannedIter<'a, Token<'a>>>;
+
+impl<'a> KeelParser<'a> for TokenIter<'a> {
+    #[inline(always)]
+    fn next_token(&mut self) -> (Token<'a>, Range<usize>) {
+        let t = self.next().unwrap_or_else(
+            #[cold]
+            || {
+                cold_path();
+                panic!("Unexpected EOF")
+            },
+        );
+        (
+            t.0.unwrap_or_else(
+                #[cold]
+                |_| {
+                    cold_path();
+                    panic!("Unknown token")
+                },
+            ),
+            t.1.into(),
+        )
+    }
+    #[inline(always)]
+    fn peek_token(&mut self) -> Token<'a> {
+        self.peek()
+            .unwrap_or_else(
+                #[cold]
+                || {
+                    cold_path();
+                    panic!("Unexpected EOF")
+                },
+            )
+            .0
+            .unwrap_or_else(
+                #[cold]
+                |_| {
+                    cold_path();
+                    panic!("Unknown token")
+                },
+            )
+    }
+    #[inline(always)]
+    fn peek_token_start(&mut self) -> u32 {
+        self.peek()
+            .unwrap_or_else(
+                #[cold]
+                || {
+                    cold_path();
+                    panic!("Unexpected EOF")
+                },
+            )
+            .1
+            .start as u32
+    }
+    #[inline(always)]
+    fn peek_token_opt(&mut self) -> Option<Token<'a>> {
+        self.peek().map(|x| {
+            x.0.unwrap_or_else(
+                #[cold]
+                |_| {
+                    cold_path();
+                    panic!("Unknown token")
+                },
+            )
+        })
+    }
+    #[inline(always)]
+    fn peek_span_opt(&mut self) -> Option<Range<usize>> {
+        self.peek().map(|x| std::range::Range::from(x.1.clone()))
     }
 }
 
-fn parse_float(input: &mut Input<'_>) -> Result<Expr> {
-    let t = input.next_token().ok_or_else(|| {
-        cold_path();
-        ParserError::from_input(input)
-    })?;
-    if let Token::Float(i) = t.token {
-        Ok(Expr::Float(i))
+fn parse_int<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, _) = input.next_token();
+    if let Token::Int(i) = t {
+        Expr::Int(i)
     } else {
         cold_path();
-        Err(ParserError::from_input(input))
+        panic!("Expected int, found {t:?}")
     }
 }
 
-fn parse_string(input: &mut Input<'_>) -> Result<Expr> {
-    let t = input.next_token().ok_or_else(|| {
-        cold_path();
-        ParserError::from_input(input)
-    })?;
-    if let Token::String(i) = t.token {
-        Ok(Expr::String(crate::util::parse_string(i)))
+fn parse_float<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, _) = input.next_token();
+    if let Token::Float(i) = t {
+        Expr::Float(i)
     } else {
         cold_path();
-        Err(ParserError::from_input(input))
+        panic!("Expected float, found {t:?}")
     }
 }
 
-fn parse_identifier(input: &mut Input<'_>) -> Result<Expr> {
-    let t = input.next_token().ok_or_else(|| {
-        cold_path();
-        ParserError::from_input(input)
-    })?;
-    if let Token::Identifier(i) = t.token {
-        Ok(Expr::Var(SmolStr::new(i), (t.start, t.end).into()))
+fn parse_string<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, _) = input.next_token();
+    if let Token::String(i) = t {
+        Expr::String(crate::util::parse_string(i))
     } else {
         cold_path();
-        Err(ParserError::from_input(input))
+        panic!("Expected string, found {t:?}")
     }
 }
 
-fn parse_bool(input: &mut Input<'_>) -> Result<Expr> {
-    let t = input.next_token().ok_or_else(|| {
-        cold_path();
-        ParserError::from_input(input)
-    })?;
-    if t.token == Token::True {
-        Ok(Expr::Bool(true))
-    } else if t.token == Token::False {
-        Ok(Expr::Bool(false))
+fn parse_identifier<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, s) = input.next_token();
+    if let Token::Identifier(i) = t {
+        return Expr::Var(SmolStr::new(i), Span::from(s));
     } else {
         cold_path();
-        Err(ParserError::from_input(input))
+        panic!("Expected identifier, found {t:?}")
     }
 }
 
-fn parse_term(input: &mut Input<'_>) -> Result<Expr> {
-    let t = input.next_token().ok_or_else(|| {
+fn parse_bool<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, _) = input.next_token();
+    if t == Token::True {
+        Expr::Bool(true)
+    } else if t == Token::False {
+        Expr::Bool(false)
+    } else {
         cold_path();
-        ParserError::from_input(input)
-    })?;
-    match t.token {
-        Token::Int(i) => Ok(Expr::Int(i)),
-        Token::Float(f) => Ok(Expr::Float(f)),
-        Token::Identifier(s) => Ok(Expr::Var(SmolStr::new(s), (t.start, t.end).into())),
-        Token::String(s) => Ok(Expr::String(crate::util::parse_string(s))),
-        Token::True => Ok(Expr::Bool(true)),
-        Token::False => Ok(Expr::Bool(false)),
-        Token::Null => Ok(Expr::Null),
-        Token::LBracket => {
-            let start = t.start;
-            let end : u32;
-            let mut elems = Vec::new();
-                loop {
-                    if input.first().is_some_and(|t| t.token == Token::RBracket) {
-                        end = input.next_token().unwrap().end;
-                        break;
-                    }
-                    elems.push(parse_expr(input)?);
-                    if input.first().is_some_and(|t| t.token == Token::Comma) {
-                        input.next_token();
+        panic!("Expected bool, found {t:?}")
+    }
+}
+
+// Must be called right after LParen is skipped
+// Identifier LParen Expr RParen
+// Parses: Expr RParen
+fn parse_fn_call<'a>(input: &mut TokenIter<'a>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
+    let mut args = Vec::with_capacity(4);
+    let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
+    let end: u32;
+    loop {
+        if input.peek_token() == Token::RParen {
+            end = input.next_token().1.end as u32;
+            break;
+        }
+        let arg_start: u32 = input.peek_token_start();
+        args.push(parse_expr(input));
+        arg_markers.push((arg_start, input.peek_token_start()).into());
+        if input.peek_token() == Token::Comma {
+            input.next_token();
+        } else if !(input.peek_token() == Token::RParen) {
+            cold_path();
+            panic!("Function arguments must be comma-separated");
+        }
+    }
+    Expr::FunctionCall(
+        Box::from(args),
+        namespace,
+        (start, end).into(),
+        Box::from(arg_markers),
+    )
+}
+
+// Must be called right after LParen is skipped
+fn parse_struct<'a>(input: &mut TokenIter<'a>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
+    let mut fields: Vec<(SmolStr, Expr, Span)> = Vec::with_capacity(4);
+    let end: u32;
+    loop {
+        let (next_token, _) = input.next_token();
+        let field_name = if let Token::Identifier(i) = next_token {
+            SmolStr::new(i)
+        } else {
+            cold_path();
+            panic!("Invalid struct field {next_token:?}")
+        };
+        let (next_token, _) = input.next_token();
+        if next_token != Token::Colon {
+            cold_path();
+            panic!(
+                "A colon must separate a field from its value. Expected colon but got {next_token:?}"
+            )
+        }
+        let field_start: u32 = input.peek_token_start();
+        let field_value = parse_expr(input);
+        fields.push((
+            field_name,
+            field_value,
+            (field_start, input.peek_token_start()).into(),
+        ));
+        let (next_token, next_token_span) = input.next_token();
+        if next_token == Token::RBrace {
+            end = next_token_span.end as u32;
+            break;
+        } else if next_token != Token::Comma {
+            cold_path();
+            panic!(
+                "Field-value elements must be separated by a comma. Expected comma but got {next_token:?}"
+            )
+        }
+    }
+
+    Expr::Struct(namespace, Box::from(fields), (start, end).into())
+}
+
+fn parse_term<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, t_span) = input.next_token();
+    match t {
+        Token::Int(i) => Expr::Int(i),
+        Token::Float(f) => Expr::Float(f),
+        Token::String(s) => Expr::String(crate::util::parse_string(s)),
+        Token::True => Expr::Bool(true),
+        Token::False => Expr::Bool(false),
+        Token::Null => Expr::Null,
+        Token::Identifier(s) => {
+            let start = t_span.start as u32;
+            match input.peek_token_opt() {
+                // FUNCTION CALL:
+                // Identifier LParen Expr RParen
+                Some(Token::LParen) => {
+                    input.next_token();
+                    parse_fn_call(input, Box::new([s.to_smolstr()]), start)
+                }
+                // STRUCT
+                Some(Token::LBrace) => {
+                    input.next_token();
+                    parse_struct(input, Box::from([SmolStr::new(s)]), start)
+                }
+                // NAMESPACE
+                Some(Token::DoubleColon) => {
+                    input.next_token();
+                    let mut namespace: Vec<SmolStr> = Vec::with_capacity(2);
+                    namespace.push(SmolStr::new(s));
+                    loop {
+                        let (next_token, _) = input.next_token();
+                        if let Token::Identifier(i) = next_token {
+                            namespace.push(SmolStr::new(i));
+                        } else {
+                            cold_path();
+                            panic!("Wrong namespace syntax");
+                        }
+                        let (next_token, _) = input.next_token();
+                        if next_token == Token::LParen {
+                            // FUNCTION CALL WITH NAMESPACE:
+                            // (Identifier DoubleColon)+ Identifier LParen Expr RParen
+                            return parse_fn_call(input, Box::from(namespace), start);
+                        } else if next_token == Token::LBrace {
+                            // STRUCT WITH NAMESPACE
+                            return parse_struct(input, Box::from(namespace), start);
+                        } else if next_token == Token::DoubleColon {
+                            continue;
+                        } else {
+                            cold_path();
+                            panic!(
+                                "Expected LParen, LBrace, or DoubleColon, but got {next_token:?}"
+                            );
+                        }
                     }
                 }
-                Ok(Expr::Array(Box::from(elems), (start,end).into()))
+                _ => Expr::Var(SmolStr::new(s), (t_span.start, t_span.end).into()),
+            }
         }
-        _ => {
+        Token::LBracket => {
+            let start = t_span.start as u32;
+            let end: u32;
+            let mut elems = Vec::with_capacity(4);
+            loop {
+                if input.peek_token_opt() == Some(Token::RBracket) {
+                    end = input.next_token().1.end as u32;
+                    break;
+                }
+                elems.push(parse_expr(input));
+                if input.peek_token_opt() == Some(Token::Comma) {
+                    input.next_token();
+                } else if !(input.peek_token_opt() == Some(Token::RBracket)) {
+                    cold_path();
+                    panic!("Array elements must be comma-separated");
+                }
+            }
+            Expr::Array(Box::from(elems), (start, end).into())
+        }
+        unexpected => {
             cold_path();
-            Err(ParserError::from_input(input))
+            panic!("Expected term, found {unexpected:?}")
         }
     }
 }
 
-fn parse_expr(input: &mut Input<'_>) -> Result<Expr> {
+fn parse_expr<'a>(input: &mut TokenIter<'a>) -> Expr {
     parse_term(input)
 }
 
+impl From<std::range::Range<usize>> for Span {
+    #[inline(always)]
+    fn from(value: std::range::Range<usize>) -> Self {
+        Span {
+            start: value.start as u32,
+            end: value.end as u32,
+        }
+    }
+}
+
+impl From<(usize, usize)> for Span {
+    #[inline(always)]
+    fn from((start, end): (usize, usize)) -> Self {
+        Span {
+            start: start as u32,
+            end: end as u32,
+        }
+    }
+}
+
 impl From<(u32, u32)> for Span {
+    #[inline(always)]
     fn from((start, end): (u32, u32)) -> Self {
-        Span { start, end }
-    }
-}
-
-type Input<'a> = TokenSlice<'a, KeelToken<'a>>;
-
-#[derive(Clone, Copy, Debug)]
-struct KeelToken<'a> {
-    pub token: Token<'a>,
-    pub start: u32,
-    pub end: u32,
-}
-
-impl PartialEq for KeelToken<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        std::mem::discriminant(&self.token) == std::mem::discriminant(&other.token)
-    }
-}
-
-impl ContainsToken<KeelToken<'_>> for KeelToken<'_> {
-    fn contains_token(&self, token: KeelToken) -> bool {
-        std::mem::discriminant(&self.token) == std::mem::discriminant(&token.token)
+        Span {
+            start: start,
+            end: end,
+        }
     }
 }
 
 pub fn experimental_parser() {
-    let input = r#"[1"hello"3]"#;
-    let tokens: Vec<KeelToken> = Token::lexer(input)
-        .spanned()
-        .map(|(tok, span)| KeelToken {
-            token: tok.unwrap(),
-            start: span.start as u32,
-            end: span.end as u32,
-        })
-        .collect();
-    dbg!(&tokens);
-    let output = parse_term.parse_next(&mut TokenSlice::new(&tokens));
-    dbg!(&output);
+    let input = r#"
+        mylib::test {
+            x:32,
+            y:test(1,2)
+        }
+        "#;
+    let mut i = Token::lexer(input).spanned().peekable();
+    let output = parse_expr(&mut i);
+    dbg!(output);
 }
 
 #[derive(Logos, Debug, PartialEq, Clone, Copy)]
-#[logos(skip r"[ \t\n\f]+")] // Ignore whitespaces
+#[logos(skip r"[ \t\n\f]+")] // Ignore whitespace
 #[logos(skip(r"//[^\n\r]*", allow_greedy = true))] // Ignore comments
 enum Token<'a> {
     // ASSIGNEMENT OPS
@@ -278,10 +459,10 @@ enum Token<'a> {
     #[token("=>")]
     Arrow,
 
-    #[regex(r#"\"(?:[^\"\\]|\\.)*\""#, |lex|lex.slice())]
+    #[regex(r#"\"(?:[^\"\\]|\\.)*\""#, |lex| lex.slice())]
     String(&'a str),
 
-    #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex|lex.slice())]
+    #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
     Identifier(&'a str),
 
     #[regex(r"[0-9]*[.][0-9]+", |lex| {

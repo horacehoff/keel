@@ -1,8 +1,8 @@
+use crate::compiler::get_id;
+use crate::compiler_data::Variable;
+use crate::compiler_data::{Ctx, State};
 use crate::expr::{Expr, Span};
 use crate::instr::Instr;
-use crate::parser::get_id;
-use crate::parser_data::Variable;
-use crate::parser_data::{Ctx, State};
 use crate::registers::free_register;
 use crate::std_lib_methods::std_lib_methods;
 use crate::type_system::infer_type;

@@ -1,6 +1,6 @@
+use crate::compile;
 use crate::data::Data;
 use crate::instr::Instr;
-use crate::parse;
 
 macro_rules! run_and_check_registers {
     ($contents:expr, $expected:expr) => {
@@ -16,7 +16,7 @@ macro_rules! run_and_check_registers {
             allocated_call_depth,
             _,
             _,
-        ) = parse(String::from($contents), filename, true);
+        ) = compile(String::from($contents), filename, true);
         crate::vm::execute(
             &instructions,
             &mut registers,
@@ -55,7 +55,7 @@ macro_rules! run {
             allocated_call_depth,
             _,
             _,
-        ) = parse(String::from($contents), filename, true);
+        ) = compile(String::from($contents), filename, true);
         crate::vm::execute(
             &instructions,
             &mut registers,

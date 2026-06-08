@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::compiler_data::Variable;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::errors::dev_error;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
-use crate::parser_data::Variable;
 use ahash::RandomState;
 use smol_strc::SmolStr;
 

@@ -12,6 +12,8 @@ trait KeelParser<'a> {
     fn peek_token_start(&mut self) -> u32;
     fn peek_token_opt(&mut self) -> Option<Token<'a>>;
     fn peek_span_opt(&mut self) -> Option<Range<usize>>;
+    fn next_token_expect(&mut self, expected: Token, msg: &str);
+    fn next_token_expect_end(&mut self, expected: Token, msg: &str) -> u32;
 }
 
 type TokenIter<'a> = Peekable<SpannedIter<'a, Token<'a>>>;
@@ -84,6 +86,23 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
     #[inline(always)]
     fn peek_span_opt(&mut self) -> Option<Range<usize>> {
         self.peek().map(|x| std::range::Range::from(x.1.clone()))
+    }
+    #[inline(always)]
+    fn next_token_expect(&mut self, expected: Token, msg: &str) {
+        let (next_token, _) = self.next_token();
+        if next_token != expected {
+            cold_path();
+            panic!("{msg}. Expected {expected:?} but got {next_token:?}")
+        }
+    }
+    #[inline(always)]
+    fn next_token_expect_end(&mut self, expected: Token, msg: &str) -> u32 {
+        let (next_token, span) = self.next_token();
+        if next_token != expected {
+            cold_path();
+            panic!("{msg}. Expected {expected:?} but got {next_token:?}")
+        }
+        span.end as u32
     }
 }
 
@@ -181,13 +200,10 @@ fn parse_struct<'a>(input: &mut TokenIter<'a>, namespace: Box<[SmolStr]>, start:
             cold_path();
             panic!("Invalid struct field {next_token:?}")
         };
-        let (next_token, _) = input.next_token();
-        if next_token != Token::Colon {
-            cold_path();
-            panic!(
-                "A colon must separate a field from its value. Expected colon but got {next_token:?}"
-            )
-        }
+        input.next_token_expect(
+            Token::Colon,
+            "A colon must separate a field from its value.",
+        );
         let field_start: u32 = input.peek_token_start();
         let field_value = parse_expr(input);
         fields.push((
@@ -286,6 +302,73 @@ fn parse_term<'a>(input: &mut TokenIter<'a>) -> Expr {
             }
             Expr::Array(Box::from(elems), (start, end).into())
         }
+        // LParen Expr RParen
+        Token::LParen => {
+            let v = parse_expr(input);
+            input.next_token_expect(Token::RParen, "Unmatched ')'");
+            v
+        }
+        // - Expr
+        Token::OpSub => match parse_expr(input) {
+            Expr::Int(i) => Expr::Int(-i),
+            Expr::Float(f) => Expr::Float(-f),
+            other => Expr::Neg(
+                Box::new(other),
+                (t_span.start as u32, input.peek_token_start()).into(),
+            ),
+        },
+        // ! Expr
+        Token::OpNot => match parse_expr(input) {
+            Expr::Bool(b) => Expr::Bool(!b),
+            other => Expr::BoolNeg(
+                Box::new(other),
+                (t_span.start as u32, input.peek_token_start()).into(),
+            ),
+        },
+        // Inline condition
+        Token::If => {
+            let condition = parse_expr(input);
+            input.next_token_expect(Token::LBrace, "Expected '{'");
+            let mut output_code: Vec<Expr> = Vec::with_capacity(2);
+            output_code.push(parse_expr(input));
+            let mut end = input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+            loop {
+                let next_token = input.peek_token_opt();
+                if next_token != Some(Token::Else) {
+                    break;
+                }
+                input.next_token();
+                // if -> else if
+                // lbrace -> else
+                // else -> end
+                let next_token = input.peek_token_opt();
+                if next_token == Some(Token::If) {
+                    input.next_token();
+                    let else_if_condition = parse_expr(input);
+                    input.next_token_expect(Token::LBrace, "Expected '{'");
+                    let else_if_value = parse_expr(input);
+                    end = input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+                    output_code.push(Expr::ElseIfBlock(Box::new(else_if_condition), Box::new([else_if_value])));
+                } else if next_token == Some(Token::LBrace) {
+                    input.next_token();
+                    let else_value = parse_expr(input);
+                    end = input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+                    output_code.push(Expr::ElseBlock(Box::new([else_value])));
+                    break;
+                } else {
+                    break;
+                }
+            }
+            if !matches!(output_code.last().unwrap(), Expr::ElseBlock(_)) {
+                cold_path();
+                panic!("Inline conditions need an else block");
+            }
+            return Expr::InlineCondition(
+                Box::new(condition),
+                Box::from(output_code),
+                (t_span.start as u32, end).into(),
+            );
+        }
         unexpected => {
             cold_path();
             panic!("Expected term, found {unexpected:?}")
@@ -329,10 +412,7 @@ impl From<(u32, u32)> for Span {
 
 pub fn experimental_parser() {
     let input = r#"
-        mylib::test {
-            x:32,
-            y:test(1,2)
-        }
+        print(if true {"yes"} else if false {"no"} else {"false"})
         "#;
     let mut i = Token::lexer(input).spanned().peekable();
     let output = parse_expr(&mut i);

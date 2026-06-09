@@ -1,5 +1,5 @@
 use core::range::Range;
-use std::hint::cold_path;
+use std::hint::{cold_path, unreachable_unchecked};
 
 use crate::expr::{Expr, Span};
 use logos::{Logos, SpannedIter};
@@ -10,6 +10,7 @@ trait KeelParser<'a> {
     fn next_token(&mut self) -> (Token<'a>, Range<usize>);
     fn peek_token(&mut self) -> Token<'a>;
     fn peek_token_start(&mut self) -> u32;
+    fn peek_token_end(&mut self) -> u32;
     fn peek_token_opt(&mut self) -> Option<Token<'a>>;
     fn peek_span_opt(&mut self) -> Option<Range<usize>>;
     fn next_token_expect(&mut self, expected: Token, msg: &str);
@@ -70,6 +71,19 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
             )
             .1
             .start as u32
+    }
+    #[inline(always)]
+    fn peek_token_end(&mut self) -> u32 {
+        self.peek()
+            .unwrap_or_else(
+                #[cold]
+                || {
+                    cold_path();
+                    panic!("Unexpected EOF")
+                },
+            )
+            .1
+            .end as u32
     }
     #[inline(always)]
     fn peek_token_opt(&mut self) -> Option<Token<'a>> {
@@ -309,7 +323,7 @@ fn parse_term<'a>(input: &mut TokenIter<'a>) -> Expr {
             v
         }
         // - Expr
-        Token::OpSub => match parse_expr(input) {
+        Token::OpSub => match parse_expr_with_precedence(input, 8) {
             Expr::Int(i) => Expr::Int(-i),
             Expr::Float(f) => Expr::Float(-f),
             other => Expr::Neg(
@@ -318,7 +332,7 @@ fn parse_term<'a>(input: &mut TokenIter<'a>) -> Expr {
             ),
         },
         // ! Expr
-        Token::OpNot => match parse_expr(input) {
+        Token::OpNot => match parse_expr_with_precedence(input, 8) {
             Expr::Bool(b) => Expr::Bool(!b),
             other => Expr::BoolNeg(
                 Box::new(other),
@@ -348,7 +362,10 @@ fn parse_term<'a>(input: &mut TokenIter<'a>) -> Expr {
                     input.next_token_expect(Token::LBrace, "Expected '{'");
                     let else_if_value = parse_expr(input);
                     end = input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
-                    output_code.push(Expr::ElseIfBlock(Box::new(else_if_condition), Box::new([else_if_value])));
+                    output_code.push(Expr::ElseIfBlock(
+                        Box::new(else_if_condition),
+                        Box::new([else_if_value]),
+                    ));
                 } else if next_token == Some(Token::LBrace) {
                     input.next_token();
                     let else_value = parse_expr(input);
@@ -376,14 +393,242 @@ fn parse_term<'a>(input: &mut TokenIter<'a>) -> Expr {
     }
 }
 
+fn parse_expr_with_precedence<'a>(input: &mut TokenIter<'a>, min_precedence: u8) -> Expr {
+    let start = input.peek_token_start();
+    let mut lhs = parse_term(input);
+    loop {
+        let Some(peek) = input.peek_token_opt() else {
+            break;
+        };
+        let Some((op, op_precedence)) = check_op(peek, min_precedence) else {
+            break;
+        };
+        input.next_token();
+        let end = input.peek_token_end();
+        let rhs = parse_expr_with_precedence(input, op_precedence);
+        lhs = add_op(op, lhs, rhs, (start, end).into());
+    }
+    lhs
+}
+
+fn add_op(op: Token, lhs: Expr, rhs: Expr, span: Span) -> Expr {
+    match op {
+        Token::OpOr => match (lhs, rhs) {
+            (Expr::Bool(false), c) | (c, Expr::Bool(false)) => c,
+            (Expr::Bool(true), _) | (_, Expr::Bool(true)) => Expr::Bool(true),
+            (lhs, rhs) => Expr::BoolOr(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpAnd => match (lhs, rhs) {
+            (Expr::Bool(false), _) | (_, Expr::Bool(false)) => Expr::Bool(false),
+            (Expr::Bool(true), c) | (c, Expr::Bool(true)) => c,
+            (lhs, rhs) => Expr::BoolAnd(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpEq => Expr::Eq(Box::new(lhs), Box::new(rhs)),
+        Token::OpNEq => Expr::NotEq(Box::new(lhs), Box::new(rhs)),
+        Token::OpInf => match (lhs, rhs) {
+            (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x < y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x < y),
+            (lhs, rhs) => Expr::Inf(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpInfEq => match (lhs, rhs) {
+            (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x <= y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x <= y),
+            (lhs, rhs) => Expr::InfEq(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpSup => match (lhs, rhs) {
+            (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x > y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x > y),
+            (lhs, rhs) => Expr::Sup(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpSupEq => match (lhs, rhs) {
+            (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x >= y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x >= y),
+            (lhs, rhs) => Expr::SupEq(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpAdd => match (lhs, rhs) {
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x + y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x + y),
+            (Expr::String(x), Expr::String(y)) => Expr::String(format_args!("{x}{y}").to_smolstr()),
+            (lhs, rhs) => Expr::Add(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpSub => match (lhs, rhs) {
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x - y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x - y),
+            (lhs, rhs) => Expr::Sub(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpMul => match (lhs, rhs) {
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x * y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x * y),
+            (lhs, rhs) => Expr::Mul(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpDiv => match (lhs, rhs) {
+            (_, Expr::Int(0)) | (_, Expr::Float(0.0)) => {
+                cold_path();
+                panic!("Division by zero");
+            }
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x / y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x / y),
+            (lhs, rhs) => Expr::Div(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpMod => match (lhs, rhs) {
+            (_, Expr::Int(0)) | (_, Expr::Float(0.0)) => {
+                cold_path();
+                panic!("Modulo by zero");
+            }
+            (Expr::Int(x), Expr::Int(y)) => Expr::Int(x % y),
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x % y),
+            (lhs, rhs) => Expr::Mod(Box::new(lhs), Box::new(rhs), span),
+        },
+        Token::OpPow => match (lhs, rhs) {
+            (Expr::Int(x), Expr::Int(y)) => {
+                if y >= 0 {
+                    Expr::Int(x.pow(y as u32))
+                } else {
+                    cold_path();
+                    panic!("Cannot raise ints to a negative exponent")
+                }
+            }
+            (Expr::Float(x), Expr::Float(y)) => Expr::Float(x.powf(y)),
+            (Expr::Float(x), Expr::Int(y)) => Expr::Float(x.powi(y)),
+            (lhs, rhs) => Expr::Pow(Box::new(lhs), Box::new(rhs), span),
+        },
+        _ => unsafe { unreachable_unchecked() },
+    }
+}
+
+fn check_op(op: Token, min_precedence: u8) -> Option<(Token, u8)> {
+    let (op_precedence, is_right_assoc) = match op {
+        Token::OpOr => (1, false),
+        Token::OpAnd => (2, false),
+        Token::OpEq | Token::OpNEq => (3, false),
+        Token::OpInf | Token::OpInfEq | Token::OpSup | Token::OpSupEq => (4, false),
+        Token::OpAdd | Token::OpSub => (5, false),
+        Token::OpMul | Token::OpDiv | Token::OpMod => (6, false),
+        Token::OpPow => (7, true),
+        _ => return None,
+    };
+    if (op_precedence > min_precedence) || (is_right_assoc && (op_precedence == min_precedence)) {
+        Some((op, op_precedence))
+    } else {
+        None
+    }
+}
+
+fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span:Span) -> Expr {
+    loop {
+        match input.peek_token_opt() {
+            // Index or slice
+            Some(Token::LBracket) => {
+                input.next_token();
+                let (next_token, _) = input.next_token();
+                if next_token == Token::RangeDot {
+                    // slice starting at 0
+                    let upper_bound = parse_expr(input);
+                    input.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
+                    base = Expr::ArrayGetSlice(Box::new(base), Box::from(Expr::Int(0)), Box::new(upper_bound), base_span);
+                } else {
+                    let lower_bound = parse_expr(input);
+                    let (next_token, _) = input.next_token();
+                    if next_token == Token::RBracket { // array index
+                        base = Expr::ArrayGetIndex(Box::new(base), Box::new(lower_bound), base_span);
+                    } else {
+                        let upper_bound = parse_expr(input);
+                        input.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
+                        base = Expr::ArrayGetSlice(Box::new(base), Box::from(lower_bound), Box::new(upper_bound), base_span);
+                    }
+                }
+            }
+            // Struct field access or ObjfunctionCall
+            Some(Token::Dot) => {
+                input.next_token();
+                let (id_token, id_span) = input.next_token();
+                let Token::Identifier(id) = id_token else {
+                    cold_path();
+                    panic!("Unexpected token. Expected Identifier but got {id_token:?}");
+                };
+                let peek_token = input.peek_token_opt();
+                if peek_token == Some(Token::LParen) { // ObjFunctionCall
+                    input.next_token();
+                    let mut args = Vec::with_capacity(4);
+                    let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
+                    let end: u32;
+                    loop {
+                        if input.peek_token() == Token::RParen {
+                            end = input.next_token().1.end as u32;
+                            break;
+                        }
+                        let arg_start: u32 = input.peek_token_start();
+                        args.push(parse_expr(input));
+                        arg_markers.push((arg_start, input.peek_token_start()).into());
+                        if input.peek_token() == Token::Comma {
+                            input.next_token();
+                        } else if !(input.peek_token() == Token::RParen) {
+                            cold_path();
+                            panic!("Function arguments must be comma-separated");
+                        }
+                    }
+                    base = Expr::ObjFunctionCall(Box::new(base), Box::from(args), Box::new([SmolStr::new(id)]), (id_span.start as u32, end).into(), base_span, Box::from(arg_markers));
+                } else if peek_token == Some(Token::DoubleColon) { // ObjFunctionCall with namespace
+                    let mut namespace:Vec<SmolStr> = Vec::with_capacity(2);
+                    namespace.push(SmolStr::new(id));
+                    loop {
+                        let (next_token, _) = input.next_token();
+                        if let Token::Identifier(i) = next_token {
+                            namespace.push(SmolStr::new(i));
+                        } else {
+                            cold_path();
+                            panic!("Wrong namespace syntax");
+                        }
+                        let (next_token, _) = input.next_token();
+                        if next_token == Token::LParen {
+                            break;
+                        } else if next_token == Token::DoubleColon {
+                            continue;
+                        } else {
+                            cold_path();
+                            panic!(
+                                "Expected LParen, LBrace, or DoubleColon, but got {next_token:?}"
+                            );
+                        }
+                    }
+                    let mut args = Vec::with_capacity(4);
+                    let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
+                    let end: u32;
+                    loop {
+                        if input.peek_token() == Token::RParen {
+                            end = input.next_token().1.end as u32;
+                            break;
+                        }
+                        let arg_start: u32 = input.peek_token_start();
+                        args.push(parse_expr(input));
+                        arg_markers.push((arg_start, input.peek_token_start()).into());
+                        if input.peek_token() == Token::Comma {
+                            input.next_token();
+                        } else if !(input.peek_token() == Token::RParen) {
+                            cold_path();
+                            panic!("Function arguments must be comma-separated");
+                        }
+                    }
+                    base = Expr::ObjFunctionCall(Box::new(base), Box::from(args), Box::new([SmolStr::new(id)]), (id_span.start as u32, end).into(), base_span, Box::from(arg_markers));
+                }
+                else {
+                    base = Expr::GetStructField(Box::new(base), SmolStr::new(id), id_span.into(), base_span);
+                }
+            }
+            _ => break,
+        }
+    }
+    base
+}
+
 fn parse_expr<'a>(input: &mut TokenIter<'a>) -> Expr {
-    parse_term(input)
+    parse_expr_with_precedence(input, 0)
 }
 
 impl From<std::range::Range<usize>> for Span {
     #[inline(always)]
     fn from(value: std::range::Range<usize>) -> Self {
-        Span {
+        Self {
             start: value.start as u32,
             end: value.end as u32,
         }
@@ -393,7 +638,7 @@ impl From<std::range::Range<usize>> for Span {
 impl From<(usize, usize)> for Span {
     #[inline(always)]
     fn from((start, end): (usize, usize)) -> Self {
-        Span {
+        Self {
             start: start as u32,
             end: end as u32,
         }
@@ -403,7 +648,7 @@ impl From<(usize, usize)> for Span {
 impl From<(u32, u32)> for Span {
     #[inline(always)]
     fn from((start, end): (u32, u32)) -> Self {
-        Span {
+        Self {
             start: start,
             end: end,
         }
@@ -412,8 +657,7 @@ impl From<(u32, u32)> for Span {
 
 pub fn experimental_parser() {
     let input = r#"
-        print(if true {"yes"} else if false {"no"} else {"false"})
-        "#;
+        x * y + z"#;
     let mut i = Token::lexer(input).spanned().peekable();
     let output = parse_expr(&mut i);
     dbg!(output);

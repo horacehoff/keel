@@ -42,7 +42,8 @@ pub enum Expr {
     WhileBlock(Box<Self>, Box<[Self]>),
     /// FunctionCall(args, (optional namespace + name), start, end, (arg_start,arg_end))
     FunctionCall(Box<[Self]>, Box<[SmolStr]>, Span, Box<[Span]>),
-    ObjFunctionCall(
+    /// ObjFunctionCall(obj, args, namespace, obj_span, fn_span, arg_markers)
+    ObjFunctionCall( // WILL BE REMOVED SOON
         Box<Self>,
         Box<[Self]>,
         Box<[SmolStr]>,

@@ -232,7 +232,7 @@ match x {
 
 ### Try/Catch blocks
 
-> This is heavily subject to change, particularly once structs are implemented
+> This is heavily subject to change
 
 The list of catchable errors is available [here](docs/CATCHABLE_ERRORS.md).
 

@@ -2366,11 +2366,7 @@ pub fn compile_expr(
                 );
             }
             Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
-                if state
-                    .fns
-                    .iter()
-                    .any(|func| &func.name == fn_name)
-                {
+                if state.fns.iter().any(|func| &func.name == fn_name) {
                     throw_parser_error(src, *markers, ErrType::FunctionAlreadyExists(&fn_name));
                 }
                 let mut callees = Vec::new();
@@ -2503,9 +2499,7 @@ fn parse_toplevel(
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
                 });
-                namespace
-                    .fns
-                    .push((fn_name, (fns.len() - 1) as u16));
+                namespace.fns.push((fn_name, (fns.len() - 1) as u16));
             }
             Expr::StructDeclare(name, fields, span) => {
                 let struct_id = structs.len() as u16;

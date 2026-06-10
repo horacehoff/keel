@@ -107,7 +107,8 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
     }
     #[inline(always)]
     fn peek_span_opt(&mut self) -> Option<Span> {
-        self.peek().map(|x| (x.1.start as u32, x.1.end as u32).into())
+        self.peek()
+            .map(|x| (x.1.start as u32, x.1.end as u32).into())
     }
     #[inline(always)]
     fn next_token_expect(&mut self, expected: Token, msg: &str) {
@@ -787,7 +788,7 @@ fn parse_eval_block<'a>(input: &mut TokenIter<'a>) -> Expr {
 }
 
 fn parse_function<'a>(input: &mut TokenIter<'a>) -> Expr {
-    let (t,Span{start:start,end:_}) = input.next_token();
+    let (t, Span { start, end: _ }) = input.next_token();
     debug_assert_eq!(t, Token::Function);
     let (t_fn_id, _) = input.next_token();
     let fn_name = if let Token::Identifier(fn_name) = t_fn_id {
@@ -796,15 +797,18 @@ fn parse_function<'a>(input: &mut TokenIter<'a>) -> Expr {
         cold_path();
         panic!("Invalid function name. Expected identifier but got {t_fn_id:?}");
     };
-    input.next_token_expect(Token::LParen, "Function arguments must be delimited by parentheses");
-    let mut args:Vec<SmolStr> = Vec::with_capacity(4);
-    let end:u32;
+    input.next_token_expect(
+        Token::LParen,
+        "Function arguments must be delimited by parentheses",
+    );
+    let mut args: Vec<SmolStr> = Vec::with_capacity(4);
+    let end: u32;
     loop {
         if input.peek_token() == Token::RParen {
             end = input.next_token().1.end as u32;
             break;
         }
-        let (arg,_) = input.next_token();
+        let (arg, _) = input.next_token();
         if let Token::Identifier(arg) = arg {
             args.push(SmolStr::new(arg));
         } else {
@@ -818,14 +822,84 @@ fn parse_function<'a>(input: &mut TokenIter<'a>) -> Expr {
             panic!("Function arguments must be comma-separated");
         }
     }
-    let fn_code = parse_code(input);
-    Expr::FunctionDecl(fn_name, Box::from(args), std::rc::Rc::from(fn_code), (start,end).into())
+    let fn_code = parse_block(input);
+    Expr::FunctionDecl(
+        fn_name,
+        Box::from(args),
+        std::rc::Rc::from(fn_code),
+        (start, end).into(),
+    )
+}
+
+fn parse_try_catch_block<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, Span { start, end: _ }) = input.next_token();
+    debug_assert_eq!(t, Token::Try);
+    let mut try_code = parse_block(input);
+    let mut has_catch = false;
+    loop {
+        let token_peek = input.peek_token();
+        if token_peek != Token::Catch {
+            break;
+        }
+        input.next_token();
+        todo!();
+    }
+    if !has_catch {
+        cold_path();
+        panic!("A try block must have at least one catch")
+    }
+    // Expr::TryCatchBlock((), (), ())
+    todo!()
+}
+
+fn parse_struct_declare<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, Span { start, end: _ }) = input.next_token();
+    debug_assert_eq!(t, Token::Struct);
+    let (next_token, _) = input.next_token();
+    let struct_name = if let Token::Identifier(id) = next_token {
+        SmolStr::new(id)
+    } else {
+        cold_path();
+        panic!("Struct declaration is missing a name");
+    };
+    input.next_token_expect(Token::LBrace, "Expected '{'");
+    let mut fields: Vec<(SmolStr, SmolStr)> = Vec::with_capacity(4);
+    let end: u32;
+    loop {
+        let (next_token, _) = input.next_token();
+        let field_name = if let Token::Identifier(i) = next_token {
+            SmolStr::new(i)
+        } else {
+            cold_path();
+            panic!("Invalid struct field {next_token:?}")
+        };
+        input.next_token_expect(Token::Colon, "A colon must separate a field from its type.");
+        let (next_token, _) = input.next_token();
+        let field_type = if let Token::Identifier(i) = next_token {
+            SmolStr::new(i)
+        } else {
+            cold_path();
+            panic!("Invalid struct field {next_token:?}")
+        };
+        fields.push((field_name, field_type));
+        let (next_token, next_token_span) = input.next_token();
+        if next_token == Token::RBrace {
+            end = next_token_span.end;
+            break;
+        } else if next_token != Token::Comma {
+            cold_path();
+            panic!(
+                "Field-type elements must be separated by a comma. Expected comma but got {next_token:?}"
+            )
+        }
+    }
+    Expr::StructDeclare(struct_name, Box::from(fields), (start, end).into())
 }
 
 fn parse_loop_block<'a>(input: &mut TokenIter<'a>) -> Expr {
-    let (t,_) = input.next_token();
+    let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Loop);
-    Expr::LoopBlock(Box::from(parse_code(input)))
+    Expr::LoopBlock(Box::from(parse_block(input)))
 }
 
 fn parse_statement<'a>(input: &mut TokenIter<'a>) -> Option<Expr> {
@@ -839,10 +913,39 @@ fn parse_statement<'a>(input: &mut TokenIter<'a>) -> Option<Expr> {
         Some(Token::LBrace) => Some(parse_eval_block(input)),
         Some(Token::Function) => Some(parse_function(input)),
         Some(Token::Loop) => Some(parse_loop_block(input)),
+        Some(Token::Try) => Some(parse_try_catch_block(input)),
+        Some(Token::Struct) => Some(parse_struct_declare(input)),
         Some(Token::RBrace) => None,
-        Some(_) => Some(parse_expr(input)),
-        None => None,
+        Some(t) => Some(parse_line(input, t)),
+        None => {
+            cold_path();
+            panic!("")
+        }
     }
+}
+
+fn parse_var_declare<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t, _) = input.next_token();
+    debug_assert_eq!(t, Token::Let);
+    let (t, _) = input.next_token();
+    let var_name = if let Token::Identifier(id) = t {
+        SmolStr::new(id)
+    } else {
+        cold_path();
+        panic!("{t:?} is not a valid variable name");
+    };
+    input.next_token_expect(Token::Equals, "Variable declarations need a '='.");
+    let var_value = parse_expr(input);
+    Expr::VarDeclare(var_name, Box::new(var_value))
+}
+
+fn parse_line<'a>(input: &mut TokenIter<'a>, peek: Token<'a>) -> Expr {
+    let line_code = match peek {
+        Token::Let => parse_var_declare(input),
+        _ => parse_expr(input),
+    };
+    input.next_token_expect(Token::Comma, "Lines need to end with a ';'.");
+    line_code
 }
 
 fn parse_code<'a>(input: &mut TokenIter<'a>) -> Vec<Expr> {
@@ -889,9 +992,7 @@ impl From<(u32, u32)> for Span {
 
 pub fn experimental_parser() {
     let input = r#"
-        fn test(x,y) {
-
-        }
+        struct test {x:string,y:float}
         "#;
     let mut i = Token::lexer(input).spanned().peekable();
     let output = parse_statement(&mut i);

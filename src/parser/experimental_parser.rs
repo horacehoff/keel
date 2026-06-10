@@ -11,6 +11,7 @@ trait KeelParser<'a> {
     fn peek_token(&mut self) -> Token<'a>;
     fn peek_token_start(&mut self) -> u32;
     fn peek_token_end(&mut self) -> u32;
+    fn peek_token_end_opt(&mut self) -> Option<u32>;
     fn peek_token_opt(&mut self) -> Option<Token<'a>>;
     fn peek_span_opt(&mut self) -> Option<Range<usize>>;
     fn next_token_expect(&mut self, expected: Token, msg: &str);
@@ -84,6 +85,10 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
             )
             .1
             .end as u32
+    }
+    #[inline(always)]
+    fn peek_token_end_opt(&mut self) -> Option<u32> {
+        self.peek().map(|t| t.1.end as u32)
     }
     #[inline(always)]
     fn peek_token_opt(&mut self) -> Option<Token<'a>> {
@@ -176,24 +181,7 @@ fn parse_bool<'a>(input: &mut TokenIter<'a>) -> Expr {
 // Identifier LParen Expr RParen
 // Parses: Expr RParen
 fn parse_fn_call<'a>(input: &mut TokenIter<'a>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
-    let mut args = Vec::with_capacity(4);
-    let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
-    let end: u32;
-    loop {
-        if input.peek_token() == Token::RParen {
-            end = input.next_token().1.end as u32;
-            break;
-        }
-        let arg_start: u32 = input.peek_token_start();
-        args.push(parse_expr(input));
-        arg_markers.push((arg_start, input.peek_token_start()).into());
-        if input.peek_token() == Token::Comma {
-            input.next_token();
-        } else if !(input.peek_token() == Token::RParen) {
-            cold_path();
-            panic!("Function arguments must be comma-separated");
-        }
-    }
+    let (args, arg_markers, end) = parse_args(input);
     Expr::FunctionCall(
         Box::from(args),
         namespace,
@@ -266,32 +254,17 @@ fn parse_term<'a>(input: &mut TokenIter<'a>) -> Expr {
                 // NAMESPACE
                 Some(Token::DoubleColon) => {
                     input.next_token();
-                    let mut namespace: Vec<SmolStr> = Vec::with_capacity(2);
-                    namespace.push(SmolStr::new(s));
-                    loop {
-                        let (next_token, _) = input.next_token();
-                        if let Token::Identifier(i) = next_token {
-                            namespace.push(SmolStr::new(i));
-                        } else {
-                            cold_path();
-                            panic!("Wrong namespace syntax");
-                        }
-                        let (next_token, _) = input.next_token();
-                        if next_token == Token::LParen {
-                            // FUNCTION CALL WITH NAMESPACE:
-                            // (Identifier DoubleColon)+ Identifier LParen Expr RParen
-                            return parse_fn_call(input, Box::from(namespace), start);
-                        } else if next_token == Token::LBrace {
-                            // STRUCT WITH NAMESPACE
-                            return parse_struct(input, Box::from(namespace), start);
-                        } else if next_token == Token::DoubleColon {
-                            continue;
-                        } else {
-                            cold_path();
-                            panic!(
-                                "Expected LParen, LBrace, or DoubleColon, but got {next_token:?}"
-                            );
-                        }
+                    let (namespace, terminator) = parse_namespace(input, SmolStr::new(s));
+                    if terminator == Token::LParen {
+                        // FUNCTION CALL WITH NAMESPACE:
+                        // (Identifier DoubleColon)+ Identifier LParen Expr RParen
+                        return parse_fn_call(input, Box::from(namespace), start);
+                    } else if terminator == Token::LBrace {
+                        // STRUCT WITH NAMESPACE
+                        return parse_struct(input, Box::from(namespace), start);
+                    } else {
+                        cold_path();
+                        panic!("Expected LParen, LBrace, or DoubleColon, but got {terminator:?}");
                     }
                 }
                 _ => Expr::Var(SmolStr::new(s), (t_span.start, t_span.end).into()),
@@ -395,7 +368,10 @@ fn parse_term<'a>(input: &mut TokenIter<'a>) -> Expr {
 
 fn parse_expr_with_precedence<'a>(input: &mut TokenIter<'a>, min_precedence: u8) -> Expr {
     let start = input.peek_token_start();
+    let mut end = input.peek_token_end();
     let mut lhs = parse_term(input);
+    end = input.peek_token_end_opt().unwrap_or(end);
+    lhs = parse_postfix_op(input, lhs, (start, end).into());
     loop {
         let Some(peek) = input.peek_token_opt() else {
             break;
@@ -514,27 +490,88 @@ fn check_op(op: Token, min_precedence: u8) -> Option<(Token, u8)> {
     }
 }
 
-fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span:Span) -> Expr {
+// Call after DoubleColon is skipped
+fn parse_namespace<'a>(input: &mut TokenIter<'a>, initial: SmolStr) -> (Box<[SmolStr]>, Token<'a>) {
+    let mut namespace: Vec<SmolStr> = Vec::with_capacity(2);
+    namespace.push(initial);
+    loop {
+        let (next_token, _) = input.next_token();
+        if let Token::Identifier(i) = next_token {
+            namespace.push(SmolStr::new(i));
+        } else {
+            cold_path();
+            panic!("Wrong namespace syntax");
+        }
+        let (next_token, _) = input.next_token();
+        if next_token == Token::DoubleColon {
+            continue;
+        } else {
+            return (Box::from(namespace), next_token);
+        }
+    }
+}
+
+// Must be called after LParen is skipped
+fn parse_args<'a>(input: &mut TokenIter<'a>) -> (Box<[Expr]>, Box<[Span]>, u32) {
+    let mut args = Vec::with_capacity(4);
+    let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
+    loop {
+        if input.peek_token() == Token::RParen {
+            let end = input.next_token().1.end as u32;
+            return (Box::from(args), Box::from(arg_markers), end);
+        }
+        let arg_start: u32 = input.peek_token_start();
+        args.push(parse_expr(input));
+        arg_markers.push((arg_start, input.peek_token_start()).into());
+        if input.peek_token() == Token::Comma {
+            input.next_token();
+        } else if !(input.peek_token() == Token::RParen) {
+            cold_path();
+            panic!("Function arguments must be comma-separated");
+        }
+    }
+}
+
+fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span: Span) -> Expr {
     loop {
         match input.peek_token_opt() {
             // Index or slice
             Some(Token::LBracket) => {
                 input.next_token();
-                let (next_token, _) = input.next_token();
-                if next_token == Token::RangeDot {
+                if input.peek_token_opt() == Some(Token::RangeDot) {
                     // slice starting at 0
+                    input.next_token();
                     let upper_bound = parse_expr(input);
-                    input.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
-                    base = Expr::ArrayGetSlice(Box::new(base), Box::from(Expr::Int(0)), Box::new(upper_bound), base_span);
+                    let end = input
+                        .next_token_expect_end(Token::RBracket, "Unmatched ']'. Invalid slice.");
+                    base_span.end = end;
+                    base = Expr::ArrayGetSlice(
+                        Box::new(base),
+                        Box::from(Expr::Int(0)),
+                        Box::new(upper_bound),
+                        base_span,
+                    );
                 } else {
                     let lower_bound = parse_expr(input);
-                    let (next_token, _) = input.next_token();
-                    if next_token == Token::RBracket { // array index
-                        base = Expr::ArrayGetIndex(Box::new(base), Box::new(lower_bound), base_span);
+                    let (next_token, next_token_span) = input.next_token();
+                    if next_token == Token::RBracket {
+                        // array index
+                        base_span.end = next_token_span.end as u32;
+                        base =
+                            Expr::ArrayGetIndex(Box::new(base), Box::new(lower_bound), base_span);
                     } else {
                         let upper_bound = parse_expr(input);
-                        input.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
-                        base = Expr::ArrayGetSlice(Box::new(base), Box::from(lower_bound), Box::new(upper_bound), base_span);
+                        let end = input.next_token_expect_end(
+                            Token::RBracket,
+                            "Unmatched ']'. Invalid slice.",
+                        );
+                        base_span.end = end;
+                        base = Expr::ArrayGetSlice(
+                            Box::new(base),
+                            Box::from(lower_bound),
+                            Box::new(upper_bound),
+                            base_span,
+                        );
                     }
                 }
             }
@@ -547,29 +584,24 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                     panic!("Unexpected token. Expected Identifier but got {id_token:?}");
                 };
                 let peek_token = input.peek_token_opt();
-                if peek_token == Some(Token::LParen) { // ObjFunctionCall
+                if peek_token == Some(Token::LParen) {
+                    // ObjFunctionCall
                     input.next_token();
-                    let mut args = Vec::with_capacity(4);
-                    let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
-                    let end: u32;
-                    loop {
-                        if input.peek_token() == Token::RParen {
-                            end = input.next_token().1.end as u32;
-                            break;
-                        }
-                        let arg_start: u32 = input.peek_token_start();
-                        args.push(parse_expr(input));
-                        arg_markers.push((arg_start, input.peek_token_start()).into());
-                        if input.peek_token() == Token::Comma {
-                            input.next_token();
-                        } else if !(input.peek_token() == Token::RParen) {
-                            cold_path();
-                            panic!("Function arguments must be comma-separated");
-                        }
-                    }
-                    base = Expr::ObjFunctionCall(Box::new(base), Box::from(args), Box::new([SmolStr::new(id)]), (id_span.start as u32, end).into(), base_span, Box::from(arg_markers));
-                } else if peek_token == Some(Token::DoubleColon) { // ObjFunctionCall with namespace
-                    let mut namespace:Vec<SmolStr> = Vec::with_capacity(2);
+                    let (args, arg_markers, end) = parse_args(input);
+                    let obj_function_call = Expr::ObjFunctionCall(
+                        Box::new(base),
+                        Box::from(args),
+                        Box::new([SmolStr::new(id)]),
+                        (id_span.start as u32, end).into(),
+                        base_span,
+                        Box::from(arg_markers),
+                    );
+                    base_span.end = end;
+                    base = obj_function_call;
+                } else if peek_token == Some(Token::DoubleColon) {
+                    // ObjFunctionCall with namespace
+                    input.next_token();
+                    let mut namespace: Vec<SmolStr> = Vec::with_capacity(2);
                     namespace.push(SmolStr::new(id));
                     loop {
                         let (next_token, _) = input.next_token();
@@ -591,28 +623,26 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                             );
                         }
                     }
-                    let mut args = Vec::with_capacity(4);
-                    let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
-                    let end: u32;
-                    loop {
-                        if input.peek_token() == Token::RParen {
-                            end = input.next_token().1.end as u32;
-                            break;
-                        }
-                        let arg_start: u32 = input.peek_token_start();
-                        args.push(parse_expr(input));
-                        arg_markers.push((arg_start, input.peek_token_start()).into());
-                        if input.peek_token() == Token::Comma {
-                            input.next_token();
-                        } else if !(input.peek_token() == Token::RParen) {
-                            cold_path();
-                            panic!("Function arguments must be comma-separated");
-                        }
-                    }
-                    base = Expr::ObjFunctionCall(Box::new(base), Box::from(args), Box::new([SmolStr::new(id)]), (id_span.start as u32, end).into(), base_span, Box::from(arg_markers));
-                }
-                else {
-                    base = Expr::GetStructField(Box::new(base), SmolStr::new(id), id_span.into(), base_span);
+                    let (args, arg_markers, end) = parse_args(input);
+                    let obj_function_call = Expr::ObjFunctionCall(
+                        Box::new(base),
+                        Box::from(args),
+                        Box::from(namespace),
+                        (id_span.start as u32, end).into(),
+                        base_span,
+                        Box::from(arg_markers),
+                    );
+                    base_span.end = end;
+                    base = obj_function_call;
+                } else {
+                    let get_struct_field = Expr::GetStructField(
+                        Box::new(base),
+                        SmolStr::new(id),
+                        id_span.into(),
+                        base_span,
+                    );
+                    base_span.end = id_span.end as u32;
+                    base = get_struct_field;
                 }
             }
             _ => break,
@@ -623,6 +653,19 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
 
 fn parse_expr<'a>(input: &mut TokenIter<'a>) -> Expr {
     parse_expr_with_precedence(input, 0)
+}
+
+fn parse_statement<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (token, t_span) = input.next_token();
+    match token {
+        Token::If => {
+            todo!();
+        }
+        unexpected => {
+            cold_path();
+            panic!("Unknown statement {unexpected:?}")
+        }
+    }
 }
 
 impl From<std::range::Range<usize>> for Span {
@@ -657,7 +700,8 @@ impl From<(u32, u32)> for Span {
 
 pub fn experimental_parser() {
     let input = r#"
-        x * y + z"#;
+        fs::read()
+        "#;
     let mut i = Token::lexer(input).spanned().peekable();
     let output = parse_expr(&mut i);
     dbg!(output);

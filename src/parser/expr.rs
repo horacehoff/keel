@@ -55,7 +55,7 @@ pub enum Expr {
         Box<[Span]>,
     ),
     /// FunctionDecl(name+args, code, start, end)
-    FunctionDecl(Box<[SmolStr]>, Rc<[Self]>, Span),
+    FunctionDecl(SmolStr, Box<[SmolStr]>, Rc<[Self]>, Span),
 
     ReturnVal(Box<Option<Self>>),
 
@@ -65,7 +65,7 @@ pub enum Expr {
     ArrayModify(Box<Self>, Box<Self>, Box<Self>, Span, Span),
 
     /// ForLoop(loop_var_name, loop_array+code, obj_markers)
-    ForLoop(SmolStr, Box<[Self]>, Span),
+    ForLoop(SmolStr, Box<Self>, Box<[Self]>, Span),
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
     IntForLoop(SmolStr, Box<Self>, Box<Self>, Box<[Self]>, Span, Span),
     /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
@@ -137,7 +137,7 @@ pub fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
         | Expr::InlineCondition(_, body, _)
         | Expr::ElseIfBlock(_, body)
         | Expr::ElseBlock(body)
-        | Expr::ForLoop(_, body, _)
+        | Expr::ForLoop(_, _, body, _)
         | Expr::IntForLoop(_, _, _, body, _, _) => contains_var_reassign(name, body),
         _ => false,
     })

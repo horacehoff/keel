@@ -115,7 +115,7 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                     expr_stack.push(code);
                 }
             }
-            Expr::FunctionDecl(_, x, _) => expr_stack.extend(x.iter()),
+            Expr::FunctionDecl(_, _, x, _) => expr_stack.extend(x.iter()),
             Expr::ArrayGetSlice(x, y, z, _) => {
                 expr_stack.push(x);
                 expr_stack.push(y);
@@ -125,7 +125,7 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
             | Expr::VarAssign(_, x, _)
             | Expr::Neg(x, _)
             | Expr::BoolNeg(x, _) => expr_stack.push(x),
-            Expr::ForLoop(_, code, _) => expr_stack.extend(code.iter()),
+            Expr::ForLoop(_, _, code, _) => expr_stack.extend(code.iter()),
             Expr::IntForLoop(_, start, end, code, _, _) => {
                 expr_stack.push(start);
                 expr_stack.push(end);
@@ -200,7 +200,7 @@ pub fn check_if_returns_void(content: &[Expr]) -> bool {
             | Expr::Condition(_, code, _)
             | Expr::InlineCondition(_, code, _)
             | Expr::WhileBlock(_, code)
-            | Expr::ForLoop(_, code, _)
+            | Expr::ForLoop(_, _, code, _)
             | Expr::EvalBlock(code)
             | Expr::LoopBlock(code)
             | Expr::IntForLoop(_, _, _, code, _, _) => {
@@ -368,8 +368,7 @@ fn track_return_flow(
                 extend_return_types!(&mut return_types, flow.types);
                 v.truncate(v_len);
             }
-            Expr::ForLoop(var_name, array_code, _) => {
-                let array_expr = array_code.first().unwrap();
+            Expr::ForLoop(var_name, array_expr, array_code, _) => {
                 let inferred_collection_type = infer_type(array_expr, v, ctx, state);
                 let elem_type = match inferred_collection_type {
                     DataType::Array(inner) => inner.map_or(DataType::Unknown, |t| *t),
@@ -385,7 +384,7 @@ fn track_return_flow(
                         var_type: elem_type,
                     });
                 }
-                let flow = track_return_flow(&array_code[1..], v, ctx, state, fn_name);
+                let flow = track_return_flow(array_code, v, ctx, state, fn_name);
                 extend_return_types!(&mut return_types, flow.types);
                 v.truncate(v_len);
             }

@@ -108,7 +108,7 @@ Block<T>: T = {
 
 pub Function:Expr = {
     <start: @L> "fn" <o1:Var> <args: Args<Var>> <o3: Block<Code>> <end: @R> => {
-        Expr::FunctionDecl(Box::from([&[o1], args.as_slice()].concat()), Rc::from(o3), span!(start, end))
+        Expr::FunctionDecl(o1, Box::from(args), Rc::from(o3), span!(start, end))
     }
 }
 
@@ -246,9 +246,9 @@ WhileBlock: Expr = {
 
 ForLoop:Expr = {
     "for" <o1:Var> "in" <start:@L> <o2: ExpressionNoBrackets> <end:@R> <o3: Block<Code>> => {
-        let mut output = vec![o2];
-        output.extend(o3);
-        Expr::ForLoop(o1,output.into_boxed_slice(), span!(start,end))
+        let mut output = vec![o2.clone()];
+        output.extend(o3.clone());
+        Expr::ForLoop(o1,Box::new(o2), o3, span!(start,end))
     }
 }
 

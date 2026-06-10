@@ -1,19 +1,22 @@
 use core::range::Range;
 use std::hint::{cold_path, unreachable_unchecked};
 
-use crate::expr::{Expr, Span};
+use crate::{
+    experimental_parser::Token::RangeDot,
+    expr::{Expr, Span},
+};
 use logos::{Logos, SpannedIter};
 use smol_strc::{SmolStr, ToSmolStr};
 use std::iter::Peekable;
 
 trait KeelParser<'a> {
-    fn next_token(&mut self) -> (Token<'a>, Range<usize>);
+    fn next_token(&mut self) -> (Token<'a>, Span);
     fn peek_token(&mut self) -> Token<'a>;
     fn peek_token_start(&mut self) -> u32;
     fn peek_token_end(&mut self) -> u32;
     fn peek_token_end_opt(&mut self) -> Option<u32>;
     fn peek_token_opt(&mut self) -> Option<Token<'a>>;
-    fn peek_span_opt(&mut self) -> Option<Range<usize>>;
+    fn peek_span_opt(&mut self) -> Option<Span>;
     fn next_token_expect(&mut self, expected: Token, msg: &str);
     fn next_token_expect_end(&mut self, expected: Token, msg: &str) -> u32;
 }
@@ -22,7 +25,7 @@ type TokenIter<'a> = Peekable<SpannedIter<'a, Token<'a>>>;
 
 impl<'a> KeelParser<'a> for TokenIter<'a> {
     #[inline(always)]
-    fn next_token(&mut self) -> (Token<'a>, Range<usize>) {
+    fn next_token(&mut self) -> (Token<'a>, Span) {
         let t = self.next().unwrap_or_else(
             #[cold]
             || {
@@ -38,7 +41,7 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
                     panic!("Unknown token")
                 },
             ),
-            t.1.into(),
+            (t.1.start, t.1.end).into(),
         )
     }
     #[inline(always)]
@@ -103,8 +106,8 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
         })
     }
     #[inline(always)]
-    fn peek_span_opt(&mut self) -> Option<Range<usize>> {
-        self.peek().map(|x| std::range::Range::from(x.1.clone()))
+    fn peek_span_opt(&mut self) -> Option<Span> {
+        self.peek().map(|x| (x.1.start as u32, x.1.end as u32).into())
     }
     #[inline(always)]
     fn next_token_expect(&mut self, expected: Token, msg: &str) {
@@ -121,7 +124,7 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
             cold_path();
             panic!("{msg}. Expected {expected:?} but got {next_token:?}")
         }
-        span.end as u32
+        span.end
     }
 }
 
@@ -215,7 +218,7 @@ fn parse_struct<'a>(input: &mut TokenIter<'a>, namespace: Box<[SmolStr]>, start:
         ));
         let (next_token, next_token_span) = input.next_token();
         if next_token == Token::RBrace {
-            end = next_token_span.end as u32;
+            end = next_token_span.end;
             break;
         } else if next_token != Token::Comma {
             cold_path();
@@ -655,17 +658,203 @@ fn parse_expr<'a>(input: &mut TokenIter<'a>) -> Expr {
     parse_expr_with_precedence(input, 0)
 }
 
-fn parse_statement<'a>(input: &mut TokenIter<'a>) -> Expr {
-    let (token, t_span) = input.next_token();
-    match token {
-        Token::If => {
-            todo!();
+// call right after peeking Token::If
+fn parse_condition_block<'a>(input: &mut TokenIter<'a>, start: u32) -> Expr {
+    let t = input.next_token();
+    debug_assert_eq!(t.0, Token::If);
+    let condition = parse_expr(input);
+    input.next_token_expect(Token::LBrace, "Expected '{'");
+    let mut output_code: Vec<Expr> = Vec::with_capacity(4);
+    output_code.extend(parse_code(input));
+    let mut end = input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+    loop {
+        let next_token = input.peek_token_opt();
+        if next_token != Some(Token::Else) {
+            break;
         }
-        unexpected => {
-            cold_path();
-            panic!("Unknown statement {unexpected:?}")
+        input.next_token();
+        // if -> else if
+        // lbrace -> else
+        // else -> end
+        let next_token = input.peek_token_opt();
+        if next_token == Some(Token::If) {
+            input.next_token();
+            let else_if_condition = parse_expr(input);
+            input.next_token_expect(Token::LBrace, "Expected '{'");
+            let else_if_code = parse_code(input);
+            end = input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+            output_code.push(Expr::ElseIfBlock(
+                Box::new(else_if_condition),
+                Box::from(else_if_code),
+            ));
+        } else if next_token == Some(Token::LBrace) {
+            input.next_token();
+            let else_code = parse_code(input);
+            end = input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+            output_code.push(Expr::ElseBlock(Box::from(else_code)));
+            break;
+        } else {
+            break;
         }
     }
+    return Expr::Condition(
+        Box::new(condition),
+        Box::from(output_code),
+        (start, end).into(),
+    );
+}
+
+/// LBrace Expr RBrace
+fn parse_block<'a>(input: &mut TokenIter<'a>) -> Vec<Expr> {
+    input.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
+    let while_code = parse_code(input);
+    input.next_token_expect_end(Token::RBrace, "Unmatched '}‘");
+    while_code
+}
+
+fn parse_while_block<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let t = input.next_token();
+    debug_assert_eq!(t.0, Token::While);
+    let while_condition = parse_expr(input);
+    let while_code = parse_block(input);
+    Expr::WhileBlock(Box::new(while_condition), Box::from(while_code))
+}
+
+/// Parses ForLoop and IntForLoop
+/// for Identifier in Expr LBrace Code RBrace
+/// for Identifier in Expr RangeDot Expr LBrace Code Rbrace
+/// for Identifier in RangeDot Expr LBrace Code RBrace
+fn parse_for_loop<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let t = input.next_token();
+    debug_assert_eq!(t.0, Token::For);
+    let (i_token, _) = input.next_token();
+    let id = if let Token::Identifier(id) = i_token {
+        SmolStr::new(id)
+    } else {
+        cold_path();
+        panic!("Expected identifier, found {i_token:?}");
+    };
+    input.next_token_expect(Token::In, "Expected 'in'");
+    let start = input.peek_token_start();
+    let peek_token = input.peek_token();
+    if peek_token == Token::RangeDot {
+        // shorthand IntForLoop
+        input.next_token();
+        let start2 = input.peek_token_start();
+        let upper_bound = parse_expr(input);
+        let end2 = input.peek_token_end();
+        let for_loop_code = parse_block(input);
+        Expr::IntForLoop(
+            id,
+            Box::new(Expr::Int(0)),
+            Box::new(upper_bound),
+            Box::from(for_loop_code),
+            (start, start).into(),
+            (start2, end2).into(),
+        )
+    } else {
+        let for_collection = parse_expr(input);
+        let end = input.peek_token_end();
+        let peek_token = input.peek_token();
+        if peek_token == RangeDot {
+            input.next_token();
+            let start2 = input.peek_token_start();
+            let upper_bound = parse_expr(input);
+            let end2 = input.peek_token_end();
+            let for_loop_code = parse_block(input);
+            Expr::IntForLoop(
+                id,
+                Box::new(for_collection),
+                Box::new(upper_bound),
+                Box::from(for_loop_code),
+                (start, start).into(),
+                (start2, end2).into(),
+            )
+        } else {
+            let for_loop_code = parse_block(input);
+            Expr::ForLoop(
+                id,
+                Box::new(for_collection),
+                Box::from(for_loop_code),
+                (start, end).into(),
+            )
+        }
+    }
+}
+
+fn parse_eval_block<'a>(input: &mut TokenIter<'a>) -> Expr {
+    Expr::EvalBlock(Box::from(parse_block(input)))
+}
+
+fn parse_function<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t,Span{start:start,end:_}) = input.next_token();
+    debug_assert_eq!(t, Token::Function);
+    let (t_fn_id, _) = input.next_token();
+    let fn_name = if let Token::Identifier(fn_name) = t_fn_id {
+        SmolStr::new(fn_name)
+    } else {
+        cold_path();
+        panic!("Invalid function name. Expected identifier but got {t_fn_id:?}");
+    };
+    input.next_token_expect(Token::LParen, "Function arguments must be delimited by parentheses");
+    let mut args:Vec<SmolStr> = Vec::with_capacity(4);
+    let end:u32;
+    loop {
+        if input.peek_token() == Token::RParen {
+            end = input.next_token().1.end as u32;
+            break;
+        }
+        let (arg,_) = input.next_token();
+        if let Token::Identifier(arg) = arg {
+            args.push(SmolStr::new(arg));
+        } else {
+            cold_path();
+            panic!("Invalid function argument. Expected identifier but got {arg:?}")
+        }
+        if input.peek_token() == Token::Comma {
+            input.next_token();
+        } else if !(input.peek_token() == Token::RParen) {
+            cold_path();
+            panic!("Function arguments must be comma-separated");
+        }
+    }
+    let fn_code = parse_code(input);
+    Expr::FunctionDecl(fn_name, Box::from(args), std::rc::Rc::from(fn_code), (start,end).into())
+}
+
+fn parse_loop_block<'a>(input: &mut TokenIter<'a>) -> Expr {
+    let (t,_) = input.next_token();
+    debug_assert_eq!(t, Token::Loop);
+    Expr::LoopBlock(Box::from(parse_code(input)))
+}
+
+fn parse_statement<'a>(input: &mut TokenIter<'a>) -> Option<Expr> {
+    let token = input.peek_token_opt();
+    let t_span = input.peek_span_opt();
+    match token {
+        Some(Token::If) => Some(parse_condition_block(input, t_span.unwrap().start as u32)),
+        Some(Token::While) => Some(parse_while_block(input)),
+        Some(Token::For) => Some(parse_for_loop(input)),
+        Some(Token::Match) => todo!("Match"),
+        Some(Token::LBrace) => Some(parse_eval_block(input)),
+        Some(Token::Function) => Some(parse_function(input)),
+        Some(Token::Loop) => Some(parse_loop_block(input)),
+        Some(Token::RBrace) => None,
+        Some(_) => Some(parse_expr(input)),
+        None => None,
+    }
+}
+
+fn parse_code<'a>(input: &mut TokenIter<'a>) -> Vec<Expr> {
+    let mut output: Vec<Expr> = Vec::with_capacity(2);
+    loop {
+        if let Some(e) = parse_statement(input) {
+            output.push(e);
+        } else {
+            break;
+        }
+    }
+    output
 }
 
 impl From<std::range::Range<usize>> for Span {
@@ -700,10 +889,12 @@ impl From<(u32, u32)> for Span {
 
 pub fn experimental_parser() {
     let input = r#"
-        fs::read()
+        fn test(x,y) {
+
+        }
         "#;
     let mut i = Token::lexer(input).spanned().peekable();
-    let output = parse_expr(&mut i);
+    let output = parse_statement(&mut i);
     dbg!(output);
 }
 

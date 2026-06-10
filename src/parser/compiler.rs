@@ -39,7 +39,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::slice;
 
-lalrpop_mod!(#[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
+lalrpop_mod!(
+    #[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
     pub grammar
 );
 
@@ -1806,12 +1807,10 @@ pub fn compile_expr(
                 output.extend(cond_code);
                 output.push(Instr::JmpBack(len));
             }
-            Expr::ForLoop(var_name, array_code, markers) => {
+            Expr::ForLoop(var_name, array, code, markers) => {
                 let real_var = var_name.as_str() != "_";
 
                 // parse the array, get its id (the target array is the first Expr in array_code)
-                let array = array_code.first().unwrap();
-                let code = &array_code[1..];
                 let array_type = infer_type(array, v, ctx, state);
                 let array = get_id(
                     array,
@@ -2366,24 +2365,23 @@ pub fn compile_expr(
                     single_run,
                 );
             }
-            Expr::FunctionDecl(x, y, markers) => {
+            Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
                 if state
                     .fns
                     .iter()
-                    .any(|func| &func.name == x.first().unwrap())
+                    .any(|func| &func.name == fn_name)
                 {
-                    throw_parser_error(src, *markers, ErrType::FunctionAlreadyExists(&x[0]));
+                    throw_parser_error(src, *markers, ErrType::FunctionAlreadyExists(&fn_name));
                 }
                 let mut callees = Vec::new();
-                collect_direct_fn_calls(y, &mut callees);
-                let fn_name = x.first().unwrap();
+                collect_direct_fn_calls(fn_code, &mut callees);
                 state.fns.push(Function {
                     name: fn_name.clone(),
-                    args: x.into_iter().skip(1).cloned().collect(),
-                    code: y.clone(),
+                    args: fn_args.clone(),
+                    code: fn_code.clone(),
                     impls: Vec::new(),
                     is_recursive: None,
-                    returns_void: check_if_returns_void(y),
+                    returns_void: check_if_returns_void(fn_code),
                     src_file: current_src_file,
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
@@ -2480,13 +2478,13 @@ fn parse_toplevel(
 ) {
     for expr in code {
         match expr {
-            Expr::FunctionDecl(fn_namespace, fn_code, markers) => {
-                if let Some(func) = fns.iter().find(|f| f.name == fn_namespace[0]) {
+            Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
+                if let Some(func) = fns.iter().find(|f| f.name == fn_name) {
                     let func_file = &sources[func.src_file as usize].0;
                     throw_parser_error(
                         use_line_markers,
                         markers,
-                        ErrType::DuplicateFunctionInImport(&fn_namespace[0], func_file.as_str()),
+                        ErrType::DuplicateFunctionInImport(&fn_name, func_file.as_str()),
                     );
                 }
                 fn_registers.push(Vec::new());
@@ -2495,8 +2493,8 @@ fn parse_toplevel(
                 collect_direct_fn_calls(&fn_code, &mut callees);
 
                 fns.push(Function {
-                    name: fn_namespace[0].clone(),
-                    args: fn_namespace[1..].into(),
+                    name: fn_name.clone(),
+                    args: fn_args,
                     code: fn_code,
                     impls: Vec::new(),
                     is_recursive: None,
@@ -2507,7 +2505,7 @@ fn parse_toplevel(
                 });
                 namespace
                     .fns
-                    .push((fn_namespace[0].clone(), (fns.len() - 1) as u16));
+                    .push((fn_name, (fns.len() - 1) as u16));
             }
             Expr::StructDeclare(name, fields, span) => {
                 let struct_id = structs.len() as u16;

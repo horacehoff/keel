@@ -53,9 +53,9 @@ KeelType: SmolStr = {
     <t: KeelType> "[" "]" => format_args!("{t}[]").to_smolstr()
 }
 
-pub FnSignature:(SmolStr, Box<[DataType]>, DataType) = {
-    <return_type: CType?> <fn_name: Var> <args: Args<CType>> ";" => {
-        (fn_name, Box::from(args), if let Some(t) = return_type { t } else { DataType::Null })
+pub FnSignature:(SmolStr, Box<[SmolStr]>, SmolStr) = {
+    <return_type: KeelType?> <fn_name: Var> <args: Args<KeelType>> ";" => {
+        (fn_name, Box::from(args), if let Some(t) = return_type { t } else { SmolStr::new("null") })
     }
 }
 

@@ -101,6 +101,8 @@ pub fn str_to_keel_type(s: &str, structs: &[Struct], span: Span, src: (&str, &st
         DataType::Bool
     } else if s == "string" {
         DataType::String
+    } else if s == "null" {
+        DataType::Null
     } else if let Some(s) = structs.iter().rposition(|candidate| candidate.name == s) {
         DataType::Struct(s as u16)
     } else {

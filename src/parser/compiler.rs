@@ -2536,6 +2536,8 @@ fn parse_toplevel(
                 let fns = fn_signatures
                         .iter()
                         .map(|(fn_name, fn_args, fn_return_type)| {
+                            let fn_args = fn_args.iter().map(|t| str_to_keel_type(t, structs, markers, use_line_markers)).collect::<Vec<DataType>>().into_boxed_slice();
+                            let fn_return_type = str_to_keel_type(fn_return_type, structs, markers, use_line_markers);
                             let return_val = FnSignature {
                                 name: fn_name.clone(),
                                 args: fn_args.clone(),
@@ -2543,7 +2545,7 @@ fn parse_toplevel(
                                 id: *dyn_fn_id,
                             };
                             let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
-                            let return_type = datatype_to_c_type(fn_return_type);
+                            let return_type = datatype_to_c_type(&fn_return_type);
                             let cif = libffi::middle::Cif::new(arg_types, return_type);
                             // If the extension is omitted, the extension is chosen based on the target OS
                             let path = if std::path::Path::new(path.as_str()).extension().is_none() {

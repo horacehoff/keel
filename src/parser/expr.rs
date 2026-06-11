@@ -69,7 +69,7 @@ pub enum Expr {
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
     IntForLoop(SmolStr, Box<Self>, Box<Self>, Box<[Self]>, Span, Span),
     /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
-    ImportDylib(SmolStr, Box<[(SmolStr, Box<[DataType]>, DataType)]>, Span),
+    ImportDylib(SmolStr, Box<[(SmolStr, Box<[SmolStr]>, SmolStr)]>, Span),
 
     /// ImportFile(path,alias ,(start, end))
     ImportFile(SmolStr, Option<SmolStr>, Span),

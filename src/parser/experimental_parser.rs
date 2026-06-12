@@ -1,4 +1,4 @@
-use core::range::Range;
+#![allow(clippy::redundant_else)]
 use std::hint::{cold_path, unreachable_unchecked};
 
 use crate::{
@@ -131,58 +131,6 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
             panic!("{msg}. Expected {expected:?} but got {next_token:?}")
         }
         span.end
-    }
-}
-
-fn parse_int<'a>(input: &mut TokenIter<'a>) -> Expr {
-    let (t, _) = input.next_token();
-    if let Token::Int(i) = t {
-        Expr::Int(i)
-    } else {
-        cold_path();
-        panic!("Expected int, found {t:?}")
-    }
-}
-
-fn parse_float<'a>(input: &mut TokenIter<'a>) -> Expr {
-    let (t, _) = input.next_token();
-    if let Token::Float(i) = t {
-        Expr::Float(i)
-    } else {
-        cold_path();
-        panic!("Expected float, found {t:?}")
-    }
-}
-
-fn parse_string<'a>(input: &mut TokenIter<'a>) -> (Expr, u32) {
-    let (t, Span { start: _, end }) = input.next_token();
-    if let Token::String(i) = t {
-        (Expr::String(crate::util::parse_string(i)), end)
-    } else {
-        cold_path();
-        panic!("Expected string, found {t:?}")
-    }
-}
-
-fn parse_identifier<'a>(input: &mut TokenIter<'a>) -> (Expr, u32) {
-    let (t, s) = input.next_token();
-    if let Token::Identifier(i) = t {
-        (Expr::Var(SmolStr::new(i), Span::from(s)), s.end)
-    } else {
-        cold_path();
-        panic!("Expected identifier, found {t:?}")
-    }
-}
-
-fn parse_bool<'a>(input: &mut TokenIter<'a>) -> Expr {
-    let (t, _) = input.next_token();
-    if t == Token::True {
-        Expr::Bool(true)
-    } else if t == Token::False {
-        Expr::Bool(false)
-    } else {
-        cold_path();
-        panic!("Expected bool, found {t:?}")
     }
 }
 
@@ -451,7 +399,7 @@ fn add_op(op: Token, lhs: Expr, rhs: Expr, span: Span) -> Expr {
             (lhs, rhs) => Expr::Mul(Box::new(lhs), Box::new(rhs), span),
         },
         Token::OpDiv => match (lhs, rhs) {
-            (_, Expr::Int(0)) | (_, Expr::Float(0.0)) => {
+            (_, Expr::Int(0) | Expr::Float(0.0)) => {
                 cold_path();
                 panic!("Division by zero");
             }
@@ -460,7 +408,7 @@ fn add_op(op: Token, lhs: Expr, rhs: Expr, span: Span) -> Expr {
             (lhs, rhs) => Expr::Div(Box::new(lhs), Box::new(rhs), span),
         },
         Token::OpMod => match (lhs, rhs) {
-            (_, Expr::Int(0)) | (_, Expr::Float(0.0)) => {
+            (_, Expr::Int(0) | Expr::Float(0.0)) => {
                 cold_path();
                 panic!("Modulo by zero");
             }
@@ -607,7 +555,7 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                         Box::new([SmolStr::new(id)]),
                         (id_span.start as u32, end).into(),
                         base_span,
-                        Box::from(arg_markers),
+                        arg_markers,
                     );
                     base_span.end = end;
                     base = obj_function_call;
@@ -641,9 +589,9 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                         Box::new(base),
                         Box::from(args),
                         Box::from(namespace),
-                        (id_span.start as u32, end).into(),
+                        (id_span.start, end).into(),
                         base_span,
-                        Box::from(arg_markers),
+                        arg_markers,
                     );
                     base_span.end = end;
                     base = obj_function_call;
@@ -651,10 +599,10 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                     let get_struct_field = Expr::GetStructField(
                         Box::new(base),
                         SmolStr::new(id),
-                        id_span.into(),
+                        id_span,
                         base_span,
                     );
-                    base_span.end = id_span.end as u32;
+                    base_span.end = id_span.end;
                     base = get_struct_field;
                 }
             }
@@ -849,20 +797,54 @@ fn parse_try_catch_block<'a>(input: &mut TokenIter<'a>) -> Expr {
     debug_assert_eq!(t, Token::Try);
     let mut try_code = parse_block(input);
     let mut has_catch = false;
+    let mut catch_blocks:Vec<(SmolStr, Vec<Expr>)> = Vec::with_capacity(1);
+    let mut catch_all_var = SmolStr::new_static("e");
+    let mut catch_all_code = None;
+    let end:u32;
     loop {
         let token_peek = input.peek_token();
         if token_peek != Token::Catch {
+            end = input.peek_token_end();
             break;
         }
         input.next_token();
-        todo!();
+        let (next_token,_) = input.next_token();
+        if let Token::Identifier(i) = next_token { // catch-all
+            catch_all_var = SmolStr::new(i);
+            catch_all_code = Some(parse_block(input));
+            end = input.peek_token_start();
+            has_catch = true;
+            break;
+        } else if let Token::String(s) = next_token {
+            catch_blocks.push((SmolStr::new(s), parse_block(input)));
+            has_catch = true;
+        }
     }
     if !has_catch {
         cold_path();
         panic!("A try block must have at least one catch")
     }
-    // Expr::TryCatchBlock((), (), ())
-    todo!()
+    let usr_var = Expr::Var(catch_all_var.clone(), (start,end).into());
+    let else_code:Box<[Expr]> = if let Some(c) = catch_all_code {
+        Box::from(c)
+    } else {
+        Box::from([Expr::FunctionCall(Box::new([usr_var]), Box::from([SmolStr::new("throw")]), (start,end).into(), Box::from([]))])
+    };
+    let mut output_code:Vec<Expr> = Vec::with_capacity(2);
+    let mut main_condition = Expr::Null;
+
+    let mut first = true;
+    for (e, c) in catch_blocks.into_iter() {
+        if first {
+            first = false;
+            main_condition = Expr::Eq(Box::new(Expr::String(e)), Box::new(Expr::Var(catch_all_var.clone(), (start,end).into())));
+            output_code.extend(c);
+        } else {
+            output_code.push(Expr::ElseIfBlock(Box::new(Expr::Eq(Box::new(Expr::String(e)), Box::new(Expr::Var(catch_all_var.clone(), (start,end).into())))), Box::from(c)));
+        }
+    }
+    output_code.push(Expr::ElseBlock(else_code));
+    Expr::TryCatchBlock(Box::from(try_code), catch_all_var, Box::from([Expr::Condition(Box::from(main_condition), Box::from(output_code), (start,end).into())]))
 }
 
 fn parse_struct_declare<'a>(input: &mut TokenIter<'a>) -> Expr {
@@ -1130,18 +1112,18 @@ impl From<(u32, u32)> for Span {
     #[inline(always)]
     fn from((start, end): (u32, u32)) -> Self {
         Self {
-            start: start,
-            end: end,
+            start,
+            end,
         }
     }
 }
 
 pub fn experimental_parser() {
-    let input = r#"
+    let input = r"
         t.x = 20;
-        "#;
+        ";
     let mut i = Token::lexer(input).spanned().peekable();
-    let output = parse_statement(&mut i);
+    let output = parse_file(&mut i);
     dbg!(output);
 }
 

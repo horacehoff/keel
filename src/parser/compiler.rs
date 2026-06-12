@@ -2367,7 +2367,7 @@ pub fn compile_expr(
             }
             Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
                 if state.fns.iter().any(|func| &func.name == fn_name) {
-                    throw_parser_error(src, *markers, ErrType::FunctionAlreadyExists(&fn_name));
+                    throw_parser_error(src, *markers, ErrType::FunctionAlreadyExists(fn_name));
                 }
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(fn_code, &mut callees);
@@ -2587,8 +2587,8 @@ fn parse_toplevel(
                                 )
                             };
 
-                            let mut types = vec![fn_return_type.clone()];
-                            types.extend(fn_args.clone());
+                            let mut types = vec![fn_return_type];
+                            types.extend(fn_args);
 
                             dyn_lib_fns.push(DynamicLibFn {
                                 types: Box::from(types),

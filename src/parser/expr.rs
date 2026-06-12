@@ -1,5 +1,4 @@
 use crate::errors::dev_error;
-use crate::type_system::DataType;
 use smol_strc::SmolStr;
 use std::rc::Rc;
 

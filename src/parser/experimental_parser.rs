@@ -40,7 +40,7 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
         (
             t.0.unwrap_or_else(
                 #[cold]
-                |_| {
+                |()| {
                     cold_path();
                     panic!("Unknown token")
                 },
@@ -61,7 +61,7 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
             .0
             .unwrap_or_else(
                 #[cold]
-                |_| {
+                |()| {
                     cold_path();
                     panic!("Unknown token")
                 },
@@ -106,7 +106,7 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
         self.peek().map(|x| {
             x.0.unwrap_or_else(
                 #[cold]
-                |_| {
+                |()| {
                     cold_path();
                     panic!("Unknown token")
                 },
@@ -140,18 +140,18 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
 // Must be called right after LParen is skipped
 // Identifier LParen Expr RParen
 // Parses: Expr RParen
-fn parse_fn_call<'a>(input: &mut TokenIter<'a>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
+fn parse_fn_call(input: &mut TokenIter<'_>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
     let (args, arg_markers, end) = parse_args(input);
     Expr::FunctionCall(
-        Box::from(args),
+        args,
         namespace,
         (start, end).into(),
-        Box::from(arg_markers),
+        arg_markers,
     )
 }
 
 // Must be called right after LParen is skipped
-fn parse_struct<'a>(input: &mut TokenIter<'a>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
+fn parse_struct(input: &mut TokenIter<'_>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
     let mut fields: Vec<(SmolStr, Expr, Span)> = Vec::with_capacity(4);
     let end: u32;
     loop {
@@ -188,7 +188,7 @@ fn parse_struct<'a>(input: &mut TokenIter<'a>, namespace: Box<[SmolStr]>, start:
     Expr::Struct(namespace, Box::from(fields), (start, end).into())
 }
 
-fn parse_term<'a>(input: &mut TokenIter<'a>, allow_struct: bool) -> Expr {
+fn parse_term(input: &mut TokenIter<'_>, allow_struct: bool) -> Expr {
     let (t, t_span) = input.next_token();
     match t {
         Token::Int(i) => Expr::Int(i),
@@ -198,7 +198,7 @@ fn parse_term<'a>(input: &mut TokenIter<'a>, allow_struct: bool) -> Expr {
         Token::False => Expr::Bool(false),
         Token::Null => Expr::Null,
         Token::Identifier(s) => {
-            let start = t_span.start as u32;
+            let start = t_span.start;
             match input.peek_token_opt() {
                 // FUNCTION CALL:
                 // Identifier LParen Expr RParen
@@ -218,10 +218,10 @@ fn parse_term<'a>(input: &mut TokenIter<'a>, allow_struct: bool) -> Expr {
                     if terminator == Token::LParen {
                         // FUNCTION CALL WITH NAMESPACE:
                         // (Identifier DoubleColon)+ Identifier LParen Expr RParen
-                        return parse_fn_call(input, Box::from(namespace), start);
+                        parse_fn_call(input, namespace, start)
                     } else if terminator == Token::LBrace {
                         // STRUCT WITH NAMESPACE
-                        return parse_struct(input, Box::from(namespace), start);
+                        parse_struct(input, namespace, start)
                     } else {
                         cold_path();
                         panic!("Expected LParen, LBrace, or DoubleColon, but got {terminator:?}");
@@ -231,12 +231,12 @@ fn parse_term<'a>(input: &mut TokenIter<'a>, allow_struct: bool) -> Expr {
             }
         }
         Token::LBracket => {
-            let start = t_span.start as u32;
+            let start = t_span.start;
             let end: u32;
             let mut elems = Vec::with_capacity(4);
             loop {
                 if input.peek_token_opt() == Some(Token::RBracket) {
-                    end = input.next_token().1.end as u32;
+                    end = input.next_token().1.end;
                     break;
                 }
                 elems.push(parse_expr(input));
@@ -261,7 +261,7 @@ fn parse_term<'a>(input: &mut TokenIter<'a>, allow_struct: bool) -> Expr {
             Expr::Float(f) => Expr::Float(-f),
             other => Expr::Neg(
                 Box::new(other),
-                (t_span.start as u32, input.peek_token_start()).into(),
+                (t_span.start, input.peek_token_start()).into(),
             ),
         },
         // ! Expr
@@ -269,7 +269,7 @@ fn parse_term<'a>(input: &mut TokenIter<'a>, allow_struct: bool) -> Expr {
             Expr::Bool(b) => Expr::Bool(!b),
             other => Expr::BoolNeg(
                 Box::new(other),
-                (t_span.start as u32, input.peek_token_start()).into(),
+                (t_span.start, input.peek_token_start()).into(),
             ),
         },
         // Inline condition
@@ -313,11 +313,11 @@ fn parse_term<'a>(input: &mut TokenIter<'a>, allow_struct: bool) -> Expr {
                 cold_path();
                 panic!("Inline conditions need an else block");
             }
-            return Expr::InlineCondition(
+            Expr::InlineCondition(
                 Box::new(condition),
                 Box::from(output_code),
-                (t_span.start as u32, end).into(),
-            );
+                (t_span.start, end).into(),
+            )
         }
         unexpected => {
             cold_path();
@@ -326,8 +326,8 @@ fn parse_term<'a>(input: &mut TokenIter<'a>, allow_struct: bool) -> Expr {
     }
 }
 
-fn parse_expr_with_precedence<'a>(
-    input: &mut TokenIter<'a>,
+fn parse_expr_with_precedence(
+    input: &mut TokenIter<'_>,
     min_precedence: u8,
     allow_struct: bool,
 ) -> Expr {
@@ -336,10 +336,7 @@ fn parse_expr_with_precedence<'a>(
     let mut lhs = parse_term(input, allow_struct);
     end = input.peek_token_end_opt().unwrap_or(end);
     lhs = parse_postfix_op(input, lhs, (start, end).into());
-    loop {
-        let Some(peek) = input.peek_token_opt() else {
-            break;
-        };
+    while let Some(peek) = input.peek_token_opt() {
         let Some((op, op_precedence)) = check_op(peek, min_precedence) else {
             break;
         };
@@ -436,7 +433,7 @@ fn add_op(op: Token, lhs: Expr, rhs: Expr, span: Span) -> Expr {
     }
 }
 
-fn check_op(op: Token, min_precedence: u8) -> Option<(Token, u8)> {
+const fn check_op(op: Token, min_precedence: u8) -> Option<(Token, u8)> {
     let (op_precedence, is_right_assoc) = match op {
         Token::OpOr => (1, false),
         Token::OpAnd => (2, false),
@@ -469,19 +466,18 @@ fn parse_namespace<'a>(input: &mut TokenIter<'a>, initial: SmolStr) -> (Box<[Smo
         let (next_token, _) = input.next_token();
         if next_token == Token::DoubleColon {
             continue;
-        } else {
-            return (Box::from(namespace), next_token);
         }
+        return (Box::from(namespace), next_token);
     }
 }
 
 // Must be called after LParen is skipped
-fn parse_args<'a>(input: &mut TokenIter<'a>) -> (Box<[Expr]>, Box<[Span]>, u32) {
+fn parse_args(input: &mut TokenIter<'_>) -> (Box<[Expr]>, Box<[Span]>, u32) {
     let mut args = Vec::with_capacity(4);
     let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
     loop {
         if input.peek_token() == Token::RParen {
-            let end = input.next_token().1.end as u32;
+            let end = input.next_token().1.end;
             return (Box::from(args), Box::from(arg_markers), end);
         }
         let arg_start: u32 = input.peek_token_start();
@@ -496,7 +492,7 @@ fn parse_args<'a>(input: &mut TokenIter<'a>) -> (Box<[Expr]>, Box<[Span]>, u32) 
     }
 }
 
-fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span: Span) -> Expr {
+fn parse_postfix_op(input: &mut TokenIter<'_>, mut base: Expr, mut base_span: Span) -> Expr {
     loop {
         match input.peek_token_opt() {
             // Index or slice
@@ -520,7 +516,7 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                     let (next_token, next_token_span) = input.next_token();
                     if next_token == Token::RBracket {
                         // array index
-                        base_span.end = next_token_span.end as u32;
+                        base_span.end = next_token_span.end;
                         base =
                             Expr::ArrayGetIndex(Box::new(base), Box::new(lower_bound), base_span);
                     } else {
@@ -554,9 +550,9 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                     let (args, arg_markers, end) = parse_args(input);
                     let obj_function_call = Expr::ObjFunctionCall(
                         Box::new(base),
-                        Box::from(args),
+                        args,
                         Box::new([SmolStr::new(id)]),
-                        (id_span.start as u32, end).into(),
+                        (id_span.start, end).into(),
                         base_span,
                         arg_markers,
                     );
@@ -578,9 +574,7 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                         let (next_token, _) = input.next_token();
                         if next_token == Token::LParen {
                             break;
-                        } else if next_token == Token::DoubleColon {
-                            continue;
-                        } else {
+                        } else if next_token != Token::DoubleColon {
                             cold_path();
                             panic!(
                                 "Expected LParen, LBrace, or DoubleColon, but got {next_token:?}"
@@ -590,7 +584,7 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
                     let (args, arg_markers, end) = parse_args(input);
                     let obj_function_call = Expr::ObjFunctionCall(
                         Box::new(base),
-                        Box::from(args),
+                        args,
                         Box::from(namespace),
                         (id_span.start, end).into(),
                         base_span,
@@ -611,16 +605,16 @@ fn parse_postfix_op<'a>(input: &mut TokenIter<'a>, mut base: Expr, mut base_span
     base
 }
 
-fn parse_expr<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_expr(input: &mut TokenIter<'_>) -> Expr {
     parse_expr_with_precedence(input, 0, true)
 }
 
-fn parse_expr_no_struct<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_expr_no_struct(input: &mut TokenIter<'_>) -> Expr {
     parse_expr_with_precedence(input, 0, false)
 }
 
 // call right after peeking Token::If
-fn parse_condition_block<'a>(input: &mut TokenIter<'a>, start: u32) -> Expr {
+fn parse_condition_block(input: &mut TokenIter<'_>, start: u32) -> Expr {
     let t = input.next_token();
     debug_assert_eq!(t.0, Token::If);
     let condition = parse_expr_no_struct(input);
@@ -658,22 +652,22 @@ fn parse_condition_block<'a>(input: &mut TokenIter<'a>, start: u32) -> Expr {
             break;
         }
     }
-    return Expr::Condition(
+    Expr::Condition(
         Box::new(condition),
         Box::from(output_code),
         (start, end).into(),
-    );
+    )
 }
 
 /// LBrace Expr RBrace
-fn parse_block<'a>(input: &mut TokenIter<'a>) -> Vec<Expr> {
+fn parse_block(input: &mut TokenIter<'_>) -> Vec<Expr> {
     input.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
     let while_code = parse_code(input);
     input.next_token_expect_end(Token::RBrace, "Unmatched '}‘");
     while_code
 }
 
-fn parse_while_block<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_while_block(input: &mut TokenIter<'_>) -> Expr {
     let t = input.next_token();
     debug_assert_eq!(t.0, Token::While);
     let while_condition = parse_expr_no_struct(input);
@@ -685,7 +679,7 @@ fn parse_while_block<'a>(input: &mut TokenIter<'a>) -> Expr {
 /// for Identifier in Expr LBrace Code RBrace
 /// for Identifier in Expr RangeDot Expr LBrace Code Rbrace
 /// for Identifier in RangeDot Expr LBrace Code RBrace
-fn parse_for_loop<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_for_loop(input: &mut TokenIter<'_>) -> Expr {
     let t = input.next_token();
     debug_assert_eq!(t.0, Token::For);
     let (i_token, _) = input.next_token();
@@ -743,11 +737,11 @@ fn parse_for_loop<'a>(input: &mut TokenIter<'a>) -> Expr {
     }
 }
 
-fn parse_eval_block<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_eval_block(input: &mut TokenIter<'_>) -> Expr {
     Expr::EvalBlock(Box::from(parse_block(input)))
 }
 
-fn parse_function<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_function(input: &mut TokenIter<'_>) -> Expr {
     let (t, Span { start, end: _ }) = input.next_token();
     debug_assert_eq!(t, Token::Function);
     let (t_fn_id, _) = input.next_token();
@@ -765,7 +759,7 @@ fn parse_function<'a>(input: &mut TokenIter<'a>) -> Expr {
     let end: u32;
     loop {
         if input.peek_token() == Token::RParen {
-            end = input.next_token().1.end as u32;
+            end = input.next_token().1.end;
             break;
         }
         let (arg, _) = input.next_token();
@@ -791,7 +785,7 @@ fn parse_function<'a>(input: &mut TokenIter<'a>) -> Expr {
     )
 }
 
-fn parse_try_catch_block<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_try_catch_block(input: &mut TokenIter<'_>) -> Expr {
     let (t, Span { start, end: _ }) = input.next_token();
     debug_assert_eq!(t, Token::Try);
     let try_code = parse_block(input);
@@ -844,7 +838,7 @@ fn parse_try_catch_block<'a>(input: &mut TokenIter<'a>) -> Expr {
     let mut main_condition = Expr::Null;
 
     let mut first = true;
-    for (e, c) in catch_blocks.into_iter() {
+    for (e, c) in catch_blocks {
         if first {
             first = false;
             main_condition = Expr::Eq(
@@ -874,7 +868,7 @@ fn parse_try_catch_block<'a>(input: &mut TokenIter<'a>) -> Expr {
     )
 }
 
-fn parse_struct_declare<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_struct_declare(input: &mut TokenIter<'_>) -> Expr {
     let (t, Span { start, end: _ }) = input.next_token();
     debug_assert_eq!(t, Token::Struct);
     let (next_token, _) = input.next_token();
@@ -918,13 +912,13 @@ fn parse_struct_declare<'a>(input: &mut TokenIter<'a>) -> Expr {
     Expr::StructDeclare(struct_name, Box::from(fields), (start, end).into())
 }
 
-fn parse_loop_block<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_loop_block(input: &mut TokenIter<'_>) -> Expr {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Loop);
     Expr::LoopBlock(Box::from(parse_block(input)))
 }
 
-fn parse_match<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_match(input: &mut TokenIter<'_>) -> Expr {
     let (t, Span { start, end: _ }) = input.next_token();
     debug_assert_eq!(t, Token::Match);
     let match_obj = parse_expr_no_struct(input);
@@ -982,11 +976,11 @@ fn parse_match<'a>(input: &mut TokenIter<'a>) -> Expr {
     ]))
 }
 
-fn parse_statement<'a>(input: &mut TokenIter<'a>) -> Option<Expr> {
+fn parse_statement(input: &mut TokenIter<'_>) -> Option<Expr> {
     let token = input.peek_token_opt();
     let t_span = input.peek_span_opt();
     match token {
-        Some(Token::If) => Some(parse_condition_block(input, t_span.unwrap().start as u32)),
+        Some(Token::If) => Some(parse_condition_block(input, t_span.unwrap().start)),
         Some(Token::While) => Some(parse_while_block(input)),
         Some(Token::For) => Some(parse_for_loop(input)),
         Some(Token::Match) => Some(parse_match(input)),
@@ -1004,7 +998,7 @@ fn parse_statement<'a>(input: &mut TokenIter<'a>) -> Option<Expr> {
     }
 }
 
-fn parse_var_declare<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_var_declare(input: &mut TokenIter<'_>) -> Expr {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Let);
     let (t, _) = input.next_token();
@@ -1019,7 +1013,7 @@ fn parse_var_declare<'a>(input: &mut TokenIter<'a>) -> Expr {
     Expr::VarDeclare(var_name, Box::new(var_value))
 }
 
-fn parse_var_assign<'a>(input: &mut TokenIter<'a>, e: Expr, e_start: u32) -> Expr {
+fn parse_var_assign(input: &mut TokenIter<'_>, e: Expr, e_start: u32) -> Expr {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Equals);
     let e_end = input.peek_token_end_opt();
@@ -1034,7 +1028,7 @@ fn parse_var_assign<'a>(input: &mut TokenIter<'a>, e: Expr, e_start: u32) -> Exp
     )
 }
 
-fn parse_return<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_return(input: &mut TokenIter<'_>) -> Expr {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Return);
     if input.peek_token_opt() == Some(Token::SemiColon) {
@@ -1072,19 +1066,15 @@ fn parse_line<'a>(input: &mut TokenIter<'a>, peek: Token<'a>) -> Expr {
     line_code
 }
 
-fn parse_code<'a>(input: &mut TokenIter<'a>) -> Vec<Expr> {
+fn parse_code(input: &mut TokenIter<'_>) -> Vec<Expr> {
     let mut output: Vec<Expr> = Vec::with_capacity(2);
-    loop {
-        if let Some(e) = parse_statement(input) {
-            output.push(e);
-        } else {
-            break;
-        }
+    while let Some(e) = parse_statement(input) {
+        output.push(e);
     }
     output
 }
 
-fn parse_file_import<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_file_import(input: &mut TokenIter<'_>) -> Expr {
     let (t, Span { start, end: _ }) = input.next_token();
     debug_assert_eq!(t, Token::Import);
     let (next_token, Span { start: _, end }) = input.next_token();
@@ -1110,7 +1100,7 @@ fn parse_file_import<'a>(input: &mut TokenIter<'a>) -> Expr {
     }
 }
 
-fn parse_type<'a>(input: &mut TokenIter<'a>) -> SmolStr {
+fn parse_type(input: &mut TokenIter<'_>) -> SmolStr {
     let mut t = String::with_capacity(8);
     let (next_token, _) = input.next_token();
     if let Token::Identifier(i) = next_token {
@@ -1140,7 +1130,7 @@ fn parse_type<'a>(input: &mut TokenIter<'a>) -> SmolStr {
     t.to_smolstr()
 }
 
-fn parse_dylib_import<'a>(input: &mut TokenIter<'a>) -> Expr {
+fn parse_dylib_import(input: &mut TokenIter<'_>) -> Expr {
     let (t, Span { start, end: _ }) = input.next_token();
     debug_assert_eq!(t, Token::Dylib);
     let (next_token, _) = input.next_token();
@@ -1194,12 +1184,12 @@ fn parse_dylib_import<'a>(input: &mut TokenIter<'a>) -> Expr {
             Token::SemiColon,
             "Function definitions must end with a semicolon",
         );
-        fn_signatures.push((fn_name, Box::from(args), return_type))
+        fn_signatures.push((fn_name, Box::from(args), return_type));
     }
     Expr::ImportDylib(path, Box::from(fn_signatures), (start, end).into())
 }
 
-fn parse_file_statement<'a>(input: &mut TokenIter<'a>) -> Option<Expr> {
+fn parse_file_statement(input: &mut TokenIter<'_>) -> Option<Expr> {
     let peek = input.peek_token_opt();
     match peek {
         None => None,
@@ -1211,15 +1201,11 @@ fn parse_file_statement<'a>(input: &mut TokenIter<'a>) -> Option<Expr> {
     }
 }
 
-fn parse_file<'a>(input: &mut TokenIter<'a>) -> Vec<Expr> {
+fn parse_file(input: &mut TokenIter<'_>) -> Vec<Expr> {
     let mut output: Vec<Expr> = Vec::with_capacity(2);
-    loop {
-        if let Some(e) = parse_file_statement(input) {
-            output.push(e);
-        } else {
-            break;
-        }
-    }
+    while let Some(e) = parse_file_statement(input) {
+        output.push(e);
+    };
     output
 }
 

@@ -252,7 +252,7 @@ fn parse_term(input: &mut TokenIter<'_>, allow_struct: bool) -> Expr {
         }
         // - Expr
         Token::OpSub => match parse_expr_with_precedence(input, 8, allow_struct) {
-            Expr::Int(i) => Expr::Int(-i),
+            Expr::Int(i) => Expr::Int(i.wrapping_neg()),
             Expr::Float(f) => Expr::Float(-f),
             other => Expr::Neg(
                 Box::new(other),
@@ -394,7 +394,7 @@ fn add_op(op: Token, lhs: Expr, rhs: Expr, span: Span) -> Expr {
             (lhs, rhs) => Expr::Mul(Box::new(lhs), Box::new(rhs), span),
         },
         Token::OpDiv => match (lhs, rhs) {
-            (_, Expr::Int(0) | Expr::Float(0.0)) => {
+            (_, Expr::Int(0)) => {
                 cold_path();
                 panic!("Division by zero");
             }
@@ -805,7 +805,10 @@ fn parse_try_catch_block(input: &mut TokenIter<'_>) -> Expr {
             has_catch = true;
             break;
         } else if let Token::String(s) = next_token {
-            catch_blocks.push((SmolStr::new(s), parse_block(input)));
+            catch_blocks.push((
+                SmolStr::new(crate::util::parse_string(s)),
+                parse_block(input),
+            ));
             has_catch = true;
         }
     }
@@ -1406,7 +1409,14 @@ enum Token<'a> {
 
     #[regex(r"[0-9]+", |lex| {
         let slice = lex.slice();
-        lexical_core::parse::<i32>(slice.as_bytes()).unwrap()
+        match lexical_core::parse::<i64>(slice.as_bytes()) {
+            Ok(v) if v <= (i32::MAX as i64) => v as i32,
+            Ok(2147483648) => i32::MIN,
+            _ => {
+                cold_path();
+                panic!("Invalid float");
+            }
+        }
     })]
     Int(i32),
 }

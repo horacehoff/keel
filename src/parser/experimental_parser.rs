@@ -1079,7 +1079,7 @@ fn parse_file_import(input: &mut TokenIter<'_>) -> Expr {
     debug_assert_eq!(t, Token::Import);
     let (next_token, Span { start: _, end }) = input.next_token();
     let path = if let Token::String(s) = next_token {
-        SmolStr::new(s)
+        SmolStr::new(crate::util::parse_string(s))
     } else {
         cold_path();
         panic!("Path must be a string");
@@ -1111,18 +1111,20 @@ fn parse_type(input: &mut TokenIter<'_>) -> SmolStr {
     }
     loop {
         let peek_token = input.peek_token();
-        if peek_token == Token::LBrace {
+        if peek_token == Token::LBracket {
             if t.as_bytes().last().unwrap() == &b'[' {
                 cold_path();
                 panic!("Invalid type");
             }
             t.push('[');
-        } else if peek_token == Token::RBrace {
+            input.next_token();
+        } else if peek_token == Token::RBracket {
             if t.as_bytes().last().unwrap() != &b'[' {
                 cold_path();
                 panic!("Invalid type");
             }
             t.push(']');
+            input.next_token();
         } else {
             break;
         }
@@ -1135,7 +1137,7 @@ fn parse_dylib_import(input: &mut TokenIter<'_>) -> Expr {
     debug_assert_eq!(t, Token::Dylib);
     let (next_token, _) = input.next_token();
     let path = if let Token::String(s) = next_token {
-        SmolStr::new(s)
+        SmolStr::new(crate::util::parse_string(s))
     } else {
         cold_path();
         panic!("Path must be a string");
@@ -1236,18 +1238,10 @@ impl From<(u32, u32)> for Span {
     }
 }
 
-pub fn experimental_parser() {
-    let input = r"
-        fn main() {
-            match 1+2 {
-                3 => {print(x);}
-                _ => {break;}
-            }
-        }
-        ";
+pub fn experimental_parser(input: &str) -> Vec<Expr> {
     let mut i = Token::lexer(input).spanned().peekable();
     let output = parse_file(&mut i);
-    dbg!(output);
+    output
 }
 
 #[derive(Logos, Debug, PartialEq, Clone, Copy)]

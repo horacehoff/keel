@@ -142,12 +142,7 @@ impl<'a> KeelParser<'a> for TokenIter<'a> {
 // Parses: Expr RParen
 fn parse_fn_call(input: &mut TokenIter<'_>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
     let (args, arg_markers, end) = parse_args(input);
-    Expr::FunctionCall(
-        args,
-        namespace,
-        (start, end).into(),
-        arg_markers,
-    )
+    Expr::FunctionCall(args, namespace, (start, end).into(), arg_markers)
 }
 
 // Must be called right after LParen is skipped
@@ -890,13 +885,7 @@ fn parse_struct_declare(input: &mut TokenIter<'_>) -> Expr {
             panic!("Invalid struct field {next_token:?}")
         };
         input.next_token_expect(Token::Colon, "A colon must separate a field from its type.");
-        let (next_token, _) = input.next_token();
-        let field_type = if let Token::Identifier(i) = next_token {
-            SmolStr::new(i)
-        } else {
-            cold_path();
-            panic!("Invalid struct field {next_token:?}")
-        };
+        let field_type = parse_type(input);
         fields.push((field_name, field_type));
         let (next_token, next_token_span) = input.next_token();
         if next_token == Token::RBrace {
@@ -924,12 +913,16 @@ fn parse_match(input: &mut TokenIter<'_>) -> Expr {
     let match_obj = parse_expr_no_struct(input);
     let obj_var = SmolStr::new_static("[MATCH TEMP]");
     input.next_token_expect(Token::LBrace, "Blocks must be delimited by braces");
-    let mut first_condition: Expr = Expr::Null;
+    let mut first_condition: Option<Expr> = None;
     let mut output_code: Vec<Expr> = Vec::with_capacity(2);
     let end: u32;
     loop {
         let peek_token = input.peek_token();
         if peek_token == Identifier("_") {
+            if first_condition.is_none() {
+                cold_path();
+                panic!("Match block must have at least one non-wildcard arm");
+            }
             input.next_token();
             input.next_token_expect(Token::Arrow, "Expected '=>'");
             let code = parse_block(input);
@@ -941,6 +934,10 @@ fn parse_match(input: &mut TokenIter<'_>) -> Expr {
             output_code.push(Expr::ElseBlock(Box::from(code)));
             break;
         } else if peek_token == Token::RBrace {
+            if first_condition.is_none() {
+                cold_path();
+                panic!("Match blocks must have at least one arm");
+            }
             end = input.peek_token_end();
             input.next_token();
             break;
@@ -949,8 +946,8 @@ fn parse_match(input: &mut TokenIter<'_>) -> Expr {
             let end = input.peek_token_start();
             input.next_token_expect(Token::Arrow, "Expected '=>'");
             let code = parse_block(input);
-            if first_condition == Expr::Null {
-                first_condition = condition;
+            if first_condition.is_none() {
+                first_condition = Some(condition);
                 output_code.extend(code);
             } else {
                 output_code.push(Expr::ElseIfBlock(
@@ -968,7 +965,7 @@ fn parse_match(input: &mut TokenIter<'_>) -> Expr {
         Expr::Condition(
             Box::from(Expr::Eq(
                 Box::new(Expr::Var(obj_var, (start, end).into())),
-                Box::from(first_condition),
+                Box::from(first_condition.unwrap()),
             )),
             Box::from(output_code),
             (start, end).into(),
@@ -1146,24 +1143,23 @@ fn parse_dylib_import(input: &mut TokenIter<'_>) -> Expr {
     let mut fn_signatures: Vec<(SmolStr, Box<[SmolStr]>, SmolStr)> = Vec::new();
     let end: u32;
     loop {
-        let (
-            next_token,
-            Span {
-                start: _,
-                end: token_end,
-            },
-        ) = input.next_token();
-        if next_token == Token::RBrace {
-            end = token_end;
+        if input.peek_token() == Token::RBrace {
+            end = input.next_token().1.end;
             break;
         }
-        let return_type = parse_type(input);
-        let (next_token, _) = input.next_token();
-        let fn_name = if let Token::Identifier(name) = next_token {
-            SmolStr::new(name)
+
+        let first = parse_type(input);
+        let (return_type, fn_name) = if input.peek_token() == Token::LParen {
+            (SmolStr::new_static("null"), first)
         } else {
-            cold_path();
-            panic!("Invalid function name. Expected identifier but found {next_token:?}");
+            let (next_token, _) = input.next_token();
+            let fn_name = if let Token::Identifier(name) = next_token {
+                SmolStr::new(name)
+            } else {
+                cold_path();
+                panic!("Invalid function name. Expected identifier but found {next_token:?}");
+            };
+            (first, fn_name)
         };
         input.next_token_expect(
             Token::LParen,
@@ -1182,6 +1178,7 @@ fn parse_dylib_import(input: &mut TokenIter<'_>) -> Expr {
                 panic!("Function arguments must be comma-separated");
             }
         }
+        input.next_token_expect(Token::RParen, "Unmatched ')'");
         input.next_token_expect(
             Token::SemiColon,
             "Function definitions must end with a semicolon",
@@ -1207,7 +1204,7 @@ fn parse_file(input: &mut TokenIter<'_>) -> Vec<Expr> {
     let mut output: Vec<Expr> = Vec::with_capacity(2);
     while let Some(e) = parse_file_statement(input) {
         output.push(e);
-    };
+    }
     output
 }
 

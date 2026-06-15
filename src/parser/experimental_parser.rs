@@ -1025,6 +1025,30 @@ fn parse_var_assign(input: &mut TokenIter<'_>, e: Expr, e_start: u32) -> Expr {
     )
 }
 
+fn parse_op_var_assign(input: &mut TokenIter<'_>, e: Expr, e_start: u32, op: Token<'_>) -> Expr {
+    let (t, _) = input.next_token();
+    debug_assert_eq!(t, op);
+    let e_end = input.peek_token_end_opt();
+    let v_start = input.peek_token_start();
+    let v = parse_expr(input);
+    let v_end = input.peek_token_start();
+    let op = match op {
+        Token::AssignOpAdd => Token::OpAdd,
+        Token::AssignOpSub => Token::OpSub,
+        Token::AssignOpMul => Token::OpMul,
+        Token::AssignOpDiv => Token::OpDiv,
+        Token::AssignOpMod => Token::OpMod,
+        Token::AssignOpPow => Token::OpPow,
+        _ => unsafe { unreachable_unchecked() },
+    };
+    var_assign(
+        e.clone(),
+        add_op(op, e, v, (e_start, v_end).into()),
+        (e_start, e_end.unwrap()).into(),
+        (v_start, v_end).into(),
+    )
+}
+
 fn parse_return(input: &mut TokenIter<'_>) -> Expr {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Return);
@@ -1036,7 +1060,7 @@ fn parse_return(input: &mut TokenIter<'_>) -> Expr {
     }
 }
 
-fn parse_line<'a>(input: &mut TokenIter<'a>, peek: Token<'a>) -> Expr {
+fn parse_line(input: &mut TokenIter<'_>, peek: Token<'_>) -> Expr {
     let line_code = match peek {
         Token::Let => parse_var_declare(input),
         Token::Return => parse_return(input),
@@ -1054,7 +1078,14 @@ fn parse_line<'a>(input: &mut TokenIter<'a>, peek: Token<'a>) -> Expr {
             let peek_token = input.peek_token_opt();
             match peek_token {
                 Some(Token::Equals) => parse_var_assign(input, e, e_start),
-                // TODO: OpVarAssign
+                Some(
+                    op @ (Token::AssignOpAdd
+                    | Token::AssignOpSub
+                    | Token::AssignOpMul
+                    | Token::AssignOpDiv
+                    | Token::AssignOpMod
+                    | Token::AssignOpPow),
+                ) => parse_op_var_assign(input, e, e_start, op),
                 _ => e,
             }
         }

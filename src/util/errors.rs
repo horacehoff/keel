@@ -413,6 +413,17 @@ pub enum ParserErr<'a> {
     UnknownToken,
     /// (expected, received)
     UnexpectedToken(Token<'a>, Token<'a>, &'static str),
+    /// (expected, received)
+    UnexpectedTokenStr(&'static str, Token<'a>, &'static str),
+    ArrayElementsMissingComma,
+    InlineConditionNoElseBlock,
+    DivisionByZero,
+    ModuloByZero,
+    IntegerNegativeExponent,
+    ArgumentsMissingCommaSeparator,
+    TryBlockNoCatch,
+    MatchBlockNoNonWildcardArm,
+    MatchBlockZeroArms,
 }
 
 #[cold]
@@ -421,11 +432,23 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
     let err_message = match t {
         ParserErr::UnexpectedEOF => "Unexpected EOF",
         ParserErr::UnknownToken => "Unknown token",
-        ParserErr::UnexpectedToken(expected, received, msg) => format_args!(
+        ParserErr::UnexpectedToken(expected, received, msg) => &format_args!(
             "Expected {color_bright_blue}{style_bold}{expected:?}{color_reset}{style_reset}. {msg}"
         )
-        .as_str()
-        .unwrap(),
+        .to_string(),
+        ParserErr::UnexpectedTokenStr(expected, received, msg) => &format_args!(
+            "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}. {msg}"
+        )
+        .to_string(),
+        ParserErr::ArrayElementsMissingComma => "Array elements must be separated by a comma",
+        ParserErr::InlineConditionNoElseBlock => "Inline conditions must have an else block",
+        ParserErr::DivisionByZero => "Division by zero",
+        ParserErr::ModuloByZero => "Modulo by zero",
+        ParserErr::IntegerNegativeExponent => "Integers cannot be raised to a negative exponent",
+        ParserErr::ArgumentsMissingCommaSeparator => "Arguments must be separated by a comma",
+        ParserErr::TryBlockNoCatch => "A {color_bright_blue}{style_bold}try{color_reset}{style_reset} block must have at least one {color_bright_blue}{style_bold}catch{color_reset}{style_reset} block",
+        ParserErr::MatchBlockNoNonWildcardArm => "{color_bright_blue}{style_bold}Match blocks{color_reset}{style_reset} must have {style_bold}at least one{style_reset} non-wildcard arm",
+        ParserErr::MatchBlockZeroArms => "{color_bright_blue}{style_bold}Match blocks{color_reset}{style_reset} must have {style_bold}at least one{style_reset} arm"
     };
     eprintln!("{color_red}KEEL ERROR{color_reset}");
     let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))

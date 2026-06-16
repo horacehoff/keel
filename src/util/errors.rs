@@ -3,7 +3,6 @@ use crate::expr::Span;
 use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use inline_colorization::*;
-use lalrpop_util::ParseError;
 use smol_strc::{SmolStr, ToSmolStr};
 use std::fmt::Arguments;
 use std::rc::Rc;
@@ -483,125 +482,125 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
     panic!();
 }
 
-#[cold]
-#[inline(never)]
-pub fn lalrpop_error<'a, T>(x: ParseError<usize, T, &str>, file: &str, filename: &str) -> !
-where
-    lalrpop_util::lexer::Token<'a>: From<T>,
-{
-    eprintln!("{color_red}KEEL ERROR{color_reset}");
-    match x {
-        ParseError::InvalidToken { location } => {
-            let report = Report::build(ReportKind::Error, (filename, location..location + 1))
-                .with_message("Invalid token")
-                .with_label(
-                    Label::new((filename, location..location + 1))
-                        .with_message(format_args!("This token is invalid"))
-                        .with_color(Color::Red),
-                )
-                .finish();
-            #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-            report.eprint((filename, Source::from(file))).unwrap();
-            #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-            report
-                .write(
-                    (filename, Source::from(file)),
-                    crate::captured_output::CapturedOutputWriter,
-                )
-                .unwrap();
-        }
-        ParseError::UnrecognizedEof {
-            location,
-            expected: _,
-        } => {
-            let report = Report::build(ReportKind::Error, (filename, location..location + 1))
-                .with_message("Unrecognized EOF")
-                .with_label(
-                    Label::new((filename, location..location + 1))
-                        .with_message(format_args!(
-                            "Expected one or more {color_bright_blue}{style_bold}}}{style_reset}{color_reset}"
-                        ))
-                        .with_color(Color::Red),
-                )
-                .finish();
-            #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-            report.eprint((filename, Source::from(file))).unwrap();
-            #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-            report
-                .write(
-                    (filename, Source::from(file)),
-                    crate::captured_output::CapturedOutputWriter,
-                )
-                .unwrap();
-        }
-        ParseError::UnrecognizedToken { token, expected } => {
-            let begin = token.0;
-            let end = token.2;
+// #[cold]
+// #[inline(never)]
+// pub fn lalrpop_error<'a, T>(x: lalrpop_util::ParseError<usize, T, &str>, file: &str, filename: &str) -> !
+// where
+//     lalrpop_util::lexer::Token<'a>: From<T>,
+// {
+//     eprintln!("{color_red}KEEL ERROR{color_reset}");
+//     match x {
+//         lalrpop_util::ParseError::InvalidToken { location } => {
+//             let report = Report::build(ReportKind::Error, (filename, location..location + 1))
+//                 .with_message("Invalid token")
+//                 .with_label(
+//                     Label::new((filename, location..location + 1))
+//                         .with_message(format_args!("This token is invalid"))
+//                         .with_color(Color::Red),
+//                 )
+//                 .finish();
+//             #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+//             report.eprint((filename, Source::from(file))).unwrap();
+//             #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+//             report
+//                 .write(
+//                     (filename, Source::from(file)),
+//                     crate::captured_output::CapturedOutputWriter,
+//                 )
+//                 .unwrap();
+//         }
+//         lalrpop_util::ParseError::UnrecognizedEof {
+//             location,
+//             expected: _,
+//         } => {
+//             let report = Report::build(ReportKind::Error, (filename, location..location + 1))
+//                 .with_message("Unrecognized EOF")
+//                 .with_label(
+//                     Label::new((filename, location..location + 1))
+//                         .with_message(format_args!(
+//                             "Expected one or more {color_bright_blue}{style_bold}}}{style_reset}{color_reset}"
+//                         ))
+//                         .with_color(Color::Red),
+//                 )
+//                 .finish();
+//             #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+//             report.eprint((filename, Source::from(file))).unwrap();
+//             #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+//             report
+//                 .write(
+//                     (filename, Source::from(file)),
+//                     crate::captured_output::CapturedOutputWriter,
+//                 )
+//                 .unwrap();
+//         }
+//         lalrpop_util::ParseError::UnrecognizedToken { token, expected } => {
+//             let begin = token.0;
+//             let end = token.2;
 
-            let expected = expected
-                .into_iter()
-                .map(|x| {
-                    {
-                        if x == "\"false\"" || x == "\"true\"" {
-                            "Boolean"
-                        } else if x == "r#\"[a-zA-Z_][a-zA-Z0-9_]*\"#" {
-                            "Variable"
-                        } else if x.contains("[^") {
-                            "String"
-                        } else if x == "r#\"[0-9]*[.][0-9]+\"#" {
-                            "Float"
-                        } else if x == "r#\"[0-9]+\"#" {
-                            "Integer"
-                        } else {
-                            x.trim_matches('\"')
-                        }
-                    }
-                    .to_smolstr()
-                })
-                .collect::<Vec<SmolStr>>();
+//             let expected = expected
+//                 .into_iter()
+//                 .map(|x| {
+//                     {
+//                         if x == "\"false\"" || x == "\"true\"" {
+//                             "Boolean"
+//                         } else if x == "r#\"[a-zA-Z_][a-zA-Z0-9_]*\"#" {
+//                             "Variable"
+//                         } else if x.contains("[^") {
+//                             "String"
+//                         } else if x == "r#\"[0-9]*[.][0-9]+\"#" {
+//                             "Float"
+//                         } else if x == "r#\"[0-9]+\"#" {
+//                             "Integer"
+//                         } else {
+//                             x.trim_matches('\"')
+//                         }
+//                     }
+//                     .to_smolstr()
+//                 })
+//                 .collect::<Vec<SmolStr>>();
 
-            const STATEMENT_KEYWORDS: [&str; 7] =
-                ["let", "if", "while", "for", "loop", "match", "return"];
-            let is_statement_set = STATEMENT_KEYWORDS
-                .iter()
-                .all(|k| expected.iter().any(|n| n == k));
+//             const STATEMENT_KEYWORDS: [&str; 7] =
+//                 ["let", "if", "while", "for", "loop", "match", "return"];
+//             let is_statement_set = STATEMENT_KEYWORDS
+//                 .iter()
+//                 .all(|k| expected.iter().any(|n| n == k));
 
-            let expected_tokens = if is_statement_set {
-                format_args!(
-                    "{color_bright_blue}{style_bold}Statement{style_reset}{color_reset} OR {color_bright_blue}{style_bold}{{{style_reset}{color_reset} OR {color_bright_blue}{style_bold}}}{style_reset}{color_reset}"
-                )
-            } else {
-                format_args!(
-                    "{color_bright_blue}{style_bold}{}{color_reset}{style_reset}",
-                    expected.join(&format!(
-                        "{color_reset}{style_reset} OR {color_bright_blue}{style_bold}"
-                    ))
-                )
-            };
+//             let expected_tokens = if is_statement_set {
+//                 format_args!(
+//                     "{color_bright_blue}{style_bold}Statement{style_reset}{color_reset} OR {color_bright_blue}{style_bold}{{{style_reset}{color_reset} OR {color_bright_blue}{style_bold}}}{style_reset}{color_reset}"
+//                 )
+//             } else {
+//                 format_args!(
+//                     "{color_bright_blue}{style_bold}{}{color_reset}{style_reset}",
+//                     expected.join(&format!(
+//                         "{color_reset}{style_reset} OR {color_bright_blue}{style_bold}"
+//                     ))
+//                 )
+//             };
 
-            let report = Report::build(ReportKind::Error, (filename, begin..end))
-                .with_message("Unrecognized token")
-                .with_label(
-                    Label::new((filename, begin..end))
-                        .with_message(format_args!("Expected {expected_tokens}"))
-                        .with_color(Color::Red),
-                )
-                .finish();
-            #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-            report.eprint((filename, Source::from(file))).unwrap();
-            #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-            report
-                .write(
-                    (filename, Source::from(file)),
-                    crate::captured_output::CapturedOutputWriter,
-                )
-                .unwrap();
-        }
-        _ => unreachable!(),
-    }
+//             let report = Report::build(ReportKind::Error, (filename, begin..end))
+//                 .with_message("Unrecognized token")
+//                 .with_label(
+//                     Label::new((filename, begin..end))
+//                         .with_message(format_args!("Expected {expected_tokens}"))
+//                         .with_color(Color::Red),
+//                 )
+//                 .finish();
+//             #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+//             report.eprint((filename, Source::from(file))).unwrap();
+//             #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+//             report
+//                 .write(
+//                     (filename, Source::from(file)),
+//                     crate::captured_output::CapturedOutputWriter,
+//                 )
+//                 .unwrap();
+//         }
+//         _ => unreachable!(),
+//     }
 
-    #[cfg(target_arch = "wasm32")]
-    wasm_bindgen::throw_str("keel_error");
-    #[cfg(not(target_arch = "wasm32"))]
-    panic!();
-}
+//     #[cfg(target_arch = "wasm32")]
+//     wasm_bindgen::throw_str("keel_error");
+//     #[cfg(not(target_arch = "wasm32"))]
+//     panic!();
+// }

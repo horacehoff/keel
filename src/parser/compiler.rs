@@ -1,7 +1,6 @@
 use crate::compiler_data::*;
 use crate::data::NULL;
 use crate::errors::ErrType;
-use crate::errors::lalrpop_error;
 use crate::errors::throw_compiler_error;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
@@ -38,10 +37,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::slice;
 
-lalrpop_util::lalrpop_mod!(
-    #[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
-    pub grammar
-);
+// lalrpop_util::lalrpop_mod!(
+//     #[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
+//     pub grammar
+// );
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is false)
 #[inline(always)]
@@ -2647,22 +2646,21 @@ fn parse_toplevel(
                 sources.push((file_name.clone(), file_contents.clone()));
 
                 // Parse the imported file's contents
-                let file_code: Vec<Expr> = grammar::FileParser::new()
-                    .parse(
-                        (file_name.as_str(), file_contents.as_str()),
-                        file_contents.as_str(),
-                    )
-                    .unwrap_or_else(|x| {
-                        lalrpop_error::<self::grammar::Token<'_>>(
-                            x,
-                            file_contents.as_str(),
-                            file_name.as_str(),
-                        )
-                    });
-                // let file_code = experimental_parser::experimental_parser(
-                //     file_contents.as_str(),
-                //     (file_name.as_str(), file_contents.as_str()),
-                // );
+                // let file_code: Vec<Expr> = grammar::FileParser::new()
+                //     .parse(
+                //         (file_name.as_str(), file_contents.as_str()),
+                //         file_contents.as_str(),
+                //     )
+                //     .unwrap_or_else(|x| {
+                //         lalrpop_error::<self::grammar::Token<'_>>(
+                //             x,
+                //             file_contents.as_str(),
+                //         )
+                //     });
+                let file_code = experimental_parser::experimental_parser(
+                    file_contents.as_str(),
+                    (file_name.as_str(), file_contents.as_str()),
+                );
 
                 let import_src: (&str, &str) = (file_name.as_str(), file_contents.as_str());
                 let child_name = alias.unwrap_or_else(|| {
@@ -2720,12 +2718,12 @@ pub fn compile(
     #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
 
-    let code: Vec<Expr> = grammar::FileParser::new()
-        .parse((filename, &contents), &contents)
-        .unwrap_or_else(|x| {
-            lalrpop_error::<lalrpop_util::lexer::Token<'_>>(x, &contents, filename)
-        });
-    // let code = experimental_parser::experimental_parser(&contents, (filename, &contents));
+    // let code: Vec<Expr> = grammar::FileParser::new()
+    //     .parse((filename, &contents), &contents)
+    //     .unwrap_or_else(|x| {
+    //         crate::errors::lalrpop_error::<lalrpop_util::lexer::Token<'_>>(x, &contents, filename)
+    //     });
+    let code = experimental_parser::experimental_parser(&contents, (filename, &contents));
 
     #[cfg(not(target_arch = "wasm32"))]
     if debug {

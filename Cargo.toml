@@ -42,7 +42,7 @@ redundant_clone = "warn"
 embed = []
 
 [dependencies]
-lalrpop-util = { version = "0.23.1", features = ["lexer"] }
+# lalrpop-util = { version = "0.23.1", features = ["lexer"] }
 inline_colorization = "0.1.6"
 smol_strc = "0.3.6"
 ariadne = "0.6.0"
@@ -68,8 +68,8 @@ name = "keel"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
-[build-dependencies]
-lalrpop = "0.23.1"
+# [build-dependencies]
+# lalrpop = "0.23.1"
 
 [profile.opt]
 inherits = "dev"

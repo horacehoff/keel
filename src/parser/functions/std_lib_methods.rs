@@ -5,7 +5,7 @@ use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
 use crate::compiler_data::Variable;
 use crate::errors::ErrType;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::instr::Instr;
@@ -61,7 +61,7 @@ pub fn std_lib_methods(
                     matches!(obj_type, $expected)
                 }
             } {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     obj_markers,
                     ErrType::InvalidObjType($expected_str, &obj_type),
@@ -178,7 +178,7 @@ pub fn std_lib_methods(
 
             let arg_type = infer_type(&args[0], v, ctx, state);
             if obj_type == DataType::String && arg_type != DataType::String {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
@@ -214,7 +214,7 @@ pub fn std_lib_methods(
 
             let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::String {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
@@ -238,14 +238,14 @@ pub fn std_lib_methods(
             let arg_type = infer_type(&args[0], v, ctx, state);
             if let DataType::Array(Some(array_elem_type)) = &obj_type {
                 if **array_elem_type != arg_type {
-                    throw_parser_error(
+                    throw_compiler_error(
                         src,
                         args_indexes[0],
                         ErrType::InvalidType(array_elem_type, &arg_type),
                     );
                 }
             } else if obj_type == DataType::String && arg_type != DataType::String {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
@@ -320,7 +320,7 @@ pub fn std_lib_methods(
 
             let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::String {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
@@ -343,7 +343,7 @@ pub fn std_lib_methods(
 
             let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::String {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
@@ -366,7 +366,7 @@ pub fn std_lib_methods(
 
             let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::Int {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&DataType::Int, &arg_type),
@@ -392,7 +392,7 @@ pub fn std_lib_methods(
             if let DataType::Array(Some(array_elem_type)) = &obj_type
                 && **array_elem_type != arg_type
             {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(array_elem_type, &arg_type),
@@ -488,7 +488,7 @@ pub fn std_lib_methods(
 
             let arg_type = infer_type(&args[0], v, ctx, state);
             if obj_type != arg_type {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&DataType::String, &arg_type),
@@ -512,7 +512,7 @@ pub fn std_lib_methods(
             if let DataType::Array(Some(array_elem_type)) = obj_type
                 && *array_elem_type != arg_type
             {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&array_elem_type, &arg_type),
@@ -538,13 +538,13 @@ pub fn std_lib_methods(
                     obj_type == expected
                 }
             } {
-                throw_parser_error(src, fn_markers, ErrType::InvalidType(&expected, &obj_type));
+                throw_compiler_error(src, fn_markers, ErrType::InvalidType(&expected, &obj_type));
             }
             check_args_range!(args, 0, 1, "join", src, fn_markers);
             if !args.is_empty() {
                 let arg_type = infer_type(&args[0], v, ctx, state);
                 if arg_type != DataType::String {
-                    throw_parser_error(
+                    throw_compiler_error(
                         src,
                         args_indexes[0],
                         ErrType::InvalidType(&DataType::String, &arg_type),
@@ -567,7 +567,7 @@ pub fn std_lib_methods(
 
             let arg_type = infer_type(&args[0], v, ctx, state);
             if arg_type != DataType::Int {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     args_indexes[0],
                     ErrType::InvalidType(&DataType::Int, &arg_type),
@@ -593,7 +593,7 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::Sort, id, 0));
         }
         name => {
-            throw_parser_error(src, fn_markers, ErrType::UnknownFunction(name));
+            throw_compiler_error(src, fn_markers, ErrType::UnknownFunction(name));
         }
     }
 }

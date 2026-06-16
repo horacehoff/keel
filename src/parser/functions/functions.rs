@@ -6,7 +6,7 @@ use crate::compiler_data::State;
 use crate::compiler_data::Variable;
 use crate::data::NULL;
 use crate::errors::ErrType;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
 use crate::expr::Expr;
@@ -37,7 +37,7 @@ pub fn check_arg_type(
         expected.contains(&inferred)
     };
     if !matches {
-        throw_parser_error(
+        throw_compiler_error(
             ctx.src,
             args_indexes[arg_idx],
             ErrType::InvalidArgType(expected, inferred),
@@ -157,7 +157,7 @@ pub fn handle_functions(
             single_run,
         ));
     } else {
-        throw_parser_error(
+        throw_compiler_error(
             src,
             markers,
             ErrType::UnknownNamespace(

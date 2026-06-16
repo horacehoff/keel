@@ -1,11 +1,11 @@
-use self::grammar::Token;
 use crate::compiler_data::*;
 use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::lalrpop_error;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
+use crate::experimental_parser;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::expr::contains_var_reassign;
@@ -31,7 +31,6 @@ use crate::util::str_to_keel_type;
 use crate::{data::Data, instr::Instr};
 use ahash::RandomState;
 use inline_colorization::*;
-use lalrpop_util::lalrpop_mod;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::collections::{HashMap, HashSet};
@@ -39,7 +38,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::slice;
 
-lalrpop_mod!(
+lalrpop_util::lalrpop_mod!(
     #[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
     pub grammar
 );
@@ -296,7 +295,7 @@ pub fn get_id(
         ($instr: ident,$symbol:expr, $l: expr, $r: expr, $markers: expr, $type:expr) => {{
             let (t_l, t_r) = (infer_type($l, v, ctx, state), infer_type($r, v, ctx, state));
             if t_l != $type || t_r != $type {
-                throw_parser_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
+                throw_compiler_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
             }
             let id_l = get_id($l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id($r, v, ctx, state, output, None, false, offset, single_run);
@@ -327,7 +326,7 @@ pub fn get_id(
         ($instr: ident, $instr2:ident,$symbol:expr, $l: expr, $r: expr, $markers: expr, $type1:expr, $type2:expr) => {{
             let (t_l, t_r) = (infer_type($l, v, ctx, state), infer_type($r, v, ctx, state));
             if !((t_l == $type1 && t_r == $type1) || (t_l == $type2 && t_r == $type2)) {
-                throw_parser_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
+                throw_compiler_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
             }
             let id_l = get_id($l, v, ctx, state, output, None, false, offset, single_run);
             let id_r = get_id($r, v, ctx, state, output, None, false, offset, single_run);
@@ -446,7 +445,7 @@ pub fn get_id(
             {
                 *register_id
             } else {
-                throw_parser_error(src, *markers, ErrType::UnknownVariable(name))
+                throw_compiler_error(src, *markers, ErrType::UnknownVariable(name))
             }
         }
         Expr::Array(elems, markers) => {
@@ -456,7 +455,7 @@ pub fn get_id(
                     .iter()
                     .all(|x| infer_type(x, v, ctx, state) == first_type)
                 {
-                    throw_parser_error(src, *markers, ErrType::ArrayWithDiffType);
+                    throw_compiler_error(src, *markers, ErrType::ArrayWithDiffType);
                 }
             }
             let array_id = {
@@ -553,12 +552,12 @@ pub fn get_id(
             let namespace = &namespace[..(namespace.len() - 1)];
             let Some(expected_struct_idx) = walk_namespace_struct(state.namespace, namespace, name)
             else {
-                throw_parser_error(src, *span, ErrType::UnknownStruct(name));
+                throw_compiler_error(src, *span, ErrType::UnknownStruct(name));
             };
             let type_id = state.structs[expected_struct_idx].id;
             let expected_fields_len = state.structs[expected_struct_idx].fields.len();
             if expected_fields_len != fields.len() {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     *span,
                     ErrType::InvalidStructFieldCount(
@@ -580,7 +579,7 @@ pub fn get_id(
                         let field_type = infer_type(field_expr, v, ctx, state);
                         let field = &state.structs[expected_struct_idx].fields[field_idx];
                         if field_type != field.1 {
-                            throw_parser_error(
+                            throw_compiler_error(
                                 src,
                                 *field_span,
                                 ErrType::InvalidType(&field.1, &field_type),
@@ -614,7 +613,7 @@ pub fn get_id(
                             ));
                         }
                     } else {
-                        throw_parser_error(
+                        throw_compiler_error(
                             src,
                             *span,
                             ErrType::StructMissingField(
@@ -639,7 +638,7 @@ pub fn get_id(
                         let field_type = infer_type(field_expr, v, ctx, state);
                         let field = &state.structs[expected_struct_idx].fields[field_idx];
                         if field_type != field.1 {
-                            throw_parser_error(
+                            throw_compiler_error(
                                 src,
                                 *field_span,
                                 ErrType::InvalidType(&field.1, &field_type),
@@ -670,7 +669,7 @@ pub fn get_id(
                             dynamic.push((compiled_field, c_id, field_idx as u16));
                         }
                     } else {
-                        throw_parser_error(
+                        throw_compiler_error(
                             src,
                             *span,
                             ErrType::StructMissingField(
@@ -708,7 +707,7 @@ pub fn get_id(
                     .iter()
                     .position(|f| &f.0 == field)
                     .unwrap_or_else(|| {
-                        throw_parser_error(
+                        throw_compiler_error(
                             src,
                             *field_span,
                             ErrType::StructUnknownField(&s.name, field),
@@ -733,7 +732,7 @@ pub fn get_id(
                 output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
                 dest_reg_id
             } else {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     *struct_span,
                     ErrType::InvalidType(&DataType::Struct(0), &t),
@@ -744,7 +743,7 @@ pub fn get_id(
         Expr::ArrayGetIndex(array, index, markers) => {
             let infered = infer_type(array, v, ctx, state);
             if !is_type_indexable(&infered) {
-                throw_parser_error(src, *markers, ErrType::NotIndexable(&infered));
+                throw_compiler_error(src, *markers, ErrType::NotIndexable(&infered));
             }
 
             let id = get_id(
@@ -753,7 +752,7 @@ pub fn get_id(
 
             let index_inferred = infer_type(index, v, ctx, state);
             if index_inferred != DataType::Int {
-                throw_parser_error(src, *markers, ErrType::InvalidIndexType(&index_inferred));
+                throw_compiler_error(src, *markers, ErrType::InvalidIndexType(&index_inferred));
             }
             let index_id = get_id(
                 index, v, ctx, state, output, None, false, offset, single_run,
@@ -786,14 +785,14 @@ pub fn get_id(
         Expr::ArrayGetSlice(array, idx_start, idx_end, markers) => {
             let infered = infer_type(array, v, ctx, state);
             if !is_type_indexable(&infered) {
-                throw_parser_error(src, *markers, ErrType::NotIndexable(&infered));
+                throw_compiler_error(src, *markers, ErrType::NotIndexable(&infered));
             }
             let id = get_id(
                 array, v, ctx, state, output, None, false, offset, single_run,
             );
             let idx_start_inferred = infer_type(idx_start, v, ctx, state);
             if idx_start_inferred != DataType::Int {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     *markers,
                     ErrType::InvalidIndexType(&idx_start_inferred),
@@ -804,7 +803,7 @@ pub fn get_id(
             );
             let idx_end_inferred = infer_type(idx_end, v, ctx, state);
             if idx_end_inferred != DataType::Int {
-                throw_parser_error(src, *markers, ErrType::InvalidIndexType(&idx_end_inferred));
+                throw_compiler_error(src, *markers, ErrType::InvalidIndexType(&idx_end_inferred));
             }
             let idx_end_id = get_id(
                 idx_end, v, ctx, state, output, None, false, offset, single_run,
@@ -856,7 +855,7 @@ pub fn get_id(
             if let Expr::Int(n) = r.as_ref()
                 && *n == 0
             {
-                throw_parser_error(src, *markers, ErrType::DivisionByZero);
+                throw_compiler_error(src, *markers, ErrType::DivisionByZero);
             }
             let id = uniform_op!(
                 DivFloat,
@@ -884,7 +883,7 @@ pub fn get_id(
                     DataType::String | DataType::Array(_) | DataType::Float | DataType::Int
                 )
             {
-                throw_parser_error(src, *markers, ErrType::OpError(&t_l, &t_r, "+"));
+                throw_compiler_error(src, *markers, ErrType::OpError(&t_l, &t_r, "+"));
             }
             // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
             if t_l == DataType::Int
@@ -956,7 +955,7 @@ pub fn get_id(
             if !((t_l == DataType::Float && t_r == DataType::Float)
                 || (t_l == DataType::Int && t_r == DataType::Int))
             {
-                throw_parser_error(src, *markers, ErrType::OpError(&t_l, &t_r, "-"));
+                throw_compiler_error(src, *markers, ErrType::OpError(&t_l, &t_r, "-"));
             }
             // var-1 uses the dedicated DecInt/DecIntTo instructions
             if t_l == DataType::Int
@@ -1015,7 +1014,7 @@ pub fn get_id(
             if let Expr::Int(n) = r.as_ref()
                 && *n == 0
             {
-                throw_parser_error(src, *markers, ErrType::ModuloByZero);
+                throw_compiler_error(src, *markers, ErrType::ModuloByZero);
             }
             let id = uniform_op!(
                 ModFloat,
@@ -1204,7 +1203,7 @@ pub fn get_id(
             } else if operand_type == DataType::Int {
                 output.push(Instr::NegInt(id_l, id));
             } else {
-                throw_parser_error(src, *markers, ErrType::InvalidOp(&operand_type, "-"));
+                throw_compiler_error(src, *markers, ErrType::InvalidOp(&operand_type, "-"));
             }
             id
         }
@@ -1228,7 +1227,7 @@ pub fn get_id(
                 )
             };
             if operand_type != DataType::Bool {
-                throw_parser_error(src, *markers, ErrType::InvalidOp(&operand_type, "!"));
+                throw_compiler_error(src, *markers, ErrType::InvalidOp(&operand_type, "!"));
             }
             output.push(Instr::NegBool(id_l, id));
             id
@@ -1383,7 +1382,7 @@ pub fn get_id(
                 }
             }
             if !else_exists {
-                throw_parser_error(src, *markers, ErrType::InvalidConditionalExpression);
+                throw_compiler_error(src, *markers, ErrType::InvalidConditionalExpression);
             }
 
             for y in jmp_markers {
@@ -1502,7 +1501,7 @@ pub fn compile_expr(
                         ),
                     ));
                 } else {
-                    throw_parser_error(src, *markers, ErrType::UnknownVariable(name))
+                    throw_compiler_error(src, *markers, ErrType::UnknownVariable(name))
                 }
             }
 
@@ -1510,7 +1509,7 @@ pub fn compile_expr(
             Expr::ArrayModify(array, index, value, index_markers, elem_markers) => {
                 let array_type = infer_type(array, v, ctx, state);
                 if !is_type_indexable(&array_type) {
-                    throw_parser_error(src, *index_markers, ErrType::NotIndexable(&array_type));
+                    throw_compiler_error(src, *index_markers, ErrType::NotIndexable(&array_type));
                 }
                 // Get the id of the source array/string (may be a nested GetIndex)
                 let id = get_id(
@@ -1566,7 +1565,7 @@ pub fn compile_expr(
                     }
                 } || (array_type == DataType::String && elem_type != DataType::String)
                 {
-                    throw_parser_error(
+                    throw_compiler_error(
                         src,
                         *elem_markers,
                         ErrType::CannotPushTypeToArray(&elem_type, &array_type),
@@ -1594,7 +1593,7 @@ pub fn compile_expr(
                 let t = infer_type(struct_expr, v, ctx, state);
                 let new_val_type = infer_type(new_val, v, ctx, state);
                 let DataType::Struct(struct_id) = t else {
-                    throw_parser_error(
+                    throw_compiler_error(
                         src,
                         *struct_span,
                         ErrType::InvalidType(&DataType::Struct(0), &t),
@@ -1604,7 +1603,7 @@ pub fn compile_expr(
                 for (i, (f, f_t)) in state.structs[struct_id as usize].fields.iter().enumerate() {
                     if f == field {
                         if new_val_type != *f_t {
-                            throw_parser_error(
+                            throw_compiler_error(
                                 src,
                                 *field_span,
                                 ErrType::InvalidType(f_t, &new_val_type),
@@ -1615,7 +1614,7 @@ pub fn compile_expr(
                     }
                 }
                 if field_index.is_none() {
-                    throw_parser_error(
+                    throw_compiler_error(
                         src,
                         *field_span,
                         ErrType::StructUnknownField(&state.structs[struct_id as usize].name, field),
@@ -1877,7 +1876,7 @@ pub fn compile_expr(
                         var_type: match array_type {
                             DataType::String => DataType::String,
                             DataType::Array(a_type) => a_type.map_or(DataType::Null, |t| *t),
-                            t => throw_parser_error(src, *markers, ErrType::IsNotAnIterator(&t)),
+                            t => throw_compiler_error(src, *markers, ErrType::IsNotAnIterator(&t)),
                         },
                     });
                 }
@@ -1974,10 +1973,10 @@ pub fn compile_expr(
                 let t1 = infer_type(start_elem, v, ctx, state);
                 let t2 = infer_type(end_elem, v, ctx, state);
                 if t1 != DataType::Int {
-                    throw_parser_error(src, *markers1, ErrType::InvalidType(&DataType::Int, &t1));
+                    throw_compiler_error(src, *markers1, ErrType::InvalidType(&DataType::Int, &t1));
                 }
                 if t2 != DataType::Int {
-                    throw_parser_error(src, *markers2, ErrType::InvalidType(&DataType::Int, &t2));
+                    throw_compiler_error(src, *markers2, ErrType::InvalidType(&DataType::Int, &t2));
                 }
                 let elem_id = if single_run {
                     get_id(
@@ -2208,7 +2207,7 @@ pub fn compile_expr(
             Expr::VarAssign(name, y, markers) => {
                 let var_type = infer_type(y, v, ctx, state);
                 let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
-                    throw_parser_error(src, *markers, ErrType::UnknownVariable(name));
+                    throw_compiler_error(src, *markers, ErrType::UnknownVariable(name));
                 });
                 let id = v[var_pos].register_id;
 
@@ -2367,7 +2366,7 @@ pub fn compile_expr(
             }
             Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
                 if state.fns.iter().any(|func| &func.name == fn_name) {
-                    throw_parser_error(src, *markers, ErrType::FunctionAlreadyExists(fn_name));
+                    throw_compiler_error(src, *markers, ErrType::FunctionAlreadyExists(fn_name));
                 }
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(fn_code, &mut callees);
@@ -2477,7 +2476,7 @@ fn parse_toplevel(
             Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
                 if let Some(func) = fns.iter().find(|f| f.name == fn_name) {
                     let func_file = &sources[func.src_file as usize].0;
-                    throw_parser_error(
+                    throw_compiler_error(
                         use_line_markers,
                         markers,
                         ErrType::DuplicateFunctionInImport(&fn_name, func_file.as_str()),
@@ -2555,7 +2554,7 @@ fn parse_toplevel(
                             };
                             let lib = unsafe {
                                 libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
-                                    throw_parser_error(
+                                    throw_compiler_error(
                                         use_line_markers,
                                         markers,
                                         ErrType::Custom(
@@ -2571,7 +2570,7 @@ fn parse_toplevel(
                                 libffi::middle::CodePtr(
                                     lib.get::<*const ()>(fn_name.as_bytes())
                                         .unwrap_or_else(|e| {
-                                            throw_parser_error(
+                                            throw_compiler_error(
                                                 use_line_markers,
                                                 markers,
                                                 ErrType::Custom(
@@ -2620,7 +2619,7 @@ fn parse_toplevel(
                     .canonicalize()
                     .unwrap_or_else(|_| {
                         let current_src = &sources[src_file_idx as usize];
-                        throw_parser_error(
+                        throw_compiler_error(
                             (current_src.0.as_str(), current_src.1.as_str()),
                             markers,
                             ErrType::CannotReadImportedFile(path.as_str()),
@@ -2628,7 +2627,7 @@ fn parse_toplevel(
                     });
                 if visited_files.contains(&file_path) {
                     let current_src = &sources[src_file_idx as usize];
-                    throw_parser_error(
+                    throw_compiler_error(
                         (current_src.0.as_str(), current_src.1.as_str()),
                         markers,
                         ErrType::CircularImport(file_path.to_str().unwrap_or(path.as_str())),
@@ -2638,7 +2637,7 @@ fn parse_toplevel(
                 let file_contents =
                     Rc::new(std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
                         let current_src = &sources[src_file_idx as usize];
-                        throw_parser_error(
+                        throw_compiler_error(
                             (current_src.0.as_str(), current_src.1.as_str()),
                             markers,
                             ErrType::CannotReadImportedFile(path.as_str()),
@@ -2654,8 +2653,16 @@ fn parse_toplevel(
                         file_contents.as_str(),
                     )
                     .unwrap_or_else(|x| {
-                        lalrpop_error::<Token<'_>>(x, file_contents.as_str(), file_name.as_str())
+                        lalrpop_error::<self::grammar::Token<'_>>(
+                            x,
+                            file_contents.as_str(),
+                            file_name.as_str(),
+                        )
                     });
+                // let file_code = experimental_parser::experimental_parser(
+                //     file_contents.as_str(),
+                //     (file_name.as_str(), file_contents.as_str()),
+                // );
 
                 let import_src: (&str, &str) = (file_name.as_str(), file_contents.as_str());
                 let child_name = alias.unwrap_or_else(|| {
@@ -2715,7 +2722,10 @@ pub fn compile(
 
     let code: Vec<Expr> = grammar::FileParser::new()
         .parse((filename, &contents), &contents)
-        .unwrap_or_else(|x| lalrpop_error::<Token<'_>>(x, &contents, filename));
+        .unwrap_or_else(|x| {
+            lalrpop_error::<lalrpop_util::lexer::Token<'_>>(x, &contents, filename)
+        });
+    // let code = experimental_parser::experimental_parser(&contents, (filename, &contents));
 
     #[cfg(not(target_arch = "wasm32"))]
     if debug {

@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::rc::Rc;
 use crate::expr::Expr;
 use crate::expr::var_assign;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 use crate::errors::ErrType;
 use crate::type_system::DataType;
 use smol_strc::SmolStr;
@@ -27,7 +27,7 @@ pub File:Vec<Expr> = {
 
 CType: DataType = {
     <start: @L> <t: Var> <end: @R> => str_to_type(&t).unwrap_or_else(|| {
-        throw_parser_error(
+        throw_compiler_error(
                     src,
                     span!(start, end),
                     ErrType::Custom(
@@ -37,7 +37,7 @@ CType: DataType = {
                         .to_smolstr()));}
     ),
     <start: @L> <t: Var> <end: @R> "[" "]" => DataType::Array(Some(Box::new(str_to_type(&t).unwrap_or_else(|| {
-        throw_parser_error(
+        throw_compiler_error(
                     src,
                     span!(start, end),
                     ErrType::Custom(
@@ -291,7 +291,7 @@ TryCatchBlock:Expr = {
             if let Some((_, v, c)) = o3 {
                 Expr::TryCatchBlock(o1, v, c)
             } else {
-                throw_parser_error(
+                throw_compiler_error(
                     src,
                     span!(start, end),
                     ErrType::Custom(
@@ -332,7 +332,7 @@ TryCatchBlock:Expr = {
 StructDeclare:Expr = {
     <start: @L> "struct" <o1: Var> "{" <fields: Comma<(Var ":" KeelType)>> "}" <end: @R> => {
         if fields.is_empty() {
-            throw_parser_error(
+            throw_compiler_error(
                 src,
                 span!(start, end),
                 ErrType::Custom(
@@ -734,14 +734,14 @@ Array:Expr = {
 }
 
 Float: f64 = {
-    <start: @L> <n: r"[0-9]*[.][0-9]+"> <end: @R> => f64::from_str(n).unwrap_or_else(|_| {throw_parser_error(src, span!(start, end), ErrType::InvalidFloat)})
+    <start: @L> <n: r"[0-9]*[.][0-9]+"> <end: @R> => f64::from_str(n).unwrap_or_else(|_| {throw_compiler_error(src, span!(start, end), ErrType::InvalidFloat)})
 }
 
 Integer: i32 = {
     <start: @L> <n: r"[0-9]+"> <end: @R> => match n.parse::<i64>() {
         Ok(v) if v <= i32::MAX as i64 => v as i32,
         Ok(2147483648) => i32::MIN,
-        _ => throw_parser_error(src, span!(start, end), ErrType::InvalidInt)
+        _ => throw_compiler_error(src, span!(start, end), ErrType::InvalidInt)
     }
 };
 

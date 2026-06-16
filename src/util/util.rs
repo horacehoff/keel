@@ -1,6 +1,6 @@
 use crate::compiler_data::Struct;
 use crate::errors::ErrType;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 use crate::expr::Span;
 use crate::type_system::DataType;
 use smol_strc::SmolStr;
@@ -106,7 +106,7 @@ pub fn str_to_keel_type(s: &str, structs: &[Struct], span: Span, src: (&str, &st
     } else if let Some(s) = structs.iter().rposition(|candidate| candidate.name == s) {
         DataType::Struct(s as u16)
     } else {
-        throw_parser_error(src, span, ErrType::UnknownType(s));
+        throw_compiler_error(src, span, ErrType::UnknownType(s));
     }
 }
 
@@ -173,7 +173,7 @@ impl std::fmt::Display for DataType {
 macro_rules! check_args {
     ($args:expr, $expected_args_len:expr, $fn_name:expr, $src:expr,$markers:expr) => {
         if $args.len() != $expected_args_len {
-            throw_parser_error(
+            throw_compiler_error(
                 $src,
                 $markers,
                 ErrType::IncorrectArgCount($fn_name, $expected_args_len as u16, $args.len() as u16),
@@ -188,7 +188,7 @@ macro_rules! check_args_range {
     ($args:expr, $min_args_len:expr,$max_args_len:expr, $fn_name:expr, $src:expr,$markers:expr) => {
         #[allow(unused_comparisons)]
         if $args.len() < $min_args_len || $args.len() > $max_args_len {
-            throw_parser_error(
+            throw_compiler_error(
                 $src,
                 $markers,
                 ErrType::IncorrectArgCountVariable(

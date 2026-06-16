@@ -4,7 +4,7 @@ use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
 use crate::compiler_data::Variable;
 use crate::errors::ErrType;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::functions::check_arg_type;
@@ -185,7 +185,7 @@ pub fn fs_lib_functions(
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         name => {
-            throw_parser_error(src, markers, ErrType::UnknownFunction(name));
+            throw_compiler_error(src, markers, ErrType::UnknownFunction(name));
         }
     }
 }

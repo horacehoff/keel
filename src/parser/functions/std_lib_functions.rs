@@ -6,7 +6,7 @@ use crate::compiler_data::State;
 use crate::compiler_data::Variable;
 use crate::data::Data;
 use crate::errors::ErrType;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::functions::check_arg_type;
@@ -309,7 +309,7 @@ pub fn std_lib_functions(
                     single_run,
                 ));
             }
-            throw_parser_error(src, markers, ErrType::UnknownFunction(fn_name));
+            throw_compiler_error(src, markers, ErrType::UnknownFunction(fn_name));
         }
     }
     None

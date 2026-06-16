@@ -1,9 +1,9 @@
+use crate::experimental_parser::Token;
 use crate::expr::Span;
 use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use inline_colorization::*;
 use lalrpop_util::ParseError;
-use lalrpop_util::lexer::Token;
 use smol_strc::{SmolStr, ToSmolStr};
 use std::fmt::Arguments;
 use std::rc::Rc;
@@ -372,8 +372,61 @@ pub fn wasm_error(msg: &str) -> ! {
 
 #[cold]
 #[inline(never)]
-pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ErrType) -> ! {
+pub fn throw_compiler_error(src: (&str, &str), Span { start, end }: Span, t: ErrType) -> ! {
     let err_message: SmolStr = t.into();
+    eprintln!("{color_red}KEEL ERROR{color_reset}");
+    let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
+        .with_label(
+            Label::new((src.0, (start as usize)..(end as usize)))
+                .with_message(err_message)
+                .with_color(Color::Red),
+        )
+        .finish();
+
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+    report.eprint((src.0, Source::from(src.1))).unwrap();
+
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+    report
+        .write(
+            (src.0, Source::from(src.1)),
+            crate::captured_output::CapturedOutputWriter,
+        )
+        .unwrap();
+
+    #[cfg(debug_assertions)]
+    panic!();
+
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
+    std::process::exit(1);
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen::throw_str("keel_error");
+
+    #[cfg(all(feature = "embed", not(debug_assertions)))]
+    panic!();
+}
+
+#[derive(Clone, Copy)]
+pub enum ParserErr<'a> {
+    UnexpectedEOF,
+    UnknownToken,
+    /// (expected, received)
+    UnexpectedToken(Token<'a>, Token<'a>, &'static str),
+}
+
+#[cold]
+#[inline(never)]
+pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ParserErr) -> ! {
+    let err_message = match t {
+        ParserErr::UnexpectedEOF => "Unexpected EOF",
+        ParserErr::UnknownToken => "Unknown token",
+        ParserErr::UnexpectedToken(expected, received, msg) => format_args!(
+            "Expected {color_bright_blue}{style_bold}{expected:?}{color_reset}{style_reset}. {msg}"
+        )
+        .as_str()
+        .unwrap(),
+    };
     eprintln!("{color_red}KEEL ERROR{color_reset}");
     let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
         .with_label(
@@ -411,7 +464,7 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ErrTy
 #[inline(never)]
 pub fn lalrpop_error<'a, T>(x: ParseError<usize, T, &str>, file: &str, filename: &str) -> !
 where
-    Token<'a>: From<T>,
+    lalrpop_util::lexer::Token<'a>: From<T>,
 {
     eprintln!("{color_red}KEEL ERROR{color_reset}");
     match x {

@@ -6,7 +6,7 @@ use crate::compiler_data::State;
 use crate::compiler_data::Variable;
 use crate::errors::ErrType;
 use crate::errors::dev_error;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::symbol_of_expr;
 #[cfg(not(target_arch = "wasm32"))]
@@ -434,7 +434,7 @@ pub fn infer_type(
             .iter()
             .rfind(|x| &x.name == name)
             .unwrap_or_else(|| {
-                throw_parser_error(ctx.src, *markers, ErrType::UnknownVariable(name));
+                throw_compiler_error(ctx.src, *markers, ErrType::UnknownVariable(name));
             })
             .var_type
             .clone(),
@@ -460,7 +460,7 @@ pub fn infer_type(
                 (DataType::Int, DataType::Int) => DataType::Int,
                 (DataType::String, DataType::String) => DataType::String,
                 (DataType::Array(t1), DataType::Array(t2)) => DataType::Array(t1.or(t2)),
-                (l, r) => throw_parser_error(ctx.src, *markers, ErrType::OpError(&l, &r, "+")),
+                (l, r) => throw_compiler_error(ctx.src, *markers, ErrType::OpError(&l, &r, "+")),
             }
         }
         Expr::Mul(x, y, markers)
@@ -476,7 +476,7 @@ pub fn infer_type(
                 }
                 (DataType::Float, DataType::Float) => DataType::Float,
                 (DataType::Int, DataType::Int) => DataType::Int,
-                (l, r) => throw_parser_error(
+                (l, r) => throw_compiler_error(
                     ctx.src,
                     *markers,
                     ErrType::OpError(&l, &r, symbol_of_expr(e)),
@@ -492,7 +492,7 @@ pub fn infer_type(
                 | (DataType::Float | DataType::Int, DataType::Unknown)
                 | (DataType::Float, DataType::Float)
                 | (DataType::Int, DataType::Int) => DataType::Bool,
-                (l, r) => throw_parser_error(
+                (l, r) => throw_compiler_error(
                     ctx.src,
                     *markers,
                     ErrType::OpError(&l, &r, symbol_of_expr(e)),
@@ -503,7 +503,7 @@ pub fn infer_type(
             match (infer_type(x, v, ctx, state), infer_type(y, v, ctx, state)) {
                 (DataType::Unknown | DataType::Bool, DataType::Bool)
                 | (DataType::Bool, DataType::Unknown) => DataType::Bool,
-                (l, r) => throw_parser_error(ctx.src, *markers, ErrType::OpError(&l, &r, "||")),
+                (l, r) => throw_compiler_error(ctx.src, *markers, ErrType::OpError(&l, &r, "||")),
             }
         }
         Expr::Neg(e, _) => match infer_type(e, v, ctx, state) {
@@ -530,7 +530,7 @@ pub fn infer_type(
                     .iter()
                     .find(|x| &x.0 == field)
                     .unwrap_or_else(|| {
-                        throw_parser_error(
+                        throw_compiler_error(
                             ctx.src,
                             *field_span,
                             ErrType::StructUnknownField(&state.structs[s_id as usize].name, field),
@@ -539,7 +539,7 @@ pub fn infer_type(
                     .1
                     .clone()
             } else {
-                throw_parser_error(
+                throw_compiler_error(
                     ctx.src,
                     *struct_span,
                     ErrType::InvalidType(&DataType::Struct(0), &s),
@@ -582,7 +582,7 @@ pub fn infer_type(
                         .iter()
                         .find(|func| func.name == function_name)
                         .unwrap_or_else(|| {
-                            throw_parser_error(
+                            throw_compiler_error(
                                 ctx.src,
                                 *markers,
                                 ErrType::UnknownFunction(function_name),
@@ -720,7 +720,7 @@ pub fn infer_type(
             let namespace = &namespace[..(namespace.len() - 1)];
             DataType::Struct(
                 walk_namespace_struct(state.namespace, namespace, name).unwrap_or_else(|| {
-                    throw_parser_error(ctx.src, *span, ErrType::UnknownStruct(name));
+                    throw_compiler_error(ctx.src, *span, ErrType::UnknownStruct(name));
                 }) as u16,
             )
         }

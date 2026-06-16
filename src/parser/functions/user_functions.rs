@@ -7,7 +7,7 @@ use crate::compiler_data::State;
 use crate::compiler_data::Variable;
 use crate::data::NULL;
 use crate::errors::ErrType;
-use crate::errors::throw_parser_error;
+use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::instr::Instr;

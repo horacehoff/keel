@@ -2,6 +2,7 @@
 > Keel is still experimental, and more optimizations are still to come.
 
 All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`--runs 150 --warmup 10`). All benchmarks are run on a 2021 M1 Pro Macbook Pro with 16GBs of ram.
+The Keel build uses PGO, which isn't used in the Github Actions builds yet.
 
 
 ## Iterative fib(46) x 200000
@@ -9,7 +10,7 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [iter_fib.kl](/examples/benchmarks/iter_fib/iter_fib.kl) | [iter_fib.py](/examples/benchmarks/iter_fib/iter_fib.py) | [iter_fib.lua](/examples/benchmarks/iter_fib/iter_fib.lua) |
-| 76.1ms | 740ms | 72.5ms |
+| 73.4ms | 740ms | 72.5ms |
 
 
 ## Recursive fib(10,15,20,25,30,33)
@@ -17,7 +18,7 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [fib.kl](/examples/benchmarks/fib/fib.kl) | [fib.py](/examples/benchmarks/fib/fib.py) | [fib.lua](/examples/benchmarks/fib/fib.lua) |
-| 212.0ms | 507.4ms | 183.4ms |
+| 189.1ms | 507.4ms | 183.4ms |
 
 
 ## N-body (N=500000)
@@ -28,12 +29,12 @@ Based on [this benchmark from The Computer Language Benchmarks Game](https://ben
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [nbody_lua.kl](/examples/benchmarks/nbody/nbody_lua.kl) | [nbody_lua.py](/examples/benchmarks/nbody/nbody_lua.py) | [nbody_lua.lua](/examples/benchmarks/nbody/nbody_lua.lua) |
-| 469.8ms | 2649ms | 458.5ms |
+| 451.5ms | 2649ms | 458.5ms |
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [nbody_py.kl](/examples/benchmarks/nbody/nbody_py.kl) | [nbody_py.py](/examples/benchmarks/nbody/nbody_py.py) | [nbody_py.lua](/examples/benchmarks/nbody/nbody_py.lua) |
-| 582.4ms | 2726ms | 581.2ms |
+| 565.4ms | 2726ms | 581.2ms |
 
 
 ## Sqrt (N=0 to 9999999)
@@ -65,7 +66,7 @@ end
 print(x)</code></pre></td>
 </tr>
 <tr>
-  <td><b>99.8ms</b></td>
+  <td><b>76.5ms</b></td>
   <td>1164ms</td>
   <td>167ms</td>
 </tr>
@@ -109,7 +110,7 @@ end
 print(count)</code></pre></td>
 </tr>
 <tr>
-  <td><b>6.7ms</b></td>
+  <td><b>5.8ms</b></td>
   <td>28.2ms</td>
   <td>27.6ms</td>
 </tr>
@@ -166,7 +167,7 @@ end
 print(last)</code></pre></td>
 </tr>
 <tr>
-  <td><b>24.5ms</b></td>
+  <td><b>21.6ms</b></td>
   <td>149.2ms</td>
   <td>84.2ms</td>
 </tr>
@@ -318,7 +319,7 @@ end
 print(count)</code></pre></td>
 </tr>
 <tr>
-  <td><b>53.67ms</b></td>
+  <td><b>46.6ms</b></td>
   <td>191.9ms</td>
   <td>253.3ms</td>
 </tr>
@@ -377,7 +378,7 @@ end
 print(x)</code></pre></td>
 </tr>
 <tr>
-  <td><b>211.6ms</b></td>
+  <td><b>193.7ms</b></td>
   <td>2907ms</td>
   <td>535.8ms</td>
 </tr>

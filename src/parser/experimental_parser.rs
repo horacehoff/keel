@@ -200,6 +200,9 @@ fn parse_struct(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u32) 
                     "In structs, fields must be separated by a comma.",
                 ),
             );
+        } else if parser.peek_token() == Token::RBrace {
+            end = parser.next_token().1.end;
+            break;
         }
     }
 
@@ -586,7 +589,10 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                 let (id_token, id_span) = parser.next_token();
                 let Token::Identifier(id) = id_token else {
                     cold_path();
-                    parser.error(id_span, ParserErr::UnexpectedToken(Token::Identifier(""), id_token, ""));
+                    parser.error(
+                        id_span,
+                        ParserErr::UnexpectedToken(Token::Identifier(""), id_token, ""),
+                    );
                 };
                 let peek_token = parser.peek_token_opt();
                 if peek_token == Some(Token::LParen) {
@@ -614,7 +620,10 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                             namespace.push(SmolStr::new(i));
                         } else {
                             cold_path();
-                            parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), id_token, ""));
+                            parser.error(
+                                span,
+                                ParserErr::UnexpectedToken(Token::Identifier(""), id_token, ""),
+                            );
                         }
                         let (next_token, span) = parser.next_token();
                         if next_token == Token::LParen {
@@ -739,7 +748,10 @@ fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
         SmolStr::new(id)
     } else {
         cold_path();
-        parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), i_token, ""));
+        parser.error(
+            span,
+            ParserErr::UnexpectedToken(Token::Identifier(""), i_token, ""),
+        );
     };
     parser.next_token_expect(Token::In, "");
     let start = parser.peek_token_start();
@@ -802,7 +814,10 @@ fn parse_function(parser: &mut Parser<'_>) -> Expr {
         SmolStr::new(fn_name)
     } else {
         cold_path();
-        parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), t_fn_id, "Invalid function name."));
+        parser.error(
+            span,
+            ParserErr::UnexpectedToken(Token::Identifier(""), t_fn_id, "Invalid function name."),
+        );
     };
     parser.next_token_expect(
         Token::LParen,
@@ -820,7 +835,14 @@ fn parse_function(parser: &mut Parser<'_>) -> Expr {
             args.push(SmolStr::new(arg));
         } else {
             cold_path();
-            parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), arg, "Invalid function argument."));
+            parser.error(
+                span,
+                ParserErr::UnexpectedToken(
+                    Token::Identifier(""),
+                    arg,
+                    "Invalid function argument.",
+                ),
+            );
         }
         if parser.peek_token() == Token::Comma {
             parser.next_token();
@@ -873,7 +895,7 @@ fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
     }
     if !has_catch {
         cold_path();
-        parser.error((start,end).into(), ParserErr::TryBlockNoCatch);
+        parser.error((start, end).into(), ParserErr::TryBlockNoCatch);
     }
     let usr_var = Expr::Var(catch_all_var.clone(), (start, end).into());
     let else_code: Box<[Expr]> = if let Some(c) = catch_all_code {
@@ -933,7 +955,10 @@ fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
         SmolStr::new(id)
     } else {
         cold_path();
-        parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, ""));
+        parser.error(
+            span,
+            ParserErr::UnexpectedToken(Token::Identifier(""), next_token, ""),
+        );
     };
     parser.next_token_expect(Token::LBrace, "Expected '{'");
     let mut fields: Vec<(SmolStr, SmolStr)> = Vec::with_capacity(4);
@@ -944,7 +969,14 @@ fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
             SmolStr::new(i)
         } else {
             cold_path();
-            parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Struct field names must be identifiers."));
+            parser.error(
+                span,
+                ParserErr::UnexpectedToken(
+                    Token::Identifier(""),
+                    next_token,
+                    "Struct field names must be identifiers.",
+                ),
+            );
         };
         parser.next_token_expect(Token::Colon, "A colon must separate a field from its type.");
         let field_type = parse_type(parser);
@@ -955,7 +987,17 @@ fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
             break;
         } else if next_token != Token::Comma {
             cold_path();
-            parser.error(span, ParserErr::UnexpectedToken(Token::Comma, next_token, "In structs, fields must be separated by a comma."));
+            parser.error(
+                span,
+                ParserErr::UnexpectedToken(
+                    Token::Comma,
+                    next_token,
+                    "In structs, fields must be separated by a comma.",
+                ),
+            );
+        } else if parser.peek_token() == Token::RBrace {
+            end = parser.next_token().1.end;
+            break;
         }
     }
     Expr::StructDeclare(struct_name, Box::from(fields), (start, end).into())
@@ -981,7 +1023,7 @@ fn parse_match(parser: &mut Parser<'_>) -> Expr {
         if peek_token == Identifier("_") {
             if first_condition.is_none() {
                 cold_path();
-                let span = (start,parser.peek_token_end()).into();
+                let span = (start, parser.peek_token_end()).into();
                 parser.error(span, ParserErr::MatchBlockNoNonWildcardArm);
             }
             parser.next_token();
@@ -997,7 +1039,7 @@ fn parse_match(parser: &mut Parser<'_>) -> Expr {
         } else if peek_token == Token::RBrace {
             if first_condition.is_none() {
                 cold_path();
-                let span = (start,parser.peek_token_end()).into();
+                let span = (start, parser.peek_token_end()).into();
                 parser.error(span, ParserErr::MatchBlockZeroArms);
             }
             end = parser.peek_token_end();
@@ -1061,9 +1103,19 @@ fn parse_var_declare(parser: &mut Parser<'_>) -> Expr {
         SmolStr::new(id)
     } else {
         cold_path();
-        parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), t, "Variable names must be identifiers."));
+        parser.error(
+            span,
+            ParserErr::UnexpectedToken(
+                Token::Identifier(""),
+                t,
+                "Variable names must be identifiers.",
+            ),
+        );
     };
-    parser.next_token_expect(Token::Equals, "Variable declarations need a '=' to separate the name from the value.");
+    parser.next_token_expect(
+        Token::Equals,
+        "Variable declarations need a '=' to separate the name from the value.",
+    );
     let var_value = parse_expr(parser);
     Expr::VarDeclare(var_name, Box::new(var_value))
 }
@@ -1168,7 +1220,10 @@ fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
         SmolStr::new(crate::util::parse_string(s))
     } else {
         cold_path();
-        parser.error(span, ParserErr::UnexpectedToken(Token::String(""), next_token, "Paths must be strings."));
+        parser.error(
+            span,
+            ParserErr::UnexpectedToken(Token::String(""), next_token, "Paths must be strings."),
+        );
     };
     let end = span.end;
     let peek_token = parser.peek_token_opt();
@@ -1179,7 +1234,14 @@ fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
             SmolStr::new(id)
         } else {
             cold_path();
-            parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Module aliases must be identifiers."));
+            parser.error(
+                span,
+                ParserErr::UnexpectedToken(
+                    Token::Identifier(""),
+                    next_token,
+                    "Module aliases must be identifiers.",
+                ),
+            );
         };
         Expr::ImportFile(path, Some(alias), (start, span.end).into())
     } else {
@@ -1194,7 +1256,10 @@ fn parse_type(parser: &mut Parser<'_>) -> SmolStr {
         t.push_str(i);
     } else {
         cold_path();
-        parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."));
+        parser.error(
+            span,
+            ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."),
+        );
     }
     loop {
         let peek_token = parser.peek_token();
@@ -1202,7 +1267,10 @@ fn parse_type(parser: &mut Parser<'_>) -> SmolStr {
             if t.as_bytes().last().unwrap() == &b'[' {
                 cold_path();
                 let span = (span.start, parser.peek_token_end()).into();
-                parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."));
+                parser.error(
+                    span,
+                    ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."),
+                );
             }
             t.push('[');
             parser.next_token();
@@ -1210,7 +1278,10 @@ fn parse_type(parser: &mut Parser<'_>) -> SmolStr {
             if t.as_bytes().last().unwrap() != &b'[' {
                 cold_path();
                 let span = (span.start, parser.peek_token_end()).into();
-                parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."));
+                parser.error(
+                    span,
+                    ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."),
+                );
             }
             t.push(']');
             parser.next_token();
@@ -1229,7 +1300,10 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
         SmolStr::new(crate::util::parse_string(s))
     } else {
         cold_path();
-        parser.error(span, ParserErr::UnexpectedToken(Token::String(""), next_token, "Paths must be strings."));
+        parser.error(
+            span,
+            ParserErr::UnexpectedToken(Token::String(""), next_token, "Paths must be strings."),
+        );
     };
     parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'.");
     let mut fn_signatures: Vec<(SmolStr, Box<[SmolStr]>, SmolStr)> = Vec::new();
@@ -1249,7 +1323,14 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
                 SmolStr::new(name)
             } else {
                 cold_path();
-                parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Function names must be identifiers."));
+                parser.error(
+                    span,
+                    ParserErr::UnexpectedToken(
+                        Token::Identifier(""),
+                        next_token,
+                        "Function names must be identifiers.",
+                    ),
+                );
             };
             (first, fn_name)
         };
@@ -1292,7 +1373,7 @@ fn parse_file_statement(parser: &mut Parser<'_>) -> Option<Expr> {
         Some(unexpected) => {
             let span = parser.peek_token_span();
             parser.error(span, ParserErr::UnexpectedTokenStr("'fn' (function declaration), 'import', 'struct' (struct declaration), or 'dylib' (dynamic library import)", unexpected, "Invalid file statement."));
-        },
+        }
     }
 }
 

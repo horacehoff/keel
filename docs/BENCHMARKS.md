@@ -36,6 +36,15 @@ Based on [this benchmark from The Computer Language Benchmarks Game](https://ben
 | [nbody_py.kl](/examples/benchmarks/nbody/nbody_py.kl) | [nbody_py.py](/examples/benchmarks/nbody/nbody_py.py) | [nbody_py.lua](/examples/benchmarks/nbody/nbody_py.lua) |
 | 565.4ms | 2726ms | 581.2ms |
 
+## Binary trees (N=16)
+Based on [this benchmark from The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/binarytrees.html#binarytrees).\
+Based on [this Python implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-python3-2.html) and [this Lua implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-lua-2.html).
+
+| Keel | Python 3.14.5 | LuaJIT (-joff) |
+| --- | --- | --- |
+| [binary-trees.kl](/examples/benchmarks/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/benchmarks/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/benchmarks/binary-trees/binary-trees.lua) |
+| 540.7ms | 1264ms | 541.8ms |
+
 
 ## Sqrt (N=0 to 9999999)
 

@@ -86,6 +86,11 @@ impl std::hash::Hash for DataType {
     }
 }
 
+#[inline(always)]
+pub fn struct_field_type_matches(expected: &DataType, received: &DataType) -> bool {
+    received == &DataType::Null || expected == received
+}
+
 pub const fn is_type_indexable(x: &DataType) -> bool {
     matches!(x, DataType::String | DataType::Array(_) | DataType::Unknown)
 }
@@ -730,6 +735,9 @@ pub fn infer_type(
 
 pub fn check_poly(data: DataType) -> DataType {
     if let DataType::Poly(ref elems) = data {
+        if let Some(new) = reduce_null_struct(elems) {
+            return new;
+        }
         let mut concrete = elems
             .iter()
             .filter(|elem_type| **elem_type != DataType::Unknown);
@@ -755,6 +763,26 @@ pub fn check_poly(data: DataType) -> DataType {
             format_args!("Received data : {data} and not data : DataType::Poly"),
         )
     }
+}
+
+fn reduce_null_struct(types: &[DataType]) -> Option<DataType> {
+    let mut struct_type = None;
+    for t in types {
+        match t {
+            DataType::Null | DataType::Unknown => {}
+            DataType::Struct(_) => {
+                if let Some(struct_type) = &struct_type {
+                    if struct_type != t {
+                        return None;
+                    }
+                } else {
+                    struct_type = Some(t.clone());
+                }
+            }
+            _ => return None,
+        }
+    }
+    struct_type
 }
 
 #[cfg(not(target_arch = "wasm32"))]

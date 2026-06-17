@@ -2948,6 +2948,20 @@ pub fn struct_field_access() {
 }
 
 #[test]
+pub fn struct_trailing_comma() {
+    run!(
+        "
+        fn main() {
+            struct Test {
+                x: Test[],
+                y: Test[],
+            }
+        }
+        "
+    );
+}
+
+#[test]
 pub fn struct_field_modify() {
     run_and_check_registers!(
         "

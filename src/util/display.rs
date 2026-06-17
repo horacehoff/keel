@@ -35,7 +35,7 @@ pub fn format_data(
         })
         .to_smolstr()
     } else if x.is_null() {
-        SmolStr::new_static("NULL")
+        SmolStr::new_static("null")
     } else if x.is_struct() {
         let s_name = unsafe { &struct_fields.get_unchecked(x.struct_type_id() as usize).0 };
         format_args!("{} {{{}}}", s_name, unsafe {

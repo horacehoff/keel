@@ -25,6 +25,7 @@ use crate::type_system::collect_direct_fn_calls;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::type_system::datatype_to_c_type;
 use crate::type_system::is_type_indexable;
+use crate::type_system::struct_field_type_matches;
 use crate::type_system::{DataType, infer_type};
 use crate::util::str_to_keel_type;
 use crate::{data::Data, instr::Instr};
@@ -577,7 +578,7 @@ pub fn get_id(
                     }) {
                         let field_type = infer_type(field_expr, v, ctx, state);
                         let field = &state.structs[expected_struct_idx].fields[field_idx];
-                        if field_type != field.1 {
+                        if !struct_field_type_matches(&field.1, &field_type) {
                             throw_compiler_error(
                                 src,
                                 *field_span,
@@ -636,7 +637,7 @@ pub fn get_id(
                     }) {
                         let field_type = infer_type(field_expr, v, ctx, state);
                         let field = &state.structs[expected_struct_idx].fields[field_idx];
-                        if field_type != field.1 {
+                        if !struct_field_type_matches(&field.1, &field_type) {
                             throw_compiler_error(
                                 src,
                                 *field_span,
@@ -1601,7 +1602,7 @@ pub fn compile_expr(
                 let mut field_index: Option<u16> = None;
                 for (i, (f, f_t)) in state.structs[struct_id as usize].fields.iter().enumerate() {
                     if f == field {
-                        if new_val_type != *f_t {
+                        if !struct_field_type_matches(f_t, &new_val_type) {
                             throw_compiler_error(
                                 src,
                                 *field_span,

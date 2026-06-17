@@ -445,9 +445,15 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
         ParserErr::ModuloByZero => "Modulo by zero",
         ParserErr::IntegerNegativeExponent => "Integers cannot be raised to a negative exponent",
         ParserErr::ArgumentsMissingCommaSeparator => "Arguments must be separated by a comma",
-        ParserErr::TryBlockNoCatch => "A {color_bright_blue}{style_bold}try{color_reset}{style_reset} block must have at least one {color_bright_blue}{style_bold}catch{color_reset}{style_reset} block",
-        ParserErr::MatchBlockNoNonWildcardArm => "{color_bright_blue}{style_bold}Match blocks{color_reset}{style_reset} must have {style_bold}at least one{style_reset} non-wildcard arm",
-        ParserErr::MatchBlockZeroArms => "{color_bright_blue}{style_bold}Match blocks{color_reset}{style_reset} must have {style_bold}at least one{style_reset} arm"
+        ParserErr::TryBlockNoCatch => {
+            "A {color_bright_blue}{style_bold}try{color_reset}{style_reset} block must have at least one {color_bright_blue}{style_bold}catch{color_reset}{style_reset} block"
+        }
+        ParserErr::MatchBlockNoNonWildcardArm => {
+            "{color_bright_blue}{style_bold}Match blocks{color_reset}{style_reset} must have {style_bold}at least one{style_reset} non-wildcard arm"
+        }
+        ParserErr::MatchBlockZeroArms => {
+            "{color_bright_blue}{style_bold}Match blocks{color_reset}{style_reset} must have {style_bold}at least one{style_reset} arm"
+        }
     };
     eprintln!("{color_red}KEEL ERROR{color_reset}");
     let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))

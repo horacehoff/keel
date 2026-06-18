@@ -148,7 +148,7 @@ checksum = "dc1804bdb6a9784758b200007273a8b84e2b0b0b97a8f1e18e763eceb3e9f98a"
 
 [[package]]
 name = "keel"
-version = "0.1.6"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "ariadne",

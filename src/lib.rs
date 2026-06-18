@@ -15,9 +15,9 @@ use wasm_bindgen::prelude::*;
 mod array_gc;
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
-#[path = "./parser/compiler.rs"]
+#[path = "./compiler/compiler.rs"]
 mod compiler;
-#[path = "./parser/compiler_data.rs"]
+#[path = "./compiler/compiler_data.rs"]
 mod compiler_data;
 #[path = "./data.rs"]
 mod data;
@@ -25,25 +25,25 @@ mod data;
 mod display;
 #[path = "./util/errors.rs"]
 mod errors;
-#[path = "./parser/experimental_parser.rs"]
-mod experimental_parser;
-#[path = "./parser/expr.rs"]
+#[path = "./parser/parser.rs"]
+mod parser;
+#[path = "./compiler/expr.rs"]
 mod expr;
-#[path = "./parser/functions/fs_lib_functions.rs"]
+#[path = "./compiler/functions/fs_lib_functions.rs"]
 mod fs_lib_functions;
-#[path = "./parser/functions/functions.rs"]
+#[path = "./compiler/functions/functions.rs"]
 mod functions;
 #[path = "./instr.rs"]
 mod instr;
-#[path = "./parser/functions/methods.rs"]
+#[path = "./compiler/functions/methods.rs"]
 mod methods;
-#[path = "./parser/registers.rs"]
+#[path = "./compiler/registers.rs"]
 mod registers;
 #[path = "./repl.rs"]
 mod repl;
-#[path = "./parser/functions/std_lib_functions.rs"]
+#[path = "./compiler/functions/std_lib_functions.rs"]
 mod std_lib_functions;
-#[path = "./parser/functions/std_lib_methods.rs"]
+#[path = "./compiler/functions/std_lib_methods.rs"]
 mod std_lib_methods;
 #[path = "./vm/string_gc.rs"]
 mod string_gc;
@@ -52,7 +52,7 @@ mod string_gc;
 mod tests;
 #[path = "./type_system.rs"]
 mod type_system;
-#[path = "./parser/functions/user_functions.rs"]
+#[path = "./compiler/functions/user_functions.rs"]
 mod user_functions;
 #[path = "./util/util.rs"]
 mod util;

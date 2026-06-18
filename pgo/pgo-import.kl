@@ -1,0 +1,10 @@
+import "pgo_import_test.kl"
+import "pgo-import-test2.kl" as test
+
+fn main() {
+    pgo_import_test::test();
+    let x = pgo_import_test::Test {x:42,y:67};
+    print(x);
+    let y = test::Test {x:42,y:67};
+    test::test();
+}

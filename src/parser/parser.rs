@@ -3,7 +3,7 @@ use std::hint::{cold_path, unreachable_unchecked};
 
 use crate::{
     errors::{ParserErr, throw_parser_error},
-    experimental_parser::Token::{Identifier, RangeDot},
+    parser::Token::{Identifier, RangeDot},
     expr::{
         Expr::{self},
         Span, var_assign,

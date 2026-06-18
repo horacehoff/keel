@@ -1,12 +1,18 @@
-int pgo_add_int(int a, int b) {
+#if defined(_WIN32)
+#define EXPORT __declspec(dllexport)
+#else
+#define EXPORT
+#endif
+
+EXPORT int pgo_add_int(int a, int b) {
     return a + b;
 }
 
-double pgo_add_float(double a, double b) {
+EXPORT double pgo_add_float(double a, double b) {
     return a + b;
 }
 
-int pgo_all_types(
+EXPORT int pgo_all_types(
     int i,
     double f,
     const char *s,

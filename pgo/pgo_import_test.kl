@@ -1,0 +1,5 @@
+fn test() {
+    print("test");
+}
+
+struct Test {x:int,y:int}

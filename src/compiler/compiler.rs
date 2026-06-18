@@ -4,7 +4,7 @@ use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
-use crate::experimental_parser;
+use crate::parser;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::expr::contains_var_reassign;
@@ -2490,7 +2490,8 @@ fn parse_toplevel(
     for expr in code {
         match expr {
             Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
-                if let Some(func) = fns.iter().find(|f| f.name == fn_name) {
+                if let Some((_, func_id)) = namespace.fns.iter().find(|(f, _)| f == &fn_name) {
+                    let func = &fns[*func_id as usize];
                     let func_file = &sources[func.src_file as usize].0;
                     throw_compiler_error(
                         use_line_markers,
@@ -2674,7 +2675,7 @@ fn parse_toplevel(
                 //             file_contents.as_str(),
                 //         )
                 //     });
-                let file_code = experimental_parser::experimental_parser(
+                let file_code = parser::experimental_parser(
                     file_contents.as_str(),
                     (file_name.as_str(), file_contents.as_str()),
                 );
@@ -2740,7 +2741,7 @@ pub fn compile(
     //     .unwrap_or_else(|x| {
     //         crate::errors::lalrpop_error::<lalrpop_util::lexer::Token<'_>>(x, &contents, filename)
     //     });
-    let code = experimental_parser::experimental_parser(&contents, (filename, &contents));
+    let code = parser::experimental_parser(&contents, (filename, &contents));
 
     #[cfg(not(target_arch = "wasm32"))]
     if debug {

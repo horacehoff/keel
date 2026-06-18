@@ -89,6 +89,7 @@ jobs:
           target/${{ matrix.target }}/release/${{ matrix.bin }} examples/benchmarks/iter_fib/iter_fib.kl
           target/${{ matrix.target }}/release/${{ matrix.bin }} pgo/pgo-fizzbuzz.kl
           target/${{ matrix.target }}/release/${{ matrix.bin }} pgo/pgo-dynlib.kl
+          target/${{ matrix.target }}/release/${{ matrix.bin }} pgo/pgo-import.kl
 
       - name: Build final binary
         env:

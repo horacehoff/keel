@@ -1,4 +1,4 @@
-use crate::experimental_parser::Token;
+use crate::parser::Token;
 use crate::expr::Span;
 use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};

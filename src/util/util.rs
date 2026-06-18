@@ -5,7 +5,6 @@ use crate::expr::Span;
 use crate::type_system::DataType;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
-use std::hint::cold_path;
 
 /// Strips the surrounding quotes & processes escape sequences \n \t \r \\ \" \0
 pub fn parse_string(s: &str) -> SmolStr {
@@ -63,21 +62,6 @@ pub fn parse_string(s: &str) -> SmolStr {
         }
     }
     SmolStr::from(processed)
-}
-
-pub fn str_to_type(s: &str) -> Option<DataType> {
-    if s == "int" {
-        Some(DataType::Int)
-    } else if s == "float" {
-        Some(DataType::Float)
-    } else if s == "bool" {
-        Some(DataType::Bool)
-    } else if s == "string" {
-        Some(DataType::String)
-    } else {
-        cold_path();
-        None
-    }
 }
 
 pub fn str_to_keel_type(s: &str, structs: &[Struct], span: Span, src: (&str, &str)) -> DataType {

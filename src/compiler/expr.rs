@@ -2,12 +2,6 @@ use crate::errors::dev_error;
 use smol_strc::SmolStr;
 use std::rc::Rc;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Span {
-    pub start: u32,
-    pub end: u32,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Float(f64),
@@ -151,5 +145,48 @@ pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) 
         Expr::SetStructField(obj, field, Box::from(value), obj_span, field_span)
     } else {
         todo!()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl From<std::range::Range<usize>> for Span {
+    #[inline(always)]
+    fn from(value: std::range::Range<usize>) -> Self {
+        Self {
+            start: value.start as u32,
+            end: value.end as u32,
+        }
+    }
+}
+
+impl From<std::ops::Range<usize>> for Span {
+    #[inline(always)]
+    fn from(value: std::ops::Range<usize>) -> Self {
+        Self {
+            start: value.start as u32,
+            end: value.end as u32,
+        }
+    }
+}
+
+impl From<(usize, usize)> for Span {
+    #[inline(always)]
+    fn from((start, end): (usize, usize)) -> Self {
+        Self {
+            start: start as u32,
+            end: end as u32,
+        }
+    }
+}
+
+impl From<(u32, u32)> for Span {
+    #[inline(always)]
+    fn from((start, end): (u32, u32)) -> Self {
+        Self { start, end }
     }
 }

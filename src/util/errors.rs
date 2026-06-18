@@ -1,5 +1,5 @@
-use crate::parser::Token;
 use crate::expr::Span;
+use crate::lexer::Token;
 use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use inline_colorization::*;
@@ -432,11 +432,11 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
         ParserErr::UnexpectedEOF => "Unexpected EOF",
         ParserErr::UnknownToken => "Unknown token",
         ParserErr::UnexpectedToken(expected, received, msg) => &format_args!(
-            "Expected {color_bright_blue}{style_bold}{expected:?}{color_reset}{style_reset}. {msg}"
+            "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}, but got {color_bright_red}{style_bold}{received}{color_reset}{style_reset}. {msg}"
         )
         .to_string(),
         ParserErr::UnexpectedTokenStr(expected, received, msg) => &format_args!(
-            "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}. {msg}"
+            "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}, but got {color_bright_red}{style_bold}{received}{color_reset}{style_reset}. {msg}"
         )
         .to_string(),
         ParserErr::ArrayElementsMissingComma => "Array elements must be separated by a comma",

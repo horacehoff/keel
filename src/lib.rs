@@ -13,6 +13,8 @@ use wasm_bindgen::prelude::*;
 
 #[path = "./vm/array_gc.rs"]
 mod array_gc;
+#[path = "./parser/blocks.rs"]
+mod blocks;
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
 #[path = "./compiler/compiler.rs"]
@@ -25,8 +27,6 @@ mod data;
 mod display;
 #[path = "./util/errors.rs"]
 mod errors;
-#[path = "./parser/parser.rs"]
-mod parser;
 #[path = "./compiler/expr.rs"]
 mod expr;
 #[path = "./compiler/functions/fs_lib_functions.rs"]
@@ -35,8 +35,14 @@ mod fs_lib_functions;
 mod functions;
 #[path = "./instr.rs"]
 mod instr;
+#[path = "./parser/lexer.rs"]
+mod lexer;
 #[path = "./compiler/functions/methods.rs"]
 mod methods;
+#[path = "./parser/parser.rs"]
+mod parser;
+#[path = "./parser/parser_expr.rs"]
+mod parser_expr;
 #[path = "./compiler/registers.rs"]
 mod registers;
 #[path = "./repl.rs"]
@@ -47,6 +53,8 @@ mod std_lib_functions;
 mod std_lib_methods;
 #[path = "./vm/string_gc.rs"]
 mod string_gc;
+#[path = "./parser/term.rs"]
+mod term;
 #[path = "./tests.rs"]
 #[cfg(test)]
 mod tests;

@@ -4,13 +4,13 @@ use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
-use crate::parser;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::expr::contains_var_reassign;
 use crate::functions::handle_functions;
 use crate::instr::LibFunc;
 use crate::methods::handle_method_calls;
+use crate::parser;
 use crate::registers::alloc_register;
 use crate::registers::free_loop_scope_registers;
 use crate::registers::free_register;
@@ -2675,7 +2675,7 @@ fn parse_toplevel(
                 //             file_contents.as_str(),
                 //         )
                 //     });
-                let file_code = parser::experimental_parser(
+                let file_code = parser::parse(
                     file_contents.as_str(),
                     (file_name.as_str(), file_contents.as_str()),
                 );
@@ -2741,7 +2741,7 @@ pub fn compile(
     //     .unwrap_or_else(|x| {
     //         crate::errors::lalrpop_error::<lalrpop_util::lexer::Token<'_>>(x, &contents, filename)
     //     });
-    let code = parser::experimental_parser(&contents, (filename, &contents));
+    let code = parser::parse(&contents, (filename, &contents));
 
     #[cfg(not(target_arch = "wasm32"))]
     if debug {

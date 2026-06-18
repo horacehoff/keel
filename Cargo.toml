@@ -36,6 +36,7 @@ ptr_as_ptr = "allow"
 too_many_arguments = "allow"
 type_complexity = "allow"
 redundant_clone = "warn"
+redundant_else = "allow"
 
 [features]
 # default = ["embed"]

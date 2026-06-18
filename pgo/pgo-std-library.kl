@@ -1,6 +1,6 @@
 fn main() {
     let count = 0;
-    for _ in 0..100000 {
+    for _ in 0..100 {
         let s = "  Hello, World!  ";
         let s1 = s[0..2];
         let s2 = s[0];

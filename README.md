@@ -13,7 +13,7 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 
 ## Why Keel?
 
-- **Fast**: ~2-10x faster than Python ([benchmarks](docs/BENCHMARKS.md)), with aggressive compile-time optimizations
+- **Fast**: ~2-15x faster than Python ([benchmarks](docs/BENCHMARKS.md)), with aggressive compile-time optimizations
 - **Familiar syntax**: Rust-like, with Python's ease-of-use
 - **Statically typed, zero annotations**: full type inference, static type checking, polymorphism
 - **FFI support**: call C/dynamic libraries directly from Keel

@@ -106,7 +106,7 @@ pub fn run(code: String) {
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)] // WIP
 pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
-    let code = &unsafe { CStr::from_ptr(code) }
+    let code = unsafe { CStr::from_ptr(code) }
         .to_string_lossy()
         .to_string();
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());

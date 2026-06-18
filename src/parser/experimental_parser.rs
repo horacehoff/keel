@@ -1449,7 +1449,7 @@ impl std::fmt::Display for Token<'_> {
 }
 
 #[derive(Logos, Debug, PartialEq, Clone, Copy)]
-#[logos(skip r"[ \t\n\f]+")] // Ignore whitespace
+#[logos(skip r"[ \t\r\n\f]+")] // Ignore whitespace
 #[logos(skip(r"//[^\n\r]*", allow_greedy = true))] // Ignore comments
 pub enum Token<'a> {
     // ASSIGNEMENT OPS

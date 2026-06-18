@@ -75,7 +75,7 @@ pub fn get_output() -> String {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn run(code: &str) {
+pub fn run(code: String) {
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let (
         instructions,

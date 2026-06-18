@@ -2626,7 +2626,7 @@ fn parse_toplevel(
                 });
             }
             #[cfg(target_arch = "wasm32")]
-            Expr::ImportFile(_, _) => wasm_error("WASM does not support importing files"),
+            Expr::ImportFile(_, _, _) => wasm_error("WASM does not support importing files"),
             #[cfg(not(target_arch = "wasm32"))]
             Expr::ImportFile(path, alias, markers) => {
                 let file_path = file_path

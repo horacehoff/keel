@@ -1,4 +1,4 @@
-use crate::compiler::walk_namespace_struct;
+use crate::compiler::find_struct;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::FnSignature;
 use crate::compiler_data::Function;
@@ -627,7 +627,14 @@ pub fn infer_type(
                     RETURN_TYPE_INFERRING
                         .with(|s| s.borrow_mut().insert(SmolStr::from(function_name)));
 
-                    let fn_type = track_returns(&fn_code, v, ctx, state, function_name);
+                    let (fn_src_name, fn_src_contents) =
+                        state.sources[func.src_file as usize].clone();
+                    let fn_ctx = Ctx {
+                        src: (fn_src_name.as_str(), fn_src_contents.as_str()),
+                        current_src_file: func.src_file,
+                        ..ctx
+                    };
+                    let fn_type = track_returns(&fn_code, v, fn_ctx, state, function_name);
 
                     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(function_name));
 
@@ -724,7 +731,7 @@ pub fn infer_type(
             let name = &namespace[namespace.len() - 1];
             let namespace = &namespace[..(namespace.len() - 1)];
             DataType::Struct(
-                walk_namespace_struct(state.namespace, namespace, name).unwrap_or_else(|| {
+                find_struct(state.namespace, state.structs, namespace, name).unwrap_or_else(|| {
                     throw_compiler_error(ctx.src, *span, ErrType::UnknownStruct(name));
                 }) as u16,
             )

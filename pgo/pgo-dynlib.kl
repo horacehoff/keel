@@ -1,0 +1,11 @@
+dylib "pgo/pgo_dynlib" {
+    int pgo_add_int(int,int);
+    float pgo_add_float(float,float);
+    int pgo_all_types(int,float,string,int[],float[],string[][],int[][],int);
+}
+
+fn main() {
+    print(pgo_dynlib::pgo_add_int(1,1));
+    print(pgo_dynlib::pgo_add_float(1.0,1.0));
+    print(pgo_dynlib::pgo_all_types(42, 42.0, "Hello, World!", [1,2,3], [1.0,2.0,3.0], [["a"], ["b"], ["c"]], [[0],[1],[2]], 2));
+}

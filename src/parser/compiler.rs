@@ -279,6 +279,21 @@ pub fn walk_namespace_struct(root: &Namespace, path: &[SmolStr], fn_name: &str) 
         .map(|(_, id)| *id as usize)
 }
 
+pub fn find_struct(
+    root: &Namespace,
+    structs: &[Struct],
+    namespace: &[SmolStr],
+    name: &str,
+) -> Option<usize> {
+    if let Some(idx) = walk_namespace_struct(root, namespace, name) {
+        Some(idx)
+    } else if namespace.is_empty() {
+        structs.iter().rposition(|s| s.name == name)
+    } else {
+        None
+    }
+}
+
 pub fn get_id(
     input: &Expr,
     v: &mut Vec<Variable>,
@@ -550,7 +565,8 @@ pub fn get_id(
         Expr::Struct(namespace, fields, span) => {
             let name = &namespace[namespace.len() - 1];
             let namespace = &namespace[..(namespace.len() - 1)];
-            let Some(expected_struct_idx) = walk_namespace_struct(state.namespace, namespace, name)
+            let Some(expected_struct_idx) =
+                find_struct(state.namespace, state.structs, namespace, name)
             else {
                 throw_compiler_error(src, *span, ErrType::UnknownStruct(name));
             };

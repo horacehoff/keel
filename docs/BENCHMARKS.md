@@ -2,7 +2,9 @@
 > Keel is still experimental, and more optimizations are still to come.
 
 All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`--runs 150 --warmup 10`). All benchmarks are run on a 2021 M1 Pro Macbook Pro with 16GBs of ram.
-The Keel build uses PGO, which isn't used in the Github Actions builds yet.
+
+Keel release binaries are built with PGO, and the instrumented binary is trained on representative Keel programs, including smaller-input versions of some benchmarks shown here.
+The PGO workflow is visible [here](.github/workflows/release.yml).
 
 
 ## Iterative fib(46) x 200000

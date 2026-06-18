@@ -1,0 +1,15 @@
+fn main() {
+    let last = "";
+    for i in 1..1000001 {
+        if i % 15 == 0 {
+            last = "FizzBuzz";
+        } else if i % 3 == 0 {
+            last = "Fizz";
+        } else if i % 5 == 0 {
+            last = "Buzz";
+        } else {
+            last = str(i);
+        }
+    }
+    print(last);
+}

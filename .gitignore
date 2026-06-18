@@ -3,7 +3,6 @@
 /.idea
 test.kl
 *.dylib
-*.c
 docs/benchmarks.py
 /lib_testing
 /testing

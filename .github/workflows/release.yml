@@ -23,33 +23,43 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: keel-aarch64-apple-darwin
+            embed_artifact: libkeel-aarch64-apple-darwin
             rustflags: ""
             bin: keel
+            lib: libkeel.dylib
 
           - os: macos-26-intel
             target: x86_64-apple-darwin
             artifact: keel-x86_64-apple-darwin
+            embed_artifact: libkeel-x86_64-apple-darwin
             rustflags: "-C target-cpu=x86-64-v3"
             bin: keel
+            lib: libkeel.dylib
 
           # Two tiers: v3 and baseline v1
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: keel-x86_64-linux-v3
+            embed_artifact: libkeel-x86_64-linux-v3
             rustflags: "-C target-cpu=x86-64-v3"
             bin: keel
+            lib: libkeel.so
 
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: keel-x86_64-linux-v1
+            embed_artifact: libkeel-x86_64-linux-v1
             rustflags: "-C target-cpu=x86-64"
             bin: keel
+            lib: libkeel.so
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: keel-x86_64-windows
+            embed_artifact: libkeel-x86_64-windows
             rustflags: "-C target-cpu=x86-64-v3"
             bin: keel.exe
+            lib: keel.dll
 
     steps:
       - uses: actions/checkout@v6
@@ -104,6 +114,19 @@ jobs:
         if: runner.os == 'Windows'
         run: Compress-Archive -Path "target/${{ matrix.target }}/release/keel.exe" -DestinationPath "${{ matrix.artifact }}.zip"
 
+      - name: Build final binary (LIB)
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo pgo optimize build -- --target ${{ matrix.target }} --profile embed --features embed
+
+      - name: Package (Unix) (LIB)
+        if: runner.os != 'Windows'
+        run: tar -czf ${{ matrix.embed_artifact }}.tar.gz -C target/${{ matrix.target }}/embed ${{ matrix.lib }}
+
+      - name: Package (Windows) (LIB)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path "target/${{ matrix.target }}/embed/${{ matrix.lib }}" -DestinationPath "${{ matrix.embed_artifact }}.zip"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -111,6 +134,8 @@ jobs:
           path: |
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}.zip
+            ${{ matrix.embed_artifact }}.tar.gz
+            ${{ matrix.embed_artifact }}.zip
 
   release:
     name: Create Release

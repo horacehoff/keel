@@ -72,10 +72,10 @@ $DOWNLOAD_CMD "https://github.com/horacehoff/keel/releases/latest/download/$ARTI
 
 if [ ! -f "$TMP/keel" ]; then
     # The github workflow packs the binary straight into an archive so something went very wrong here
-    error "Archive downloaded but binary not found inside. Please file a bug at https://github.com/horacehoff/keel/issues"
+    error "Archive downloaded but binary not found inside. Please file a bug report at https://github.com/horacehoff/keel/issues"
 fi
 
-if install "$TMP/$ARTIFACT" "$INSTALL_DIR/keel" 2>/dev/null; then
+if install "$TMP/keel" "$INSTALL_DIR/keel" 2>/dev/null; then
     :
 elif command -v sudo >/dev/null 2>&1; then
     sudo install -m755 "$TMP/keel" "$INSTALL_DIR/keel"

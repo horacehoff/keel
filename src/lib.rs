@@ -1,7 +1,9 @@
 use crate::compiler::compile;
+use crate::errors::BOLD;
 use crate::errors::ErrorCtx;
+use crate::errors::RED;
+use crate::errors::RESET;
 use crate::repl::repl;
-use inline_colorization::*;
 #[cfg(feature = "embed")]
 use std::ffi::{CStr, CString, c_char};
 use std::fs;
@@ -154,7 +156,7 @@ pub unsafe extern "C" fn keel_free_output(output: *mut c_char) {
 pub fn main() {
     #[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|info| {
-        eprintln!("{color_red}KEEL ERROR{color_reset}\n{info}");
+        eprintln!("{RED}KEEL ERROR{RESET}\n{info}");
     }));
 
     let mut args = std::env::args().skip(1);
@@ -179,9 +181,7 @@ pub fn main() {
     if next_arg == "--version" || next_arg == "-v" {
         cold_path();
         if args.len() > 1 {
-            eprintln!(
-                "{color_red}KEEL ERROR{color_reset}\nInvalid arguments\nUsage:\n  keel [-v | --version]"
-            );
+            eprintln!("{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n  keel [-v | --version]");
             return;
         }
         println!("Keel {}", env!("CARGO_PKG_VERSION"));
@@ -193,7 +193,7 @@ pub fn main() {
     let contents = fs::read_to_string(filename).unwrap_or_else(|_| {
         cold_path();
         eprintln!(
-            "--------------\n{color_red}KEEL RUNTIME ERROR:{color_reset}\nCannot read {color_bright_red}{style_bold}{filename}{style_reset}{color_reset}\n--------------",
+            "--------------\n{RED}KEEL RUNTIME ERROR:{RESET}\nCannot read {RED}{BOLD}{filename}{RESET}\n--------------",
         );
         std::process::exit(1);
     });

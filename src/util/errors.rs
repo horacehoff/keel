@@ -2,16 +2,22 @@ use crate::expr::Span;
 use crate::lexer::Token;
 use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use inline_colorization::*;
 use smol_strc::{SmolStr, ToSmolStr};
 use std::fmt::Arguments;
 use std::rc::Rc;
+
+pub const BLUE: &str = "\x1B[94m";
+pub const RED: &str = "\x1B[101m";
+pub const BOLD: &str = "\x1B[1m";
+pub const GREEN: &str = "\x1B[102m";
+pub const YELLOW: &str = "\x1B[103m";
+pub const RESET: &str = "\x1B[0m\x1B[39m";
 
 #[cold]
 #[inline(always)]
 pub fn dev_error(file: &str, function: &str, additional_data: Arguments) -> ! {
     unreachable!(
-        "\n--------------\n{color_red}KEEL COMPILATION ERROR:{color_reset}\nFROM FILE: {}\nFROM FUNCTION: {}\nADDITIONAL DATA: {}\n--------------",
+        "\n--------------\n{RED}KEEL COMPILATION ERROR:{RESET}\nFROM FILE: {}\nFROM FUNCTION: {}\nADDITIONAL DATA: {}\n--------------",
         file, function, additional_data
     );
 }
@@ -146,10 +152,10 @@ impl From<ErrType<'_>> for SmolStr {
     fn from(value: ErrType) -> Self {
         match value {
             ErrType::Custom(m) => m,
-            ErrType::CannotReadImportedFile(filename) => format_args!("Cannot read imported file {color_bright_red}{style_bold}{filename}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::CannotReadImportedFile(filename) => format_args!("Cannot read imported file {RED}{BOLD}{filename}{RESET}").to_smolstr(),
             ErrType::InvalidFloat => "Invalid float".into(),
-            ErrType::IndexOutOfBounds(length, index) => format_args!("Tried to get index {color_bright_red}{style_bold}{index}{color_reset}{style_reset} but the length is {color_bright_blue}{style_bold}{length}{color_reset}{style_reset}").to_smolstr(),
-            ErrType::SliceOutOfBounds(length, idx_start, idx_end) => format_args!("Invalid range {color_bright_red}{style_bold}{idx_start}{color_reset}{style_reset}..{color_bright_red}{style_bold}{idx_end}{color_reset}{style_reset} for collection with length {color_bright_blue}{style_bold}{length}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::IndexOutOfBounds(length, index) => format_args!("Tried to get index {RED}{BOLD}{index}{RESET} but the length is {BLUE}{BOLD}{length}{RESET}").to_smolstr(),
+            ErrType::SliceOutOfBounds(length, idx_start, idx_end) => format_args!("Invalid range {RED}{BOLD}{idx_start}{RESET}..{RED}{BOLD}{idx_end}{RESET} for collection with length {BLUE}{BOLD}{length}{RESET}").to_smolstr(),
             ErrType::InvalidBool => "The string could not be parsed into a boolean".into(),
             ErrType::InvalidInt => "Invalid integer".into(),
             ErrType::FsAlreadyExists => "The entity (directory, file, ...) already exists".into(),
@@ -179,77 +185,77 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::FsStorageFull => "Storage is full".into(),
             ErrType::FsTimedOut => "This operation timed out".into(),
             ErrType::UnknownFunction(f) => format_args!(
-                "Unknown function {color_bright_blue}{style_bold}{f}{color_reset}{style_reset}"
+                "Unknown function {BLUE}{BOLD}{f}{RESET}"
             )
             .to_smolstr(),
             ErrType::UnknownStruct(f) => format_args!(
-                "Unknown struct {color_bright_blue}{style_bold}{f}{color_reset}{style_reset}"
+                "Unknown struct {BLUE}{BOLD}{f}{RESET}"
             )
             .to_smolstr(),
             ErrType::UnknownVariable(v) => format_args!(
-                "Unknown variable {color_bright_blue}{style_bold}{v}{color_reset}{style_reset}"
+                "Unknown variable {BLUE}{BOLD}{v}{RESET}"
             )
             .to_smolstr(),
             ErrType::UnknownNamespace(n) => format_args!(
-                "Unknown namespace {color_bright_blue}{style_bold}{n}{color_reset}{style_reset}"
+                "Unknown namespace {BLUE}{BOLD}{n}{RESET}"
             )
             .to_smolstr(),
-            ErrType::UnknownType(t) => format_args!("Unknown type {color_red}{style_bold}{t}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::UnknownType(t) => format_args!("Unknown type {RED}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::InvalidStructFieldCount(name, expected, received) => format_args!(
-                "Struct {color_bright_blue}{style_bold}{name}{color_reset}{style_reset} expects {expected} fields while this has {color_red}{style_bold}{received}{color_reset}{style_reset} fields").to_smolstr(),
+                "Struct {BLUE}{BOLD}{name}{RESET} expects {expected} fields while this has {RED}{BOLD}{received}{RESET} fields").to_smolstr(),
             ErrType::StructUnknownField(name, field) => format_args!(
-                "Unknown field {color_red}{style_bold}{field}{color_reset}{style_reset} in struct {color_bright_blue}{style_bold}{name}{color_reset}{style_reset}").to_smolstr(),
+                "Unknown field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
             ErrType::StructMissingField(name, field) => format_args!(
-                "Missing field {color_red}{style_bold}{field}{color_reset}{style_reset} in struct {color_bright_blue}{style_bold}{name}{color_reset}{style_reset}").to_smolstr(),
+                "Missing field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
             ErrType::ArrayWithDiffType => "Arrays can only hold a single type".into(),
             ErrType::NotIndexable(t) => format_args!(
-                "The type {color_bright_blue}{style_bold}{t}{color_reset}{style_reset} cannot be indexed"
+                "The type {BLUE}{BOLD}{t}{RESET} cannot be indexed"
             )
             .to_smolstr(),
             ErrType::InvalidIndexType(t) => format_args!(
-                "The type {color_bright_blue}{style_bold}{t}{color_reset}{style_reset} is not a valid index"
+                "The type {BLUE}{BOLD}{t}{RESET} is not a valid index"
             )
             .to_smolstr(),
-            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {color_bright_blue}{style_bold}{elem_t}{color_reset}{style_reset} in {array_t}").to_smolstr(),
+            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{elem_t}{RESET} in {array_t}").to_smolstr(),
             ErrType::CannotInferType(t) => format_args!(
-                "Cannot infer the type of {color_bright_blue}{style_bold}{t}{color_reset}{style_reset}"
+                "Cannot infer the type of {BLUE}{BOLD}{t}{RESET}"
             )
             .to_smolstr(),
-            ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects {expected} argument{} but received {received}", if expected == 1 {""} else {"s"}).to_smolstr(),
-            ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
-            ErrType::InvalidType(expected, received) => format_args!("Expected type {expected}, found {color_bright_blue}{style_bold}{received}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects {expected} argument{} but received {received}", if expected == 1 {""} else {"s"}).to_smolstr(),
+            ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
+            ErrType::InvalidType(expected, received) => format_args!("Expected type {expected}, found {BLUE}{BOLD}{received}{RESET}").to_smolstr(),
             ErrType::OpError(l, r, op) => format_args!(
-                "Cannot perform operation {color_bright_blue}{style_bold}{l} {color_red}{op}{color_bright_blue} {r}{color_reset}{style_reset}").to_smolstr(),
+                "Cannot perform operation {BLUE}{BOLD}{l} {RED}{op}{BLUE} {r}{RESET}").to_smolstr(),
             ErrType::InvalidOp(t, op) => format_args!(
-                "Operation {color_bright_red}{style_bold}{op}{color_reset}{style_reset} is not supported for type {color_bright_blue}{style_bold}{t}{color_reset}{style_reset}").to_smolstr(),
+                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::InvalidConditionalExpression => "Conditional expressions must have an else clause".into(),
             ErrType::FunctionAlreadyExists(fn_name) => format_args!(
-                "Function {color_bright_red}{style_bold}{fn_name}{color_reset}{style_reset} is already defined",
+                "Function {RED}{BOLD}{fn_name}{RESET} is already defined",
             ).to_smolstr(),
             ErrType::CircularImport(path) => format_args!(
-                "Circular import detected: {color_bright_red}{style_bold}{path}{color_reset}{style_reset} is already being imported"
+                "Circular import detected: {RED}{BOLD}{path}{RESET} is already being imported"
             ).to_smolstr(),
             ErrType::DuplicateFunctionInImport(fn_name, file_path) => format_args!(
-                "Function {color_bright_blue}{style_bold}{fn_name}{color_reset}{style_reset} imported from {color_bright_red}{style_bold}{file_path}{color_reset}{style_reset} is already defined"
+                "Function {BLUE}{BOLD}{fn_name}{RESET} imported from {RED}{BOLD}{file_path}{RESET} is already defined"
             ).to_smolstr(),
-            ErrType::IsNotAnIterator(t) => format_args!("The type {color_bright_red}{style_bold}{t}{color_reset}{style_reset} is not a collection").to_smolstr(),
+            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{t}{RESET} is not a collection").to_smolstr(),
             ErrType::InvalidArgType(expected, received) => {
                 let expected_str = expected
                     .iter()
-                    .map(|x| format!("{color_bright_blue}{style_bold}{x}{color_reset}{style_reset}"))
+                    .map(|x| format!("{BLUE}{BOLD}{x}{RESET}"))
                     .collect::<Vec<String>>()
                     .join(" or ");
                 format_args!(
-                    "Expected {expected_str}, found {color_bright_red}{style_bold}{received}{color_reset}{style_reset}"
+                    "Expected {expected_str}, found {RED}{BOLD}{received}{RESET}"
                 ).to_smolstr()
             }
             ErrType::InvalidObjType(expected, received) => format_args!(
-                "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}, found {color_bright_red}{style_bold}{received}{color_reset}{style_reset}"
+                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{received}{RESET}"
             ).to_smolstr(),
             ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
-            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {color_bright_red}{style_bold}{t}{color_reset}{style_reset}").to_smolstr(),
+            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::CArrayReturnTypeNotSupported => "Array return types are not supported: C does not convey the length of a returned array".into(),
         }
     }
@@ -323,7 +329,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
         .unwrap_or(&(Instr::Halt(1), Span { start: 0, end: 0 }, 0));
     let src = &ctx.sources[*file_idx as usize];
     let err_message: SmolStr = t.into();
-    eprintln!("{color_red}KEEL ERROR{color_reset}");
+    eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(
         ReportKind::Error,
         (src.0.as_str(), (*start as usize)..(*end as usize)),
@@ -373,7 +379,7 @@ pub fn wasm_error(msg: &str) -> ! {
 #[inline(never)]
 pub fn throw_compiler_error(src: (&str, &str), Span { start, end }: Span, t: ErrType) -> ! {
     let err_message: SmolStr = t.into();
-    eprintln!("{color_red}KEEL ERROR{color_reset}");
+    eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
         .with_label(
             Label::new((src.0, (start as usize)..(end as usize)))
@@ -432,11 +438,11 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
         ParserErr::UnexpectedEOF => "Unexpected EOF",
         ParserErr::UnknownToken => "Unknown token",
         ParserErr::UnexpectedToken(expected, received, msg) => &format_args!(
-            "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}, but got {color_bright_red}{style_bold}{received}{color_reset}{style_reset}. {msg}"
+            "Expected {BLUE}{BOLD}{expected}{RESET}, but got {RED}{BOLD}{received}{RESET}. {msg}"
         )
         .to_string(),
         ParserErr::UnexpectedTokenStr(expected, received, msg) => &format_args!(
-            "Expected {color_bright_blue}{style_bold}{expected}{color_reset}{style_reset}, but got {color_bright_red}{style_bold}{received}{color_reset}{style_reset}. {msg}"
+            "Expected {BLUE}{BOLD}{expected}{RESET}, but got {RED}{BOLD}{received}{RESET}. {msg}"
         )
         .to_string(),
         ParserErr::ArrayElementsMissingComma => "Array elements must be separated by a comma",
@@ -446,16 +452,16 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
         ParserErr::IntegerNegativeExponent => "Integers cannot be raised to a negative exponent",
         ParserErr::ArgumentsMissingCommaSeparator => "Arguments must be separated by a comma",
         ParserErr::TryBlockNoCatch => {
-            "A {color_bright_blue}{style_bold}try{color_reset}{style_reset} block must have at least one {color_bright_blue}{style_bold}catch{color_reset}{style_reset} block"
+            "A {BLUE}{BOLD}try{RESET} block must have at least one {BLUE}{BOLD}catch{RESET} block"
         }
         ParserErr::MatchBlockNoNonWildcardArm => {
-            "{color_bright_blue}{style_bold}Match blocks{color_reset}{style_reset} must have {style_bold}at least one{style_reset} non-wildcard arm"
+            "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one non-wildcard arm{RESET}"
         }
         ParserErr::MatchBlockZeroArms => {
-            "{color_bright_blue}{style_bold}Match blocks{color_reset}{style_reset} must have {style_bold}at least one{style_reset} arm"
+            "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}"
         }
     };
-    eprintln!("{color_red}KEEL ERROR{color_reset}");
+    eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
         .with_label(
             Label::new((src.0, (start as usize)..(end as usize)))
@@ -494,7 +500,7 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
 // where
 //     lalrpop_util::lexer::Token<'a>: From<T>,
 // {
-//     eprintln!("{color_red}KEEL ERROR{color_reset}");
+//     eprintln!("{RED}KEEL ERROR{RESET}");
 //     match x {
 //         lalrpop_util::ParseError::InvalidToken { location } => {
 //             let report = Report::build(ReportKind::Error, (filename, location..location + 1))
@@ -524,7 +530,7 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
 //                 .with_label(
 //                     Label::new((filename, location..location + 1))
 //                         .with_message(format_args!(
-//                             "Expected one or more {color_bright_blue}{style_bold}}}{style_reset}{color_reset}"
+//                             "Expected one or more {BLUE}{BOLD}}}{RESET}"
 //                         ))
 //                         .with_color(Color::Red),
 //                 )
@@ -573,13 +579,13 @@ pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: Parse
 
 //             let expected_tokens = if is_statement_set {
 //                 format_args!(
-//                     "{color_bright_blue}{style_bold}Statement{style_reset}{color_reset} OR {color_bright_blue}{style_bold}{{{style_reset}{color_reset} OR {color_bright_blue}{style_bold}}}{style_reset}{color_reset}"
+//                     "{BLUE}{BOLD}Statement{RESET} OR {BLUE}{BOLD}{{{RESET} OR {BLUE}{BOLD}}}{RESET}"
 //                 )
 //             } else {
 //                 format_args!(
-//                     "{color_bright_blue}{style_bold}{}{color_reset}{style_reset}",
+//                     "{BLUE}{BOLD}{}{RESET}",
 //                     expected.join(&format!(
-//                         "{color_reset}{style_reset} OR {color_bright_blue}{style_bold}"
+//                         "{RESET} OR {BLUE}{BOLD}"
 //                     ))
 //                 )
 //             };

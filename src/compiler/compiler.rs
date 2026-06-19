@@ -1,6 +1,10 @@
 use crate::compiler_data::*;
 use crate::data::NULL;
+use crate::errors::BLUE;
+use crate::errors::BOLD;
 use crate::errors::ErrType;
+use crate::errors::RED;
+use crate::errors::RESET;
 use crate::errors::throw_compiler_error;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
@@ -30,7 +34,6 @@ use crate::type_system::{DataType, infer_type};
 use crate::util::str_to_keel_type;
 use crate::{data::Data, instr::Instr};
 use ahash::RandomState;
-use inline_colorization::*;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::collections::{HashMap, HashSet};
@@ -2833,7 +2836,7 @@ pub fn compile(
                 wasm_error("Cannot find main function");
 
                 eprintln!(
-                    "--------------\n{color_red}KEEL RUNTIME ERROR:{color_reset}\nCannot find {color_bright_blue}{style_bold}main{style_reset}{color_reset} function\n--------------",
+                    "--------------\n{RED}KEEL RUNTIME ERROR:{RESET}\nCannot find {BLUE}{BOLD}main{RESET} function\n--------------",
                 );
                 std::process::exit(1);
             })

@@ -1,14 +1,14 @@
-use inline_colorization::*;
+use crate::errors::BLUE;
+use crate::errors::RESET;
 use std::io::{Write, stdin, stdout};
 
 pub fn repl() {
     println!(
-        "{color_blue}KEEL {} -- REPL (read-eval-print-loop){color_reset}",
+        "{BLUE}KEEL {} -- REPL (read-eval-print-loop){RESET}",
         env!("CARGO_PKG_VERSION")
     );
 
-    let exe = std::env::current_exe()
-        .expect("{color_red}[ERROR]{color_reset} Cannot find keel binary path");
+    let exe = std::env::current_exe().expect("{RED}[ERROR]{RESET} Cannot find keel binary path");
     let tmp = std::env::temp_dir().join("keel_repl_tmp.kl");
 
     let mut all_lines: Vec<String> = Vec::with_capacity(1);
@@ -21,7 +21,7 @@ pub fn repl() {
         let _ = stdout().flush();
         stdin()
             .read_line(&mut s)
-            .expect("{color_red}[ERROR]{color_reset} Incorrect input string");
+            .expect("{RED}[ERROR]{RESET} Incorrect input string");
         if s.ends_with('\n') {
             s.pop();
         }
@@ -35,7 +35,7 @@ pub fn repl() {
             s.push(';');
         }
         if s.contains("exit()") && !s.contains('"') {
-            println!("{color_blue}[KEEL TIP]{color_reset} To exit, press Ctrl+C");
+            println!("{BLUE}[KEEL TIP]{RESET} To exit, press Ctrl+C");
         }
 
         all_lines.push(s);
@@ -54,12 +54,12 @@ pub fn repl() {
         contents.push('}');
 
         std::fs::write(&tmp, &contents)
-            .expect("{color_red}[ERROR]{color_reset} Cannot write to temporary file");
+            .expect("{RED}[ERROR]{RESET} Cannot write to temporary file");
 
         let output = std::process::Command::new(&exe)
             .arg(tmp.to_str().unwrap())
             .output()
-            .expect("{color_red}[ERROR]{color_reset} Failed to execute Keel");
+            .expect("{RED}[ERROR]{RESET} Failed to execute Keel");
 
         std::fs::remove_file(&tmp).unwrap();
 

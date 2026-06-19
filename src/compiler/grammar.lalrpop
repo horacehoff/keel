@@ -32,7 +32,7 @@ CType: DataType = {
                     span!(start, end),
                     ErrType::Custom(
                         format_args!(
-                            "Unknown type {color_red}{style_bold}{t}{color_reset}{style_reset}"
+                            "Unknown type {RED}{BOLD}{t}{RESET}"
                         )
                         .to_smolstr()));}
     ),
@@ -42,7 +42,7 @@ CType: DataType = {
                     span!(start, end),
                     ErrType::Custom(
                         format_args!(
-                            "Unknown type {color_red}{style_bold}{t}{color_reset}{style_reset}"
+                            "Unknown type {RED}{BOLD}{t}{RESET}"
                         )
                         .to_smolstr()));}
     )))),
@@ -296,7 +296,7 @@ TryCatchBlock:Expr = {
                     span!(start, end),
                     ErrType::Custom(
                         format_args!(
-                            "A {color_blue}{style_bold}try{color_reset}{style_reset} block must have at least one {color_blue}{style_bold}catch{color_reset}{style_reset}"
+                            "A {color_blue}{BOLD}try{RESET} block must have at least one {color_blue}{BOLD}catch{RESET}"
                         )
                         .to_smolstr()));
             }

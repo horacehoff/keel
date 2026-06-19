@@ -1,7 +1,10 @@
+use crate::RED;
+use crate::RESET;
 use crate::compiler_data::{Function, Pools};
+use crate::errors::GREEN;
+use crate::errors::YELLOW;
 use crate::type_system::DataType;
 use crate::{data::Data, instr::Instr};
-use inline_colorization::*;
 use smol_strc::{SmolStr, ToSmolStr};
 use std::hint::unreachable_unchecked;
 
@@ -112,14 +115,14 @@ pub fn print_debug(
     pools: &Pools,
     struct_fields: &[(SmolStr, Vec<SmolStr>)],
 ) {
-    println!("{color_yellow}---- DEBUG ----{color_reset}");
+    println!("{YELLOW}---- DEBUG ----{RESET}");
     if !pools.obj_pool.is_empty() {
-        println!("{color_green}---  ARRAYS  ---{color_reset}");
+        println!("{GREEN}---  ARRAYS  ---{RESET}");
         for (i, data) in pools.obj_pool.iter().enumerate() {
             println!(" {i} {data:?}");
         }
     }
-    println!("{color_green}-- REGISTERS --{color_reset}");
+    println!("{GREEN}-- REGISTERS --{RESET}");
     for (i, data) in registers.iter().enumerate() {
         println!(
             " [{i}] {}({})",
@@ -136,9 +139,9 @@ pub fn print_debug(
     if instructions.is_empty() {
         return;
     }
-    println!("{color_red}-- INSTRUCTIONS --{color_reset}");
+    println!("{RED}-- INSTRUCTIONS --{RESET}");
     for (i, instr) in instructions.iter().enumerate() {
         println!(" {i}: {instr:?}");
     }
-    println!("{color_yellow}------------------{color_reset}");
+    println!("{YELLOW}------------------{RESET}");
 }

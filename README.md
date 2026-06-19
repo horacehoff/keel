@@ -321,11 +321,12 @@ fn main() {print(my_test::add(6,1));}
 > The API is subject to change
 
 Keel can be embedded in other programs through a C ABI.
-Build it as a dynamic library:
+You can build it as a dynamic library:
 ```sh
 cargo build --profile embed --features embed
-# The library will be in target/embed/libkeel.dylib (OR .so / .dll)
+# The library will be in target/embed/
 ```
+Or you can download the `libkeel-*` artifact of your choice from [the latest release](https://github.com/horacehoff/keel/releases/latest).
 
 Two functions are exposed:
 ```c

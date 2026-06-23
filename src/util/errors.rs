@@ -7,7 +7,7 @@ use std::fmt::Arguments;
 use std::rc::Rc;
 
 pub const BLUE: &str = "\x1B[94m";
-pub const RED: &str = "\x1B[101m";
+pub const RED: &str = "\x1B[31m";
 pub const BOLD: &str = "\x1B[1m";
 pub const GREEN: &str = "\x1B[102m";
 pub const YELLOW: &str = "\x1B[103m";

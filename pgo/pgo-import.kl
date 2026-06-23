@@ -1,5 +1,5 @@
-import "pgo_import_test.kl"
-import "pgo-import-test2.kl" as test
+import "pgo_import_test.kl";
+import "pgo-import-test2.kl" as test;
 
 fn main() {
     pgo_import_test::test();

@@ -376,8 +376,16 @@ fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
                 ),
             );
         };
+        parser.next_token_expect(
+            Token::SemiColon,
+            "Import statements must end with a semicolon",
+        );
         Expr::ImportFile(path, Some(alias), (start, span.end).into())
     } else {
+        parser.next_token_expect(
+            Token::SemiColon,
+            "Import statements must end with a semicolon",
+        );
         Expr::ImportFile(path, None, (start, end).into())
     }
 }
@@ -495,25 +503,22 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
     Expr::ImportDylib(path, Box::from(fn_signatures), (start, end).into())
 }
 
-fn parse_file_statement(parser: &mut Parser<'_>) -> Option<Expr> {
-    let peek = parser.peek_token_opt();
-    match peek {
-        None => None,
-        Some(Token::Function) => Some(parse_function(parser)),
-        Some(Token::Import) => Some(parse_file_import(parser)),
-        Some(Token::Struct) => Some(parse_struct_declare(parser)),
-        Some(Token::Dylib) => Some(parse_dylib_import(parser)),
-        Some(unexpected) => {
-            let span = parser.peek_token_span();
-            parser.error(span, ParserErr::UnexpectedTokenStr("'fn' (function declaration), 'import', 'struct' (struct declaration), or 'dylib' (dynamic library import)", unexpected, "Invalid file statement."));
-        }
-    }
-}
-
-fn parse_file(input: &mut Parser<'_>) -> Vec<Expr> {
+#[inline(always)]
+fn parse_file(parser: &mut Parser<'_>) -> Vec<Expr> {
     let mut output: Vec<Expr> = Vec::with_capacity(2);
-    while let Some(e) = parse_file_statement(input) {
-        output.push(e);
+    // parse file statements
+    while let Some(t) = parser.peek_token_opt() {
+        output.push(match t {
+            Token::Function => parse_function(parser),
+            Token::Import => parse_file_import(parser),
+            Token::Struct => parse_struct_declare(parser),
+            Token::Dylib => parse_dylib_import(parser),
+            unexpected => {
+                cold_path();
+                let span = parser.peek_token_span();
+                parser.error(span, ParserErr::UnexpectedTokenStr("'fn' (function declaration), 'import', 'struct' (struct declaration), or 'dylib' (dynamic library import)", unexpected, "Invalid file statement."));
+            }
+        });
     }
     output
 }

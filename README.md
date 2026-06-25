@@ -302,12 +302,12 @@ fn main() {
 }
 ```
 
-If the extension is omitted, Keel will choose the correct extension based on your OS. For example:
+If the extension is omitted, Keel will choose the correct extension based on your OS, and it will also try to load an architecture-specific version if one exists. For example:
 
 ```rust
-// On macOS, it will try to load "my_test.dylib".
-// On Windows, it will try to load "my_test.dll".
-// On Linux, it will try to load "my_test.so".
+// On macOS, it will try to load "my_test-aarch64.dylib" (or "my_test-x86_64.dylib", depending on your CPU), then fall back to "my_test.dylib".
+// Same process on Windows, but with the ".dll" extension.
+// Same process on Linux, but with the ".so" extension.
 dylib "my_test" {
     int add(int, int);
     float add(float, float);

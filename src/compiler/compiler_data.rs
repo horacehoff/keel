@@ -29,7 +29,7 @@ pub struct Function {
     pub code: Rc<[Expr]>,
     pub impls: Vec<FunctionImpl>,
     pub is_recursive: Option<bool>,
-    pub returns_void: bool,
+    pub returns_null: bool,
     pub src_file: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,

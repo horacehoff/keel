@@ -13,6 +13,7 @@ use crate::expr::Span;
 use crate::instr::Instr;
 use crate::registers::alloc_register;
 use crate::registers::for_each_read_reg;
+use crate::registers::free_register;
 use crate::registers::get_tgt_ids;
 use crate::registers::move_to_id;
 use crate::type_system::DataType;
@@ -59,11 +60,62 @@ pub fn handle_user_function(
         is_recursive
     };
 
-    let fn_returns_void = state.fns[fn_id].returns_void;
+    let fn_returns_null = state.fns[fn_id].returns_null;
 
     // Check if the arguments are correct
     let args_len = state.fns[fn_id].args.len();
     check_args!(args, args_len, fn_name, src, markers);
+
+    //This inlines dylib wrappers
+    // Actual general function inlining is coming soon
+    if state.fns[fn_id].code.len() == 1
+        && let Expr::ReturnVal(ret) = &state.fns[fn_id].code[0]
+        && let Some(Expr::FunctionCall(call_args, namespace, _, _)) = &**ret
+        && namespace.len() >= 2
+        && call_args.len() == args_len
+        && call_args
+            .iter()
+            .zip(state.fns[fn_id].args.iter())
+            .all(|(e, p)| matches!(e, Expr::Var(n, _) if n == p))
+        && let Some(fn_sig) = state
+            .dyn_libs
+            .iter()
+            .find(|lib| lib.name == namespace[namespace.len() - 2])
+            .and_then(|lib| {
+                lib.fns
+                    .iter()
+                    .find(|f| f.name == namespace[namespace.len() - 1])
+            })
+    {
+        let dyn_id = fn_sig.id;
+        let returns_null = fn_sig.return_type == DataType::Null;
+        for arg in args {
+            let arg_id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
+            output.push(Instr::StoreFuncArg(arg_id));
+            free_register(
+                arg_id,
+                state.free_registers,
+                v,
+                state.const_registers,
+                &state.reserved_registers,
+            );
+            *state.allocated_arg_count += 1;
+        }
+
+        let register_id = if returns_null {
+            0
+        } else {
+            state.registers.push(NULL);
+            (state.registers.len() - 1) as u16
+        };
+        output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
+        state.instr_src.push((
+            Instr::CallDynamicLibFunc(dyn_id, register_id),
+            markers,
+            ctx.current_src_file,
+        ));
+        return register_id;
+    }
 
     // Infer arg types
     let infered_arg_types = args
@@ -145,7 +197,7 @@ pub fn handle_user_function(
             .extend(get_tgt_ids(&output[saveframe_loc..]));
     }
 
-    let return_register_id = if fn_returns_void {
+    let return_register_id = if fn_returns_null {
         0
     } else {
         alloc_register(

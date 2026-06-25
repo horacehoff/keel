@@ -2,7 +2,7 @@
 /.zed
 /.idea
 test.kl
-*.dylib
 docs/benchmarks.py
 /lib_testing
 /testing
+pgo/pgo_dynlib.dylib

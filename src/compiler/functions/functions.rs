@@ -105,7 +105,7 @@ pub fn handle_functions(
             offset,
             single_run,
         );
-    } else if let Some((fn_args, returns_void, dyn_id)) = state
+    } else if let Some((fn_args, returns_null, dyn_id)) = state
         .dyn_libs
         .iter()
         .find(|l| l.name == namespace[0])
@@ -131,8 +131,8 @@ pub fn handle_functions(
             *state.allocated_arg_count += 1;
         }
 
-        let register_id = if returns_void {
-            0u16
+        let register_id = if returns_null {
+            0
         } else {
             state.registers.push(NULL);
             (state.registers.len() - 1) as u16

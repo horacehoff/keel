@@ -2395,7 +2395,7 @@ pub fn compile_expr(
                     code: fn_code.clone(),
                     impls: Vec::new(),
                     is_recursive: None,
-                    returns_void: check_if_returns_void(fn_code),
+                    returns_null: check_if_returns_void(fn_code),
                     src_file: current_src_file,
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
@@ -2465,6 +2465,13 @@ const DYLIB_EXT: &str = "so";
 #[cfg(target_os = "windows")]
 const DYLIB_EXT: &str = "dll";
 
+#[cfg(target_arch = "aarch64")]
+const ARCH_SUFFIX: &str = "-aarch64";
+#[cfg(target_arch = "x86_64")]
+const ARCH_SUFFIX: &str = "-x86_64";
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+const ARCH_SUFFIX: &str = "";
+
 #[derive(Debug)]
 pub struct Namespace {
     pub fns: Vec<(SmolStr, u16)>,
@@ -2513,7 +2520,7 @@ fn parse_toplevel(
                     code: fn_code,
                     impls: Vec::new(),
                     is_recursive: None,
-                    returns_void,
+                    returns_null: returns_void,
                     src_file: src_file_idx,
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
@@ -2566,11 +2573,22 @@ fn parse_toplevel(
                             let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
                             let return_type = datatype_to_c_type(&fn_return_type);
                             let cif = libffi::middle::Cif::new(arg_types, return_type);
-                            // If the extension is omitted, the extension is chosen based on the target OS
-                            let path = if std::path::Path::new(path.as_str()).extension().is_none() {
-                                format_args!("{path}.{DYLIB_EXT}").to_smolstr()
+                            let base_path = if Path::new(path.as_str()).is_relative() {
+                                file_path.parent().unwrap_or_else(|| Path::new(".")).join(path.as_str()).to_string_lossy().to_smolstr()
                             } else {
                                 path.clone()
+                            };
+                            // If the extension is omitted, the extension is chosen based on the target OS.
+                            // An architecture-specific suffix is also tried before the extension
+                            let path = if Path::new(base_path.as_str()).extension().is_none() {
+                                let arch_path = format!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
+                                if Path::new(&arch_path).exists() {
+                                    SmolStr::from(arch_path)
+                                } else {
+                                    format_args!("{base_path}.{DYLIB_EXT}").to_smolstr()
+                                }
+                            } else {
+                                base_path
                             };
                             let lib = unsafe {
                                 libloading::Library::new(path.as_str()).unwrap_or_else(|e| {

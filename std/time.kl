@@ -1,0 +1,5 @@
+dylib "time" {
+    int get_time();
+}
+
+fn time() {return time::get_time();}

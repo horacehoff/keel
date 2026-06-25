@@ -1,6 +1,9 @@
 dylib "../std_src/time/time" {
-    int get_time();
+    int now();
+    string format(int,string);
 }
 
 /// Returns the number of seconds since January 1, 1970, 00:00:00 UTC
-fn time() { return time::get_time(); }
+fn now() { return time::now(); }
+/// Formats a date (an int) into a string according to the given formatting pattern
+fn format(date,format) { return time::format(date,format); }

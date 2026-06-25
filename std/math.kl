@@ -1,0 +1,59 @@
+dylib "../std_src/math/math" {
+    float keel_acos(float);
+    float keel_asin(float);
+    float keel_atan(float);
+    float keel_atan2(float, float);
+    float keel_cos(float);
+    float keel_sin(float);
+    float keel_tan(float);
+    float keel_acosh(float);
+    float keel_asinh(float);
+    float keel_atanh(float);
+    float keel_cosh(float);
+    float keel_sinh(float);
+    float keel_tanh(float);
+    float keel_exp(float);
+    float keel_expm1(float);
+    float keel_log(float);
+    float keel_log10(float);
+    float keel_log2(float);
+    float keel_log1p(float);
+    float keel_logb(float);
+    float keel_ldexp(float, int);
+    int keel_ilogb(float);
+    float keel_scalbn(float, int);
+    float keel_fabs(float);
+    float keel_cbrt(float);
+    float keel_hypot(float, float);
+    float keel_erf(float);
+    float keel_erfc(float);
+}
+
+fn acos(x) { return math::keel_acos(x); }
+fn asin(x) { return math::keel_asin(x); }
+fn atan(x) { return math::keel_atan(x); }
+fn atan2(x, y) { return math::keel_atan2(x, y); }
+fn cos(x) { return math::keel_cos(x); }
+fn sin(x) { return math::keel_sin(x); }
+fn tan(x) { return math::keel_tan(x); }
+fn acosh(x) { return math::keel_acosh(x); }
+fn asinh(x) { return math::keel_asinh(x); }
+fn atanh(x) { return math::keel_atanh(x); }
+fn cosh(x) { return math::keel_cosh(x); }
+fn sinh(x) { return math::keel_sinh(x); }
+fn tanh(x) { return math::keel_tanh(x); }
+fn exp(x) { return math::keel_exp(x); }
+fn expm1(x) { return math::keel_expm1(x); }
+fn log(x) { return math::keel_log(x); }
+fn log10(x) { return math::keel_log10(x); }
+fn log2(x) { return math::keel_log2(x); }
+fn log1p(x) { return math::keel_log1p(x); }
+fn logb(x) { return math::keel_logb(x); }
+fn ldexp(x, y) { return math::keel_ldexp(x, y); }
+fn ilogb(x) { return math::keel_ilogb(x); }
+fn scalbn(x, y) { return math::keel_scalbn(x, y); }
+fn fabs(x) { return math::keel_fabs(x); }
+fn cbrt(x) { return math::keel_cbrt(x); }
+fn hypot(x, y) { return math::keel_hypot(x, y); }
+fn erf(x) { return math::keel_erf(x); }
+fn erfc(x) { return math::keel_erfc(x); }

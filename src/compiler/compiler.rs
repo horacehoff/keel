@@ -2559,6 +2559,45 @@ fn parse_toplevel(
             }
             #[cfg(not(target_arch = "wasm32"))]
             Expr::ImportDylib(path, fn_signatures, markers) => {
+                let base_path = if Path::new(path.as_str()).is_relative() {
+                    file_path
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(path.as_str())
+                        .to_string_lossy()
+                        .to_smolstr()
+                } else {
+                    path.clone()
+                };
+                let dylib_name = std::path::PathBuf::from(base_path.as_str())
+                    .file_prefix()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(base_path.as_str())
+                    .to_smolstr();
+                // If the extension is omitted, the extension is chosen based on the target OS.
+                // An architecture-specific suffix is also tried before the extension
+                let path = if Path::new(base_path.as_str()).extension().is_none() {
+                    let arch_path = format!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
+                    if Path::new(&arch_path).exists() {
+                        SmolStr::from(arch_path)
+                    } else {
+                        format_args!("{base_path}.{DYLIB_EXT}").to_smolstr()
+                    }
+                } else {
+                    base_path
+                };
+                let lib = Rc::new(unsafe {
+                    libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
+                        throw_compiler_error(
+                            use_line_markers,
+                            markers,
+                            ErrType::Custom(
+                                format_args!("Cannot load dynamic library \"{path}\": {e}")
+                                    .to_smolstr(),
+                            ),
+                        )
+                    })
+                });
                 let fns = fn_signatures
                         .iter()
                         .map(|(fn_name, fn_args, fn_return_type)| {
@@ -2573,37 +2612,6 @@ fn parse_toplevel(
                             let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
                             let return_type = datatype_to_c_type(&fn_return_type);
                             let cif = libffi::middle::Cif::new(arg_types, return_type);
-                            let base_path = if Path::new(path.as_str()).is_relative() {
-                                file_path.parent().unwrap_or_else(|| Path::new(".")).join(path.as_str()).to_string_lossy().to_smolstr()
-                            } else {
-                                path.clone()
-                            };
-                            // If the extension is omitted, the extension is chosen based on the target OS.
-                            // An architecture-specific suffix is also tried before the extension
-                            let path = if Path::new(base_path.as_str()).extension().is_none() {
-                                let arch_path = format!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
-                                if Path::new(&arch_path).exists() {
-                                    SmolStr::from(arch_path)
-                                } else {
-                                    format_args!("{base_path}.{DYLIB_EXT}").to_smolstr()
-                                }
-                            } else {
-                                base_path
-                            };
-                            let lib = unsafe {
-                                libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
-                                    throw_compiler_error(
-                                        use_line_markers,
-                                        markers,
-                                        ErrType::Custom(
-                                            format_args!(
-                                                "Cannot load dynamic library \"{path}\": {e}"
-                                            )
-                                            .to_smolstr(),
-                                        ),
-                                    )
-                                })
-                            };
                             let ptr = unsafe {
                                 libffi::middle::CodePtr(
                                     lib.get::<*const ()>(fn_name.as_bytes())
@@ -2620,7 +2628,7 @@ fn parse_toplevel(
                                             )
                                         })
                                         .try_as_raw_ptr()
-                                        .unwrap(),
+                                        .unwrap_unchecked(),
                                 )
                             };
 
@@ -2629,7 +2637,7 @@ fn parse_toplevel(
 
                             dyn_lib_fns.push(DynamicLibFn {
                                 types: Box::from(types),
-                                _lib: lib,
+                                _lib: Rc::clone(&lib),
                                 ptr,
                                 cif,
                             });
@@ -2638,11 +2646,7 @@ fn parse_toplevel(
                         })
                         .collect();
                 dyn_libs.push(Dynamiclib {
-                    name: std::path::PathBuf::from(path.as_str())
-                        .file_prefix()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(path.as_str())
-                        .to_smolstr(),
+                    name: dylib_name,
                     fns,
                 });
             }

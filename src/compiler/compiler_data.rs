@@ -62,7 +62,7 @@ pub struct DynamicLibFn {
     /// [ return_type, arg_types... ]
     pub types: Box<[DataType]>,
     #[cfg(not(target_arch = "wasm32"))]
-    pub _lib: Library,
+    pub _lib: Rc<Library>,
     #[cfg(not(target_arch = "wasm32"))]
     pub ptr: libffi::middle::CodePtr,
     #[cfg(not(target_arch = "wasm32"))]

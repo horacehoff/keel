@@ -1,5 +1,6 @@
-dylib "time" {
+dylib "../std_src/time/time" {
     int get_time();
 }
 
-fn time() {return time::get_time();}
+/// Returns the number of seconds since January 1, 1970, 00:00:00 UTC
+fn time() { return time::get_time(); }

@@ -5,6 +5,7 @@
 #endif
 
 #include <math.h>
+#include <stdint.h>
 
 EXPORT double keel_acos(double x) { return acos(x); }
 EXPORT double keel_asin(double x) { return asin(x); }
@@ -27,7 +28,7 @@ EXPORT double keel_log2(double x) { return log2(x); }
 EXPORT double keel_log1p(double x) { return log1p(x); }
 EXPORT double keel_logb(double x) { return logb(x); }
 EXPORT double keel_ldexp(double x, int y) { return ldexp(x, y); }
-EXPORT int keel_ilogb(double x) { return ilogb(x); }
+EXPORT int32_t keel_ilogb(double x) { return (int32_t)ilogb(x); }
 EXPORT double keel_scalbn(double x, int y) { return scalbn(x, y); }
 EXPORT double keel_fabs(double x) { return fabs(x); }
 EXPORT double keel_cbrt(double x) { return cbrt(x); }

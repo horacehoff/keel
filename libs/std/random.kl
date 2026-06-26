@@ -1,0 +1,17 @@
+dylib "../std_src/random/random" {
+    keel_seed(int);
+    int keel_random_int();
+    int keel_random_int_range(int, int);
+    float keel_random();
+    float keel_random_float_range(float,float);
+}
+
+fn seed(s) { random::keel_seed(s); }
+fn random_int() { return random::keel_random_int(); }
+fn random_int_range(min, max) {
+    return random::keel_random_int_range(min, max);
+}
+fn random() { return random::keel_random(); }
+fn random_range(min, max) {
+    return random::keel_random_float_range(min, max);
+}

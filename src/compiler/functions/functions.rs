@@ -153,6 +153,7 @@ pub fn handle_functions(
             state,
             args,
             markers,
+            args_indexes,
             offset,
             single_run,
         ));

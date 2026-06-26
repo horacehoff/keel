@@ -34,6 +34,7 @@ pub fn handle_user_function(
     state: &mut State<'_>,
     args: &[Expr],
     markers: Span,
+    args_indexes: &[Span],
     offset: u16,
     single_run: bool,
 ) -> u16 {
@@ -89,6 +90,17 @@ pub fn handle_user_function(
     {
         let dyn_id = fn_sig.id;
         let returns_null = fn_sig.return_type == DataType::Null;
+        let expected_arg_types = fn_sig.args.clone();
+        for (i, arg) in args.iter().enumerate() {
+            let inferred = infer_type(arg, v, ctx, state);
+            if inferred != expected_arg_types[i] {
+                throw_compiler_error(
+                    ctx.src,
+                    args_indexes[i],
+                    ErrType::InvalidType(&expected_arg_types[i], &inferred),
+                );
+            }
+        }
         for arg in args {
             let arg_id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
             output.push(Instr::StoreFuncArg(arg_id));

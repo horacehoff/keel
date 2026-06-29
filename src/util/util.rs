@@ -1,3 +1,4 @@
+use crate::compiler_data::State;
 use crate::compiler_data::Struct;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
@@ -104,51 +105,104 @@ macro_rules! span {
     };
 }
 
-impl std::fmt::Display for DataType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Float => write!(f, "Float"),
-            Self::Int => write!(f, "Integer"),
-            Self::Bool => write!(f, "Boolean"),
-            Self::String => write!(f, "String"),
-            Self::Array(array_type) => match array_type {
-                Some(t) => write!(f, "Array<{t}>"),
-                None => write!(f, "Array<?>"),
-            },
-            Self::Null => write!(f, "Null"),
-            Self::Unknown => write!(f, "Unknown"),
-            Self::Poly(types) => write!(
-                f,
-                "{}",
-                types
-                    .into_iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<String>>()
-                    .join("|")
-            ),
-            Self::Fn(t) => {
-                write!(
-                    f,
-                    "({}) -> {}",
-                    t[..1]
-                        .iter()
-                        .map(|x| x.to_smolstr())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    {
-                        let x = t.last().unwrap();
-                        if x == &Self::Null {
-                            SmolStr::new_static("")
-                        } else {
-                            x.to_smolstr()
-                        }
-                    }
-                )
-            }
-            Self::Struct(s) => {
-                write!(f, "Struct({s})")
-            }
+// impl std::fmt::Display for DataType {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             Self::Float => write!(f, "Float"),
+//             Self::Int => write!(f, "Integer"),
+//             Self::Bool => write!(f, "Boolean"),
+//             Self::String => write!(f, "String"),
+//             Self::Array(array_type) => match array_type {
+//                 Some(t) => write!(f, "Array<{t}>"),
+//                 None => write!(f, "Array<?>"),
+//             },
+//             Self::Null => write!(f, "Null"),
+//             Self::Unknown => write!(f, "Unknown"),
+//             Self::Poly(types) => write!(
+//                 f,
+//                 "{}",
+//                 types
+//                     .into_iter()
+//                     .map(|x| x.to_string())
+//                     .collect::<Vec<String>>()
+//                     .join("|")
+//             ),
+//             Self::Fn(t) => {
+//                 write!(f, "Function")
+//             }
+//             Self::Struct(s) => {
+//                 write!(f, "Struct({s})")
+//             }
+//         }
+//     }
+// }
+
+pub fn format_type(t: &DataType, state: &State<'_>) -> SmolStr {
+    match t {
+        DataType::Float => SmolStr::new_static("Float"),
+        DataType::Int => SmolStr::new_static("Integer"),
+        DataType::Bool => SmolStr::new_static("Boolean"),
+        DataType::String => SmolStr::new_static("String"),
+        DataType::Array(array_type) => match array_type {
+            Some(array_type) => format_args!("{}[]", format_type(array_type, state)).to_smolstr(),
+            None => SmolStr::new_static("Unknown[]"),
+        },
+        DataType::Null => SmolStr::new_static("Null"),
+        DataType::Unknown => SmolStr::new_static("Unknown"),
+        DataType::Poly(types) => format_args!(
+            "{}",
+            types
+                .into_iter()
+                .map(|x| format_type(x, state))
+                .collect::<Vec<SmolStr>>()
+                .join("|")
+        )
+        .to_smolstr(),
+        DataType::Struct(s) => {
+            let s = &state.structs[*s as usize];
+            format_args!(
+                "{} {{{}}}",
+                s.name,
+                s.fields
+                    .iter()
+                    .map(|(n, t)| format_args!("{n}: {}", format_type(t, state)).to_smolstr())
+                    .collect::<Vec<SmolStr>>()
+                    .join(", ")
+            )
+            .to_smolstr()
         }
+        DataType::Fn(id) => {
+            let f = &state.fns[*id as usize];
+            format_args!("fn ({})", f.args.join(", ")).to_smolstr()
+        }
+    }
+}
+
+pub fn format_type_stateless(t: &DataType) -> SmolStr {
+    match t {
+        DataType::Float => SmolStr::new_static("Float"),
+        DataType::Int => SmolStr::new_static("Integer"),
+        DataType::Bool => SmolStr::new_static("Boolean"),
+        DataType::String => SmolStr::new_static("String"),
+        DataType::Array(array_type) => match array_type {
+            Some(array_type) => {
+                format_args!("{}[]", format_type_stateless(array_type)).to_smolstr()
+            }
+            None => SmolStr::new_static("Unknown[]"),
+        },
+        DataType::Null => SmolStr::new_static("Null"),
+        DataType::Unknown => SmolStr::new_static("Unknown"),
+        DataType::Poly(types) => format_args!(
+            "{}",
+            types
+                .into_iter()
+                .map(format_type_stateless)
+                .collect::<Vec<SmolStr>>()
+                .join("|")
+        )
+        .to_smolstr(),
+        DataType::Struct(_) => SmolStr::new_static("Struct"),
+        DataType::Fn(_) => SmolStr::new_static("Function"),
     }
 }
 

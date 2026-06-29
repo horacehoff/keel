@@ -363,7 +363,7 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
                 parser.error(span, ParserErr::MatchBlockNoNonWildcardArm);
             }
             parser.next_token();
-            parser.next_token_expect(Token::Arrow, "Expected '=>'");
+            parser.next_token_expect(Token::FatArrow, "Expected '=>'");
             let code = parse_block(parser);
             end = parser.peek_token_end();
             parser.next_token_expect(
@@ -384,7 +384,7 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
         } else {
             let condition = parse_expr(parser);
             let end = parser.peek_token_start();
-            parser.next_token_expect(Token::Arrow, "");
+            parser.next_token_expect(Token::FatArrow, "");
             let code = parse_block(parser);
             if first_condition.is_none() {
                 first_condition = Some(condition);

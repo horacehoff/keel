@@ -183,6 +183,10 @@ pub fn handle_user_function(
     for i in 0..args_loc_len {
         let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
 
+        if matches!(infered_arg_types[i], DataType::Fn(_)) {
+            continue;
+        }
+
         let start_len = output.len();
         let arg_id = get_id(
             &args[i],
@@ -294,16 +298,26 @@ fn compile_function(
     let loc = fn_start as u16 + offset;
 
     let v_len_before_args = v.len();
+    let fn_len = state.namespace.fns.len();
     infered_arg_types
         .iter()
         .enumerate()
         .for_each(|(i, infered_type)| {
-            // 0 => placeholder id, it's never used
-            v.push(Variable {
-                name: fn_args[i].clone(),
-                register_id: 0,
-                var_type: infered_type.clone(),
-            });
+            if let DataType::Fn(fn_id) = infered_type {
+                state.namespace.fns.push((fn_args[i].clone(), *fn_id));
+                v.push(Variable {
+                    name: fn_args[i].clone(),
+                    register_id: 0,
+                    var_type: DataType::Fn(*fn_id),
+                });
+            } else {
+                // 0 => placeholder id, it's never used
+                v.push(Variable {
+                    name: fn_args[i].clone(),
+                    register_id: 0,
+                    var_type: infered_type.clone(),
+                });
+            }
         });
     let fn_type = track_returns(fn_code, v, ctx, state, fn_name);
     let return_type = if fn_type.is_empty() {
@@ -347,6 +361,7 @@ fn compile_function(
         offset + output.len() as u16,
         false,
     );
+    state.namespace.fns.truncate(fn_len);
 
     let mut reserved_registers = get_tgt_ids(&parsed);
     reserved_registers.extend(args_loc);

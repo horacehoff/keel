@@ -1,8 +1,8 @@
 # File System library
 
 > T represents any type.\
-> Array\<T\> represents an array containing elements of type T\
-> \<T\> represents any element of type T
+> Array\<T\> represents an array containing elements of type T. It can also be written T[].\
+> `arg: T` represents a function argument of type T.
 
 ## Read
 

@@ -22,7 +22,6 @@ dylib "../std_src/math/math" {
     float keel_ldexp(float, int);
     int keel_ilogb(float);
     float keel_scalbn(float, int);
-    float keel_fabs(float);
     float keel_cbrt(float);
     float keel_hypot(float, float);
     float keel_erf(float);
@@ -52,7 +51,6 @@ fn logb(x) { return math::keel_logb(x); }
 fn ldexp(x, y) { return math::keel_ldexp(x, y); }
 fn ilogb(x) { return math::keel_ilogb(x); }
 fn scalbn(x, y) { return math::keel_scalbn(x, y); }
-fn fabs(x) { return math::keel_fabs(x); }
 fn cbrt(x) { return math::keel_cbrt(x); }
 fn hypot(x, y) { return math::keel_hypot(x, y); }
 fn erf(x) { return math::keel_erf(x); }

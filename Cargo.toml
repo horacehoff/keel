@@ -43,7 +43,6 @@ redundant_else = "allow"
 embed = []
 
 [dependencies]
-# lalrpop-util = { version = "0.23.1", features = ["lexer"] }
 smol_strc = "0.3.6"
 ariadne = "0.6.0"
 memchr = "2.8.1"
@@ -68,9 +67,6 @@ wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 name = "keel"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
-
-# [build-dependencies]
-# lalrpop = "0.23.1"
 
 [profile.opt]
 inherits = "dev"

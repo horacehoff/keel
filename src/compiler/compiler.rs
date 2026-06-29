@@ -1457,6 +1457,16 @@ pub fn get_id(
         .unwrap_or_else(|| {
             get_last_tgt_id(output).unwrap_or_else(|| (state.registers.len() - 1) as u16)
         }),
+        Expr::AnonymousFunction(_, _, _) => {
+            if let Some(&id) = state.const_registers.get(&NULL) {
+                id
+            } else {
+                let id = state.registers.len() as u16;
+                state.const_registers.insert(NULL, id);
+                state.registers.push(NULL);
+                id
+            }
+        }
         other => {
             let output_code = compile_expr(
                 slice::from_ref(other),
@@ -2217,6 +2227,9 @@ pub fn compile_expr(
                     }
                 };
 
+                if let DataType::Fn(fn_id) = &var_type {
+                    state.namespace.fns.push((x.clone(), *fn_id));
+                }
                 v.push(Variable {
                     name: x.clone(),
                     register_id: var_id,
@@ -2440,6 +2453,7 @@ pub fn compile_expr(
                 ));
                 v.truncate(v_len);
             }
+            Expr::AnonymousFunction(_, _, _) => {}
             other => {
                 get_id(
                     other,
@@ -2660,12 +2674,24 @@ fn parse_toplevel(
                     .join(path.as_str())
                     .canonicalize()
                     .unwrap_or_else(|_| {
-                        let current_src = &sources[src_file_idx as usize];
-                        throw_compiler_error(
-                            (current_src.0.as_str(), current_src.1.as_str()),
-                            markers,
-                            ErrType::CannotReadImportedFile(path.as_str()),
-                        );
+                        std::env::current_exe().map_or_else(
+                            |_| {
+                                let current_src = &sources[src_file_idx as usize];
+                                throw_compiler_error(
+                                    (current_src.0.as_str(), current_src.1.as_str()),
+                                    markers,
+                                    ErrType::CannotReadImportedFile(path.as_str()),
+                                );
+                            },
+                            |p| {
+                                p.canonicalize()
+                                    .unwrap_or(p)
+                                    .parent()
+                                    .unwrap_or_else(|| Path::new("."))
+                                    .join("libs/")
+                                    .join(path.clone())
+                            },
+                        )
                     });
                 if visited_files.contains(&file_path) {
                     let current_src = &sources[src_file_idx as usize];

@@ -1,8 +1,8 @@
-# Standard library
+# Built-in functions
 
 > T represents any type.\
-> Array\<T\> represents an array containing elements of type T\
-> \<T\> represents any expression of type T
+> Array\<T\> represents an array containing elements of type T. It can also be written T[].\
+> `arg: T` represents a function argument of type T.
 
 ## Print
 
@@ -55,7 +55,6 @@ Example:
 str(42); // Returns "42"
 str([0,1,2,3]); // Returns "[0,1,2,3]"
 ```
-
 
 ## Bool
 

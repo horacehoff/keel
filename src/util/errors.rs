@@ -1,5 +1,6 @@
 use crate::expr::Span;
 use crate::lexer::Token;
+use crate::util::format_type_stateless;
 use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use smol_strc::{SmolStr, ToSmolStr};
@@ -209,25 +210,25 @@ impl From<ErrType<'_>> for SmolStr {
                 "Missing field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
             ErrType::ArrayWithDiffType => "Arrays can only hold a single type".into(),
             ErrType::NotIndexable(t) => format_args!(
-                "The type {BLUE}{BOLD}{t}{RESET} cannot be indexed"
+                "The type {BLUE}{BOLD}{}{RESET} cannot be indexed", format_type_stateless(t)
             )
             .to_smolstr(),
             ErrType::InvalidIndexType(t) => format_args!(
-                "The type {BLUE}{BOLD}{t}{RESET} is not a valid index"
+                "The type {BLUE}{BOLD}{}{RESET} is not a valid index", format_type_stateless(t)
             )
             .to_smolstr(),
-            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{elem_t}{RESET} in {array_t}").to_smolstr(),
+            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{}{RESET} in {}", format_type_stateless(elem_t), format_type_stateless(array_t)).to_smolstr(),
             ErrType::CannotInferType(t) => format_args!(
                 "Cannot infer the type of {BLUE}{BOLD}{t}{RESET}"
             )
             .to_smolstr(),
             ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects {expected} argument{} but received {received}", if expected == 1 {""} else {"s"}).to_smolstr(),
             ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
-            ErrType::InvalidType(expected, received) => format_args!("Expected type {expected}, found {BLUE}{BOLD}{received}{RESET}").to_smolstr(),
+            ErrType::InvalidType(expected, received) => format_args!("Expected type {}, found {BLUE}{BOLD}{}{RESET}", format_type_stateless(expected), format_type_stateless(received)).to_smolstr(),
             ErrType::OpError(l, r, op) => format_args!(
-                "Cannot perform operation {BLUE}{BOLD}{l} {RED}{op}{BLUE} {r}{RESET}").to_smolstr(),
+                "Cannot perform operation {BLUE}{BOLD}{} {RED}{op}{BLUE} {}{RESET}", format_type_stateless(l), format_type_stateless(r)).to_smolstr(),
             ErrType::InvalidOp(t, op) => format_args!(
-                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{t}{RESET}").to_smolstr(),
+                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{}{RESET}", format_type_stateless(t)).to_smolstr(),
             ErrType::InvalidConditionalExpression => "Conditional expressions must have an else clause".into(),
             ErrType::FunctionAlreadyExists(fn_name) => format_args!(
                 "Function {RED}{BOLD}{fn_name}{RESET} is already defined",
@@ -238,24 +239,24 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::DuplicateFunctionInImport(fn_name, file_path) => format_args!(
                 "Function {BLUE}{BOLD}{fn_name}{RESET} imported from {RED}{BOLD}{file_path}{RESET} is already defined"
             ).to_smolstr(),
-            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{t}{RESET} is not a collection").to_smolstr(),
+            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{}{RESET} is not a collection", format_type_stateless(t)).to_smolstr(),
             ErrType::InvalidArgType(expected, received) => {
                 let expected_str = expected
                     .iter()
-                    .map(|x| format!("{BLUE}{BOLD}{x}{RESET}"))
+                    .map(|t| format!("{BLUE}{BOLD}{}{RESET}", format_type_stateless(t)))
                     .collect::<Vec<String>>()
                     .join(" or ");
                 format_args!(
-                    "Expected {expected_str}, found {RED}{BOLD}{received}{RESET}"
+                    "Expected {expected_str}, found {RED}{BOLD}{}{RESET}", format_type_stateless(&received)
                 ).to_smolstr()
             }
             ErrType::InvalidObjType(expected, received) => format_args!(
-                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{received}{RESET}"
+                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{}{RESET}", format_type_stateless(received)
             ).to_smolstr(),
             ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
-            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{t}{RESET}").to_smolstr(),
+            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{}{RESET}", format_type_stateless(t)).to_smolstr(),
             ErrType::CArrayReturnTypeNotSupported => "Array return types are not supported: C does not convey the length of a returned array".into(),
         }
     }

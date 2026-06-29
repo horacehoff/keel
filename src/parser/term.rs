@@ -5,6 +5,7 @@ use crate::expr::Span;
 use crate::lexer::Token;
 use crate::parser::Parser;
 use crate::parser::parse_args;
+use crate::parser::parse_code;
 use crate::parser::parse_namespace;
 use crate::parser_expr::parse_expr;
 use crate::parser_expr::parse_expr_no_struct;
@@ -216,11 +217,82 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 (t_span.start, end).into(),
             )
         }
+        // anonymous function
+        Token::Function => {
+            parser.error(
+                t_span,
+                ParserErr::UnexpectedTokenStr(
+                    "Term",
+                    Token::Function,
+                    "Higher order functions are still WIP.",
+                ),
+            );
+            let start = t_span.start;
+            parser.next_token_expect(
+                Token::LParen,
+                "Function arguments must be delimited by parentheses",
+            );
+            let mut args: Vec<SmolStr> = Vec::with_capacity(2);
+            // let mut args: Vec<(SmolStr, SmolStr)> = Vec::with_capacity(2);
+            loop {
+                let (next_token, next_token_span) = parser.next_token();
+                let Token::Identifier(arg_name) = next_token else {
+                    cold_path();
+                    parser.error(
+                        next_token_span,
+                        ParserErr::UnexpectedToken(Token::Identifier(""), next_token, ""),
+                    );
+                };
+                // parser.next_token_expect(
+                //     Token::Colon,
+                //     "Argument names and types must be separated by a colon",
+                // );
+                // let arg_type = parse_type(parser);
+                args.push(SmolStr::new(arg_name));
+                if parser.peek_token() != Token::Comma {
+                    break;
+                }
+                parser.next_token();
+            }
+            parser.next_token_expect(
+                Token::RParen,
+                "Function arguments must be delimited by parentheses",
+            );
+            let (next_token, next_token_span) = parser.next_token();
+            // if next_token == Token::Arrow {
+            //     // return type
+            //     let return_type = parse_type(parser);
+            //     parser.next_token_expect(Token::LBrace, "Blocks must begin with a '{'.");
+            //     let fn_code = parse_code(parser);
+            //     let end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+            //     Expr::AnonymousFunction(
+            //         Box::from(args),
+            //         Box::from(fn_code),
+            //         (start, end).into(),
+            //     )
+            // } else
+            if next_token == Token::LBrace {
+                // returns null
+                // let return_type = SmolStr::new_static("null");
+                let fn_code = parse_code(parser);
+                let end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+                Expr::AnonymousFunction(Box::from(args), Box::from(fn_code), (start, end).into())
+            } else {
+                parser.error(
+                    next_token_span,
+                    ParserErr::UnexpectedTokenStr(
+                        "'->' (return type) OR '{' (function code block)",
+                        next_token,
+                        "",
+                    ),
+                );
+            }
+        }
         unexpected => {
             cold_path();
             parser.error(
                 t_span,
-                ParserErr::UnexpectedTokenStr("Term ", unexpected, ""),
+                ParserErr::UnexpectedTokenStr("Term", unexpected, ""),
             );
         }
     }

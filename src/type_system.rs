@@ -12,8 +12,10 @@ use crate::expr::symbol_of_expr;
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
 use smol_strc::SmolStr;
+use smol_strc::ToSmolStr;
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 // Tracks which user-defined functions are currently being analysed for their
 // return type. Used to break mutual-recursion cycles in type inference
@@ -35,7 +37,7 @@ pub enum DataType {
     Unknown,
     Poly(Box<[Self]>),
     /// Fn (\[arg_types ... return_type\]) => return_type is always specified
-    Fn(Box<[Self]>),
+    Fn(u16),
     Struct(u16),
 }
 
@@ -52,8 +54,9 @@ impl PartialEq for DataType {
             | (Self::Unknown, Self::Unknown)
             | (Self::Array(_), Self::Array(None)) => true,
             (Self::Array(Some(a)), Self::Array(Some(b))) => a == b,
-            (Self::Poly(a), Self::Poly(b)) | (Self::Fn(a), Self::Fn(b)) => a == b,
+            (Self::Poly(a), Self::Poly(b)) => a == b,
             (Self::Struct(a), Self::Struct(b)) => a == b,
+            (Self::Fn(a), Self::Fn(b)) => true,
             _ => false,
         }
     }
@@ -736,6 +739,35 @@ pub fn infer_type(
                 }) as u16,
             )
         }
+        Expr::AnonymousFunction(args, code, span) => {
+            let fn_name =
+                format_args!("{}{}{}", ctx.current_src_file, span.start, span.end).to_smolstr();
+            if let Some(id) = state
+                .fns
+                .iter()
+                .rposition(|f| f.name == fn_name && &f.args == args)
+            {
+                return DataType::Fn(id as u16);
+            }
+            let returns_null = check_if_returns_void(code);
+            let mut callees = Vec::new();
+            collect_direct_fn_calls(code, &mut callees);
+            let id = state.fns.len() as u16;
+            state.fns.push(Function {
+                name: fn_name,
+                args: args.clone(),
+                code: Rc::from(code.clone()),
+                impls: Vec::new(),
+                is_recursive: None,
+                returns_null,
+                src_file: ctx.current_src_file,
+                return_type_cache: Vec::new(),
+                direct_calls: callees.into_boxed_slice(),
+            });
+            state.fn_registers.push(Vec::new());
+            // state.namespace.fns.push((x.clone(), id));
+            DataType::Fn(id)
+        }
         _ => unreachable!(),
     }
 }
@@ -767,7 +799,7 @@ pub fn check_poly(data: DataType) -> DataType {
         dev_error(
             "type_inference.rs",
             "check_poly",
-            format_args!("Received data : {data} and not data : DataType::Poly"),
+            format_args!("Didn't receive DataType::Poly"),
         )
     }
 }

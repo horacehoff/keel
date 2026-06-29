@@ -17,6 +17,7 @@ use crate::registers::free_register;
 use crate::type_system::DataType;
 use crate::type_system::infer_type;
 use crate::user_functions::handle_user_function;
+use crate::util::format_type;
 
 pub fn std_lib_functions(
     name: &str,
@@ -50,7 +51,7 @@ pub fn std_lib_functions(
             check_args!(args, 1, name, src, markers);
             let infered = infer_type(&args[0], v, ctx, state);
             state.registers.push(Data::p_str(
-                &infered.to_string(),
+                format_type(&infered, state).as_str(),
                 &mut state.pools.string_pool,
             ));
             return Some((state.registers.len() - 1) as u16);

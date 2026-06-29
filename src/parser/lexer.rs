@@ -14,7 +14,7 @@ impl std::fmt::Display for Token<'_> {
             Token::RParen => write!(f, "')'"),
             Token::LBracket => write!(f, "'['"),
             Token::RBracket => write!(f, "']'"),
-            Token::Arrow => write!(f, "'=>'"),
+            Token::FatArrow => write!(f, "'=>'"),
             other => write!(f, "{other:?}"),
         }
     }
@@ -138,6 +138,10 @@ pub enum Token<'a> {
     #[token(";")]
     SemiColon,
     #[token("=>")]
+    /// =>
+    FatArrow,
+    #[token("->")]
+    /// ->
     Arrow,
 
     #[regex(r#"\"(?:[^\"\\]|\\.)*\""#, |lex| lex.slice())]

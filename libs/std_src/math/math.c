@@ -30,7 +30,6 @@ EXPORT double keel_logb(double x) { return logb(x); }
 EXPORT double keel_ldexp(double x, int y) { return ldexp(x, y); }
 EXPORT int32_t keel_ilogb(double x) { return (int32_t)ilogb(x); }
 EXPORT double keel_scalbn(double x, int y) { return scalbn(x, y); }
-EXPORT double keel_fabs(double x) { return fabs(x); }
 EXPORT double keel_cbrt(double x) { return cbrt(x); }
 EXPORT double keel_hypot(double x, double y) { return hypot(x, y); }
 EXPORT double keel_erf(double x) { return erf(x); }

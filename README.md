@@ -55,7 +55,7 @@ keel -h/--help     # Print help
 
 - Better module system (in progress)
 - Struct methods
-- Higher-order functions
+- Proper higher-order functions implementation (in progress)
 - [Better embedding API with limits](#embedding-experimental)
 
 ## Language tour
@@ -268,6 +268,24 @@ fn main() {print(mylib::my_func(42));}
 
 Imports can be nested, and circular imports trigger an error and crash the program.
 
+### Importing libraries
+This item is very similar to the one above.
+Keel libraries are ordinary `.kl` files.
+By placing the `libs/` folder where the Keel executable is located, and by compiling the C files into dynamic libraries (currently, only macOS dynamic libraries are pre-built), you can import them:
+```rs
+import "std/math.kl";
+import "std/time.kl";
+import "std/random.kl";
+
+fn main() {
+    print(math::cos(3.14159265359));
+    print(random::random_range(10.0,20.0));
+    print(time::format(time::now(), "%x - %X %p"));
+}
+```
+
+You can make your own by simply placing the `.kl` files in the `libs/` folder.
+
 ### Importing dynamic libraries
 
 You can load functions from dynamic libraries by specifying each function's
@@ -432,6 +450,9 @@ print(x > 1 && x < 1);
 
 ## Documentation
 
-- [Standard library](docs/STD_LIB.md)
+- [Built-in functions](docs/BUILT_IN.md)
 - [File system library](docs/FS_LIB.md)
+- [Math library](docs/MATH_LIB.md)
+- [Random library](docs/RANDOM_LIB.md)
+- [Time library](docs/TIME_LIB.md)
 - [Catchable errors](docs/CATCHABLE_ERRORS.md)

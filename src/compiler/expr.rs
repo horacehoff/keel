@@ -32,6 +32,9 @@ pub enum Expr {
     ElseIfBlock(Box<Self>, Box<[Self]>),
     ElseBlock(Box<[Self]>),
 
+    /// AnonymousFunction(args, code, span)
+    AnonymousFunction(Box<[SmolStr]>, Box<[Self]>, Span),
+    // AnonymousFunction(Box<[(SmolStr, SmolStr)]>, SmolStr, Box<[Self]>, Span),
     WhileBlock(Box<Self>, Box<[Self]>),
     /// FunctionCall(args, (optional namespace + name), start, end, (arg_start,arg_end))
     FunctionCall(Box<[Self]>, Box<[SmolStr]>, Span, Box<[Span]>),

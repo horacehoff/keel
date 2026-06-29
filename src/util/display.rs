@@ -62,33 +62,6 @@ pub fn format_data(
     }
 }
 
-pub fn _display_fn_signatures(f: Function) {
-    for fn_impl in f.impls {
-        let return_type = f
-            .return_type_cache
-            .iter()
-            .find(|(args, _)| *args == fn_impl.arg_types)
-            .map_or(DataType::Null, |(_, ret)| ret.clone());
-        println!(
-            "{} : ({}) -> {}",
-            f.name,
-            fn_impl
-                .arg_types
-                .iter()
-                .map(|x| x.to_smolstr())
-                .collect::<Vec<_>>()
-                .join(", "),
-            {
-                if return_type == DataType::Null {
-                    SmolStr::new_static("()")
-                } else {
-                    return_type.to_smolstr()
-                }
-            }
-        );
-    }
-}
-
 pub fn get_type_name(x: &Data) -> &str {
     if x.is_array() {
         "Array"

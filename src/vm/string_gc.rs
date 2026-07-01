@@ -1,18 +1,19 @@
 use crate::data::Data;
 use crate::vm::ObjectPool;
+use crate::vm::RegisterFile;
 use crate::vm::StringPool;
 
 pub fn string_gc(
     array_pool: &ObjectPool,
     string_pool: &StringPool,
     free_strings: &mut Vec<u16>,
-    registers: &[Data],
-    recursion_stack: &[Data],
+    registers: &RegisterFile,
+    recursion_stack: &RegisterFile,
     live: &mut Vec<bool>,
 ) {
     live.clear();
     live.resize(string_pool.len(), false);
-    for data in registers.iter().chain(recursion_stack.iter()) {
+    for data in registers.0.iter().chain(recursion_stack.0.iter()) {
         if data.is_large_str() {
             live[data.get_str_pool_id()] = true;
         } else if data.is_array() {
@@ -31,7 +32,7 @@ pub fn string_gc(
     }
 }
 
-fn track_strings(array_pool: &ObjectPool, array: &[Data], live: &mut [bool]) {
+fn track_strings(array_pool: &ObjectPool, array: &Vec<Data>, live: &mut [bool]) {
     if let Some(first) = array.first() {
         if first.is_str() {
             for x in array {

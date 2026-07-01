@@ -1,8 +1,9 @@
+use crate::vm::{MapPool, RegisterFile, StringPool};
 use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ObjectPool};
-use nohash_hasher::{IsEnabled, NoHashHasher};
+use nohash_hasher::IsEnabled;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
-use std::{collections::HashMap, hash::BuildHasherDefault, hint::unreachable_unchecked};
+use std::hint::unreachable_unchecked;
 
 // 51 bits of total payload => 3 bits for data type & 48 bits of actual payload
 // 1111_1111_1111_1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000
@@ -125,8 +126,8 @@ impl Data {
         s: &str,
         array_pool: &ObjectPool,
         string_pool: &mut Vec<String>,
-        registers: &[Self],
-        recursion_stack: &[Self],
+        registers: &RegisterFile,
+        recursion_stack: &RegisterFile,
         free_strings: &mut Vec<u16>,
         gc_string_threshold: &mut u32,
         string_live: &mut Vec<bool>,
@@ -160,8 +161,8 @@ impl Data {
         s: String,
         array_pool: &ObjectPool,
         string_pool: &mut Vec<String>,
-        registers: &[Self],
-        recursion_stack: &[Self],
+        registers: &RegisterFile,
+        recursion_stack: &RegisterFile,
         free_strings: &mut Vec<u16>,
         gc_string_threshold: &mut u32,
         string_live: &mut Vec<bool>,
@@ -191,7 +192,7 @@ impl Data {
         }
     }
     #[inline(always)]
-    pub fn as_str(&self, string_pool: &[String]) -> &str {
+    pub fn as_str(&self, string_pool: &StringPool) -> &str {
         debug_assert!(self.is_str());
         if (self.0 & !PAYLOAD_MASK) == NAN_STRING_SMALL {
             let payload = self.0 & PAYLOAD_MASK;
@@ -297,9 +298,9 @@ impl Data {
     }
     pub fn format(
         self,
-        obj_pool: &[Vec<Self>],
-        string_pool: &[String],
-        map_pool: &[HashMap<Self, Self, BuildHasherDefault<NoHashHasher<Self>>>],
+        obj_pool: &ObjectPool,
+        string_pool: &StringPool,
+        map_pool: &MapPool,
         struct_fields: &[(SmolStr, Vec<SmolStr>)],
         show_str: bool,
     ) -> SmolStr {

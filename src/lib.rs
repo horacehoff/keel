@@ -4,6 +4,7 @@ use crate::errors::ErrorCtx;
 use crate::errors::RED;
 use crate::errors::RESET;
 use crate::repl::repl;
+use crate::vm::RegisterFile;
 #[cfg(feature = "embed")]
 use std::ffi::{CStr, CString, c_char};
 use std::fs;
@@ -205,7 +206,7 @@ pub fn main() {
             let now = std::time::Instant::now();
             let (
                 instructions,
-                mut registers,
+                registers,
                 mut arrays,
                 instr_src,
                 fn_registers,
@@ -219,7 +220,7 @@ pub fn main() {
             let now = std::time::Instant::now();
             vm::execute(
                 &instructions,
-                &mut registers,
+                &mut RegisterFile(registers),
                 &mut arrays,
                 &ErrorCtx { instr_src, sources },
                 &fn_registers,
@@ -241,7 +242,7 @@ pub fn main() {
 
     let (
         instructions,
-        mut registers,
+        registers,
         mut arrays,
         instr_src,
         fn_registers,
@@ -253,7 +254,7 @@ pub fn main() {
     ) = compile(contents, filename, false);
     vm::execute(
         &instructions,
-        &mut registers,
+        &mut RegisterFile(registers),
         &mut arrays,
         &ErrorCtx { instr_src, sources },
         &fn_registers,

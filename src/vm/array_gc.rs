@@ -1,12 +1,12 @@
 use crate::data::Data;
-use crate::vm::ObjectPool;
+use crate::vm::{ObjectPool, RegisterFile};
 
 /// Allocates a new array in the array pool. If reusing an array, it clears it.
 pub fn alloc_array(
     obj_pool: &mut ObjectPool,
     free_arrays: &mut Vec<u32>,
-    registers: &[Data],
-    recursion_stack: &[Data],
+    registers: &RegisterFile,
+    recursion_stack: &RegisterFile,
     gc_array_threshold: &mut u32,
     live: &mut Vec<bool>,
     obj_gc_stack: &mut Vec<Data>,
@@ -40,8 +40,8 @@ pub fn alloc_array(
 fn array_gc(
     obj_pool: &ObjectPool,
     free_arrays: &mut Vec<u32>,
-    registers: &[Data],
-    recursion_stack: &[Data],
+    registers: &RegisterFile,
+    recursion_stack: &RegisterFile,
     live: &mut Vec<bool>,
     obj_gc_stack: &mut Vec<Data>,
 ) {
@@ -49,7 +49,7 @@ fn array_gc(
     live.resize(obj_pool.len(), false);
 
     // Find all used arrays
-    for data in registers.iter().chain(recursion_stack.iter()) {
+    for data in registers.0.iter().chain(recursion_stack.0.iter()) {
         if data.is_array() || data.is_struct() {
             track(*data, obj_pool, live, obj_gc_stack);
         }
@@ -68,7 +68,8 @@ fn array_gc(
     }
 }
 
-fn track(root: Data, obj_pool: &ObjectPool, live: &mut [bool], obj_gc_stack: &mut Vec<Data>) {
+#[allow(clippy::ptr_arg)]
+fn track(root: Data, obj_pool: &ObjectPool, live: &mut Vec<bool>, obj_gc_stack: &mut Vec<Data>) {
     obj_gc_stack.push(root);
     while let Some(d) = obj_gc_stack.pop() {
         let is_live = unsafe { live.get_unchecked_mut(d.as_array()) };

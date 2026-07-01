@@ -1,3 +1,4 @@
+use crate::RegisterFile;
 use crate::compile;
 use crate::data::Data;
 use crate::instr::Instr;
@@ -7,7 +8,7 @@ macro_rules! run_and_check_registers {
         let filename = "test.kl";
         let (
             instructions,
-            mut registers,
+            registers,
             mut arrays,
             instr_src,
             fn_registers,
@@ -17,9 +18,10 @@ macro_rules! run_and_check_registers {
             _,
             _,
         ) = compile(String::from($contents), filename, true);
+        let mut reg = RegisterFile(registers);
         crate::vm::execute(
             &instructions,
-            &mut registers,
+            &mut reg,
             &mut arrays,
             &crate::errors::ErrorCtx {
                 instr_src,
@@ -33,7 +35,7 @@ macro_rules! run_and_check_registers {
         );
         assert!(instructions.iter().any(|x| {
             if let Instr::Print(tgt) = x {
-                registers[(*tgt) as usize] == $expected
+                reg[(*tgt) as usize] == $expected
             } else {
                 false
             }
@@ -46,7 +48,7 @@ macro_rules! run {
         let filename = "test.kl";
         let (
             instructions,
-            mut registers,
+            registers,
             mut arrays,
             instr_src,
             fn_registers,
@@ -58,7 +60,7 @@ macro_rules! run {
         ) = compile(String::from($contents), filename, true);
         crate::vm::execute(
             &instructions,
-            &mut registers,
+            &mut RegisterFile(registers),
             &mut arrays,
             &crate::errors::ErrorCtx {
                 instr_src,

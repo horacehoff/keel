@@ -1,4 +1,3 @@
-use crate::check_args;
 use crate::compiler::Namespace;
 use crate::compiler::get_id;
 use crate::compiler_data::Ctx;
@@ -13,11 +12,11 @@ use crate::expr::Expr;
 use crate::expr::Span;
 use crate::fs_lib_functions::fs_lib_functions;
 use crate::instr::Instr;
-use crate::registers::free_register;
 use crate::std_lib_functions::std_lib_functions;
 use crate::type_system::DataType;
 use crate::type_system::infer_type;
 use crate::user_functions::handle_user_function;
+use crate::util::check_args;
 use smol_strc::SmolStr;
 use std::slice;
 
@@ -112,7 +111,7 @@ pub fn handle_functions(
         .and_then(|lib| lib.fns.iter().find(|x| x.name == name))
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
-        check_args!(args, fn_args.len(), name, src, markers);
+        check_args(args, fn_args.len(), name, src, markers);
         for (i, a) in fn_args.iter().enumerate() {
             check_arg_type(v, ctx, state, args, args_indexes, i, slice::from_ref(a));
         }
@@ -121,13 +120,7 @@ pub fn handle_functions(
             let arg_id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
             output.push(Instr::StoreFuncArg(arg_id));
             // This may break stuff
-            free_register(
-                arg_id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(arg_id, v);
             *state.allocated_arg_count += 1;
         }
 

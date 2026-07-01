@@ -1,6 +1,5 @@
 use crate::expr::Span;
 use crate::lexer::Token;
-use crate::util::format_type_stateless;
 use crate::{instr::Instr, type_system::DataType};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use smol_strc::{SmolStr, ToSmolStr};
@@ -101,6 +100,10 @@ pub enum ErrType<'a> {
 
     /// SliceOutOfBounds(length, idx_start, idx_end)
     SliceOutOfBounds(usize, i32, i32),
+
+    UnknownMapKey(&'a str),
+    DuplicateMapKey,
+    NotLiteralMapKey,
 
     NullByteInString,
     CArrayReturnTypeNotSupported,
@@ -210,25 +213,25 @@ impl From<ErrType<'_>> for SmolStr {
                 "Missing field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
             ErrType::ArrayWithDiffType => "Arrays can only hold a single type".into(),
             ErrType::NotIndexable(t) => format_args!(
-                "The type {BLUE}{BOLD}{}{RESET} cannot be indexed", format_type_stateless(t)
+                "The type {BLUE}{BOLD}{}{RESET} cannot be indexed", t.format()
             )
             .to_smolstr(),
             ErrType::InvalidIndexType(t) => format_args!(
-                "The type {BLUE}{BOLD}{}{RESET} is not a valid index", format_type_stateless(t)
+                "The type {BLUE}{BOLD}{}{RESET} is not a valid index", t.format()
             )
             .to_smolstr(),
-            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{}{RESET} in {}", format_type_stateless(elem_t), format_type_stateless(array_t)).to_smolstr(),
+            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{}{RESET} in {}", elem_t.format(), array_t.format()).to_smolstr(),
             ErrType::CannotInferType(t) => format_args!(
                 "Cannot infer the type of {BLUE}{BOLD}{t}{RESET}"
             )
             .to_smolstr(),
             ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects {expected} argument{} but received {received}", if expected == 1 {""} else {"s"}).to_smolstr(),
             ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
-            ErrType::InvalidType(expected, received) => format_args!("Expected type {}, found {BLUE}{BOLD}{}{RESET}", format_type_stateless(expected), format_type_stateless(received)).to_smolstr(),
+            ErrType::InvalidType(expected, received) => format_args!("Expected type {}, found {BLUE}{BOLD}{}{RESET}", expected.format(), received.format()).to_smolstr(),
             ErrType::OpError(l, r, op) => format_args!(
-                "Cannot perform operation {BLUE}{BOLD}{} {RED}{op}{BLUE} {}{RESET}", format_type_stateless(l), format_type_stateless(r)).to_smolstr(),
+                "Cannot perform operation {BLUE}{BOLD}{} {RED}{op}{BLUE} {}{RESET}", l.format(), r.format()).to_smolstr(),
             ErrType::InvalidOp(t, op) => format_args!(
-                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{}{RESET}", format_type_stateless(t)).to_smolstr(),
+                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{}{RESET}", t.format()).to_smolstr(),
             ErrType::InvalidConditionalExpression => "Conditional expressions must have an else clause".into(),
             ErrType::FunctionAlreadyExists(fn_name) => format_args!(
                 "Function {RED}{BOLD}{fn_name}{RESET} is already defined",
@@ -239,25 +242,28 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::DuplicateFunctionInImport(fn_name, file_path) => format_args!(
                 "Function {BLUE}{BOLD}{fn_name}{RESET} imported from {RED}{BOLD}{file_path}{RESET} is already defined"
             ).to_smolstr(),
-            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{}{RESET} is not a collection", format_type_stateless(t)).to_smolstr(),
+            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{}{RESET} is not a collection", t.format()).to_smolstr(),
             ErrType::InvalidArgType(expected, received) => {
                 let expected_str = expected
                     .iter()
-                    .map(|t| format!("{BLUE}{BOLD}{}{RESET}", format_type_stateless(t)))
+                    .map(|t| format!("{BLUE}{BOLD}{}{RESET}", t.format()))
                     .collect::<Vec<String>>()
                     .join(" or ");
                 format_args!(
-                    "Expected {expected_str}, found {RED}{BOLD}{}{RESET}", format_type_stateless(&received)
+                    "Expected {expected_str}, found {RED}{BOLD}{}{RESET}", received.format()
                 ).to_smolstr()
             }
             ErrType::InvalidObjType(expected, received) => format_args!(
-                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{}{RESET}", format_type_stateless(received)
+                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{}{RESET}", received.format()
             ).to_smolstr(),
             ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
-            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{}{RESET}", format_type_stateless(t)).to_smolstr(),
+            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{}{RESET}", t.format()).to_smolstr(),
             ErrType::CArrayReturnTypeNotSupported => "Array return types are not supported: C does not convey the length of a returned array".into(),
+            ErrType::UnknownMapKey(key) => format_args!("Unknown key {RED}{BOLD}{key}{RESET}").to_smolstr(),
+            ErrType::DuplicateMapKey => format_args!("Duplicate key in map").to_smolstr(),
+            ErrType::NotLiteralMapKey => format_args!("Map keys must be literals").to_smolstr(),
         }
     }
 }
@@ -316,6 +322,9 @@ impl ErrType<'_> {
             ErrType::NullByteInString => "null_byte_in_string",
             ErrType::CArrayReturnTypeNotSupported => "c_array_return_type_not_supported",
             ErrType::InvalidReturnType(_) => "invalid_return_type",
+            ErrType::UnknownMapKey(_) => "unknown_map_key",
+            ErrType::DuplicateMapKey => "duplicate_map_key",
+            ErrType::NotLiteralMapKey => "not_literal_map_key",
         }
     }
 }

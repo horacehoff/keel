@@ -13,6 +13,8 @@ pub enum Expr {
     Var(SmolStr, Span),
     /// Array(contents, span)
     Array(Box<[Self]>, Span),
+    /// Map(key-value pairs, span)
+    Map(Box<[(Self, Self)]>, Span),
     /// Struct(name, fields, span)
     Struct(Box<[SmolStr]>, Box<[(SmolStr, Self, Span)]>, Span),
     /// StructDeclare(name, fields, span)

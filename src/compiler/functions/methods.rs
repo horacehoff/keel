@@ -3,7 +3,6 @@ use crate::compiler_data::Variable;
 use crate::compiler_data::{Ctx, State};
 use crate::expr::{Expr, Span};
 use crate::instr::Instr;
-use crate::registers::free_register;
 use crate::std_lib_methods::std_lib_methods;
 use crate::type_system::infer_type;
 use smol_strc::SmolStr;
@@ -26,13 +25,7 @@ pub fn handle_method_calls(
 
     let obj_type = infer_type(obj, v, ctx, state);
     let id = get_id(obj, v, ctx, state, output, None, false, offset, single_run);
-    free_register(
-        id,
-        state.free_registers,
-        v,
-        state.const_registers,
-        &state.reserved_registers,
-    );
+    state.free_reg(id, v);
 
     std_lib_methods(
         name,

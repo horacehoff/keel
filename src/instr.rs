@@ -162,6 +162,14 @@ pub enum Instr {
     /// Remove(array_reg_id, elem_index_reg_id)
     Remove(u16, u16),
 
+    /// MapGet(map_pool_id, key_reg_id, dest_reg_id)
+    MapGet(u16, u16, u16),
+    /// MapSet(map_pool_id, key_reg_id, val_reg_id)
+    MapInsert(u16, u16, u16),
+    /// MapSet(map_reg_id, key_reg_id, val_reg_id)
+    MapInsertReg(u16, u16, u16),
+    CloneMap(u16, u16),
+
     /// Exits the program with the i32 code if it's != 0
     Halt(u16),
 }

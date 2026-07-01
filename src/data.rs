@@ -1,4 +1,8 @@
 use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ObjectPool};
+use nohash_hasher::{IsEnabled, NoHashHasher};
+use smol_strc::SmolStr;
+use smol_strc::ToSmolStr;
+use std::{collections::HashMap, hash::BuildHasherDefault, hint::unreachable_unchecked};
 
 // 51 bits of total payload => 3 bits for data type & 48 bits of actual payload
 // 1111_1111_1111_1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000
@@ -13,12 +17,15 @@ const NAN_ARRAY: u64 = NAN_BASE | (4 << 48);
 const NAN_NULL: u64 = NAN_BASE | (5 << 48);
 const NAN_INT: u64 = NAN_BASE | (6 << 48);
 const NAN_STRUCT: u64 = NAN_BASE | (7 << 48);
+const NAN_MAP: u64 = NAN_BASE | (7 << 48) | (1 << 47);
 pub const NULL: Data = Data(NAN_NULL);
 pub const FALSE: Data = Data(NAN_BOOL);
 pub const TRUE: Data = Data(NAN_BOOL | 1);
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Data(pub u64);
+
+impl IsEnabled for Data {}
 
 impl Data {
     #[inline(always)]
@@ -104,6 +111,8 @@ impl Data {
         let len = s.len();
         if len <= 6 {
             Self::small_str(s)
+        } else if let Some(id) = string_pool.iter().position(|existing| existing == s) {
+            Self(NAN_STRING_LARGE | id as u64)
         } else {
             let string_pool_id = string_pool.len() as u64;
             string_pool.push(s.to_owned());
@@ -250,7 +259,116 @@ impl Data {
     }
     #[inline(always)]
     pub const fn is_struct(self) -> bool {
-        (self.0 & !PAYLOAD_MASK) == NAN_STRUCT
+        (self.0 & !PAYLOAD_MASK) == NAN_STRUCT && (self.0 & (1 << 47)) == 0
+    }
+    #[inline(always)]
+    pub const fn map(id: u32) -> Self {
+        Self(NAN_MAP | id as u64)
+    }
+    #[inline(always)]
+    pub const fn as_map(self) -> usize {
+        debug_assert!(self.is_map());
+        (self.0 & 0xFFFF_FFFF) as usize
+    }
+    #[inline(always)]
+    pub const fn is_map(self) -> bool {
+        (self.0 & !PAYLOAD_MASK) == NAN_STRUCT && (self.0 & (1 << 47)) != 0
+    }
+    pub const fn type_name(self) -> &'static str {
+        if self.is_array() {
+            "Array"
+        } else if self.is_bool() {
+            "Boolean"
+        } else if self.is_str() {
+            "String"
+        } else if self.is_float() {
+            "Float"
+        } else if self.is_int() {
+            "Integer"
+        } else if self.is_null() {
+            "Null"
+        } else if self.is_struct() {
+            "Struct"
+        } else if self.is_map() {
+            "Map"
+        } else {
+            unsafe { unreachable_unchecked() }
+        }
+    }
+    pub fn format(
+        self,
+        obj_pool: &[Vec<Self>],
+        string_pool: &[String],
+        map_pool: &[HashMap<Self, Self, BuildHasherDefault<NoHashHasher<Self>>>],
+        struct_fields: &[(SmolStr, Vec<SmolStr>)],
+        show_str: bool,
+    ) -> SmolStr {
+        if self.is_float() {
+            self.as_float().to_smolstr()
+        } else if self.is_int() {
+            self.as_int().to_smolstr()
+        } else if self.is_bool() {
+            self.as_bool().to_smolstr()
+        } else if self.is_str() {
+            if show_str {
+                self.as_str(string_pool).to_smolstr()
+            } else {
+                format_args!("\"{}\"", self.as_str(string_pool)).to_smolstr()
+            }
+        } else if self.is_array() {
+            format_args!("[{}]", unsafe {
+                obj_pool
+                    .get_unchecked(self.as_array())
+                    .iter()
+                    .map(|x| x.format(obj_pool, string_pool, map_pool, struct_fields, false))
+                    .collect::<Vec<SmolStr>>()
+                    .join(",")
+            })
+            .to_smolstr()
+        } else if self.is_null() {
+            SmolStr::new_static("null")
+        } else if self.is_struct() {
+            let s_name = unsafe {
+                &struct_fields
+                    .get_unchecked(self.struct_type_id() as usize)
+                    .0
+            };
+            format_args!("{} {{{}}}", s_name, unsafe {
+                obj_pool
+                    .get_unchecked(self.as_struct())
+                    .iter()
+                    .map(|x| {
+                        format_args!(
+                            "{}",
+                            // s_fields.get_unchecked(i),
+                            x.format(obj_pool, string_pool, map_pool, struct_fields, false)
+                        )
+                        .to_smolstr()
+                    })
+                    .collect::<Vec<SmolStr>>()
+                    .join(",")
+            })
+            .to_smolstr()
+        } else if self.is_map() {
+            let m = unsafe { map_pool.get_unchecked(self.as_map()) };
+            format_args!(
+                "{{{}}}",
+                m.iter()
+                    .map(|(key, val)| {
+                        format_args!(
+                            "{}:{}",
+                            key.format(obj_pool, string_pool, map_pool, struct_fields, false),
+                            val.format(obj_pool, string_pool, map_pool, struct_fields, false),
+                        )
+                        .to_smolstr()
+                    })
+                    .collect::<Vec<SmolStr>>()
+                    .join(",")
+            )
+            .to_smolstr()
+        } else {
+            unsafe { unreachable_unchecked() }
+        }
     }
 }
 

@@ -6,6 +6,7 @@
 - `modulo_by_zero`
 - `index_out_of_bounds`
 - `slice_out_of_bounds`
+- `unknown_map_key`
 
 ## Runtime parsing
 

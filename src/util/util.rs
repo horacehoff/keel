@@ -1,11 +1,11 @@
-use crate::compiler_data::State;
 use crate::compiler_data::Struct;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
+use crate::expr::Expr;
 use crate::expr::Span;
 use crate::type_system::DataType;
 use smol_strc::SmolStr;
-use smol_strc::ToSmolStr;
+use std::hint::cold_path;
 
 /// Strips the surrounding quotes & processes escape sequences \n \t \r \\ \" \0
 pub fn parse_string(s: &str) -> SmolStr {
@@ -95,149 +95,44 @@ pub fn str_to_keel_type(s: &str, structs: &[Struct], span: Span, src: (&str, &st
     }
 }
 
-#[macro_export]
-macro_rules! span {
-    ($start:expr,$end:expr) => {
-        Span {
-            start: $start as u32,
-            end: $end as u32,
-        }
-    };
-}
-
-// impl std::fmt::Display for DataType {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             Self::Float => write!(f, "Float"),
-//             Self::Int => write!(f, "Integer"),
-//             Self::Bool => write!(f, "Boolean"),
-//             Self::String => write!(f, "String"),
-//             Self::Array(array_type) => match array_type {
-//                 Some(t) => write!(f, "Array<{t}>"),
-//                 None => write!(f, "Array<?>"),
-//             },
-//             Self::Null => write!(f, "Null"),
-//             Self::Unknown => write!(f, "Unknown"),
-//             Self::Poly(types) => write!(
-//                 f,
-//                 "{}",
-//                 types
-//                     .into_iter()
-//                     .map(|x| x.to_string())
-//                     .collect::<Vec<String>>()
-//                     .join("|")
-//             ),
-//             Self::Fn(t) => {
-//                 write!(f, "Function")
-//             }
-//             Self::Struct(s) => {
-//                 write!(f, "Struct({s})")
-//             }
-//         }
-//     }
-// }
-
-pub fn format_type(t: &DataType, state: &State<'_>) -> SmolStr {
-    match t {
-        DataType::Float => SmolStr::new_static("Float"),
-        DataType::Int => SmolStr::new_static("Integer"),
-        DataType::Bool => SmolStr::new_static("Boolean"),
-        DataType::String => SmolStr::new_static("String"),
-        DataType::Array(array_type) => match array_type {
-            Some(array_type) => format_args!("{}[]", format_type(array_type, state)).to_smolstr(),
-            None => SmolStr::new_static("Unknown[]"),
-        },
-        DataType::Null => SmolStr::new_static("Null"),
-        DataType::Unknown => SmolStr::new_static("Unknown"),
-        DataType::Poly(types) => format_args!(
-            "{}",
-            types
-                .into_iter()
-                .map(|x| format_type(x, state))
-                .collect::<Vec<SmolStr>>()
-                .join("|")
+pub fn check_args(
+    args: &[Expr],
+    expected_args_len: usize,
+    fn_name: &str,
+    src: (&str, &str),
+    span: Span,
+) {
+    if args.len() != expected_args_len {
+        cold_path();
+        throw_compiler_error(
+            src,
+            span,
+            ErrType::IncorrectArgCount(fn_name, expected_args_len as u16, args.len() as u16),
         )
-        .to_smolstr(),
-        DataType::Struct(s) => {
-            let s = &state.structs[*s as usize];
-            format_args!(
-                "{} {{{}}}",
-                s.name,
-                s.fields
-                    .iter()
-                    .map(|(n, t)| format_args!("{n}: {}", format_type(t, state)).to_smolstr())
-                    .collect::<Vec<SmolStr>>()
-                    .join(", ")
-            )
-            .to_smolstr()
-        }
-        DataType::Fn(id) => {
-            let f = &state.fns[*id as usize];
-            format_args!("fn ({})", f.args.join(", ")).to_smolstr()
-        }
     }
 }
 
-pub fn format_type_stateless(t: &DataType) -> SmolStr {
-    match t {
-        DataType::Float => SmolStr::new_static("Float"),
-        DataType::Int => SmolStr::new_static("Integer"),
-        DataType::Bool => SmolStr::new_static("Boolean"),
-        DataType::String => SmolStr::new_static("String"),
-        DataType::Array(array_type) => match array_type {
-            Some(array_type) => {
-                format_args!("{}[]", format_type_stateless(array_type)).to_smolstr()
-            }
-            None => SmolStr::new_static("Unknown[]"),
-        },
-        DataType::Null => SmolStr::new_static("Null"),
-        DataType::Unknown => SmolStr::new_static("Unknown"),
-        DataType::Poly(types) => format_args!(
-            "{}",
-            types
-                .into_iter()
-                .map(format_type_stateless)
-                .collect::<Vec<SmolStr>>()
-                .join("|")
+pub fn check_args_range(
+    args: &[Expr],
+    min_args_len: usize,
+    max_args_len: usize,
+    fn_name: &str,
+    src: (&str, &str),
+    span: Span,
+) {
+    if args.len() < min_args_len || args.len() > max_args_len {
+        cold_path();
+        throw_compiler_error(
+            src,
+            span,
+            ErrType::IncorrectArgCountVariable(
+                fn_name,
+                min_args_len as u16,
+                max_args_len as u16,
+                args.len() as u16,
+            ),
         )
-        .to_smolstr(),
-        DataType::Struct(_) => SmolStr::new_static("Struct"),
-        DataType::Fn(_) => SmolStr::new_static("Function"),
     }
-}
-
-/// check_args(args, expected_args_len, fn_name, src, markers)
-#[macro_export]
-macro_rules! check_args {
-    ($args:expr, $expected_args_len:expr, $fn_name:expr, $src:expr,$markers:expr) => {
-        if $args.len() != $expected_args_len {
-            throw_compiler_error(
-                $src,
-                $markers,
-                ErrType::IncorrectArgCount($fn_name, $expected_args_len as u16, $args.len() as u16),
-            );
-        }
-    };
-}
-
-/// check_args_range(args, min_args_len, max_args_len, fn_name, src, markers)
-#[macro_export]
-macro_rules! check_args_range {
-    ($args:expr, $min_args_len:expr,$max_args_len:expr, $fn_name:expr, $src:expr,$markers:expr) => {
-        #[allow(unused_comparisons)]
-        if $args.len() < $min_args_len || $args.len() > $max_args_len {
-            throw_compiler_error(
-                $src,
-                $markers,
-                ErrType::IncorrectArgCountVariable(
-                    $fn_name.into(),
-                    $min_args_len as u16,
-                    $max_args_len as u16,
-                    $args.len() as u16,
-                ),
-            );
-        }
-    };
 }
 
 pub const KEEL_LOGO: &str = "

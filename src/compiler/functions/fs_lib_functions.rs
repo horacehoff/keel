@@ -1,4 +1,3 @@
-use crate::check_args;
 use crate::compiler::get_id;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
@@ -11,9 +10,8 @@ use crate::functions::check_arg_type;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use crate::registers::alloc_register;
-use crate::registers::free_register;
 use crate::type_system::DataType;
+use crate::util::check_args;
 
 pub fn fs_lib_functions(
     name: &str,
@@ -31,59 +29,31 @@ pub fn fs_lib_functions(
     let current_src_file = ctx.current_src_file;
     match name {
         "read" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            output.push(Instr::CallLibFunc(
-                LibFunc::FsRead,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            state.free_reg(id, v);
+            output.push(Instr::CallLibFunc(LibFunc::FsRead, id, state.alloc_reg()));
             state
                 .instr_src
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "exists" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            output.push(Instr::CallLibFunc(
-                LibFunc::FsExists,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            state.free_reg(id, v);
+            output.push(Instr::CallLibFunc(LibFunc::FsExists, id, state.alloc_reg()));
             state
                 .instr_src
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "write" => {
-            check_args!(args, 2, name, src, markers);
+            check_args(args, 2, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
             let filepath = get_id(
@@ -92,20 +62,8 @@ pub fn fs_lib_functions(
             let contents = get_id(
                 &args[1], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                filepath,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            free_register(
-                contents,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(filepath, v);
+            state.free_reg(contents, v);
             output.push(Instr::CallLibFuncVoid(
                 LibFuncVoid::FsWrite,
                 filepath,
@@ -116,7 +74,7 @@ pub fn fs_lib_functions(
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "append" => {
-            check_args!(args, 2, name, src, markers);
+            check_args(args, 2, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
             let filepath = get_id(
@@ -125,20 +83,8 @@ pub fn fs_lib_functions(
             let contents = get_id(
                 &args[1], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                filepath,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            free_register(
-                contents,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(filepath, v);
+            state.free_reg(contents, v);
             output.push(Instr::CallLibFuncVoid(
                 LibFuncVoid::FsAppend,
                 filepath,
@@ -149,36 +95,24 @@ pub fn fs_lib_functions(
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "delete" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let path = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                path,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(path, v);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, 0));
             state
                 .instr_src
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "delete_dir" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let path = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                path,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(path, v);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, 0));
             state
                 .instr_src

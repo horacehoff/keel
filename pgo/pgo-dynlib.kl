@@ -1,4 +1,4 @@
-dylib "pgo/pgo_dynlib" {
+dylib "pgo_dynlib" {
     int pgo_add_int(int,int);
     float pgo_add_float(float,float);
     int pgo_all_types(int,float,string,int[],float[],string[][],int[][],int);

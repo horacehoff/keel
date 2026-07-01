@@ -1,13 +1,8 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
-
 use crate::compiler_data::Variable;
 use crate::data::Data;
-use crate::data::NULL;
 use crate::errors::dev_error;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
-use ahash::RandomState;
 use smol_strc::SmolStr;
 
 pub fn get_expr_tgt_id(x: &[Instr], fallback_reg: u16) -> Option<u16> {
@@ -18,9 +13,10 @@ pub fn get_expr_tgt_id(x: &[Instr], fallback_reg: u16) -> Option<u16> {
         return Some(fallback_reg);
     }
     match x[0] {
-        Instr::EmptyArray(dest) | Instr::CloneArray(_, dest, _) | Instr::CloneStruct(_, dest) => {
-            Some(dest)
-        }
+        Instr::EmptyArray(dest)
+        | Instr::CloneArray(_, dest, _)
+        | Instr::CloneStruct(_, dest)
+        | Instr::CloneMap(_, dest) => Some(dest),
         _ => get_last_tgt_id(x),
     }
 }
@@ -38,7 +34,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     }
     let matching_elem_index = x
         .iter()
-        .rposition(|w| get_tgt_id(*w).is_some())
+        .rposition(|w| w.get_tgt_id().is_some())
         .unwrap_or(x.len() - 1);
     let matching_elem = x.get_mut(matching_elem_index).unwrap();
     match matching_elem {
@@ -88,6 +84,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::GetSliceString(_, _, y)
         | Instr::SaveFrame(_, y, _)
         | Instr::CallDynamicLibFunc(_, y)
+        | Instr::MapGet(_, _, y)
         | Instr::IncIntTo(_, y)
         | Instr::DecIntTo(_, y) => *y = tgt_id,
         Instr::CallFuncRecursive(_, y_func) => {
@@ -107,112 +104,229 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     }
 }
 
-/// Returns the ID of the register that will be modified by the given instruction
-pub const fn get_tgt_id(x: Instr) -> Option<u16> {
-    match x {
-        // ↓ INSTRUCTIONS THAT DON'T MODIFY ANY REGISTER ↓
-        Instr::Print(_)
-        | Instr::Jmp(_)
-        | Instr::JmpBack(_)
-        | Instr::IsFalseJmp(_, _)
-        | Instr::IsTrueJmp(_, _)
-        | Instr::NotEqJmp(_, _, _)
-        | Instr::ObjNotEqJmp(_, _, _)
-        | Instr::StrNotEqJmp(_, _, _)
-        | Instr::EqJmp(_, _, _)
-        | Instr::ObjEqJmp(_, _, _)
-        | Instr::StrEqJmp(_, _, _)
-        | Instr::SupFloatJmp(_, _, _)
-        | Instr::SupIntJmp(_, _, _)
-        | Instr::SupEqFloatJmp(_, _, _)
-        | Instr::SupEqIntJmp(_, _, _)
-        | Instr::InfEqFloatJmp(_, _, _)
-        | Instr::InfEqIntJmp(_, _, _)
-        | Instr::InfFloatJmp(_, _, _)
-        | Instr::InfIntJmp(_, _, _)
-        | Instr::InfIntJmpBack(_, _, _)
-        // | Instr::IoDelete(_)
-        | Instr::StoreFuncArg(_)
-        | Instr::SetElementObj(_, _, _)
-        | Instr::SetFieldStruct(_, _, _)
-        | Instr::ObjElemMov(_, _, _)
-        | Instr::Push(_, _)
-        | Instr::Return(_) // Modifies a register, but this function doesn't know which one
-        | Instr::RecursiveReturn(_) // Modifies a register, but this function doesn't know which one
-        | Instr::VoidReturn
-        | Instr::Remove(_, _)
-        | Instr::CallLibFuncVoid(_, _, _)
-        | Instr::Halt(_)
-        | Instr::StopErrorCatch
-        | Instr::ThrowError(_)
-        => None,
+impl Instr {
+    /// Returns the ID of the register that will be modified by the given instruction
+    pub const fn get_tgt_id(self) -> Option<u16> {
+        match self {
+            // ↓ INSTRUCTIONS THAT DON'T MODIFY ANY REGISTER ↓
+            Self::Print(_)
+            | Self::Jmp(_)
+            | Self::JmpBack(_)
+            | Self::IsFalseJmp(_, _)
+            | Self::IsTrueJmp(_, _)
+            | Self::NotEqJmp(_, _, _)
+            | Self::ObjNotEqJmp(_, _, _)
+            | Self::StrNotEqJmp(_, _, _)
+            | Self::EqJmp(_, _, _)
+            | Self::ObjEqJmp(_, _, _)
+            | Self::StrEqJmp(_, _, _)
+            | Self::SupFloatJmp(_, _, _)
+            | Self::SupIntJmp(_, _, _)
+            | Self::SupEqFloatJmp(_, _, _)
+            | Self::SupEqIntJmp(_, _, _)
+            | Self::InfEqFloatJmp(_, _, _)
+            | Self::InfEqIntJmp(_, _, _)
+            | Self::InfFloatJmp(_, _, _)
+            | Self::InfIntJmp(_, _, _)
+            | Self::InfIntJmpBack(_, _, _)
+            | Self::StoreFuncArg(_)
+            | Self::SetElementObj(_, _, _)
+            | Self::SetFieldStruct(_, _, _)
+            | Self::MapInsert(_, _, _)
+            | Self::MapInsertReg(_, _, _)
+            | Self::ObjElemMov(_, _, _)
+            | Self::Push(_, _)
+            | Self::Return(_) // Modifies a register, but this function doesn't know which one
+            | Self::RecursiveReturn(_) // Modifies a register, but this function doesn't know which one
+            | Self::VoidReturn
+            | Self::Remove(_, _)
+            | Self::CallLibFuncVoid(_, _, _)
+            | Self::Halt(_)
+            | Self::StopErrorCatch
+            | Self::ThrowError(_)
+            => None,
 
-        Instr::StartErrorCatch(_, y) if y == u16::MAX => None,
+            Self::StartErrorCatch(_, y) if y == u16::MAX => None,
 
-        Instr::Mov(_, y)
-        | Instr::SetInt(y, _)
-        | Instr::SetBool(_, y)
-        | Instr::CallFunc(_, y)
-        | Instr::CallFuncRecursive(_, y)
-        | Instr::SaveFrame(_, y, _)
-        | Instr::AddFloat(_, _, y)
-        | Instr::AddInt(_, _, y)
-        | Instr::AddArray(_, _, y)
-        | Instr::AddStr(_, _, y)
-        | Instr::MulFloat(_, _, y)
-        | Instr::MulInt(_, _, y)
-        | Instr::SubFloat(_, _, y)
-        | Instr::SubInt(_, _, y)
-        | Instr::DivFloat(_, _, y)
-        | Instr::DivInt(_, _, y)
-        | Instr::ModFloat(_, _, y)
-        | Instr::ModInt(_, _, y)
-        | Instr::PowFloat(_, _, y)
-        | Instr::PowInt(_, _, y)
-        | Instr::Eq(_, _, y)
-        | Instr::ObjEq(_, _, y)
-        | Instr::StrEq(_, _, y)
-        | Instr::NotEq(_, _, y)
-        | Instr::ObjNotEq(_, _, y)
-        | Instr::StrNotEq(_, _, y)
-        | Instr::SupFloat(_, _, y)
-        | Instr::SupInt(_, _, y)
-        | Instr::SupEqFloat(_, _, y)
-        | Instr::SupEqInt(_, _, y)
-        | Instr::InfFloat(_, _, y)
-        | Instr::InfInt(_, _, y)
-        | Instr::InfEqFloat(_, _, y)
-        | Instr::InfEqInt(_, _, y)
-        | Instr::BoolAnd(_, _, y)
-        | Instr::BoolOr(_, _, y)
-        | Instr::NegBool(_, y)
-        | Instr::EmptyArray(y)
-        | Instr::NegFloat(_, y)
-        | Instr::NegInt(_, y)
-        | Instr::CallLibFunc(_, _, y)
-        | Instr::GetIndexArray(_, _, y)
-        | Instr::GetFieldStruct(_, _, y)
-        | Instr::GetSliceArray(_, _, y)
-        | Instr::GetIndexString(_, _, y)
-        | Instr::GetSliceString(_, _, y)
-        | Instr::SetElementString(y, _, _)
-        | Instr::CallDynamicLibFunc(_, y)
-        | Instr::IncInt(y)
-        | Instr::DecInt(y)
-        | Instr::IncIntTo(_, y)
-        | Instr::DecIntTo(_, y)
-        | Instr::StartErrorCatch(_,y)
-        | Instr::CloneStruct(_, y)
-        | Instr::CloneArray(_, y, _) => Some(y),
+            Self::Mov(_, y)
+            | Self::SetInt(y, _)
+            | Self::SetBool(_, y)
+            | Self::CallFunc(_, y)
+            | Self::CallFuncRecursive(_, y)
+            | Self::SaveFrame(_, y, _)
+            | Self::AddFloat(_, _, y)
+            | Self::AddInt(_, _, y)
+            | Self::AddArray(_, _, y)
+            | Self::AddStr(_, _, y)
+            | Self::MulFloat(_, _, y)
+            | Self::MulInt(_, _, y)
+            | Self::SubFloat(_, _, y)
+            | Self::SubInt(_, _, y)
+            | Self::DivFloat(_, _, y)
+            | Self::DivInt(_, _, y)
+            | Self::ModFloat(_, _, y)
+            | Self::ModInt(_, _, y)
+            | Self::PowFloat(_, _, y)
+            | Self::PowInt(_, _, y)
+            | Self::Eq(_, _, y)
+            | Self::ObjEq(_, _, y)
+            | Self::StrEq(_, _, y)
+            | Self::NotEq(_, _, y)
+            | Self::ObjNotEq(_, _, y)
+            | Self::StrNotEq(_, _, y)
+            | Self::SupFloat(_, _, y)
+            | Self::SupInt(_, _, y)
+            | Self::SupEqFloat(_, _, y)
+            | Self::SupEqInt(_, _, y)
+            | Self::InfFloat(_, _, y)
+            | Self::InfInt(_, _, y)
+            | Self::InfEqFloat(_, _, y)
+            | Self::InfEqInt(_, _, y)
+            | Self::BoolAnd(_, _, y)
+            | Self::BoolOr(_, _, y)
+            | Self::NegBool(_, y)
+            | Self::EmptyArray(y)
+            | Self::NegFloat(_, y)
+            | Self::NegInt(_, y)
+            | Self::CallLibFunc(_, _, y)
+            | Self::GetIndexArray(_, _, y)
+            | Self::GetFieldStruct(_, _, y)
+            | Self::MapGet(_, _, y)
+            | Self::GetSliceArray(_, _, y)
+            | Self::GetIndexString(_, _, y)
+            | Self::GetSliceString(_, _, y)
+            | Self::SetElementString(y, _, _)
+            | Self::CallDynamicLibFunc(_, y)
+            | Self::IncInt(y)
+            | Self::DecInt(y)
+            | Self::IncIntTo(_, y)
+            | Self::DecIntTo(_, y)
+            | Self::StartErrorCatch(_,y)
+            | Self::CloneStruct(_, y)
+            | Self::CloneMap(_, y)
+            | Self::CloneArray(_, y, _) => Some(y),
+        }
+    }
 
+    pub fn for_each_read_reg(self, mut f: impl FnMut(u16)) {
+        match self {
+            Self::AddFloat(a, b, _)
+            | Self::AddInt(a, b, _)
+            | Self::AddArray(a, b, _)
+            | Self::AddStr(a, b, _)
+            | Self::MulFloat(a, b, _)
+            | Self::MulInt(a, b, _)
+            | Self::SubFloat(a, b, _)
+            | Self::SubInt(a, b, _)
+            | Self::DivFloat(a, b, _)
+            | Self::DivInt(a, b, _)
+            | Self::ModFloat(a, b, _)
+            | Self::ModInt(a, b, _)
+            | Self::PowFloat(a, b, _)
+            | Self::PowInt(a, b, _)
+            | Self::Eq(a, b, _)
+            | Self::NotEq(a, b, _)
+            | Self::ObjEq(a, b, _)
+            | Self::ObjNotEq(a, b, _)
+            | Self::StrEq(a, b, _)
+            | Self::StrNotEq(a, b, _)
+            | Self::SupFloat(a, b, _)
+            | Self::SupInt(a, b, _)
+            | Self::SupEqFloat(a, b, _)
+            | Self::SupEqInt(a, b, _)
+            | Self::InfFloat(a, b, _)
+            | Self::InfInt(a, b, _)
+            | Self::InfEqFloat(a, b, _)
+            | Self::InfEqInt(a, b, _)
+            | Self::BoolAnd(a, b, _)
+            | Self::BoolOr(a, b, _)
+            | Self::GetIndexArray(a, b, _)
+            | Self::GetSliceArray(a, b, _)
+            | Self::GetIndexString(a, b, _)
+            | Self::GetSliceString(a, b, _)
+            | Self::NotEqJmp(a, b, _)
+            | Self::EqJmp(a, b, _)
+            | Self::ObjNotEqJmp(a, b, _)
+            | Self::ObjEqJmp(a, b, _)
+            | Self::StrNotEqJmp(a, b, _)
+            | Self::StrEqJmp(a, b, _)
+            | Self::SupFloatJmp(a, b, _)
+            | Self::SupIntJmp(a, b, _)
+            | Self::SupEqFloatJmp(a, b, _)
+            | Self::SupEqIntJmp(a, b, _)
+            | Self::InfFloatJmp(a, b, _)
+            | Self::InfIntJmp(a, b, _)
+            | Self::InfEqFloatJmp(a, b, _)
+            | Self::InfEqIntJmp(a, b, _)
+            | Self::InfIntJmpBack(a, b, _)
+            | Self::Push(a, b)
+            | Self::SetFieldStruct(a, b, _)
+            | Self::MapGet(a, b, _)
+            | Self::MapInsert(_, a, b)
+            | Self::Remove(a, b) => {
+                f(a);
+                f(b);
+            }
 
+            Self::SetElementObj(a, b, c)
+            | Self::SetElementString(a, b, c)
+            | Self::MapInsertReg(a, b, c) => {
+                f(a);
+                f(b);
+                f(c);
+            }
 
+            Self::Mov(a, _)
+            | Self::IncInt(a)
+            | Self::DecInt(a)
+            | Self::IncIntTo(a, _)
+            | Self::DecIntTo(a, _)
+            | Self::NegFloat(a, _)
+            | Self::NegInt(a, _)
+            | Self::CallLibFunc(_, a, _)
+            | Self::Print(a)
+            | Self::StoreFuncArg(a)
+            | Self::Return(a)
+            | Self::RecursiveReturn(a)
+            | Self::IsFalseJmp(a, _)
+            | Self::IsTrueJmp(a, _)
+            | Self::ThrowError(a)
+            | Self::GetFieldStruct(a, _, _)
+            | Self::NegBool(a, _)
+            | Self::ObjElemMov(a, _, _) => f(a),
+
+            Self::CallLibFuncVoid(func, a, b) => {
+                f(a);
+                if matches!(func, LibFuncVoid::FsWrite | LibFuncVoid::FsAppend) {
+                    f(b);
+                }
+            }
+            Self::Halt(x) if x != 0 => f(x),
+
+            Self::CloneArray(src, _, _) | Self::CloneStruct(src, _) | Self::CloneMap(src, _) => {
+                f(src);
+            }
+
+            Self::Halt(_)
+            | Self::Jmp(_)
+            | Self::JmpBack(_)
+            | Self::VoidReturn
+            | Self::CallFunc(_, _)
+            | Self::CallFuncRecursive(_, _)
+            | Self::SaveFrame(_, _, _)
+            | Self::CallDynamicLibFunc(_, _)
+            | Self::EmptyArray(_)
+            | Self::SetInt(_, _)
+            | Self::StartErrorCatch(_, _)
+            | Self::StopErrorCatch
+            | Self::SetBool(_, _) => {}
+        }
     }
 }
 
 /// Returns the IDs of all the registers which are modified by the given instructions
 pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
-    let mut ids: Vec<u16> = x.iter().filter_map(|i| get_tgt_id(*i)).collect();
+    let mut ids: Vec<u16> = x.iter().filter_map(|i| i.get_tgt_id()).collect();
     ids.sort_unstable();
     ids.dedup();
     ids
@@ -221,209 +335,16 @@ pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
 pub fn get_last_tgt_id(x: &[Instr]) -> Option<u16> {
     debug_assert!(!(x.is_empty() || matches!(x.last().unwrap(), Instr::ObjElemMov(_, _, _))));
     for y in x.iter().rev() {
-        if let Some(id) = get_tgt_id(*y) {
+        if let Some(id) = y.get_tgt_id() {
             return Some(id);
         }
     }
     None
 }
 
-pub fn alloc_register(
-    registers: &mut Vec<Data>,
-    free_registers: &mut Vec<u16>,
-    reserved_registers: &HashSet<u16, RandomState>,
-) -> u16 {
-    if reserved_registers.is_empty() {
-        free_registers.pop().unwrap_or_else(|| {
-            registers.push(NULL);
-            (registers.len() - 1) as u16
-        })
-    } else if let Some(pos) = free_registers
-        .iter()
-        .rposition(|reg| !reserved_registers.contains(reg))
-    {
-        free_registers.swap_remove(pos)
-    } else {
-        registers.push(NULL);
-        (registers.len() - 1) as u16
-    }
-}
-
-pub fn free_register(
-    id: u16,
-    free_registers: &mut Vec<u16>,
-    v: &[Variable],
-    const_registers: &HashMap<Data, u16, RandomState>,
-    reserved_registers: &HashSet<u16, RandomState>,
-) {
-    if !v.iter().any(|var| var.register_id == id)
-        && !const_registers.values().any(|&reg| reg == id)
-        && !reserved_registers.contains(&id)
-        && !free_registers.contains(&id)
-    {
-        free_registers.push(id);
-    }
-}
-
-/// Frees registers that are written by instructions in scope_instrs & are not held by a variable & and are not in const_registers.
-pub fn free_scope_registers(
-    regs_before: u16,
-    scope_instrs: &[Instr],
-    free_registers: &mut Vec<u16>,
-    v: &[Variable],
-    const_registers: &HashMap<Data, u16, RandomState>,
-    avoid: &HashSet<u16, RandomState>,
-) {
-    for id in get_tgt_ids(scope_instrs) {
-        if id >= regs_before {
-            free_register(id, free_registers, v, const_registers, avoid);
-        }
-    }
-}
-
-/// Similar to free_scope_registers, but also frees CloneArray template registers. Only call this after a loop ends.
-pub fn free_loop_scope_registers(
-    regs_before: u16,
-    scope_instrs: &[Instr],
-    free_registers: &mut Vec<u16>,
-    v: &[Variable],
-    const_registers: &HashMap<Data, u16, RandomState>,
-    avoid: &HashSet<u16, RandomState>,
-) {
-    free_scope_registers(
-        regs_before,
-        scope_instrs,
-        free_registers,
-        v,
-        const_registers,
-        avoid,
-    );
-    // Free CloneArray template registers
-    for instr in scope_instrs {
-        if let Instr::CloneArray(template_reg, _, _) = instr
-            && *template_reg >= regs_before
-        {
-            free_register(*template_reg, free_registers, v, const_registers, avoid);
-        } else if let Instr::CloneStruct(template_reg, _) = instr
-            && *template_reg >= regs_before
-        {
-            free_register(*template_reg, free_registers, v, const_registers, avoid);
-        }
-    }
-}
-
 pub fn is_reg_free(v: &[Variable], id: u16, name: &SmolStr) -> bool {
     !v.iter()
         .any(|var| &var.name != name && var.register_id == id)
-}
-
-pub fn for_each_read_reg(instr: Instr, mut f: impl FnMut(u16)) {
-    match instr {
-        Instr::AddFloat(a, b, _)
-        | Instr::AddInt(a, b, _)
-        | Instr::AddArray(a, b, _)
-        | Instr::AddStr(a, b, _)
-        | Instr::MulFloat(a, b, _)
-        | Instr::MulInt(a, b, _)
-        | Instr::SubFloat(a, b, _)
-        | Instr::SubInt(a, b, _)
-        | Instr::DivFloat(a, b, _)
-        | Instr::DivInt(a, b, _)
-        | Instr::ModFloat(a, b, _)
-        | Instr::ModInt(a, b, _)
-        | Instr::PowFloat(a, b, _)
-        | Instr::PowInt(a, b, _)
-        | Instr::Eq(a, b, _)
-        | Instr::NotEq(a, b, _)
-        | Instr::ObjEq(a, b, _)
-        | Instr::ObjNotEq(a, b, _)
-        | Instr::StrEq(a, b, _)
-        | Instr::StrNotEq(a, b, _)
-        | Instr::SupFloat(a, b, _)
-        | Instr::SupInt(a, b, _)
-        | Instr::SupEqFloat(a, b, _)
-        | Instr::SupEqInt(a, b, _)
-        | Instr::InfFloat(a, b, _)
-        | Instr::InfInt(a, b, _)
-        | Instr::InfEqFloat(a, b, _)
-        | Instr::InfEqInt(a, b, _)
-        | Instr::BoolAnd(a, b, _)
-        | Instr::BoolOr(a, b, _)
-        | Instr::GetIndexArray(a, b, _)
-        | Instr::GetSliceArray(a, b, _)
-        | Instr::GetIndexString(a, b, _)
-        | Instr::GetSliceString(a, b, _)
-        | Instr::NotEqJmp(a, b, _)
-        | Instr::EqJmp(a, b, _)
-        | Instr::ObjNotEqJmp(a, b, _)
-        | Instr::ObjEqJmp(a, b, _)
-        | Instr::StrNotEqJmp(a, b, _)
-        | Instr::StrEqJmp(a, b, _)
-        | Instr::SupFloatJmp(a, b, _)
-        | Instr::SupIntJmp(a, b, _)
-        | Instr::SupEqFloatJmp(a, b, _)
-        | Instr::SupEqIntJmp(a, b, _)
-        | Instr::InfFloatJmp(a, b, _)
-        | Instr::InfIntJmp(a, b, _)
-        | Instr::InfEqFloatJmp(a, b, _)
-        | Instr::InfEqIntJmp(a, b, _)
-        | Instr::InfIntJmpBack(a, b, _)
-        | Instr::Push(a, b)
-        | Instr::SetFieldStruct(a, b, _)
-        | Instr::Remove(a, b) => {
-            f(a);
-            f(b);
-        }
-
-        Instr::SetElementObj(a, b, c) | Instr::SetElementString(a, b, c) => {
-            f(a);
-            f(b);
-            f(c);
-        }
-
-        Instr::Mov(a, _)
-        | Instr::IncInt(a)
-        | Instr::DecInt(a)
-        | Instr::IncIntTo(a, _)
-        | Instr::DecIntTo(a, _)
-        | Instr::NegFloat(a, _)
-        | Instr::NegInt(a, _)
-        | Instr::CallLibFunc(_, a, _)
-        | Instr::Print(a)
-        | Instr::StoreFuncArg(a)
-        | Instr::Return(a)
-        | Instr::RecursiveReturn(a)
-        | Instr::IsFalseJmp(a, _)
-        | Instr::IsTrueJmp(a, _)
-        | Instr::ThrowError(a)
-        | Instr::GetFieldStruct(a, _, _)
-        | Instr::NegBool(a, _)
-        | Instr::ObjElemMov(a, _, _) => f(a),
-
-        Instr::CallLibFuncVoid(func, a, b) => {
-            f(a);
-            if matches!(func, LibFuncVoid::FsWrite | LibFuncVoid::FsAppend) {
-                f(b);
-            }
-        }
-        Instr::Halt(x) if x != 0 => f(x),
-
-        Instr::CloneArray(src, _, _) | Instr::CloneStruct(src, _) => f(src),
-
-        Instr::Halt(_)
-        | Instr::Jmp(_)
-        | Instr::JmpBack(_)
-        | Instr::VoidReturn
-        | Instr::CallFunc(_, _)
-        | Instr::CallFuncRecursive(_, _)
-        | Instr::SaveFrame(_, _, _)
-        | Instr::CallDynamicLibFunc(_, _)
-        | Instr::EmptyArray(_)
-        | Instr::SetInt(_, _)
-        | Instr::StartErrorCatch(_, _)
-        | Instr::StopErrorCatch
-        | Instr::SetBool(_, _) => {}
-    }
 }
 
 /// Write v, located in the src_id register, into the dest_id register using the cheapest instruction

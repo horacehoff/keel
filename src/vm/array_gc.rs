@@ -9,7 +9,7 @@ pub fn alloc_array(
     recursion_stack: &[Data],
     gc_array_threshold: &mut u32,
     live: &mut Vec<bool>,
-    array_gc_stack: &mut Vec<Data>,
+    obj_gc_stack: &mut Vec<Data>,
 ) -> u32 {
     if let Some(id) = free_arrays.pop() {
         unsafe { obj_pool.get_unchecked_mut(id as usize) }.clear();
@@ -23,7 +23,7 @@ pub fn alloc_array(
                 registers,
                 recursion_stack,
                 live,
-                array_gc_stack,
+                obj_gc_stack,
             );
         }
         if let Some(id) = free_arrays.pop() {

@@ -76,8 +76,9 @@ keel -h/--help     # Print help
 - [Importing dynamic libraries](#importing-dynamic-libraries)
 - [Embedding (experimental)](#embedding-experimental)
 - [Arrays](#arrays)
-- [Slices](#slices)
 - [Structs](#structs)
+- [Maps](#maps)
+- [Slices](#slices)
 - [Arithmetic Operations](#arithmetic-operations)
 - [Documentation](#documentation)
 
@@ -91,9 +92,13 @@ let name = "Keel";
 let ratio = 3.14;
 let flag = true;
 let numbers = [1, 2, 3, 4, 5];
+// structs can be defined inside/outside functions
+struct MyStruct { first: float, second: MyStruct[], third:string, fourth:bool[][] }
+let s = MyStruct { first: 42.0, second: null, third: "Hello, world!", fourth: [[true],[false]] };
+let map = {"the answer": 42, "funny": 67};
 ```
 
-Built-in types: `Integer` (i32), `Float` (f64), `Boolean`, `String`, `Array<T>`.
+Built-in types: `Integer` (i32), `Float` (f64), `Boolean`, `String`, `Array<T>`, and `Map<K,V>` (T, K, and V representing any type)
 
 ### Functions
 
@@ -368,21 +373,6 @@ nums.push(2);
 print(nums.contains(9)); // true
 ```
 
-### Slices
-
-```rs
-let nums = [3, 1, 4, 1, 5, 9];
-print(nums[..2]);  // [3,1]
-print(nums[0..2]); // [3,1]
-print(nums[2..4]); // [4,1]
-```
-
-```rs
-let msg = "Hello world";
-print(msg[..5]);   // "Hello"
-print(msg[0..5]);  // "Hello"
-print(msg[6..11]); // "world"
-```
 
 ### Structs
 
@@ -414,6 +404,36 @@ print(x.second_field[0]); // TestStruct {x:[[99,1,2],[3,4,5]],y:false}
 print(x); // MyStruct {first_field:10,second_field:[TestStruct {x:[[99,1,2],[3,4,5]],y:false}],third_field:"HELLO, WORLD!"}
 ```
 
+### Maps
+Maps allow you to store key-value pairs with O(1) access.
+They're written `Map<K,V>`, with `K` being the type of the keys and `V` being the type of the values.
+Maps can only have one key-value type and cannot contain duplicate keys.
+
+```rs
+struct User {email: string, password: string, id: int}
+let users = {
+  "horacehoff": User {email: "horace.hoff", password: "123456789", id: 0}
+};
+users.insert("horacehoff", User {email: "horace.hoff", password: "987654321", id: 0}); // updates the entry
+users.insert("anotheruser", User {email: "guest@email.com", password: "strongpwd", id: 1}); // adds an entry
+print(users.get("horacehoff").email);
+```
+
+### Slices
+
+```rs
+let nums = [3, 1, 4, 1, 5, 9];
+print(nums[..2]);  // [3,1]
+print(nums[0..2]); // [3,1]
+print(nums[2..4]); // [4,1]
+```
+
+```rs
+let msg = "Hello world";
+print(msg[..5]);   // "Hello"
+print(msg[0..5]);  // "Hello"
+print(msg[6..11]); // "world"
+```
 
 ### Arithmetic Operations
 

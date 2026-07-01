@@ -165,6 +165,7 @@ dependencies = [
  "logos",
  "memchr",
  "mimalloc",
+ "nohash-hasher",
  "smol_strc",
  "wasm-bindgen",
  "zmij",
@@ -317,6 +318,12 @@ checksum = "2d4139bb28d14ad1facf21d5eb8825051b326e172d216b39f6d31df53cc97862"
 dependencies = [
  "libmimalloc-sys",
 ]
+
+[[package]]
+name = "nohash-hasher"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "once_cell"

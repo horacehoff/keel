@@ -2,6 +2,7 @@
 
 > T represents any type.\
 > Array\<T\> represents an array containing elements of type T. It can also be written T[].\
+> Map\<T,V\> represents a map where keys are of type T and values are of type V.\
 > `arg: T` represents a function argument of type T.
 
 ## Print
@@ -395,3 +396,25 @@ argv() // Returns ["foo", "bar"]
 `exit()`\
 `exit(exit_code: Int)`\
 Exits the program with the exit code 0, if not provided with one.
+
+## Get
+
+`<Map<K,V>>.get(key: T) -> V`
+Returns the value associated with the key in the given map. If the key doesn't exist, it raises the `unknown_map_key` error.
+Example:
+```
+let map = {"test1": 42, "test2": 67};
+print(map.get("test2")); // prints 67
+```
+
+## Insert
+
+`<Map<K,V>>.insert(key: T, value: V)`
+Inserts the given key-value pair in the map. It updates the value if the key already exists.
+Example:
+```
+let map = {"test1": 42, "test2": 67};
+map.insert("test3", 314);
+map.insert("test1", 3000);
+print(map); // prints {"test1":3000,"test2":67,"test3":314}
+```

@@ -7,6 +7,7 @@ use crate::parser::Parser;
 use crate::parser::parse_args;
 use crate::parser::parse_code;
 use crate::parser::parse_namespace;
+use crate::parser_expr;
 use crate::parser_expr::parse_expr;
 use crate::parser_expr::parse_expr_no_struct;
 use crate::parser_expr::parse_expr_with_precedence;
@@ -287,6 +288,38 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                     ),
                 );
             }
+        }
+        // map
+        Token::LBrace => {
+            let mut kv_pairs: Vec<(Expr, Expr)> = Vec::with_capacity(2);
+            let end: u32;
+            loop {
+                let key = parse_term(parser, allow_struct);
+                parser.next_token_expect(
+                    Token::Colon,
+                    "Key-value pairs must be separated by a colon",
+                );
+                let value = parser_expr::parse_expr(parser);
+                kv_pairs.push((key, value));
+                let peek_token = parser.peek_token();
+                if peek_token == Token::Comma {
+                    parser.next_token();
+                } else if peek_token == Token::RBrace {
+                    end = parser.next_token().1.end;
+                    break;
+                } else {
+                    let span = parser.peek_token_span();
+                    parser.error(
+                        span,
+                        ParserErr::UnexpectedTokenStr(
+                            "',' (another key-value pair) or '}' (end of map)",
+                            peek_token,
+                            "",
+                        ),
+                    )
+                }
+            }
+            Expr::Map(Box::from(kv_pairs), (t_span.start, end).into())
         }
         unexpected => {
             cold_path();

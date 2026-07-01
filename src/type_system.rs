@@ -39,24 +39,114 @@ pub enum DataType {
     /// Fn (\[arg_types ... return_type\]) => return_type is always specified
     Fn(u16),
     Struct(u16),
+    Map(Box<(Option<Self>, Option<Self>)>),
+}
+
+impl DataType {
+    pub fn format(&self) -> SmolStr {
+        match self {
+            Self::Float => SmolStr::new_static("Float"),
+            Self::Int => SmolStr::new_static("Integer"),
+            Self::Bool => SmolStr::new_static("Boolean"),
+            Self::String => SmolStr::new_static("String"),
+            Self::Array(array_type) => match array_type {
+                Some(array_type) => format_args!("{}[]", array_type.format()).to_smolstr(),
+                None => SmolStr::new_static("Unknown[]"),
+            },
+            Self::Null => SmolStr::new_static("Null"),
+            Self::Unknown => SmolStr::new_static("Unknown"),
+            Self::Poly(types) => format_args!(
+                "{}",
+                types
+                    .into_iter()
+                    .map(|x| x.format())
+                    .collect::<Vec<SmolStr>>()
+                    .join("|")
+            )
+            .to_smolstr(),
+            Self::Struct(_) => SmolStr::new_static("Struct"),
+            Self::Map(m) => format_args!(
+                "Map[{}, {}]",
+                m.0.as_ref().unwrap_or(&Self::Unknown).format(),
+                m.1.as_ref().unwrap_or(&Self::Unknown).format()
+            )
+            .to_smolstr(),
+            Self::Fn(_) => SmolStr::new_static("Function"),
+        }
+    }
+    pub fn format_detailed(&self, state: &State<'_>) -> SmolStr {
+        match self {
+            Self::Float => SmolStr::new_static("Float"),
+            Self::Int => SmolStr::new_static("Integer"),
+            Self::Bool => SmolStr::new_static("Boolean"),
+            Self::String => SmolStr::new_static("String"),
+            Self::Array(array_type) => match array_type {
+                Some(array_type) => {
+                    format_args!("{}[]", array_type.format_detailed(state)).to_smolstr()
+                }
+                None => SmolStr::new_static("Unknown[]"),
+            },
+            Self::Null => SmolStr::new_static("Null"),
+            Self::Unknown => SmolStr::new_static("Unknown"),
+            Self::Poly(types) => format_args!(
+                "{}",
+                types
+                    .into_iter()
+                    .map(|x| x.format_detailed(state))
+                    .collect::<Vec<SmolStr>>()
+                    .join("|")
+            )
+            .to_smolstr(),
+            Self::Struct(s) => {
+                let s = &state.structs[*s as usize];
+                format_args!(
+                    "{} {{{}}}",
+                    s.name,
+                    s.fields
+                        .iter()
+                        .map(|(n, t)| format_args!("{n}: {}", t.format_detailed(state)).to_smolstr())
+                        .collect::<Vec<SmolStr>>()
+                        .join(", ")
+                )
+                .to_smolstr()
+            }
+            Self::Map(m) => format_args!(
+                "Map[{}, {}]",
+                m.0.as_ref().unwrap_or(&Self::Unknown).format(),
+                m.1.as_ref().unwrap_or(&Self::Unknown).format()
+            )
+            .to_smolstr(),
+            Self::Fn(id) => {
+                let f = &state.fns[*id as usize];
+                format_args!("fn ({})", f.args.join(", ")).to_smolstr()
+            }
+        }
+    }
+    pub const fn is_indexable(&self) -> bool {
+        matches!(self, Self::String | Self::Array(_) | Self::Unknown)
+    }
 }
 
 impl PartialEq for DataType {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             // Array(None) is compatible with any array type
-            (Self::Array(None), Self::Array(_))
-            | (Self::Float, Self::Float)
+            (Self::Float, Self::Float)
             | (Self::Int, Self::Int)
             | (Self::Bool, Self::Bool)
             | (Self::String, Self::String)
             | (Self::Null, Self::Null)
             | (Self::Unknown, Self::Unknown)
-            | (Self::Array(_), Self::Array(None)) => true,
+            | (Self::Array(_), Self::Array(None))
+            | (Self::Array(None), Self::Array(_)) => true,
             (Self::Array(Some(a)), Self::Array(Some(b))) => a == b,
             (Self::Poly(a), Self::Poly(b)) => a == b,
             (Self::Struct(a), Self::Struct(b)) => a == b,
-            (Self::Fn(a), Self::Fn(b)) => true,
+            (Self::Fn(_), Self::Fn(_)) => true,
+            (Self::Map(a), Self::Map(b)) => {
+                (a.0.is_none() || b.0.is_none() || a.0 == b.0)
+                    && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
+            }
             _ => false,
         }
     }
@@ -85,6 +175,10 @@ impl std::hash::Hash for DataType {
                 10u8.hash(state);
                 s.hash(state);
             }
+            Self::Map(m) => {
+                11u8.hash(state);
+                m.hash(state);
+            }
         }
     }
 }
@@ -92,10 +186,6 @@ impl std::hash::Hash for DataType {
 #[inline(always)]
 pub fn struct_field_type_matches(expected: &DataType, received: &DataType) -> bool {
     received == &DataType::Null || expected == received
-}
-
-pub const fn is_type_indexable(x: &DataType) -> bool {
-    matches!(x, DataType::String | DataType::Array(_) | DataType::Unknown)
 }
 
 /// Collect all the function calls in the given code
@@ -461,6 +551,31 @@ pub fn infer_type(
                 .unwrap_or(DataType::Unknown);
             Some(Box::from(elem_type))
         }),
+        Expr::Map(kv_pairs, _) => {
+            if kv_pairs.is_empty() {
+                DataType::Map(Box::from((
+                    Some(DataType::Unknown),
+                    Some(DataType::Unknown),
+                )))
+            } else {
+                let kv_type = kv_pairs
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            infer_type(key, v, ctx, state),
+                            infer_type(value, v, ctx, state),
+                        )
+                    })
+                    .find(|(key_t, val_t)| {
+                        key_t != &DataType::Unknown || val_t != &DataType::Unknown
+                    })
+                    .map_or(
+                        (Some(DataType::Unknown), Some(DataType::Unknown)),
+                        |(key_t, val_t)| (Some(key_t), Some(val_t)),
+                    );
+                DataType::Map(Box::from(kv_type))
+            }
+        }
         Expr::Add(x, y, markers) => {
             match (infer_type(x, v, ctx, state), infer_type(y, v, ctx, state)) {
                 (DataType::Unknown, t) | (t, DataType::Unknown) => t,
@@ -688,7 +803,7 @@ pub fn infer_type(
                         unreachable!()
                     }
                 }
-                "push" | "sort" | "remove" => DataType::Null,
+                "push" | "sort" | "remove" | "insert" => DataType::Null,
                 "sqrt" | "round" | "floor" => DataType::Float,
                 "abs" => {
                     let obj_type = infer_type(obj, v, ctx, state);
@@ -705,6 +820,14 @@ pub fn infer_type(
                     let obj_type = infer_type(obj, v, ctx, state);
                     if let DataType::Array(array_type) = obj_type {
                         DataType::Array(Some(Box::from(DataType::Array(array_type))))
+                    } else {
+                        unreachable!()
+                    }
+                }
+                "get" => {
+                    let obj_type = infer_type(obj, v, ctx, state);
+                    if let DataType::Map(m) = obj_type {
+                        m.1.unwrap_or(DataType::Unknown)
                     } else {
                         unreachable!()
                     }

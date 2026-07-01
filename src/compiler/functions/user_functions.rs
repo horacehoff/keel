@@ -1,4 +1,3 @@
-use crate::check_args;
 use crate::compiler::compile_expr;
 use crate::compiler::get_id;
 use crate::compiler_data::Ctx;
@@ -11,9 +10,6 @@ use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::instr::Instr;
-use crate::registers::alloc_register;
-use crate::registers::for_each_read_reg;
-use crate::registers::free_register;
 use crate::registers::get_tgt_ids;
 use crate::registers::move_to_id;
 use crate::type_system::DataType;
@@ -21,6 +17,7 @@ use crate::type_system::can_reach;
 use crate::type_system::check_poly;
 use crate::type_system::infer_type;
 use crate::type_system::track_returns;
+use crate::util::check_args;
 use smol_strc::SmolStr;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -65,7 +62,7 @@ pub fn handle_user_function(
 
     // Check if the arguments are correct
     let args_len = state.fns[fn_id].args.len();
-    check_args!(args, args_len, fn_name, src, markers);
+    check_args(args, args_len, fn_name, src, markers);
 
     //This inlines dylib wrappers
     // Actual general function inlining is coming soon
@@ -104,13 +101,7 @@ pub fn handle_user_function(
         for arg in args {
             let arg_id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
             output.push(Instr::StoreFuncArg(arg_id));
-            free_register(
-                arg_id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(arg_id, v);
             *state.allocated_arg_count += 1;
         }
 
@@ -216,11 +207,7 @@ pub fn handle_user_function(
     let return_register_id = if fn_returns_null {
         0
     } else {
-        alloc_register(
-            state.registers,
-            state.free_registers,
-            &state.reserved_registers,
-        )
+        state.alloc_reg()
     };
     if is_recursive {
         output.push(Instr::CallFuncRecursive(loc, return_register_id));
@@ -367,7 +354,9 @@ fn compile_function(
     reserved_registers.extend(args_loc);
     for instr in &parsed {
         match instr {
-            Instr::CloneArray(template_reg, _, _) | Instr::CloneStruct(template_reg, _) => {
+            Instr::CloneArray(template_reg, _, _)
+            | Instr::CloneStruct(template_reg, _)
+            | Instr::CloneMap(template_reg, _) => {
                 reserved_registers.push(*template_reg);
             }
             _ => {}
@@ -398,7 +387,7 @@ fn compile_function(
 
                 let mut live_regs: Vec<u16> = Vec::new();
                 for after_instr in &parsed[pos + 1..] {
-                    for_each_read_reg(*after_instr, |reg| {
+                    after_instr.for_each_read_reg(|reg| {
                         if all_written_regs.binary_search(&reg).is_ok() {
                             live_regs.push(reg);
                         }

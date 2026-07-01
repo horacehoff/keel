@@ -1,9 +1,12 @@
 use crate::compiler::Namespace;
 use crate::data::Data;
+use crate::data::NULL;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::instr::Instr;
+use crate::registers::get_tgt_ids;
 use crate::type_system::DataType;
+use crate::vm::MapPool;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
 use ahash::RandomState;
@@ -88,8 +91,9 @@ pub struct Struct {
 }
 
 pub struct Pools {
-    pub obj_pool: ObjectPool,
-    pub string_pool: StringPool,
+    pub objs: ObjectPool,
+    pub maps: MapPool,
+    pub strings: StringPool,
 }
 
 #[derive(Clone, Copy)]
@@ -117,6 +121,72 @@ pub struct State<'a> {
     pub sources: &'a mut Vec<(SmolStr, Rc<String>)>,
     pub reserved_registers: HashSet<u16, RandomState>,
     pub namespace: &'a mut Namespace,
+}
+
+impl State<'_> {
+    pub fn free_reg(&mut self, id: u16, v: &[Variable]) {
+        if !v.iter().any(|var| var.register_id == id)
+            && !self.const_registers.values().any(|&reg| reg == id)
+            && !self.reserved_registers.contains(&id)
+            && !self.free_registers.contains(&id)
+        {
+            self.free_registers.push(id);
+        }
+    }
+    pub fn alloc_reg(&mut self) -> u16 {
+        if self.reserved_registers.is_empty() {
+            self.free_registers.pop().unwrap_or_else(|| {
+                self.registers.push(NULL);
+                (self.registers.len() - 1) as u16
+            })
+        } else if let Some(pos) = self
+            .free_registers
+            .iter()
+            .rposition(|reg| !self.reserved_registers.contains(reg))
+        {
+            self.free_registers.swap_remove(pos)
+        } else {
+            self.registers.push(NULL);
+            (self.registers.len() - 1) as u16
+        }
+    }
+    /// Frees registers that are written by instructions in scope_instrs & are not held by a variable & and are not in const_registers.
+    pub fn free_scope_registers(
+        &mut self,
+        regs_before: u16,
+        scope_instrs: &[Instr],
+        v: &[Variable],
+    ) {
+        for id in get_tgt_ids(scope_instrs) {
+            if id >= regs_before && !self.reserved_registers.contains(&id) {
+                self.free_reg(id, v);
+            }
+        }
+    }
+
+    /// Similar to free_scope_registers, but also frees CloneArray template registers. Only call this after a loop ends.
+    pub fn free_loop_scope_registers(
+        &mut self,
+        regs_before: u16,
+        scope_instrs: &[Instr],
+        v: &[Variable],
+    ) {
+        self.free_scope_registers(regs_before, scope_instrs, v);
+        // Free CloneArray template registers
+        for instr in scope_instrs {
+            if let Instr::CloneArray(template_reg, _, _) = instr
+                && *template_reg >= regs_before
+                && !self.reserved_registers.contains(template_reg)
+            {
+                self.free_reg(*template_reg, v);
+            } else if let Instr::CloneStruct(template_reg, _) = instr
+                && *template_reg >= regs_before
+                && !self.reserved_registers.contains(template_reg)
+            {
+                self.free_reg(*template_reg, v);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]

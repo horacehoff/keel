@@ -50,6 +50,7 @@ lexical-core = "1.0.6"
 zmij = "1.0.21"
 ahash = {version="0.8.12", features = ["compile-time-rng"]}
 logos = "0.16.1"
+nohash-hasher = "0.2.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.9.0"
@@ -68,13 +69,10 @@ name = "keel"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
-[profile.opt]
-inherits = "dev"
+[profile.dev]
 opt-level = 1
-lto = "thin"
 debug = false
 strip = true
-debug-assertions = false
 
 [profile.release]
 opt-level = 3

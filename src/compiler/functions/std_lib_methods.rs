@@ -1,5 +1,3 @@
-use crate::check_args;
-use crate::check_args_range;
 use crate::compiler::get_id;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
@@ -11,10 +9,10 @@ use crate::expr::Span;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use crate::registers::alloc_register;
-use crate::registers::free_register;
 use crate::type_system::DataType;
 use crate::type_system::infer_type;
+use crate::util::check_args;
+use crate::util::check_args_range;
 
 pub fn std_lib_methods(
     name: &str,
@@ -41,13 +39,7 @@ pub fn std_lib_methods(
                 let arg_id = get_id(&arg, v, ctx, state, output, None, false, offset, single_run);
                 output.push(Instr::StoreFuncArg(arg_id));
                 *state.allocated_arg_count += 1;
-                free_register(
-                    arg_id,
-                    state.free_registers,
-                    v,
-                    state.const_registers,
-                    &state.reserved_registers,
-                );
+                state.free_reg(arg_id, v);
             }
         };
     }
@@ -73,15 +65,19 @@ pub fn std_lib_methods(
     macro_rules! check {
         ($expected:pat,$expected_str:expr, $args:expr) => {
             check_type!($expected, $expected_str);
-            check_args!(
+            check_args(
                 args,
                 $args,
                 name,
                 src,
-                Span {
-                    start: args_indexes[0].start,
-                    end: args_indexes.last().unwrap().end
-                }
+                if args_indexes.is_empty() {
+                    fn_markers
+                } else {
+                    Span {
+                        start: args_indexes[0].start,
+                        end: args_indexes.last().unwrap().end,
+                    }
+                },
             )
         };
         ($expected:pat,$expected_str:expr, $args_min:expr,$args_max:expr) => {
@@ -92,8 +88,16 @@ pub fn std_lib_methods(
                 $args_max,
                 name,
                 src,
-                args_indexes[0].start,
-                args_indexes.last().unwrap().end
+                if args_indexes.is_empty() {
+                    fn_markers.start
+                } else {
+                    args_indexes[0].start
+                },
+                if args_indexes.is_empty() {
+                    fn_markers.end
+                } else {
+                    args_indexes.last().unwrap().end
+                }
             )
         };
     }
@@ -103,11 +107,7 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Uppercase,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "lowercase" => {
@@ -115,11 +115,7 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::Lowercase,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "starts_with" => {
@@ -128,50 +124,22 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::StartsWith,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "ends_with" => {
             check!(DataType::String, "String", 1);
             add_args!();
-            output.push(Instr::CallLibFunc(
-                LibFunc::EndsWith,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::EndsWith, id, state.alloc_reg()));
         }
         "replace" => {
             check!(DataType::String, "String", 2);
             add_args!();
-            output.push(Instr::CallLibFunc(
-                LibFunc::Replace,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Replace, id, state.alloc_reg()));
         }
         "len" => {
             check!(DataType::Array(_) | DataType::String, "Array or String", 0);
-            output.push(Instr::CallLibFunc(
-                LibFunc::Len,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Len, id, state.alloc_reg()));
         }
         "contains" => {
             check!(DataType::Array(_) | DataType::String, "Array or String", 1);
@@ -187,27 +155,11 @@ pub fn std_lib_methods(
 
             add_args!();
 
-            output.push(Instr::CallLibFunc(
-                LibFunc::Contains,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Contains, id, state.alloc_reg()));
         }
         "trim" => {
             check!(DataType::String, "String", 0);
-            output.push(Instr::CallLibFunc(
-                LibFunc::Trim,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Trim, id, state.alloc_reg()));
         }
         "trim_sequence" => {
             check!(DataType::String, "String", 1);
@@ -225,11 +177,7 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimSequence,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "find" => {
@@ -254,65 +202,29 @@ pub fn std_lib_methods(
 
             add_args!();
 
-            output.push(Instr::CallLibFunc(
-                LibFunc::Find,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Find, id, state.alloc_reg()));
             state
                 .instr_src
                 .push((*output.last().unwrap(), fn_markers, current_src_file));
         }
         "is_float" => {
             check!(DataType::String, "String", 0);
-            output.push(Instr::CallLibFunc(
-                LibFunc::IsFloat,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::IsFloat, id, state.alloc_reg()));
         }
         "is_int" => {
             check!(DataType::String, "String", 0);
-            output.push(Instr::CallLibFunc(
-                LibFunc::IsInt,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::IsInt, id, state.alloc_reg()));
         }
         "trim_left" => {
             check!(DataType::String, "String", 0);
-            output.push(Instr::CallLibFunc(
-                LibFunc::TrimLeft,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::TrimLeft, id, state.alloc_reg()));
         }
         "trim_right" => {
             check!(DataType::String, "String", 0);
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimRight,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "trim_sequence_left" => {
@@ -331,11 +243,7 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimSequenceLeft,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "trim_sequence_right" => {
@@ -354,11 +262,7 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::TrimSequenceRight,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "repeat" => {
@@ -375,15 +279,7 @@ pub fn std_lib_methods(
 
             add_args!();
 
-            output.push(Instr::CallLibFunc(
-                LibFunc::Repeat,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Repeat, id, state.alloc_reg()));
         }
         "push" => {
             check!(DataType::Array(_), "Array", 1);
@@ -410,13 +306,7 @@ pub fn std_lib_methods(
             let arg_id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(id, v);
             output.push(Instr::Push(id, arg_id));
         }
         "sqrt" => {
@@ -424,61 +314,25 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::SqrtFloat,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "round" => {
             check!(DataType::Float, "Float", 0);
-            output.push(Instr::CallLibFunc(
-                LibFunc::Round,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Round, id, state.alloc_reg()));
         }
         "floor" => {
             check!(DataType::Float, "Float", 0);
-            output.push(Instr::CallLibFunc(
-                LibFunc::Floor,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Floor, id, state.alloc_reg()));
         }
         "abs" => {
             check!(DataType::Float | DataType::Int, "Int or Float", 0);
-            output.push(Instr::CallLibFunc(
-                LibFunc::Abs,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Abs, id, state.alloc_reg()));
         }
         "reverse" => {
             check!(DataType::Array(_) | DataType::String, "Array or String", 0);
             if obj_type == DataType::String {
-                output.push(Instr::CallLibFunc(
-                    LibFunc::Reverse,
-                    id,
-                    alloc_register(
-                        state.registers,
-                        state.free_registers,
-                        &state.reserved_registers,
-                    ),
-                ));
+                output.push(Instr::CallLibFunc(LibFunc::Reverse, id, state.alloc_reg()));
             } else {
                 output.push(Instr::CallLibFuncVoid(LibFuncVoid::Reverse, id, 0));
             }
@@ -495,15 +349,7 @@ pub fn std_lib_methods(
                 );
             }
             add_args!();
-            output.push(Instr::CallLibFunc(
-                LibFunc::Split,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Split, id, state.alloc_reg()));
         }
         "partition" => {
             check!(DataType::Array(_), "Array", 1);
@@ -519,15 +365,7 @@ pub fn std_lib_methods(
                 );
             }
             add_args!();
-            output.push(Instr::CallLibFunc(
-                LibFunc::Split,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            output.push(Instr::CallLibFunc(LibFunc::Split, id, state.alloc_reg()));
         }
         "join" => {
             let expected = DataType::Array(Some(Box::from(DataType::String)));
@@ -540,7 +378,7 @@ pub fn std_lib_methods(
             } {
                 throw_compiler_error(src, fn_markers, ErrType::InvalidType(&expected, &obj_type));
             }
-            check_args_range!(args, 0, 1, "join", src, fn_markers);
+            check_args_range(args, 0, 1, "join", src, fn_markers);
             if !args.is_empty() {
                 let arg_type = infer_type(&args[0], v, ctx, state);
                 if arg_type != DataType::String {
@@ -555,11 +393,7 @@ pub fn std_lib_methods(
             output.push(Instr::CallLibFunc(
                 LibFunc::JoinStringArray,
                 id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "remove" => {
@@ -576,13 +410,7 @@ pub fn std_lib_methods(
             let arg_id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                arg_id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(arg_id, v);
             output.push(Instr::Remove(id, arg_id));
             state
                 .instr_src
@@ -591,6 +419,52 @@ pub fn std_lib_methods(
         "sort" => {
             check!(DataType::Array(_), "Array", 0);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::Sort, id, 0));
+        }
+        "get" => {
+            check!(DataType::Map(_), "Map", 1);
+
+            let arg_type = infer_type(&args[0], v, ctx, state);
+            if let DataType::Map(t) = obj_type
+                && let Some(key_type) = t.0
+                && key_type != arg_type
+            {
+                throw_compiler_error(
+                    src,
+                    args_indexes[0],
+                    ErrType::InvalidType(&key_type, &arg_type),
+                );
+            }
+            let arg_id = get_id(
+                &args[0], v, ctx, state, output, None, false, offset, single_run,
+            );
+            output.push(Instr::MapGet(id, arg_id, state.alloc_reg()));
+            state
+                .instr_src
+                .push((*output.last().unwrap(), args_indexes[0], current_src_file));
+        }
+        "insert" => {
+            check!(DataType::Map(_), "Map", 2);
+            let key_type = infer_type(&args[0], v, ctx, state);
+            let val_type = infer_type(&args[1], v, ctx, state);
+            if let DataType::Map(m) = obj_type {
+                if let Some(t) = m.0
+                    && t != key_type
+                {
+                    throw_compiler_error(src, args_indexes[0], ErrType::InvalidType(&t, &key_type));
+                }
+                if let Some(t) = m.1
+                    && t != val_type
+                {
+                    throw_compiler_error(src, args_indexes[1], ErrType::InvalidType(&t, &val_type));
+                }
+            }
+            let key_id = get_id(
+                &args[0], v, ctx, state, output, None, false, offset, single_run,
+            );
+            let val_id = get_id(
+                &args[1], v, ctx, state, output, None, false, offset, single_run,
+            );
+            output.push(Instr::MapInsertReg(id, key_id, val_id));
         }
         name => {
             throw_compiler_error(src, fn_markers, ErrType::UnknownFunction(name));

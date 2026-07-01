@@ -1,5 +1,3 @@
-use crate::check_args;
-use crate::check_args_range;
 use crate::compiler::get_id;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
@@ -12,12 +10,11 @@ use crate::expr::Span;
 use crate::functions::check_arg_type;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
-use crate::registers::alloc_register;
-use crate::registers::free_register;
 use crate::type_system::DataType;
 use crate::type_system::infer_type;
 use crate::user_functions::handle_user_function;
-use crate::util::format_type;
+use crate::util::check_args;
+use crate::util::check_args_range;
 
 pub fn std_lib_functions(
     name: &str,
@@ -38,26 +35,20 @@ pub fn std_lib_functions(
             for arg in args {
                 let id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
                 output.push(Instr::Print(id));
-                free_register(
-                    id,
-                    state.free_registers,
-                    v,
-                    state.const_registers,
-                    &state.reserved_registers,
-                );
+                state.free_reg(id, v);
             }
         }
         "type" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             let infered = infer_type(&args[0], v, ctx, state);
             state.registers.push(Data::p_str(
-                format_type(&infered, state).as_str(),
-                &mut state.pools.string_pool,
+                infered.format_detailed(state).as_str(),
+                &mut state.pools.strings,
             ));
             return Some((state.registers.len() - 1) as u16);
         }
         "float" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             check_arg_type(
                 v,
                 ctx,
@@ -70,28 +61,14 @@ pub fn std_lib_functions(
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            output.push(Instr::CallLibFunc(
-                LibFunc::Float,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            state.free_reg(id, v);
+            output.push(Instr::CallLibFunc(LibFunc::Float, id, state.alloc_reg()));
             state
                 .instr_src
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "int" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             check_arg_type(
                 v,
                 ctx,
@@ -104,80 +81,38 @@ pub fn std_lib_functions(
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            output.push(Instr::CallLibFunc(
-                LibFunc::Int,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            state.free_reg(id, v);
+            output.push(Instr::CallLibFunc(LibFunc::Int, id, state.alloc_reg()));
             state
                 .instr_src
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "str" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            output.push(Instr::CallLibFunc(
-                LibFunc::Str,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            state.free_reg(id, v);
+            output.push(Instr::CallLibFunc(LibFunc::Str, id, state.alloc_reg()));
         }
         "bool" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,
             );
-            free_register(
-                id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            output.push(Instr::CallLibFunc(
-                LibFunc::Bool,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            state.free_reg(id, v);
+            output.push(Instr::CallLibFunc(LibFunc::Bool, id, state.alloc_reg()));
             state
                 .instr_src
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "input" => {
-            check_args_range!(args, 0, 1, name, src, markers);
+            check_args_range(args, 0, 1, name, src, markers);
             let id = if args.is_empty() {
                 state
                     .registers
-                    .push(Data::p_str("", &mut state.pools.string_pool));
+                    .push(Data::p_str("", &mut state.pools.strings));
                 (state.registers.len() - 1) as u16
             } else {
                 check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
@@ -185,25 +120,11 @@ pub fn std_lib_functions(
                     &args[0], v, ctx, state, output, None, false, offset, single_run,
                 )
             };
-            free_register(
-                id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            output.push(Instr::CallLibFunc(
-                LibFunc::Input,
-                id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            state.free_reg(id, v);
+            output.push(Instr::CallLibFunc(LibFunc::Input, id, state.alloc_reg()));
         }
         "range" => {
-            check_args_range!(args, 1, 2, name, src, markers);
+            check_args_range(args, 1, 2, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
             if args.len() != 1 {
                 check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::Int]);
@@ -222,56 +143,24 @@ pub fn std_lib_functions(
                 *state.allocated_arg_count += 1;
                 id_second_arg
             };
-            free_register(
-                id_first_arg,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
-            free_register(
-                source_reg_id,
-                state.free_registers,
-                v,
-                state.const_registers,
-                &state.reserved_registers,
-            );
+            state.free_reg(id_first_arg, v);
+            state.free_reg(source_reg_id, v);
             output.push(Instr::CallLibFunc(
                 LibFunc::Range,
                 source_reg_id,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
+                state.alloc_reg(),
             ));
         }
         "the_answer" => {
-            check_args!(args, 0, name, src, markers);
-            output.push(Instr::CallLibFunc(
-                LibFunc::TheAnswer,
-                0,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            check_args(args, 0, name, src, markers);
+            output.push(Instr::CallLibFunc(LibFunc::TheAnswer, 0, state.alloc_reg()));
         }
         "argv" => {
-            check_args!(args, 0, name, src, markers);
-            output.push(Instr::CallLibFunc(
-                LibFunc::Argv,
-                0,
-                alloc_register(
-                    state.registers,
-                    state.free_registers,
-                    &state.reserved_registers,
-                ),
-            ));
+            check_args(args, 0, name, src, markers);
+            output.push(Instr::CallLibFunc(LibFunc::Argv, 0, state.alloc_reg()));
         }
         "exit" => {
-            check_args_range!(args, 0, 1, name, src, markers);
+            check_args_range(args, 0, 1, name, src, markers);
             let halt_code = if args.is_empty() {
                 0
             } else {
@@ -283,7 +172,7 @@ pub fn std_lib_functions(
             output.push(Instr::Halt(halt_code));
         }
         "throw" => {
-            check_args!(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let err_reg_id = get_id(
                 &args[0], v, ctx, state, output, None, false, offset, single_run,

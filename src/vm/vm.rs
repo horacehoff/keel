@@ -6,7 +6,6 @@ use crate::data::Data;
 use crate::data::FALSE;
 use crate::data::NULL;
 use crate::data::TRUE;
-use crate::display::format_data;
 use crate::errors::ErrType;
 use crate::errors::ErrorCtx;
 use crate::errors::throw_error;
@@ -20,12 +19,18 @@ use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
 use lexical_core::FormattedSize;
 use memchr::memmem;
+use nohash_hasher::NoHashHasher;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
+use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
 use std::hint::cold_path;
 use std::io::Write;
+use std::ops::Index;
+use std::ops::IndexMut;
 
 pub type ObjectPool = Vec<Vec<Data>>;
+pub type MapPool = Vec<HashMap<Data, Data, BuildHasherDefault<NoHashHasher<Data>>>>;
 pub type StringPool = Vec<String>;
 
 /// Converts a Keel array to a C pointer for libffi
@@ -128,13 +133,60 @@ struct CallFrame {
     callsite_id: u16,
 }
 
+pub trait UncheckedVecOps<T> {
+    fn pop_unchecked(&mut self) -> T;
+}
+
+impl<T> UncheckedVecOps<T> for Vec<T> {
+    #[inline(always)]
+    fn pop_unchecked(&mut self) -> T {
+        debug_assert!(!self.is_empty());
+        let new_len = self.len() - 1;
+        unsafe {
+            self.set_len(new_len);
+            self.as_mut_ptr().add(new_len).read()
+        }
+    }
+}
+
+#[repr(transparent)]
+struct RegisterFile(Vec<Data>);
+
+impl Index<u16> for RegisterFile {
+    type Output = Data;
+    #[inline(always)]
+    fn index(&self, index: u16) -> &Self::Output {
+        unsafe { self.0.get_unchecked(index as usize) }
+    }
+}
+impl IndexMut<u16> for RegisterFile {
+    #[inline(always)]
+    fn index_mut(&mut self, index: u16) -> &mut Data {
+        unsafe { self.0.get_unchecked_mut(index as usize) }
+    }
+}
+impl Index<usize> for RegisterFile {
+    type Output = Data;
+    #[inline(always)]
+    fn index(&self, index: usize) -> &Self::Output {
+        unsafe { self.0.get_unchecked(index) }
+    }
+}
+impl IndexMut<usize> for RegisterFile {
+    #[inline(always)]
+    fn index_mut(&mut self, index: usize) -> &mut Data {
+        unsafe { self.0.get_unchecked_mut(index) }
+    }
+}
+
 #[allow(unused_unsafe)]
 pub fn execute(
     instructions: &[Instr],
     registers: &mut [Data],
     Pools {
-        obj_pool,
-        string_pool,
+        objs: obj_pool,
+        maps: map_pool,
+        strings: string_pool,
     }: &mut Pools,
     err_ctx: &ErrorCtx,
     fn_registers: &[Vec<u16>],
@@ -201,7 +253,7 @@ pub fn execute(
         ($err:expr) => {
             cold_path();
             if !error_handles.is_empty() {
-                let err_handle = unsafe { error_handles.pop().unwrap_unchecked() };
+                let err_handle = unsafe { error_handles.pop_unchecked() };
                 unsafe {
                     args.set_len(err_handle.args_len as usize);
                     call_frames.set_len(err_handle.call_frames_len as usize);
@@ -215,7 +267,7 @@ pub fn execute(
         ($err:expr, $label:lifetime) => {
             cold_path();
             if !error_handles.is_empty() {
-                let err_handle = unsafe { error_handles.pop().unwrap_unchecked() };
+                let err_handle = unsafe { error_handles.pop_unchecked() };
                 unsafe {
                     args.set_len(err_handle.args_len as usize);
                     call_frames.set_len(err_handle.call_frames_len as usize);
@@ -267,12 +319,7 @@ pub fn execute(
             }
             Instr::VoidReturn => {
                 // Simply jump back to the callsite, since there's nothing to return
-                i = unsafe {
-                    let new_len = call_frames.len() - 1;
-                    let ptr = call_frames.as_mut_ptr().add(new_len);
-                    call_frames.set_len(new_len);
-                    ptr.read().return_addr as usize
-                };
+                i = call_frames.pop_unchecked().return_addr as usize;
             }
             Instr::SaveFrame(relative_func_loc, return_register, callsite_id) => {
                 call_frames.push(CallFrame {
@@ -288,22 +335,12 @@ pub fn execute(
             }
             Instr::Return(tgt) => {
                 // Pop the latest call frame, set the return value and jump back to the callsite
-                let call_frame = unsafe {
-                    let new_len = call_frames.len() - 1;
-                    let ptr = call_frames.as_mut_ptr().add(new_len);
-                    call_frames.set_len(new_len);
-                    ptr.read()
-                };
+                let call_frame = call_frames.pop_unchecked();
                 i = call_frame.return_addr as usize;
                 *w!(call_frame.return_reg) = r!(tgt);
             }
             Instr::RecursiveReturn(tgt) => {
-                let call_frame = unsafe {
-                    let new_len = call_frames.len() - 1;
-                    let ptr = call_frames.as_mut_ptr().add(new_len);
-                    call_frames.set_len(new_len);
-                    ptr.read()
-                };
+                let call_frame = call_frames.pop_unchecked();
                 let temp = r!(tgt);
                 let regs = unsafe { fn_registers.get_unchecked(call_frame.callsite_id as usize) };
                 let base = recursion_stack.len() - regs.len();
@@ -710,7 +747,7 @@ pub fn execute(
                         write!(
                             handle,
                             "{}",
-                            format_data(*item, obj_pool, string_pool, struct_fields, false)
+                            item.format(obj_pool, string_pool, map_pool, struct_fields, false)
                         )
                         .unwrap();
                     }
@@ -728,7 +765,23 @@ pub fn execute(
                             handle,
                             "{}:{}",
                             unsafe { s_fields.get_unchecked(idx) },
-                            format_data(*item, obj_pool, string_pool, struct_fields, false)
+                            item.format(obj_pool, string_pool, map_pool, struct_fields, false)
+                        )
+                        .unwrap();
+                    }
+                    writeln!(handle, "}}").unwrap();
+                } else if tgt.is_map() {
+                    let m = unsafe { map_pool.get_unchecked(tgt.as_map()) };
+                    write!(handle, "{{").unwrap();
+                    for (i, (key, val)) in m.iter().enumerate() {
+                        if i != 0 {
+                            write!(handle, ",").unwrap();
+                        }
+                        write!(
+                            handle,
+                            "{}:{}",
+                            key.format(obj_pool, string_pool, map_pool, struct_fields, false),
+                            val.format(obj_pool, string_pool, map_pool, struct_fields, false),
                         )
                         .unwrap();
                     }
@@ -780,7 +833,7 @@ pub fn execute(
             }
             Instr::GetSliceArray(array_reg_id, idx_start_id, dest_reg_id) => {
                 let idx_start = r!(idx_start_id).as_int();
-                let idx_end = r!(args.pop().unwrap_unchecked()).as_int();
+                let idx_end = r!(args.pop_unchecked()).as_int();
                 let arr_id = r!(array_reg_id).as_array();
                 let array = unsafe { obj_pool.get_unchecked(arr_id) };
                 if (idx_end as usize) > array.len()
@@ -826,7 +879,7 @@ pub fn execute(
             }
             Instr::GetSliceString(str_reg_id, idx_start, dest_reg_id) => {
                 let idx_start = r!(idx_start).as_int();
-                let idx_end = r!(args.pop().unwrap_unchecked()).as_int();
+                let idx_end = r!(args.pop_unchecked()).as_int();
                 let s = r!(str_reg_id).as_str(string_pool).to_smolstr();
                 if (idx_end as usize) > s.len()
                     || (idx_start as usize) >= s.len()
@@ -849,6 +902,39 @@ pub fn execute(
                 }
                 arr.remove(index as usize);
             }
+            Instr::MapGet(map_reg_id, key_reg_id, dest_reg_id) => {
+                *w!(dest_reg_id) = if let Some(elem) = unsafe {
+                    map_pool
+                        .get_unchecked(r!(map_reg_id).as_map())
+                        .get(&r!(key_reg_id))
+                } {
+                    *elem
+                } else {
+                    cold_path();
+                    error_with_catch!(ErrType::UnknownMapKey(&r!(key_reg_id).format(
+                        obj_pool,
+                        string_pool,
+                        map_pool,
+                        struct_fields,
+                        false
+                    )));
+                };
+            }
+            Instr::MapInsert(map_pool_id, key_reg_id, val_reg_id) => unsafe {
+                map_pool
+                    .get_unchecked_mut(map_pool_id as usize)
+                    .insert(r!(key_reg_id), r!(val_reg_id));
+            },
+            Instr::MapInsertReg(map_reg_id, key_reg_id, val_reg_id) => unsafe {
+                map_pool
+                    .get_unchecked_mut(r!(map_reg_id).as_map())
+                    .insert(r!(key_reg_id), r!(val_reg_id));
+            },
+            Instr::CloneMap(src_reg, dest_reg) => {
+                let new_id = map_pool.len() as u32;
+                map_pool.push(unsafe { map_pool.get_unchecked(r!(src_reg).as_map()).clone() });
+                *w!(dest_reg) = Data::map(new_id);
+            }
             Instr::CallLibFunc(LibFunc::Uppercase, source_string_reg_id, dest_reg_id) => {
                 *w!(dest_reg_id) =
                     string!(r!(source_string_reg_id).as_str(string_pool).to_uppercase());
@@ -861,14 +947,14 @@ pub fn execute(
                 let reg = r!(tgt);
                 if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    let temp_arg = r!(args.pop().unwrap_unchecked());
+                    let temp_arg = r!(args.pop_unchecked());
                     let arg = temp_arg.as_str(string_pool);
                     // *w!(dest) = str.contains(arg).into();
                     *w!(dest) = memmem::find(str.as_bytes(), arg.as_bytes())
                         .is_some()
                         .into();
                 } else if reg.is_array() {
-                    let arg = r!(args.pop().unwrap_unchecked());
+                    let arg = r!(args.pop_unchecked());
                     *w!(dest) = unsafe { obj_pool.get_unchecked(reg.as_array()) }
                         .contains(&arg)
                         .into();
@@ -878,7 +964,7 @@ pub fn execute(
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim());
             }
             Instr::CallLibFunc(LibFunc::TrimSequence, tgt, dest) => {
-                let temp_arg = r!(args.pop().unwrap_unchecked());
+                let temp_arg = r!(args.pop_unchecked());
                 let arg = temp_arg.as_str(string_pool);
                 let chars: Vec<char> = arg.chars().collect();
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim_matches(&chars[..]));
@@ -887,7 +973,7 @@ pub fn execute(
                 let reg = r!(tgt);
                 if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    let temp_elem = r!(args.pop().unwrap_unchecked());
+                    let temp_elem = r!(args.pop_unchecked());
                     let element = temp_elem.as_str(string_pool);
                     // *w!(dest) = if let Some(idx) = str.find(element) {
                     //     idx as i32
@@ -906,7 +992,7 @@ pub fn execute(
                     .into();
                 } else if reg.is_array() {
                     let arr_id = reg.as_array();
-                    let element = r!(args.pop().unwrap_unchecked());
+                    let element = r!(args.pop_unchecked());
                     *w!(dest) = if let Some(idx) = unsafe { obj_pool.get_unchecked(arr_id) }
                         .iter()
                         .position(|x| x == &element)
@@ -934,14 +1020,14 @@ pub fn execute(
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim_end());
             }
             Instr::CallLibFunc(LibFunc::TrimSequenceLeft, tgt, dest) => {
-                let chars: Vec<char> = r!(args.pop().unwrap_unchecked())
+                let chars: Vec<char> = r!(args.pop_unchecked())
                     .as_str(string_pool)
                     .chars()
                     .collect();
                 *w!(dest) = str!(r!(tgt).as_str(string_pool).trim_start_matches(&chars[..]));
             }
             Instr::CallLibFunc(LibFunc::TrimSequenceRight, tgt, dest) => {
-                let chars: Vec<char> = r!(args.pop().unwrap_unchecked())
+                let chars: Vec<char> = r!(args.pop_unchecked())
                     .as_str(string_pool)
                     .chars()
                     .collect();
@@ -951,10 +1037,10 @@ pub fn execute(
                 let reg = r!(tgt);
                 if reg.is_str() {
                     let str = reg.as_str(string_pool);
-                    let repeat_count = r!(args.pop().unwrap_unchecked()).as_int();
+                    let repeat_count = r!(args.pop_unchecked()).as_int();
                     *w!(dest) = string!(str.repeat(repeat_count as usize));
                 } else if reg.is_array() {
-                    let repeat_count = r!(args.pop().unwrap_unchecked()).as_int();
+                    let repeat_count = r!(args.pop_unchecked()).as_int();
                     let array_id = alloc_array(
                         obj_pool,
                         &mut free_arrays,
@@ -1038,13 +1124,11 @@ pub fn execute(
                 } else if value.is_str() {
                     value
                 } else {
-                    str!(&format_data(
-                        value,
-                        obj_pool,
-                        string_pool,
-                        struct_fields,
-                        false
-                    ))
+                    str!(
+                        value
+                            .format(obj_pool, string_pool, map_pool, struct_fields, false)
+                            .as_str()
+                    )
                 };
             }
             Instr::CallLibFunc(LibFunc::Bool, tgt, dest) => {
@@ -1094,25 +1178,25 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::StartsWith, source_register, dest_register) => {
                 *w!(dest_register) = r!(source_register)
                     .as_str(string_pool)
-                    .starts_with(r!(args.pop().unwrap_unchecked()).as_str(string_pool))
+                    .starts_with(r!(args.pop_unchecked()).as_str(string_pool))
                     .into();
             }
             Instr::CallLibFunc(LibFunc::EndsWith, source_register, dest_register) => {
                 *w!(dest_register) = r!(source_register)
                     .as_str(string_pool)
-                    .ends_with(r!(args.pop().unwrap_unchecked()).as_str(string_pool))
+                    .ends_with(r!(args.pop_unchecked()).as_str(string_pool))
                     .into();
             }
             #[allow(clippy::no_effect_replace)]
             Instr::CallLibFunc(LibFunc::Replace, source_register, dest_register) => {
                 *w!(dest_register) = string!(r!(source_register).as_str(string_pool).replace(
-                    r!(args.pop().unwrap_unchecked()).as_str(string_pool),
-                    r!(args.pop().unwrap_unchecked()).as_str(string_pool),
+                    r!(args.pop_unchecked()).as_str(string_pool),
+                    r!(args.pop_unchecked()).as_str(string_pool),
                 ));
             }
             Instr::CallLibFunc(LibFunc::Split, source_register, dest_register) => {
                 let source = r!(source_register);
-                let separator = unsafe { args.pop().unwrap_unchecked() };
+                let separator = unsafe { args.pop_unchecked() };
                 if source.is_str() {
                     let output_str_reg_id = alloc_array(
                         obj_pool,
@@ -1381,7 +1465,7 @@ pub fn execute(
                 });
             }
             Instr::StopErrorCatch => unsafe {
-                error_handles.pop().unwrap_unchecked();
+                error_handles.pop_unchecked();
             },
             Instr::ThrowError(error_reg_id) => {
                 error_with_catch!(ErrType::Custom(

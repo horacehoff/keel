@@ -24,6 +24,7 @@ use crate::type_system::collect_direct_fn_calls;
 use crate::type_system::datatype_to_c_type;
 use crate::type_system::struct_field_type_matches;
 use crate::util::parse_keel_type;
+use crate::vm::Pool;
 use crate::{data::Data, instr::Instr};
 use ahash::RandomState;
 use nohash_hasher::BuildNoHashHasher;
@@ -34,6 +35,18 @@ use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+
+pub trait UnwrapId {
+    fn unwrap_id(self) -> u16;
+}
+
+impl UnwrapId for Option<u16> {
+    #[inline(always)]
+    fn unwrap_id(self) -> u16 {
+        debug_assert!(self.is_some());
+        unsafe { self.unwrap_unchecked() }
+    }
+}
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is false)
 fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_backwards: bool) {
@@ -146,8 +159,12 @@ fn compile_short_circuit_condition(
         Expr::BoolAnd(left, right, _) => {
             if bool_or_mode {
                 // && inside left side of ||
-                let id_l = get_id(left, v, ctx, state, output, None, false);
-                let id_r = get_id(right, v, ctx, state, output, None, false);
+                let id_l = left
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap_id();
+                let id_r = right
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap_id();
                 state.free_reg(id_l, v);
                 state.free_reg(id_r, v);
                 let id = state.alloc_reg();
@@ -166,7 +183,9 @@ fn compile_short_circuit_condition(
             }
         }
         expr => {
-            let cond_id = get_id(expr, v, ctx, state, output, None, false);
+            let cond_id = expr
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             if bool_or_mode {
                 add_cmp_true(cond_id, output);
                 state.free_reg(cond_id, v);
@@ -270,7 +289,7 @@ fn compile_array_literal(
         for elem in array_items {
             let id = elem
                 .compile(v, ctx, state, output, None, false, true)
-                .unwrap();
+                .unwrap_id();
             if elem.is_constant_literal() {
                 state
                     .pools
@@ -296,7 +315,7 @@ fn compile_array_literal(
         for elem in array_items {
             let id = elem
                 .compile(v, ctx, state, output, None, false, true)
-                .unwrap();
+                .unwrap_id();
             if elem.is_constant_literal() {
                 state
                     .pools
@@ -386,7 +405,7 @@ fn compile_struct_literal(
                 }
                 let id = field_expr
                     .compile(v, ctx, state, output, None, false, true)
-                    .unwrap();
+                    .unwrap_id();
                 if field_expr.is_constant_literal() {
                     state
                         .pools
@@ -436,7 +455,7 @@ fn compile_struct_literal(
                 }
                 let id = field_expr
                     .compile(v, ctx, state, output, None, false, true)
-                    .unwrap();
+                    .unwrap_id();
                 if field_expr.is_constant_literal() {
                     state
                         .pools
@@ -510,7 +529,7 @@ fn compile_map_literal(
             let output_len = output.len();
             let key_val_id = key
                 .compile(v, ctx, state, output, None, false, true)
-                .unwrap();
+                .unwrap_id();
             if !(key.is_constant_literal()
                 || matches!(key, Expr::Array(_, _)) && output_len == output.len())
             {
@@ -519,7 +538,7 @@ fn compile_map_literal(
             let key_val = state.registers[key_val_id as usize];
             let id = val
                 .compile(v, ctx, state, output, None, false, true)
-                .unwrap();
+                .unwrap_id();
             if val.is_constant_literal() {
                 state
                     .pools
@@ -563,7 +582,7 @@ fn compile_map_literal(
             let output_len = output.len();
             let key_val_id = key
                 .compile(v, ctx, state, output, None, false, true)
-                .unwrap();
+                .unwrap_id();
             if !(key.is_constant_literal()
                 || matches!(key, Expr::Array(_, _)) && output_len == output.len())
             {
@@ -572,7 +591,7 @@ fn compile_map_literal(
             let key_val = state.registers[key_val_id as usize];
             let val_id = val
                 .compile(v, ctx, state, output, None, false, true)
-                .unwrap();
+                .unwrap_id();
             if val.is_constant_literal() {
                 state
                     .pools
@@ -639,7 +658,9 @@ fn compile_struct_field_access(
                     ErrType::StructUnknownField(&s.name, field),
                 );
             });
-        let id = get_id(struct_expr, v, ctx, state, output, None, false);
+        let id = struct_expr
+            .compile(v, ctx, state, output, None, false, true)
+            .unwrap_id();
         let dest_reg_id = state.alloc_reg();
         output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
         dest_reg_id
@@ -666,13 +687,17 @@ fn compile_array_indexing(
         throw_compiler_error(ctx.src, span, ErrType::NotIndexable(&infered));
     }
 
-    let id = get_id(array, v, ctx, state, output, None, false);
+    let id = array
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
 
     let index_inferred = index.infer_type(v, ctx, state);
     if index_inferred != DataType::Int {
         throw_compiler_error(ctx.src, span, ErrType::InvalidIndexType(&index_inferred));
     }
-    let index_id = get_id(index, v, ctx, state, output, None, false);
+    let index_id = index
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(index_id, v);
     let dest_reg_id = state.alloc_reg();
 
@@ -700,7 +725,9 @@ fn compile_array_slice(
     if !infered.is_indexable() {
         throw_compiler_error(ctx.src, span, ErrType::NotIndexable(&infered));
     }
-    let id = get_id(array, v, ctx, state, output, None, false);
+    let id = array
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     let idx_start_inferred = idx_start.infer_type(v, ctx, state);
     if idx_start_inferred != DataType::Int {
         throw_compiler_error(
@@ -709,12 +736,16 @@ fn compile_array_slice(
             ErrType::InvalidIndexType(&idx_start_inferred),
         );
     }
-    let idx_start_id = get_id(idx_start, v, ctx, state, output, None, false);
+    let idx_start_id = idx_start
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     let idx_end_inferred = idx_end.infer_type(v, ctx, state);
     if idx_end_inferred != DataType::Int {
         throw_compiler_error(ctx.src, span, ErrType::InvalidIndexType(&idx_end_inferred));
     }
-    let idx_end_id = get_id(idx_end, v, ctx, state, output, None, false);
+    let idx_end_id = idx_end
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     output.push(Instr::StoreFuncArg(idx_end_id));
     state.free_reg(idx_start_id, v);
     state.free_reg(idx_end_id, v);
@@ -747,8 +778,12 @@ fn uniform_op(
         throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, symbol))
     }
 
-    let id_l = get_id(l, v, ctx, state, output, None, false);
-    let id_r = get_id(r, v, ctx, state, output, None, false);
+    let id_l = l
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
+    let id_r = r
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id_l, v);
     state.free_reg(id_r, v);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -776,8 +811,12 @@ fn uniform_op2(
     if !((&t_l == t_1 && &t_r == t_1) || (&t_l == t_2 && &t_r == t_2)) {
         throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, symbol))
     }
-    let id_l = get_id(l, v, ctx, state, output, None, false);
-    let id_r = get_id(r, v, ctx, state, output, None, false);
+    let id_l = l
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
+    let id_r = r
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id_l, v);
     state.free_reg(id_r, v);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -869,8 +908,12 @@ fn compile_add_op(
         });
         return id;
     }
-    let id_l = get_id(l, v, ctx, state, output, None, false);
-    let id_r = get_id(r, v, ctx, state, output, None, false);
+    let id_l = l
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
+    let id_r = r
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id_l, v);
     state.free_reg(id_r, v);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -918,8 +961,12 @@ fn compile_sub_op(
         });
         return id;
     }
-    let id_l = get_id(l, v, ctx, state, output, None, false);
-    let id_r = get_id(r, v, ctx, state, output, None, false);
+    let id_l = l
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
+    let id_r = r
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id_l, v);
     state.free_reg(id_r, v);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -983,8 +1030,12 @@ fn compile_eq_op(
     let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
         && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
     let is_string = l_type == DataType::String || r_type == DataType::String;
-    let id_l = get_id(l, v, ctx, state, output, None, false);
-    let id_r = get_id(r, v, ctx, state, output, None, false);
+    let id_l = l
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
+    let id_r = r
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id_l, v);
     state.free_reg(id_r, v);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -1012,8 +1063,12 @@ fn compile_neq_op(
     let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
         && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
     let is_string = l_type == DataType::String || r_type == DataType::String;
-    let id_l = get_id(l, v, ctx, state, output, None, false);
-    let id_r = get_id(r, v, ctx, state, output, None, false);
+    let id_l = l
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
+    let id_r = r
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id_l, v);
     state.free_reg(id_r, v);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -1037,7 +1092,9 @@ fn compile_neg_op(
     output: &mut Vec<Instr>,
 ) -> u16 {
     let operand_type = l.infer_type(v, ctx, state);
-    let id_l = get_id(l, v, ctx, state, output, None, false);
+    let id_l = l
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id_l, v);
     let id = state.alloc_reg_tgt(tgt_id);
     if operand_type == DataType::Float {
@@ -1060,7 +1117,9 @@ fn compile_bool_neg_op(
     output: &mut Vec<Instr>,
 ) -> u16 {
     let operand_type = l.infer_type(v, ctx, state);
-    let id_l = get_id(l, v, ctx, state, output, None, false);
+    let id_l = l
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id_l, v);
     let id = state.alloc_reg_tgt(tgt_id);
     if operand_type != DataType::Bool {
@@ -1127,7 +1186,9 @@ fn compile_inline_condition(
     let mut condition_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
 
     // parse the main condition
-    let condition_id = get_id(main_condition, v, ctx, state, output, None, false);
+    let condition_id = main_condition
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     add_cmp_false(condition_id, &mut 0, output, false);
     cmp_markers.push(output.len() - 1);
 
@@ -1141,7 +1202,9 @@ fn compile_inline_condition(
     for elem in &code[main_code_limit..] {
         if let Expr::ElseIfBlock(condition, code) = elem {
             condition_markers.push(output.len());
-            let condition_id = get_id(condition, v, ctx, state, output, None, false);
+            let condition_id = condition
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             add_cmp_false(condition_id, &mut 0, output, false);
             state.free_reg(condition_id, v);
             cmp_markers.push(output.len() - 1);
@@ -1191,20 +1254,6 @@ fn compile_inline_condition(
     return_id
 }
 
-pub fn get_id(
-    input: &Expr,
-    v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
-    state: &mut State<'_>,
-    output: &mut Vec<Instr>,
-    tgt_id: Option<u16>,
-    var_assignment: bool,
-) -> u16 {
-    input
-        .compile(v, ctx, state, output, tgt_id, var_assignment, true)
-        .unwrap()
-}
-
 fn compile_array_index_assignment(
     array: &Expr,
     index: &Expr,
@@ -1221,12 +1270,18 @@ fn compile_array_index_assignment(
         throw_compiler_error(ctx.src, index_markers, ErrType::NotIndexable(&array_type));
     }
     // Get the id of the source array/string (may be a nested GetIndex)
-    let id = get_id(array, v, ctx, state, output, None, false);
+    let id = array
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
 
-    let final_id = get_id(index, v, ctx, state, output, None, false);
+    let final_id = index
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
 
     let elem_type = value.infer_type(v, ctx, state);
-    let elem_id = get_id(value, v, ctx, state, output, None, false);
+    let elem_id = value
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(elem_id, v);
     if {
         if let DataType::Array(Some(array_type)) = &array_type
@@ -1298,8 +1353,12 @@ fn compile_struct_field_assignment(
             ErrType::StructUnknownField(&state.structs[struct_id as usize].name, field),
         );
     }
-    let id = get_id(struct_expr, v, ctx, state, output, None, false);
-    let new_elem_reg_id = get_id(new_val, v, ctx, state, output, None, false);
+    let id = struct_expr
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
+    let new_elem_reg_id = new_val
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     output.push(Instr::SetFieldStruct(
         id,
         new_elem_reg_id,
@@ -1355,7 +1414,9 @@ fn compile_condition(
     for elem in &code[main_code_limit..] {
         if let Expr::ElseIfBlock(condition, code) = elem {
             condition_markers.push(output.len());
-            let condition_id = get_id(condition, v, ctx, state, output, None, false);
+            let condition_id = condition
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(condition_id, v);
             add_cmp_false(condition_id, &mut 0, output, false);
             conditional_false_jmp_idxs.push(vec![output.len() - 1]);
@@ -1443,7 +1504,9 @@ fn compile_for_loop(
 
     // parse the array, get its id (the target array is the first Expr in array_code)
     let array_type = array.infer_type(v, ctx, state);
-    let array = get_id(array, v, ctx, state, output, None, false);
+    let array = array
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
 
     let array_len_id = state.alloc_reg();
 
@@ -1557,9 +1620,13 @@ fn compile_int_for_loop(
     t1.expect(&DataType::Int, ctx.src, span1);
     t2.expect(&DataType::Int, ctx.src, span2);
     let elem_id = if ctx.single_run {
-        get_id(start_elem, v, ctx, state, output, None, false)
+        start_elem
+            .compile(v, ctx, state, output, None, false, true)
+            .unwrap_id()
     } else {
-        let start_elem_id = get_id(start_elem, v, ctx, state, output, None, false);
+        let start_elem_id = start_elem
+            .compile(v, ctx, state, output, None, false, true)
+            .unwrap_id();
         let start_val = state.registers[start_elem_id as usize];
         let elem_id = state.alloc_reg();
         if state.const_registers.values().any(|&v| v == start_elem_id) && start_val.is_int() {
@@ -1569,7 +1636,9 @@ fn compile_int_for_loop(
         }
         elem_id
     };
-    let end_elem_id = get_id(end_elem, v, ctx, state, output, None, false);
+    let end_elem_id = end_elem
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
 
     // elem_id is a fresh mutable register -> remove from const_registers just in case
     state.const_registers.retain(|_, &mut v| v != elem_id);
@@ -1688,9 +1757,13 @@ fn compile_var_declaration(
     let var_type = value.infer_type(v, ctx, state);
 
     let var_id = if ctx.single_run {
-        get_id(value, v, ctx, state, output, None, true)
+        value
+            .compile(v, ctx, state, output, None, true, true)
+            .unwrap_id()
     } else {
-        let src_id = get_id(value, v, ctx, state, output, None, false);
+        let src_id = value
+            .compile(v, ctx, state, output, None, false, true)
+            .unwrap_id();
         if contains_var_reassign(name, remaining_code) {
             let mutable_id = state.alloc_reg();
             move_reg_to_reg(output, src_id, mutable_id, state.registers[src_id as usize]);
@@ -1785,7 +1858,9 @@ fn compile_var_assignment(
     }
 
     let output_len = output.len();
-    let obj_id = get_id(value, v, ctx, state, output, Some(id), false);
+    let obj_id = value
+        .compile(v, ctx, state, output, Some(id), false, true)
+        .unwrap_id();
     if output.len() != output_len {
         move_to_id(output, id);
     } else if state.const_registers.values().any(|&v| v == obj_id) {
@@ -1881,7 +1956,9 @@ fn compile_return(
     output: &mut Vec<Instr>,
 ) {
     if let Some(x) = return_value {
-        let id = get_id(x, v, ctx, state, output, None, false);
+        let id = x
+            .compile(v, ctx, state, output, None, false, true)
+            .unwrap_id();
         if ctx.is_parsing_recursive {
             output.push(Instr::RecursiveReturn(id));
         } else {
@@ -2852,7 +2929,7 @@ pub fn compile(
     let mut pools: Pools = Pools {
         objs: Vec::with_capacity(10),
         maps: Vec::with_capacity(2),
-        strings: Vec::with_capacity(10),
+        strings: Pool::init(10),
     };
     let mut instr_src: Vec<(Instr, Span, u16)> = Vec::new();
     let mut fn_registers: Vec<Vec<u16>> = Vec::new();

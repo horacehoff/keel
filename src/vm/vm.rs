@@ -33,7 +33,7 @@ use crate::errors::wasm_error;
 
 pub type ObjectPool = Vec<Vec<Data>>;
 pub type MapPool = Vec<HashMap<Data, Data, BuildHasherDefault<NoHashHasher<Data>>>>;
-pub type StringPool = Vec<String>;
+pub type StringPool = Pool<String>;
 
 /// Converts a Keel array to a C pointer for libffi
 #[cfg(not(target_arch = "wasm32"))]
@@ -148,6 +148,42 @@ impl<T> UncheckedVecOps<T> for Vec<T> {
             self.set_len(new_len);
             self.as_mut_ptr().add(new_len).read()
         }
+    }
+}
+
+#[repr(transparent)]
+pub struct Pool<T>(pub Vec<T>);
+
+impl<T> Pool<T> {
+    #[inline(always)]
+    pub const fn len(&self) -> usize {
+        self.0.len()
+    }
+    #[inline(always)]
+    pub fn push(&mut self, value: T) {
+        self.0.push(value);
+    }
+    #[inline(always)]
+    pub fn init(capacity: usize) -> Self {
+        Self(Vec::with_capacity(capacity))
+    }
+    #[inline(always)]
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.0.iter()
+    }
+}
+
+impl<T> Index<usize> for Pool<T> {
+    type Output = T;
+    #[inline(always)]
+    fn index(&self, index: usize) -> &Self::Output {
+        unsafe { self.0.get_unchecked(index) }
+    }
+}
+impl<T> IndexMut<usize> for Pool<T> {
+    #[inline(always)]
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        unsafe { self.0.get_unchecked_mut(index) }
     }
 }
 

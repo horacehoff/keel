@@ -1,5 +1,5 @@
+use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
-use crate::compiler::get_id;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::FunctionImpl;
 use crate::compiler_data::State;
@@ -87,7 +87,9 @@ pub fn handle_user_function(
             inferred.expect(&expected_arg_types[i], ctx.src, args_indexes[i]);
         }
         for arg in args {
-            let arg_id = get_id(arg, v, ctx, state, output, None, false);
+            let arg_id = arg
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             output.push(Instr::StoreFuncArg(arg_id));
             state.free_reg(arg_id, v);
             *state.allocated_arg_count += 1;
@@ -165,7 +167,9 @@ pub fn handle_user_function(
         }
 
         let start_len = output.len();
-        let arg_id = get_id(&args[i], v, ctx, state, output, Some(tgt_id), false);
+        let arg_id = args[i]
+            .compile(v, ctx, state, output, Some(tgt_id), false, true)
+            .unwrap_id();
         if output.len() == start_len {
             output.push(Instr::Mov(arg_id, tgt_id));
         } else {

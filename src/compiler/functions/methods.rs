@@ -1,5 +1,5 @@
 use crate::builtin_methods::builtin_methods;
-use crate::compiler::get_id;
+use crate::compiler::UnwrapId;
 use crate::compiler_data::Variable;
 use crate::compiler_data::{Ctx, State};
 use crate::expr::{Expr, Span};
@@ -22,7 +22,9 @@ pub fn handle_method_calls(
     let name = namespace[namespace.len() - 1].as_str();
 
     let obj_type = obj.infer_type(v, ctx, state);
-    let id = get_id(obj, v, ctx, state, output, None, false);
+    let id = obj
+        .compile(v, ctx, state, output, None, false, true)
+        .unwrap_id();
     state.free_reg(id, v);
 
     builtin_methods(

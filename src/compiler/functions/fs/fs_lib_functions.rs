@@ -1,4 +1,4 @@
-use crate::compiler::get_id;
+use crate::compiler::UnwrapId;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
 use crate::compiler_data::Variable;
@@ -30,7 +30,9 @@ pub fn fs_lib_functions(
         "read" => {
             check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-            let id = get_id(&args[0], v, ctx, state, output, None, false);
+            let id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::FsRead, id, output_id));
@@ -42,7 +44,9 @@ pub fn fs_lib_functions(
         "exists" => {
             check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-            let id = get_id(&args[0], v, ctx, state, output, None, false);
+            let id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::FsExists, id, output_id));
@@ -55,8 +59,12 @@ pub fn fs_lib_functions(
             check_args(args, 2, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
-            let filepath = get_id(&args[0], v, ctx, state, output, None, false);
-            let contents = get_id(&args[1], v, ctx, state, output, None, false);
+            let filepath = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
+            let contents = args[1]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(filepath, v);
             state.free_reg(contents, v);
             output.push(Instr::CallLibFuncVoid(
@@ -72,8 +80,12 @@ pub fn fs_lib_functions(
             check_args(args, 2, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
-            let filepath = get_id(&args[0], v, ctx, state, output, None, false);
-            let contents = get_id(&args[1], v, ctx, state, output, None, false);
+            let filepath = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
+            let contents = args[1]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(filepath, v);
             state.free_reg(contents, v);
             output.push(Instr::CallLibFuncVoid(
@@ -88,7 +100,9 @@ pub fn fs_lib_functions(
         "delete" => {
             check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-            let path = get_id(&args[0], v, ctx, state, output, None, false);
+            let path = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(path, v);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, 0));
             state
@@ -98,7 +112,9 @@ pub fn fs_lib_functions(
         "delete_dir" => {
             check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-            let path = get_id(&args[0], v, ctx, state, output, None, false);
+            let path = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(path, v);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, 0));
             state

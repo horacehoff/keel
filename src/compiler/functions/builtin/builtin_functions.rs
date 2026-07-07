@@ -1,4 +1,4 @@
-use crate::compiler::get_id;
+use crate::compiler::UnwrapId;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
 use crate::compiler_data::Variable;
@@ -31,7 +31,9 @@ pub fn builtin_functions(
     match name {
         "print" => {
             for arg in args {
-                let id = get_id(arg, v, ctx, state, output, None, false);
+                let id = arg
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap_id();
                 output.push(Instr::Print(id));
                 state.free_reg(id, v);
             }
@@ -57,7 +59,9 @@ pub fn builtin_functions(
                 0,
                 &[DataType::String, DataType::Int],
             );
-            let id = get_id(&args[0], v, ctx, state, output, None, false);
+            let id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Float, id, output_id));
@@ -77,7 +81,9 @@ pub fn builtin_functions(
                 0,
                 &[DataType::String, DataType::Float],
             );
-            let id = get_id(&args[0], v, ctx, state, output, None, false);
+            let id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Int, id, output_id));
@@ -88,7 +94,9 @@ pub fn builtin_functions(
         }
         "str" => {
             check_args(args, 1, name, src, markers);
-            let id = get_id(&args[0], v, ctx, state, output, None, false);
+            let id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Str, id, output_id));
@@ -97,7 +105,9 @@ pub fn builtin_functions(
         "bool" => {
             check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-            let id = get_id(&args[0], v, ctx, state, output, None, false);
+            let id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Bool, id, output_id));
@@ -115,7 +125,9 @@ pub fn builtin_functions(
                 (state.registers.len() - 1) as u16
             } else {
                 check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-                get_id(&args[0], v, ctx, state, output, None, false)
+                args[0]
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap_id()
             };
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -129,11 +141,15 @@ pub fn builtin_functions(
                 check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::Int]);
             }
 
-            let id_first_arg = get_id(&args[0], v, ctx, state, output, None, false);
+            let id_first_arg = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             let source_reg_id = if args.len() == 1 {
                 id_first_arg
             } else {
-                let id_second_arg = get_id(&args[1], v, ctx, state, output, None, false);
+                let id_second_arg = args[1]
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap_id();
                 output.push(Instr::StoreFuncArg(id_first_arg));
                 *state.allocated_arg_count += 1;
                 id_second_arg
@@ -162,7 +178,9 @@ pub fn builtin_functions(
                 0
             } else {
                 check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
-                get_id(&args[0], v, ctx, state, output, None, false)
+                args[0]
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap_id()
             };
             output.push(Instr::Halt(halt_code));
             None
@@ -170,7 +188,9 @@ pub fn builtin_functions(
         "throw" => {
             check_args(args, 1, name, src, markers);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-            let err_reg_id = get_id(&args[0], v, ctx, state, output, None, false);
+            let err_reg_id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             output.push(Instr::ThrowError(err_reg_id));
             None
         }

@@ -1,4 +1,4 @@
-use crate::compiler::get_id;
+use crate::compiler::UnwrapId;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
 use crate::compiler_data::Variable;
@@ -34,7 +34,9 @@ pub fn builtin_methods(
     macro_rules! add_args {
         () => {
             for arg in args.iter().rev() {
-                let arg_id = get_id(&arg, v, ctx, state, output, None, false);
+                let arg_id = arg
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap_id();
                 output.push(Instr::StoreFuncArg(arg_id));
                 *state.allocated_arg_count += 1;
                 state.free_reg(arg_id, v);
@@ -263,7 +265,9 @@ pub fn builtin_methods(
                 var.var_type = DataType::Array(Some(Box::new(arg_type)));
             }
 
-            let arg_id = get_id(&args[0], v, ctx, state, output, None, false);
+            let arg_id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(id, v);
             output.push(Instr::Push(id, arg_id));
             None
@@ -350,7 +354,9 @@ pub fn builtin_methods(
 
             let arg_type = args[0].infer_type(v, ctx, state);
             arg_type.expect(&DataType::Int, src, args_indexes[0]);
-            let arg_id = get_id(&args[0], v, ctx, state, output, None, false);
+            let arg_id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             state.free_reg(arg_id, v);
             output.push(Instr::Remove(id, arg_id));
             state
@@ -372,7 +378,9 @@ pub fn builtin_methods(
             {
                 arg_type.expect(&key_type, src, args_indexes[0]);
             }
-            let arg_id = get_id(&args[0], v, ctx, state, output, None, false);
+            let arg_id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::MapGet(id, arg_id, output_id));
             state
@@ -392,8 +400,12 @@ pub fn builtin_methods(
                     val_type.expect(&t, src, args_indexes[1]);
                 }
             }
-            let key_id = get_id(&args[0], v, ctx, state, output, None, false);
-            let val_id = get_id(&args[1], v, ctx, state, output, None, false);
+            let key_id = args[0]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
+            let val_id = args[1]
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap_id();
             output.push(Instr::MapInsertReg(id, key_id, val_id));
             None
         }

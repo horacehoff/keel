@@ -108,7 +108,7 @@ impl Data {
     }
     #[inline(always)]
     /// Same as str(), except this never runs the GC because this function is called by the parser
-    pub fn p_str(s: &str, string_pool: &mut Vec<String>) -> Self {
+    pub fn p_str(s: &str, string_pool: &mut StringPool) -> Self {
         if s.len() <= 6 {
             Self::small_str(s)
         } else if let Some(id) = string_pool.iter().position(|existing| existing == s) {
@@ -124,7 +124,7 @@ impl Data {
     pub fn str(
         s: &str,
         array_pool: &ObjectPool,
-        string_pool: &mut Vec<String>,
+        string_pool: &mut StringPool,
         registers: &RegisterFile,
         recursion_stack: &RegisterFile,
         free_strings: &mut Vec<u16>,
@@ -159,7 +159,7 @@ impl Data {
     pub fn string(
         s: String,
         array_pool: &ObjectPool,
-        string_pool: &mut Vec<String>,
+        string_pool: &mut StringPool,
         registers: &RegisterFile,
         recursion_stack: &RegisterFile,
         free_strings: &mut Vec<u16>,
@@ -203,7 +203,7 @@ impl Data {
             }
         } else {
             let payload = (self.0 & PAYLOAD_MASK) as usize;
-            unsafe { &*(string_pool.get_unchecked(payload).as_str() as *const str) }
+            unsafe { &*(string_pool[payload].as_str() as *const str) }
         }
     }
     #[inline(always)]

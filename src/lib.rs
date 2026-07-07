@@ -14,10 +14,14 @@ use std::panic::catch_unwind;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-#[path = "./vm/array_gc.rs"]
+#[path = "./vm/gc/array_gc.rs"]
 mod array_gc;
 #[path = "./parser/blocks.rs"]
 mod blocks;
+#[path = "./compiler/functions/builtin/builtin_functions.rs"]
+mod builtin_functions;
+#[path = "./compiler/functions/builtin/builtin_methods.rs"]
+mod builtin_methods;
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
 #[path = "./compiler/compiler.rs"]
@@ -32,7 +36,7 @@ mod display;
 mod errors;
 #[path = "./compiler/expr.rs"]
 mod expr;
-#[path = "./compiler/functions/fs_lib_functions.rs"]
+#[path = "./compiler/functions/fs/fs_lib_functions.rs"]
 mod fs_lib_functions;
 #[path = "./compiler/functions/functions.rs"]
 mod functions;
@@ -40,6 +44,8 @@ mod functions;
 mod instr;
 #[path = "./parser/lexer.rs"]
 mod lexer;
+#[path = "./vm/gc/map_gc.rs"]
+mod map_gc;
 #[path = "./compiler/functions/methods.rs"]
 mod methods;
 #[path = "./parser/parser.rs"]
@@ -50,11 +56,7 @@ mod parser_expr;
 mod registers;
 #[path = "./repl.rs"]
 mod repl;
-#[path = "./compiler/functions/std_lib_functions.rs"]
-mod std_lib_functions;
-#[path = "./compiler/functions/std_lib_methods.rs"]
-mod std_lib_methods;
-#[path = "./vm/string_gc.rs"]
+#[path = "./vm/gc/string_gc.rs"]
 mod string_gc;
 #[path = "./parser/term.rs"]
 mod term;
@@ -173,7 +175,7 @@ pub fn main() {
     if next_arg == "--help" || next_arg == "-h" {
         cold_path();
         println!(
-            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel [-v | --version]",
+            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel myfile.kl\n  keel [-v | --version]",
             util::KEEL_LOGO
         );
         return;
@@ -182,7 +184,9 @@ pub fn main() {
     if next_arg == "--version" || next_arg == "-v" {
         cold_path();
         if args.len() > 1 {
-            eprintln!("{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n  keel [-v | --version]");
+            eprintln!(
+                "{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n  keel myfile.kl\n  keel [-v | --version]"
+            );
             return;
         }
         println!("Keel {}", env!("CARGO_PKG_VERSION"));

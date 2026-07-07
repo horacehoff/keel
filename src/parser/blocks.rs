@@ -60,7 +60,7 @@ pub fn parse_condition_block(parser: &mut Parser<'_>, start: u32) -> Expr {
 fn parse_block(input: &mut Parser<'_>) -> Vec<Expr> {
     input.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
     let while_code = parse_code(input);
-    input.next_token_expect_end(Token::RBrace, "Unmatched '}‘");
+    input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
     while_code
 }
 

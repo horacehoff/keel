@@ -3492,3 +3492,73 @@ pub fn loop_function_reg_interference() {
         1.into()
     );
 }
+
+#[test]
+pub fn map_init() {
+    run!(
+        "
+        fn main() {
+            let m = {\"test\": 42, \"othertest\": 67};
+        }
+        "
+    );
+}
+
+#[test]
+pub fn map_get_key() {
+    run_and_check_registers!(
+        "
+        fn main() {
+            let m = {0: 42, 1: 67};
+            print(m.get(0));
+        }
+        ",
+        42.into()
+    );
+}
+
+#[test]
+pub fn map_insert_new_pair() {
+    run_and_check_registers!(
+        "
+        fn main() {
+            let m = {[0,1,2]: 0, [3,4,5]: 1};
+            let a = [6,7,8];
+            m.insert(a, 2);
+            print(m.get(a));
+        }
+        ",
+        2.into()
+    );
+}
+
+#[test]
+pub fn map_overwrite_pair() {
+    run_and_check_registers!(
+        "
+        fn main() {
+            let m = {false: \"false\", true: \"true\"};
+            m.insert(false, \"true?\");
+            print(m.get(false).len());
+        }
+        ",
+        5.into()
+    );
+}
+
+#[test]
+pub fn map_loop() {
+    run_and_check_registers!(
+        "
+        fn main() {
+            let sum = 0;
+            for _ in 0..10 {
+                let x = 10;
+                let m = {1.0: x+10, 2.0: x+20};
+                sum += m.get(1.0) + m.get(2.0);
+            }
+            print(sum);
+        }",
+        500.into()
+    );
+}

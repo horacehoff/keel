@@ -8,20 +8,24 @@ use crate::errors::ErrType;
 use crate::errors::dev_error;
 use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
+use crate::expr::Span;
 use crate::expr::symbol_of_expr;
+use ahash::AHashSet;
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::hint::cold_path;
+use std::hint::unreachable_unchecked;
 use std::rc::Rc;
 
 // Tracks which user-defined functions are currently being analysed for their
 // return type. Used to break mutual-recursion cycles in type inference
 thread_local! {
-    static RETURN_TYPE_INFERRING: RefCell<HashSet<SmolStr>> =
-        RefCell::new(HashSet::new());
+    static RETURN_TYPE_INFERRING: RefCell<AHashSet<SmolStr>> =
+        RefCell::new(AHashSet::with_capacity(2));
 }
 
 #[derive(Debug, Clone)]
@@ -122,8 +126,16 @@ impl DataType {
             }
         }
     }
+    #[inline(always)]
     pub const fn is_indexable(&self) -> bool {
         matches!(self, Self::String | Self::Array(_) | Self::Unknown)
+    }
+    #[inline(always)]
+    pub fn expect(&self, expected: &Self, src: (&str, &str), span: Span) {
+        if self != expected {
+            cold_path();
+            throw_compiler_error(src, span, ErrType::InvalidType(expected, self));
+        }
     }
 }
 
@@ -438,7 +450,7 @@ fn track_return_flow(
                 }
             }
             Expr::VarDeclare(name, expr) => {
-                let var_type = infer_type(expr, v, ctx, state);
+                let var_type = expr.infer_type(v, ctx, state);
                 v.push(Variable {
                     name: name.clone(),
                     register_id: 0,
@@ -446,7 +458,7 @@ fn track_return_flow(
                 });
             }
             Expr::VarAssign(name, expr, _) => {
-                let var_type = infer_type(expr, v, ctx, state);
+                let var_type = expr.infer_type(v, ctx, state);
                 if let Some(var) = v.iter_mut().rfind(|var| &var.name == name) {
                     var.var_type = var_type;
                 }
@@ -467,12 +479,12 @@ fn track_return_flow(
                 v.truncate(v_len);
             }
             Expr::ForLoop(var_name, array_expr, array_code, _) => {
-                let inferred_collection_type = infer_type(array_expr, v, ctx, state);
+                let inferred_collection_type = array_expr.infer_type(v, ctx, state);
                 let elem_type = match inferred_collection_type {
                     DataType::Array(inner) => inner.map_or(DataType::Unknown, |t| *t),
                     DataType::String => DataType::String,
                     DataType::Unknown => DataType::Unknown,
-                    _ => unreachable!(),
+                    _ => unsafe { unreachable_unchecked() },
                 };
                 let v_len = v.len();
                 if var_name.as_str() != "_" {
@@ -494,7 +506,7 @@ fn track_return_flow(
                         .rfind(|var| &var.name == var_name)
                         .is_some_and(|var| var.var_type == DataType::Array(None))
                 {
-                    let arg_type = infer_type(&args[0], v, ctx, state);
+                    let arg_type = args[0].infer_type(v, ctx, state);
                     if let Some(var) = v.iter_mut().rfind(|var| &var.name == var_name) {
                         var.var_type = DataType::Array(Some(Box::new(arg_type)));
                     }
@@ -502,7 +514,7 @@ fn track_return_flow(
             }
             Expr::ReturnVal(return_val) => {
                 if let Some(val) = return_val.as_ref() {
-                    let infered = infer_type(val, v, ctx, state);
+                    let infered = val.infer_type(v, ctx, state);
                     add_return_type!(&mut return_types, infered);
                 } else {
                     add_return_type!(&mut return_types, DataType::Null);
@@ -521,409 +533,424 @@ fn track_return_flow(
     }
 }
 
-pub fn infer_type(
-    e: &Expr,
-    v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
-    state: &mut State<'_>,
-) -> DataType {
-    match e {
-        Expr::Var(name, markers) => v
-            .iter()
-            .rfind(|x| &x.name == name)
-            .unwrap_or_else(|| {
-                throw_compiler_error(ctx.src, *markers, ErrType::UnknownVariable(name));
-            })
-            .var_type
-            .clone(),
-        Expr::Float(_) => DataType::Float,
-        Expr::Int(_) => DataType::Int,
-        Expr::String(_) => DataType::String,
-        Expr::Bool(_) | Expr::Eq(_, _) | Expr::NotEq(_, _) => DataType::Bool,
-        Expr::Null | Expr::Condition(_, _, _) => DataType::Null,
-        Expr::Array(x, _) => DataType::Array(if x.is_empty() {
-            None
-        } else {
-            let elem_type = x
+impl Expr {
+    pub fn infer_type(
+        &self,
+        v: &mut Vec<Variable>,
+        ctx: Ctx<'_>,
+        state: &mut State<'_>,
+    ) -> DataType {
+        match self {
+            Self::Var(name, markers) => v
                 .iter()
-                .map(|elem| infer_type(elem, v, ctx, state))
-                .find(|elem_type| *elem_type != DataType::Unknown)
-                .unwrap_or(DataType::Unknown);
-            Some(Box::from(elem_type))
-        }),
-        Expr::Map(kv_pairs, _) => {
-            if kv_pairs.is_empty() {
-                DataType::Map(Box::from((
-                    Some(DataType::Unknown),
-                    Some(DataType::Unknown),
-                )))
+                .rfind(|x| &x.name == name)
+                .unwrap_or_else(|| {
+                    throw_compiler_error(ctx.src, *markers, ErrType::UnknownVariable(name));
+                })
+                .var_type
+                .clone(),
+            Self::Float(_) => DataType::Float,
+            Self::Int(_) => DataType::Int,
+            Self::String(_) => DataType::String,
+            Self::Bool(_) | Self::Eq(_, _) | Self::NotEq(_, _) => DataType::Bool,
+            Self::Null => DataType::Null,
+            Self::Array(x, _) => DataType::Array(if x.is_empty() {
+                None
             } else {
-                let kv_type = kv_pairs
+                let elem_type = x
                     .iter()
-                    .map(|(key, value)| {
-                        (
-                            infer_type(key, v, ctx, state),
-                            infer_type(value, v, ctx, state),
-                        )
-                    })
-                    .find(|(key_t, val_t)| {
-                        key_t != &DataType::Unknown || val_t != &DataType::Unknown
-                    })
-                    .map_or(
-                        (Some(DataType::Unknown), Some(DataType::Unknown)),
-                        |(key_t, val_t)| (Some(key_t), Some(val_t)),
-                    );
-                DataType::Map(Box::from(kv_type))
-            }
-        }
-        Expr::Add(x, y, markers) => {
-            match (infer_type(x, v, ctx, state), infer_type(y, v, ctx, state)) {
-                (DataType::Unknown, t) | (t, DataType::Unknown) => t,
-                (DataType::Float, DataType::Float) => DataType::Float,
-                (DataType::Int, DataType::Int) => DataType::Int,
-                (DataType::String, DataType::String) => DataType::String,
-                (DataType::Array(t1), DataType::Array(t2)) => DataType::Array(t1.or(t2)),
-                (l, r) => throw_compiler_error(ctx.src, *markers, ErrType::OpError(&l, &r, "+")),
-            }
-        }
-        Expr::Mul(x, y, markers)
-        | Expr::Div(x, y, markers)
-        | Expr::Sub(x, y, markers)
-        | Expr::Mod(x, y, markers)
-        | Expr::Pow(x, y, markers) => {
-            match (infer_type(x, v, ctx, state), infer_type(y, v, ctx, state)) {
-                (DataType::Unknown, t) | (t, DataType::Unknown)
-                    if matches!(t, DataType::Float | DataType::Int | DataType::Unknown) =>
-                {
-                    t
-                }
-                (DataType::Float, DataType::Float) => DataType::Float,
-                (DataType::Int, DataType::Int) => DataType::Int,
-                (l, r) => throw_compiler_error(
-                    ctx.src,
-                    *markers,
-                    ErrType::OpError(&l, &r, symbol_of_expr(e)),
-                ),
-            }
-        }
-        Expr::Sup(x, y, markers)
-        | Expr::SupEq(x, y, markers)
-        | Expr::Inf(x, y, markers)
-        | Expr::InfEq(x, y, markers) => {
-            match (infer_type(x, v, ctx, state), infer_type(y, v, ctx, state)) {
-                (DataType::Unknown, DataType::Float | DataType::Int)
-                | (DataType::Float | DataType::Int, DataType::Unknown)
-                | (DataType::Float, DataType::Float)
-                | (DataType::Int, DataType::Int) => DataType::Bool,
-                (l, r) => throw_compiler_error(
-                    ctx.src,
-                    *markers,
-                    ErrType::OpError(&l, &r, symbol_of_expr(e)),
-                ),
-            }
-        }
-        Expr::BoolAnd(x, y, markers) | Expr::BoolOr(x, y, markers) => {
-            match (infer_type(x, v, ctx, state), infer_type(y, v, ctx, state)) {
-                (DataType::Unknown | DataType::Bool, DataType::Bool)
-                | (DataType::Bool, DataType::Unknown) => DataType::Bool,
-                (l, r) => throw_compiler_error(ctx.src, *markers, ErrType::OpError(&l, &r, "||")),
-            }
-        }
-        Expr::Neg(e, _) => match infer_type(e, v, ctx, state) {
-            DataType::Float => DataType::Float,
-            DataType::Int => DataType::Int,
-            DataType::Unknown => DataType::Unknown,
-            _ => unreachable!(),
-        },
-        Expr::BoolNeg(e, _) => match infer_type(e, v, ctx, state) {
-            DataType::Bool => DataType::Bool,
-            _ => unreachable!(),
-        },
-        Expr::ArrayGetIndex(array, _, _) => match infer_type(array, v, ctx, state) {
-            DataType::Array(array_type) => array_type.map_or(DataType::Null, |t| *t),
-            DataType::String => DataType::String,
-            DataType::Unknown => DataType::Unknown,
-            _ => unreachable!(),
-        },
-        Expr::GetStructField(s, field, struct_span, field_span) => {
-            let s = infer_type(s, v, ctx, state);
-            if let DataType::Struct(s_id) = s {
-                state.structs[s_id as usize]
-                    .fields
-                    .iter()
-                    .find(|x| &x.0 == field)
-                    .unwrap_or_else(|| {
-                        throw_compiler_error(
-                            ctx.src,
-                            *field_span,
-                            ErrType::StructUnknownField(&state.structs[s_id as usize].name, field),
+                    .map(|elem| elem.infer_type(v, ctx, state))
+                    .find(|elem_type| *elem_type != DataType::Unknown)
+                    .unwrap_or(DataType::Unknown);
+                Some(Box::from(elem_type))
+            }),
+            Self::Map(kv_pairs, _) => {
+                if kv_pairs.is_empty() {
+                    DataType::Map(Box::from((
+                        Some(DataType::Unknown),
+                        Some(DataType::Unknown),
+                    )))
+                } else {
+                    let kv_type = kv_pairs
+                        .iter()
+                        .map(|(key, value)| {
+                            (
+                                key.infer_type(v, ctx, state),
+                                value.infer_type(v, ctx, state),
+                            )
+                        })
+                        .find(|(key_t, val_t)| {
+                            key_t != &DataType::Unknown || val_t != &DataType::Unknown
+                        })
+                        .map_or(
+                            (Some(DataType::Unknown), Some(DataType::Unknown)),
+                            |(key_t, val_t)| (Some(key_t), Some(val_t)),
                         );
-                    })
-                    .1
-                    .clone()
-            } else {
-                throw_compiler_error(
-                    ctx.src,
-                    *struct_span,
-                    ErrType::InvalidType(&DataType::Struct(0), &s),
-                );
+                    DataType::Map(Box::from(kv_type))
+                }
             }
-        }
-        Expr::ArrayGetSlice(array, _, _, _) => match infer_type(array, v, ctx, state) {
-            DataType::Array(array_type) => DataType::Array(array_type),
-            DataType::String => DataType::String,
-            DataType::Unknown => DataType::Unknown,
-            _ => unreachable!(),
-        },
-        Expr::FunctionCall(args, namespace, markers, _) => {
-            match namespace.last().unwrap().as_str() {
-                "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
-                "type" | "str" | "input" | "read" => DataType::String,
-                "float" => DataType::Float,
-                "int" | "the_answer" => DataType::Int,
-                "bool" | "exists" => DataType::Bool,
-                "range" => DataType::Array(Some(Box::from(DataType::Int))),
-                "argv" => DataType::Array(Some(Box::from(DataType::String))),
-                function_name => {
-                    if let Some(lib) = state.dyn_libs.iter().find(|l| l.name == namespace[0])
-                        && let Some(FnSignature {
-                            name: _,
-                            args: _,
-                            return_type: fn_return_type,
-                            id: _,
-                        }) = lib.fns.iter().find(|x| x.name == function_name)
-                    {
-                        return fn_return_type.clone();
+            Self::Add(x, y, markers) => {
+                match (x.infer_type(v, ctx, state), y.infer_type(v, ctx, state)) {
+                    (DataType::Unknown, t) | (t, DataType::Unknown) => t,
+                    (DataType::Float, DataType::Float) => DataType::Float,
+                    (DataType::Int, DataType::Int) => DataType::Int,
+                    (DataType::String, DataType::String) => DataType::String,
+                    (DataType::Array(t1), DataType::Array(t2)) => DataType::Array(t1.or(t2)),
+                    (l, r) => {
+                        throw_compiler_error(ctx.src, *markers, ErrType::OpError(&l, &r, "+"))
                     }
-                    let infered_arg_types = args
+                }
+            }
+            Self::Mul(x, y, markers)
+            | Self::Div(x, y, markers)
+            | Self::Sub(x, y, markers)
+            | Self::Mod(x, y, markers)
+            | Self::Pow(x, y, markers) => {
+                match (x.infer_type(v, ctx, state), y.infer_type(v, ctx, state)) {
+                    (DataType::Unknown, t) | (t, DataType::Unknown)
+                        if matches!(t, DataType::Float | DataType::Int | DataType::Unknown) =>
+                    {
+                        t
+                    }
+                    (DataType::Float, DataType::Float) => DataType::Float,
+                    (DataType::Int, DataType::Int) => DataType::Int,
+                    (l, r) => throw_compiler_error(
+                        ctx.src,
+                        *markers,
+                        ErrType::OpError(&l, &r, symbol_of_expr(self)),
+                    ),
+                }
+            }
+            Self::Sup(x, y, markers)
+            | Self::SupEq(x, y, markers)
+            | Self::Inf(x, y, markers)
+            | Self::InfEq(x, y, markers) => {
+                match (x.infer_type(v, ctx, state), y.infer_type(v, ctx, state)) {
+                    (DataType::Unknown, DataType::Float | DataType::Int)
+                    | (DataType::Float | DataType::Int, DataType::Unknown)
+                    | (DataType::Float, DataType::Float)
+                    | (DataType::Int, DataType::Int) => DataType::Bool,
+                    (l, r) => throw_compiler_error(
+                        ctx.src,
+                        *markers,
+                        ErrType::OpError(&l, &r, symbol_of_expr(self)),
+                    ),
+                }
+            }
+            Self::BoolAnd(x, y, markers) | Self::BoolOr(x, y, markers) => {
+                match (x.infer_type(v, ctx, state), y.infer_type(v, ctx, state)) {
+                    (DataType::Unknown | DataType::Bool, DataType::Bool)
+                    | (DataType::Bool, DataType::Unknown) => DataType::Bool,
+                    (l, r) => {
+                        throw_compiler_error(ctx.src, *markers, ErrType::OpError(&l, &r, "||"))
+                    }
+                }
+            }
+            Self::Neg(e, _) => match e.infer_type(v, ctx, state) {
+                DataType::Float => DataType::Float,
+                DataType::Int => DataType::Int,
+                DataType::Unknown => DataType::Unknown,
+                _ => unreachable!(),
+            },
+            Self::BoolNeg(e, _) => match e.infer_type(v, ctx, state) {
+                DataType::Bool => DataType::Bool,
+                _ => unreachable!(),
+            },
+            Self::ArrayGetIndex(array, _, _) => match array.infer_type(v, ctx, state) {
+                DataType::Array(array_type) => array_type.map_or(DataType::Null, |t| *t),
+                DataType::String => DataType::String,
+                DataType::Unknown => DataType::Unknown,
+                _ => unreachable!(),
+            },
+            Self::GetStructField(s, field, struct_span, field_span) => {
+                let s = s.infer_type(v, ctx, state);
+                if let DataType::Struct(s_id) = s {
+                    state.structs[s_id as usize]
+                        .fields
                         .iter()
-                        .map(|x| infer_type(x, v, ctx, state))
-                        .collect::<Vec<DataType>>();
-
-                    let func = state
-                        .fns
-                        .iter()
-                        .find(|func| func.name == function_name)
+                        .find(|x| &x.0 == field)
                         .unwrap_or_else(|| {
                             throw_compiler_error(
                                 ctx.src,
-                                *markers,
-                                ErrType::UnknownFunction(function_name),
+                                *field_span,
+                                ErrType::StructUnknownField(
+                                    &state.structs[s_id as usize].name,
+                                    field,
+                                ),
                             );
-                        });
-
-                    // Check the return type cache
-                    if let Some((_, ret)) = func
-                        .return_type_cache
-                        .iter()
-                        .find(|(args, _)| **args == *infered_arg_types)
-                    {
-                        return ret.clone();
-                    }
-
-                    let fn_args = func.args.clone();
-                    let fn_code = func.code.clone();
-                    let v_len_before_args = v.len();
-                    for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
-                        // 0 => placeholder id, it's never used
-                        v.push(Variable {
-                            name: fn_args[i].clone(),
-                            register_id: 0,
-                            var_type: infered_type,
-                        });
-                    }
-
-                    // Mutual-recursion cycle guard -> if we are already in the
-                    // middle of inferring this function's return type, return Null to break the cycle
-                    let already_inferring =
-                        RETURN_TYPE_INFERRING.with(|s| s.borrow().contains(function_name));
-                    if already_inferring {
-                        v.truncate(v_len_before_args);
-                        return DataType::Unknown;
-                    }
-
-                    RETURN_TYPE_INFERRING
-                        .with(|s| s.borrow_mut().insert(SmolStr::from(function_name)));
-
-                    let (fn_src_name, fn_src_contents) =
-                        state.sources[func.src_file as usize].clone();
-                    let fn_ctx = Ctx {
-                        src: (fn_src_name.as_str(), fn_src_contents.as_str()),
-                        current_src_file: func.src_file,
-                        ..ctx
-                    };
-                    let fn_type = track_returns(&fn_code, v, fn_ctx, state, function_name);
-
-                    RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(function_name));
-
-                    let to_return = if fn_type.is_empty() {
-                        // If function doesn't return anything, return nothing
-                        DataType::Null
-                    } else {
-                        // If function returns anything, check if it returns the same thing each time
-                        check_poly(DataType::Poly(Box::from(fn_type)))
-                    };
-
-                    v.truncate(v_len_before_args);
-
-                    // Cache the result
-                    state
-                        .fns
-                        .iter_mut()
-                        .find(|f| f.name == function_name)
-                        .unwrap()
-                        .return_type_cache
-                        .push((Box::from(infered_arg_types), to_return.clone()));
-
-                    to_return
+                        })
+                        .1
+                        .clone()
+                } else {
+                    throw_compiler_error(
+                        ctx.src,
+                        *struct_span,
+                        ErrType::InvalidType(&DataType::Struct(0), &s),
+                    );
                 }
             }
-        }
-        Expr::ObjFunctionCall(obj, _, namespace, _, _, _) => {
-            match namespace.last().unwrap().as_str() {
-                "uppercase"
-                | "lowercase"
-                | "replace"
-                | "trim"
-                | "trim_sequence"
-                | "trim_left"
-                | "trim_right"
-                | "trim_sequence_left"
-                | "trim_sequence_right"
-                | "join" => DataType::String,
-                "starts_with" | "ends_with" | "contains" | "is_float" | "is_int" => DataType::Bool,
-                "len" | "find" => DataType::Int,
-                "repeat" | "reverse" => {
-                    let obj_type = infer_type(obj, v, ctx, state);
-                    if obj_type == DataType::String {
-                        DataType::String
-                    } else if let DataType::Array(array_type) = obj_type {
-                        DataType::Array(array_type)
-                    } else {
-                        unreachable!()
-                    }
-                }
-                "push" | "sort" | "remove" | "insert" => DataType::Null,
-                "sqrt" | "round" | "floor" => DataType::Float,
-                "abs" => {
-                    let obj_type = infer_type(obj, v, ctx, state);
-                    if obj_type == DataType::Float {
-                        DataType::Float
-                    } else if obj_type == DataType::Int {
-                        DataType::Int
-                    } else {
-                        unreachable!()
-                    }
-                }
-                "split" => DataType::Array(Some(Box::from(DataType::String))),
-                "partition" => {
-                    let obj_type = infer_type(obj, v, ctx, state);
-                    if let DataType::Array(array_type) = obj_type {
-                        DataType::Array(Some(Box::from(DataType::Array(array_type))))
-                    } else {
-                        unreachable!()
-                    }
-                }
-                "get" => {
-                    let obj_type = infer_type(obj, v, ctx, state);
-                    if let DataType::Map(m) = obj_type {
-                        m.1.unwrap_or(DataType::Unknown)
-                    } else {
-                        unreachable!()
-                    }
-                }
+            Self::ArrayGetSlice(array, _, _, _) => match array.infer_type(v, ctx, state) {
+                DataType::Array(array_type) => DataType::Array(array_type),
+                DataType::String => DataType::String,
+                DataType::Unknown => DataType::Unknown,
                 _ => unreachable!(),
-            }
-        }
-        Expr::InlineCondition(_, code, _) => {
-            let mut types: Vec<DataType> = Vec::with_capacity(code.len());
-            types.push(infer_type(&code[0], v, ctx, state));
-            for t in &code[0..] {
-                if let Expr::ElseIfBlock(_, code) = t {
-                    let infered = infer_type(&code[0], v, ctx, state);
-                    if !types.contains(&infered) {
-                        types.push(infered);
-                    }
-                } else if let Expr::ElseBlock(code) = t {
-                    let infered = infer_type(&code[0], v, ctx, state);
-                    if !types.contains(&infered) {
-                        types.push(infered);
+            },
+            Self::FunctionCall(args, namespace, markers, _) => {
+                match namespace.last().unwrap().as_str() {
+                    "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
+                    "type" | "str" | "input" | "read" => DataType::String,
+                    "float" => DataType::Float,
+                    "int" | "the_answer" => DataType::Int,
+                    "bool" | "exists" => DataType::Bool,
+                    "range" => DataType::Array(Some(Box::from(DataType::Int))),
+                    "argv" => DataType::Array(Some(Box::from(DataType::String))),
+                    function_name => {
+                        if let Some(lib) = state.dyn_libs.iter().find(|l| l.name == namespace[0])
+                            && let Some(FnSignature {
+                                name: _,
+                                args: _,
+                                return_type: fn_return_type,
+                                id: _,
+                            }) = lib.fns.iter().find(|x| x.name == function_name)
+                        {
+                            return fn_return_type.clone();
+                        }
+                        let infered_arg_types = args
+                            .iter()
+                            .map(|x| x.infer_type(v, ctx, state))
+                            .collect::<Vec<DataType>>();
+
+                        let func = state
+                            .fns
+                            .iter()
+                            .find(|func| func.name == function_name)
+                            .unwrap_or_else(|| {
+                                throw_compiler_error(
+                                    ctx.src,
+                                    *markers,
+                                    ErrType::UnknownFunction(function_name),
+                                );
+                            });
+
+                        // Check the return type cache
+                        if let Some((_, ret)) = func
+                            .return_type_cache
+                            .iter()
+                            .find(|(args, _)| **args == *infered_arg_types)
+                        {
+                            return ret.clone();
+                        }
+
+                        let fn_args = func.args.clone();
+                        let fn_code = func.code.clone();
+                        let v_len_before_args = v.len();
+                        for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
+                            // 0 => placeholder id, it's never used
+                            v.push(Variable {
+                                name: fn_args[i].clone(),
+                                register_id: 0,
+                                var_type: infered_type,
+                            });
+                        }
+
+                        // Mutual-recursion cycle guard -> if we are already in the
+                        // middle of inferring this function's return type, return Null to break the cycle
+                        let already_inferring =
+                            RETURN_TYPE_INFERRING.with(|s| s.borrow().contains(function_name));
+                        if already_inferring {
+                            v.truncate(v_len_before_args);
+                            return DataType::Unknown;
+                        }
+
+                        RETURN_TYPE_INFERRING
+                            .with(|s| s.borrow_mut().insert(SmolStr::from(function_name)));
+
+                        let (fn_src_name, fn_src_contents) =
+                            state.sources[func.src_file as usize].clone();
+                        let fn_ctx = Ctx {
+                            src: (fn_src_name.as_str(), fn_src_contents.as_str()),
+                            current_src_file: func.src_file,
+                            ..ctx
+                        };
+                        let fn_type = track_returns(&fn_code, v, fn_ctx, state, function_name);
+
+                        RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(function_name));
+
+                        let to_return = if fn_type.is_empty() {
+                            // If function doesn't return anything, return nothing
+                            DataType::Null
+                        } else {
+                            // If function returns anything, check if it returns the same thing each time
+                            DataType::Poly(Box::from(fn_type)).check_poly()
+                        };
+
+                        v.truncate(v_len_before_args);
+
+                        // Cache the result
+                        state
+                            .fns
+                            .iter_mut()
+                            .find(|f| f.name == function_name)
+                            .unwrap()
+                            .return_type_cache
+                            .push((Box::from(infered_arg_types), to_return.clone()));
+
+                        to_return
                     }
                 }
             }
-            check_poly(DataType::Poly(Box::from(types)))
-        }
-        Expr::Struct(namespace, _, span) => {
-            let name = &namespace[namespace.len() - 1];
-            let namespace = &namespace[..(namespace.len() - 1)];
-            DataType::Struct(
-                find_struct(state.namespace, state.structs, namespace, name).unwrap_or_else(|| {
-                    throw_compiler_error(ctx.src, *span, ErrType::UnknownStruct(name));
-                }) as u16,
-            )
-        }
-        Expr::AnonymousFunction(args, code, span) => {
-            let fn_name =
-                format_args!("{}{}{}", ctx.current_src_file, span.start, span.end).to_smolstr();
-            if let Some(id) = state
-                .fns
-                .iter()
-                .rposition(|f| f.name == fn_name && &f.args == args)
-            {
-                return DataType::Fn(id as u16);
+            Self::ObjFunctionCall(obj, _, namespace, _, _, _) => {
+                match namespace.last().unwrap().as_str() {
+                    "uppercase"
+                    | "lowercase"
+                    | "replace"
+                    | "trim"
+                    | "trim_sequence"
+                    | "trim_left"
+                    | "trim_right"
+                    | "trim_sequence_left"
+                    | "trim_sequence_right"
+                    | "join" => DataType::String,
+                    "starts_with" | "ends_with" | "contains" | "is_float" | "is_int" => {
+                        DataType::Bool
+                    }
+                    "len" | "find" => DataType::Int,
+                    "repeat" | "reverse" => {
+                        let obj_type = obj.infer_type(v, ctx, state);
+                        if obj_type == DataType::String {
+                            DataType::String
+                        } else if let DataType::Array(array_type) = obj_type {
+                            DataType::Array(array_type)
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    "push" | "sort" | "remove" | "insert" => DataType::Null,
+                    "sqrt" | "round" | "floor" => DataType::Float,
+                    "abs" => {
+                        let obj_type = obj.infer_type(v, ctx, state);
+                        if obj_type == DataType::Float {
+                            DataType::Float
+                        } else if obj_type == DataType::Int {
+                            DataType::Int
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    "split" => DataType::Array(Some(Box::from(DataType::String))),
+                    "partition" => {
+                        let obj_type = obj.infer_type(v, ctx, state);
+                        if let DataType::Array(array_type) = obj_type {
+                            DataType::Array(Some(Box::from(DataType::Array(array_type))))
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    "get" => {
+                        let obj_type = obj.infer_type(v, ctx, state);
+                        if let DataType::Map(m) = obj_type {
+                            m.1.unwrap_or(DataType::Unknown)
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    _ => unreachable!(),
+                }
             }
-            let returns_null = check_if_returns_void(code);
-            let mut callees = Vec::new();
-            collect_direct_fn_calls(code, &mut callees);
-            let id = state.fns.len() as u16;
-            state.fns.push(Function {
-                name: fn_name,
-                args: args.clone(),
-                code: Rc::from(code.clone()),
-                impls: Vec::new(),
-                is_recursive: None,
-                returns_null,
-                src_file: ctx.current_src_file,
-                return_type_cache: Vec::new(),
-                direct_calls: callees.into_boxed_slice(),
-            });
-            state.fn_registers.push(Vec::new());
-            // state.namespace.fns.push((x.clone(), id));
-            DataType::Fn(id)
+            Self::InlineCondition(_, code, _) => {
+                let mut types: Vec<DataType> = Vec::with_capacity(code.len());
+                types.push(code[0].infer_type(v, ctx, state));
+                for t in &code[0..] {
+                    if let Self::ElseIfBlock(_, code) = t {
+                        let infered = code[0].infer_type(v, ctx, state);
+                        if !types.contains(&infered) {
+                            types.push(infered);
+                        }
+                    } else if let Self::ElseBlock(code) = t {
+                        let infered = code[0].infer_type(v, ctx, state);
+                        if !types.contains(&infered) {
+                            types.push(infered);
+                        }
+                    }
+                }
+                DataType::Poly(Box::from(types)).check_poly()
+            }
+            Self::Struct(namespace, _, span) => {
+                let name = &namespace[namespace.len() - 1];
+                let namespace = &namespace[..(namespace.len() - 1)];
+                DataType::Struct(
+                    find_struct(state.namespace, state.structs, namespace, name).unwrap_or_else(
+                        || {
+                            throw_compiler_error(ctx.src, *span, ErrType::UnknownStruct(name));
+                        },
+                    ) as u16,
+                )
+            }
+            Self::AnonymousFunction(args, code, span) => {
+                let fn_name =
+                    format_args!("{}{}{}", ctx.current_src_file, span.start, span.end).to_smolstr();
+                if let Some(id) = state
+                    .fns
+                    .iter()
+                    .rposition(|f| f.name == fn_name && &f.args == args)
+                {
+                    return DataType::Fn(id as u16);
+                }
+                let returns_null = check_if_returns_void(code);
+                let mut callees = Vec::new();
+                collect_direct_fn_calls(code, &mut callees);
+                let id = state.fns.len() as u16;
+                state.fns.push(Function {
+                    name: fn_name,
+                    args: args.clone(),
+                    code: Rc::from(code.clone()),
+                    impls: Vec::new(),
+                    is_recursive: None,
+                    returns_null,
+                    src_file: ctx.current_src_file,
+                    return_type_cache: Vec::new(),
+                    direct_calls: callees.into_boxed_slice(),
+                });
+                state.fn_registers.push(Vec::new());
+                // state.namespace.fns.push((x.clone(), id));
+                DataType::Fn(id)
+            }
+            _ => unsafe { unreachable_unchecked() },
         }
-        _ => unreachable!(),
     }
 }
 
-pub fn check_poly(data: DataType) -> DataType {
-    if let DataType::Poly(ref elems) = data {
-        if let Some(new) = reduce_null_struct(elems) {
-            return new;
-        }
-        let mut concrete = elems
-            .iter()
-            .filter(|elem_type| **elem_type != DataType::Unknown);
-        if let Some(first_type) = concrete.next() {
-            if concrete.all(|x| x == first_type) {
-                first_type.clone()
-            } else {
-                data
+impl DataType {
+    pub fn check_poly(self) -> Self {
+        if let Self::Poly(ref elems) = self {
+            if let Some(new) = reduce_null_struct(elems) {
+                return new;
             }
-        } else if !elems.is_empty() {
-            DataType::Unknown
+            let mut concrete = elems
+                .iter()
+                .filter(|elem_type| **elem_type != Self::Unknown);
+            if let Some(first_type) = concrete.next() {
+                if concrete.all(|x| x == first_type) {
+                    first_type.clone()
+                } else {
+                    self
+                }
+            } else if !elems.is_empty() {
+                Self::Unknown
+            } else {
+                dev_error(
+                    "type_inference.rs",
+                    "check_poly",
+                    format_args!("DataType::Poly is empty"),
+                )
+            }
         } else {
             dev_error(
                 "type_inference.rs",
                 "check_poly",
-                format_args!("DataType::Poly is empty"),
+                format_args!("Didn't receive DataType::Poly"),
             )
         }
-    } else {
-        dev_error(
-            "type_inference.rs",
-            "check_poly",
-            format_args!("Didn't receive DataType::Poly"),
-        )
     }
 }
 

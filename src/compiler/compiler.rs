@@ -15,36 +15,27 @@ use crate::functions::handle_functions;
 use crate::instr::LibFunc;
 use crate::methods::handle_method_calls;
 use crate::parser;
-use crate::registers::get_expr_tgt_id;
-use crate::registers::get_last_tgt_id;
-use crate::registers::is_reg_free;
 use crate::registers::move_reg_to_reg;
 use crate::registers::move_to_id;
+use crate::type_system::DataType;
 use crate::type_system::check_if_returns_void;
 use crate::type_system::collect_direct_fn_calls;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::type_system::datatype_to_c_type;
 use crate::type_system::struct_field_type_matches;
-use crate::type_system::{DataType, infer_type};
-use crate::util::str_to_keel_type;
-use crate::vm::UncheckedVecOps;
+use crate::util::parse_keel_type;
 use crate::{data::Data, instr::Instr};
 use ahash::RandomState;
 use nohash_hasher::BuildNoHashHasher;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::collections::{HashMap, HashSet};
+use std::hint::cold_path;
+use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::slice;
-
-// lalrpop_util::lalrpop_mod!(
-//     #[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
-//     pub grammar
-// );
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is false)
-#[inline(always)]
 fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_backwards: bool) {
     if output.is_empty() {
         return output.push(Instr::IsFalseJmp(condition_id, *len));
@@ -140,36 +131,23 @@ fn compile_short_circuit_condition(
     ctx: Ctx<'_>,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
-    offset: u16,
-    single_run: bool,
     bool_or_mode: bool,
 ) -> (Vec<usize>, Vec<usize>) {
     match expr {
         Expr::BoolOr(left, right, _) => {
             // left side of || always uses true jump mode
-            let (mut true_jumps, _) = compile_short_circuit_condition(
-                left, v, ctx, state, output, offset, single_run, true,
-            );
-            let (right_true, right_false) = compile_short_circuit_condition(
-                right,
-                v,
-                ctx,
-                state,
-                output,
-                offset,
-                single_run,
-                bool_or_mode,
-            );
+            let (mut true_jumps, _) =
+                compile_short_circuit_condition(left, v, ctx, state, output, true);
+            let (right_true, right_false) =
+                compile_short_circuit_condition(right, v, ctx, state, output, bool_or_mode);
             true_jumps.extend(right_true);
             (true_jumps, right_false)
         }
         Expr::BoolAnd(left, right, _) => {
             if bool_or_mode {
                 // && inside left side of ||
-                let id_l = get_id(left, v, ctx, state, output, None, false, offset, single_run);
-                let id_r = get_id(
-                    right, v, ctx, state, output, None, false, offset, single_run,
-                );
+                let id_l = get_id(left, v, ctx, state, output, None, false);
+                let id_r = get_id(right, v, ctx, state, output, None, false);
                 state.free_reg(id_l, v);
                 state.free_reg(id_r, v);
                 let id = state.alloc_reg();
@@ -179,18 +157,16 @@ fn compile_short_circuit_condition(
                 (vec![output.len() - 1], Vec::new())
             } else {
                 // normal && -> if either side is false, jump past the body
-                let (_, mut false_jumps) = compile_short_circuit_condition(
-                    left, v, ctx, state, output, offset, single_run, false,
-                );
-                let (_, right_false) = compile_short_circuit_condition(
-                    right, v, ctx, state, output, offset, single_run, false,
-                );
+                let (_, mut false_jumps) =
+                    compile_short_circuit_condition(left, v, ctx, state, output, false);
+                let (_, right_false) =
+                    compile_short_circuit_condition(right, v, ctx, state, output, false);
                 false_jumps.extend(right_false);
                 (Vec::new(), false_jumps)
             }
         }
         expr => {
-            let cond_id = get_id(expr, v, ctx, state, output, None, false, offset, single_run);
+            let cond_id = get_id(expr, v, ctx, state, output, None, false);
             if bool_or_mode {
                 add_cmp_true(cond_id, output);
                 state.free_reg(cond_id, v);
@@ -260,6 +236,961 @@ pub fn find_struct(
     }
 }
 
+#[inline(always)]
+fn compile_array_literal(
+    array_items: &[Expr],
+    span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    if let Some(first) = array_items.first() {
+        let first_type = first.infer_type(v, ctx, state);
+        if !array_items
+            .iter()
+            .all(|x| x.infer_type(v, ctx, state) == first_type)
+        {
+            throw_compiler_error(ctx.src, span, ErrType::ArrayWithDiffType);
+        }
+    }
+    let array_id = {
+        state.pools.objs.push(Vec::with_capacity(array_items.len()));
+        state.pools.objs.len() - 1
+    };
+    if array_items.is_empty() && !ctx.single_run {
+        let array_reg = {
+            state.registers.push(Data::array(array_id as u32));
+            state.registers.len() - 1
+        } as u16;
+        output.push(Instr::EmptyArray(array_reg));
+        return array_reg;
+    }
+    if ctx.single_run {
+        for elem in array_items {
+            let id = elem
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap();
+            if elem.is_constant_literal() {
+                state
+                    .pools
+                    .objs
+                    .get_mut(array_id)
+                    .unwrap()
+                    .push(state.registers[id as usize]);
+            } else {
+                output.push(Instr::ObjElemMov(
+                    id,
+                    array_id as u16,
+                    state.pools.objs[array_id].len() as u16,
+                ));
+                state.pools.objs.get_mut(array_id).unwrap().push(NULL);
+            }
+        }
+        state.registers.push(Data::array(array_id as u32));
+        (state.registers.len() - 1) as u16
+    } else {
+        // Check if all elements are constant (no instructions emitted)
+        let mut constant_array = true;
+        let mut elem_ids: Vec<u16> = Vec::with_capacity(array_items.len());
+        for elem in array_items {
+            let id = elem
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap();
+            if elem.is_constant_literal() {
+                state
+                    .pools
+                    .objs
+                    .get_mut(array_id)
+                    .unwrap()
+                    .push(state.registers[id as usize]);
+            } else {
+                constant_array = false;
+                state.pools.objs.get_mut(array_id).unwrap().push(NULL);
+            }
+            elem_ids.push(id);
+        }
+
+        if constant_array {
+            // The template array is held by a register to prevent it from being freed by the GC
+            let template_reg = {
+                state.registers.push(Data::array(array_id as u32));
+                (state.registers.len() - 1) as u16
+            };
+            let dest_reg = {
+                state.registers.push(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
+                (state.registers.len() - 1) as u16
+            };
+            output.push(Instr::CloneArray(
+                template_reg,
+                dest_reg,
+                state.pools.objs[array_id].len() as u16,
+            ));
+            dest_reg
+        } else {
+            let dest_reg = {
+                state.registers.push(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
+                (state.registers.len() - 1) as u16
+            };
+            output.push(Instr::EmptyArray(dest_reg));
+            for elem_reg in elem_ids {
+                output.push(Instr::Push(dest_reg, elem_reg));
+            }
+            dest_reg
+        }
+    }
+}
+
+fn compile_struct_literal(
+    namespace: &[SmolStr],
+    fields: &[(SmolStr, Expr, Span)],
+    span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let name = &namespace[namespace.len() - 1];
+    let namespace = &namespace[..(namespace.len() - 1)];
+    let Some(expected_struct_idx) = find_struct(state.namespace, state.structs, namespace, name)
+    else {
+        throw_compiler_error(ctx.src, span, ErrType::UnknownStruct(name));
+    };
+    let type_id = state.structs[expected_struct_idx].id;
+    let expected_fields_len = state.structs[expected_struct_idx].fields.len();
+    if expected_fields_len != fields.len() {
+        throw_compiler_error(
+            ctx.src,
+            span,
+            ErrType::InvalidStructFieldCount(name, expected_fields_len as u16, fields.len() as u16),
+        );
+    }
+    let struct_id = {
+        state.pools.objs.push(Vec::with_capacity(fields.len()));
+        state.pools.objs.len() - 1
+    };
+    if ctx.single_run {
+        for field_idx in 0..expected_fields_len {
+            if let Some((_, field_expr, field_span)) = fields
+                .iter()
+                .find(|(f, _, _)| f == &state.structs[expected_struct_idx].fields[field_idx].0)
+            {
+                let field_type = field_expr.infer_type(v, ctx, state);
+                let field = &state.structs[expected_struct_idx].fields[field_idx];
+                if !struct_field_type_matches(&field.1, &field_type) {
+                    throw_compiler_error(
+                        ctx.src,
+                        *field_span,
+                        ErrType::InvalidType(&field.1, &field_type),
+                    );
+                }
+                let id = field_expr
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap();
+                if field_expr.is_constant_literal() {
+                    state
+                        .pools
+                        .objs
+                        .get_mut(struct_id)
+                        .unwrap()
+                        .push(state.registers[id as usize]);
+                } else {
+                    output.push(Instr::ObjElemMov(
+                        id,
+                        struct_id as u16,
+                        state.pools.objs[struct_id].len() as u16,
+                    ));
+                    state.pools.objs.get_mut(struct_id).unwrap().push(NULL);
+                }
+            } else {
+                throw_compiler_error(
+                    ctx.src,
+                    span,
+                    ErrType::StructMissingField(
+                        name,
+                        &state.structs[expected_struct_idx].fields[field_idx].0,
+                    ),
+                );
+            }
+        }
+
+        state
+            .registers
+            .push(Data::struct_instance(type_id, struct_id as u32));
+        (state.registers.len() - 1) as u16
+    } else {
+        let mut dynamic: Vec<(u16, u16)> = Vec::with_capacity(expected_fields_len);
+        for field_idx in 0..expected_fields_len {
+            if let Some((_, field_expr, field_span)) = fields
+                .iter()
+                .find(|(f, _, _)| f == &state.structs[expected_struct_idx].fields[field_idx].0)
+            {
+                let field_type = field_expr.infer_type(v, ctx, state);
+                let field = &state.structs[expected_struct_idx].fields[field_idx];
+                if !struct_field_type_matches(&field.1, &field_type) {
+                    throw_compiler_error(
+                        ctx.src,
+                        *field_span,
+                        ErrType::InvalidType(&field.1, &field_type),
+                    );
+                }
+                let id = field_expr
+                    .compile(v, ctx, state, output, None, false, true)
+                    .unwrap();
+                if field_expr.is_constant_literal() {
+                    state
+                        .pools
+                        .objs
+                        .get_mut(struct_id)
+                        .unwrap()
+                        .push(state.registers[id as usize]);
+                } else {
+                    state.pools.objs.get_mut(struct_id).unwrap().push(NULL);
+                    dynamic.push((id, field_idx as u16));
+                }
+            } else {
+                throw_compiler_error(
+                    ctx.src,
+                    span,
+                    ErrType::StructMissingField(
+                        name,
+                        &state.structs[expected_struct_idx].fields[field_idx].0,
+                    ),
+                );
+            }
+        }
+
+        let template_reg = {
+            state
+                .registers
+                .push(Data::struct_instance(type_id, struct_id as u32));
+            (state.registers.len() - 1) as u16
+        };
+        let dest_reg = {
+            state.registers.push(Data::struct_instance(type_id, 0));
+            (state.registers.len() - 1) as u16
+        };
+        output.push(Instr::CloneStruct(template_reg, dest_reg));
+        for (val_reg, slot) in dynamic {
+            output.push(Instr::SetFieldStruct(dest_reg, val_reg, slot));
+        }
+        dest_reg
+    }
+}
+
+fn compile_map_literal(
+    kv_pairs: &[(Expr, Expr)],
+    span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let mut global_key_type: DataType = DataType::Unknown;
+    let mut global_val_type: DataType = DataType::Unknown;
+    let map_id = state.pools.maps.len();
+    state.pools.maps.push(HashMap::with_capacity_and_hasher(
+        kv_pairs.len(),
+        BuildNoHashHasher::default(),
+    ));
+    if ctx.single_run {
+        for (i, (key, val)) in kv_pairs.iter().enumerate() {
+            if kv_pairs.iter().skip(i + 1).any(|(k, _)| k == key) {
+                throw_compiler_error(ctx.src, span, ErrType::DuplicateMapKey);
+            }
+            let key_t = key.infer_type(v, ctx, state);
+            let val_t = val.infer_type(v, ctx, state);
+            if i == 0 {
+                global_key_type = key_t;
+                global_val_type = val_t;
+            } else {
+                key_t.expect(&global_key_type, ctx.src, span);
+                val_t.expect(&global_val_type, ctx.src, span);
+            }
+            let output_len = output.len();
+            let key_val_id = key
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap();
+            if !(key.is_constant_literal()
+                || matches!(key, Expr::Array(_, _)) && output_len == output.len())
+            {
+                throw_compiler_error(ctx.src, span, ErrType::NotLiteralMapKey);
+            }
+            let key_val = state.registers[key_val_id as usize];
+            let id = val
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap();
+            if val.is_constant_literal() {
+                state
+                    .pools
+                    .maps
+                    .get_mut(map_id)
+                    .unwrap()
+                    .insert(key_val, state.registers[id as usize]);
+            } else {
+                state
+                    .pools
+                    .maps
+                    .get_mut(map_id)
+                    .unwrap()
+                    .insert(key_val, NULL);
+                output.push(Instr::MapInsert(
+                    map_id as u16,
+                    state.registers.len() as u16,
+                    id,
+                ));
+                state.registers.push(key_val);
+            }
+        }
+        let dest_id = state.registers.len();
+        state.registers.push(Data::map(map_id as u32));
+        dest_id as u16
+    } else {
+        let mut dynamic: Vec<(Data, u16)> = Vec::with_capacity(kv_pairs.len());
+        for (i, (key, val)) in kv_pairs.iter().enumerate() {
+            if kv_pairs.iter().skip(i + 1).any(|(k, _)| k == key) {
+                throw_compiler_error(ctx.src, span, ErrType::DuplicateMapKey);
+            }
+            let key_t = key.infer_type(v, ctx, state);
+            let val_t = val.infer_type(v, ctx, state);
+            if i == 0 {
+                global_key_type = key_t;
+                global_val_type = val_t;
+            } else {
+                key_t.expect(&global_key_type, ctx.src, span);
+                val_t.expect(&global_val_type, ctx.src, span);
+            }
+            let output_len = output.len();
+            let key_val_id = key
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap();
+            if !(key.is_constant_literal()
+                || matches!(key, Expr::Array(_, _)) && output_len == output.len())
+            {
+                throw_compiler_error(ctx.src, span, ErrType::NotLiteralMapKey);
+            }
+            let key_val = state.registers[key_val_id as usize];
+            let val_id = val
+                .compile(v, ctx, state, output, None, false, true)
+                .unwrap();
+            if val.is_constant_literal() {
+                state
+                    .pools
+                    .maps
+                    .get_mut(map_id)
+                    .unwrap()
+                    .insert(key_val, state.registers[val_id as usize]);
+            } else {
+                state
+                    .pools
+                    .maps
+                    .get_mut(map_id)
+                    .unwrap()
+                    .insert(key_val, NULL);
+                dynamic.push((key_val, val_id));
+            }
+        }
+
+        let template_reg = {
+            state.registers.push(Data::map(map_id as u32));
+            (state.registers.len() - 1) as u16
+        };
+        let dest_reg = {
+            state.registers.push(Data::map(0));
+            (state.registers.len() - 1) as u16
+        };
+        output.push(Instr::CloneMap(template_reg, dest_reg));
+        for (key_val, val_id) in dynamic {
+            let key_reg = if let Some(&id) = state.const_registers.get(&key_val) {
+                id
+            } else {
+                let id = state.registers.len() as u16;
+                state.const_registers.insert(key_val, id);
+                state.registers.push(key_val);
+                id
+            };
+            output.push(Instr::MapInsertReg(dest_reg, key_reg, val_id));
+        }
+        dest_reg
+    }
+}
+
+fn compile_struct_field_access(
+    struct_expr: &Expr,
+    field: &SmolStr,
+    struct_span: Span,
+    field_span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let t = struct_expr.infer_type(v, ctx, state);
+    if let DataType::Struct(s_id) = t {
+        let s = &state.structs[s_id as usize];
+        let idx = s
+            .fields
+            .iter()
+            .position(|f| &f.0 == field)
+            .unwrap_or_else(|| {
+                throw_compiler_error(
+                    ctx.src,
+                    field_span,
+                    ErrType::StructUnknownField(&s.name, field),
+                );
+            });
+        let id = get_id(struct_expr, v, ctx, state, output, None, false);
+        let dest_reg_id = state.alloc_reg();
+        output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
+        dest_reg_id
+    } else {
+        throw_compiler_error(
+            ctx.src,
+            struct_span,
+            ErrType::InvalidType(&DataType::Struct(0), &t),
+        );
+    }
+}
+
+fn compile_array_indexing(
+    array: &Expr,
+    index: &Expr,
+    span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let infered = array.infer_type(v, ctx, state);
+    if !infered.is_indexable() {
+        throw_compiler_error(ctx.src, span, ErrType::NotIndexable(&infered));
+    }
+
+    let id = get_id(array, v, ctx, state, output, None, false);
+
+    let index_inferred = index.infer_type(v, ctx, state);
+    if index_inferred != DataType::Int {
+        throw_compiler_error(ctx.src, span, ErrType::InvalidIndexType(&index_inferred));
+    }
+    let index_id = get_id(index, v, ctx, state, output, None, false);
+    state.free_reg(index_id, v);
+    let dest_reg_id = state.alloc_reg();
+
+    let to_push = if infered == DataType::String {
+        Instr::GetIndexString(id, index_id, dest_reg_id)
+    } else {
+        Instr::GetIndexArray(id, index_id, dest_reg_id)
+    };
+    state.instr_src.push((to_push, span, ctx.current_src_file));
+    output.push(to_push);
+    dest_reg_id
+}
+
+fn compile_array_slice(
+    array: &Expr,
+    idx_start: &Expr,
+    idx_end: &Expr,
+    span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let infered = array.infer_type(v, ctx, state);
+    if !infered.is_indexable() {
+        throw_compiler_error(ctx.src, span, ErrType::NotIndexable(&infered));
+    }
+    let id = get_id(array, v, ctx, state, output, None, false);
+    let idx_start_inferred = idx_start.infer_type(v, ctx, state);
+    if idx_start_inferred != DataType::Int {
+        throw_compiler_error(
+            ctx.src,
+            span,
+            ErrType::InvalidIndexType(&idx_start_inferred),
+        );
+    }
+    let idx_start_id = get_id(idx_start, v, ctx, state, output, None, false);
+    let idx_end_inferred = idx_end.infer_type(v, ctx, state);
+    if idx_end_inferred != DataType::Int {
+        throw_compiler_error(ctx.src, span, ErrType::InvalidIndexType(&idx_end_inferred));
+    }
+    let idx_end_id = get_id(idx_end, v, ctx, state, output, None, false);
+    output.push(Instr::StoreFuncArg(idx_end_id));
+    state.free_reg(idx_start_id, v);
+    state.free_reg(idx_end_id, v);
+    let dest_reg_id = state.alloc_reg();
+    let to_push = if infered == DataType::String {
+        Instr::GetSliceString(id, idx_start_id, dest_reg_id)
+    } else {
+        Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
+    };
+    state.instr_src.push((to_push, span, ctx.current_src_file));
+    output.push(to_push);
+    dest_reg_id
+}
+
+fn uniform_op(
+    instr: fn(u16, u16, u16) -> Instr,
+    symbol: &'static str,
+    l: &Expr,
+    r: &Expr,
+    span: Span,
+    t: &DataType,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let (t_l, t_r) = (l.infer_type(v, ctx, state), r.infer_type(v, ctx, state));
+    if &t_l != t || &t_r != t {
+        throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, symbol))
+    }
+
+    let id_l = get_id(l, v, ctx, state, output, None, false);
+    let id_r = get_id(r, v, ctx, state, output, None, false);
+    state.free_reg(id_l, v);
+    state.free_reg(id_r, v);
+    let id = state.alloc_reg_tgt(tgt_id);
+    output.push(instr(id_l, id_r, id));
+    id
+}
+
+#[inline]
+fn uniform_op2(
+    instr: fn(u16, u16, u16) -> Instr,
+    t_1: &'static DataType,
+    instr2: fn(u16, u16, u16) -> Instr,
+    t_2: &'static DataType,
+    symbol: &'static str,
+    l: &Expr,
+    r: &Expr,
+    span: Span,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let (t_l, t_r) = (l.infer_type(v, ctx, state), r.infer_type(v, ctx, state));
+    if !((&t_l == t_1 && &t_r == t_1) || (&t_l == t_2 && &t_r == t_2)) {
+        throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, symbol))
+    }
+    let id_l = get_id(l, v, ctx, state, output, None, false);
+    let id_r = get_id(r, v, ctx, state, output, None, false);
+    state.free_reg(id_l, v);
+    state.free_reg(id_r, v);
+    let id = state.alloc_reg_tgt(tgt_id);
+    output.push(if &t_l == t_1 {
+        instr(id_l, id_r, id)
+    } else {
+        instr2(id_l, id_r, id)
+    });
+    id
+}
+
+fn compile_div_op(
+    l: &Expr,
+    r: &Expr,
+    span: Span,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    if let Expr::Int(n) = r
+        && *n == 0
+    {
+        throw_compiler_error(ctx.src, span, ErrType::DivisionByZero);
+    }
+    let id = uniform_op2(
+        Instr::DivFloat,
+        &DataType::Float,
+        Instr::DivInt,
+        &DataType::Int,
+        "/",
+        l,
+        r,
+        span,
+        tgt_id,
+        v,
+        ctx,
+        state,
+        output,
+    );
+    if matches!(output.last(), Some(Instr::DivInt(..))) {
+        state
+            .instr_src
+            .push((*output.last().unwrap(), span, ctx.current_src_file));
+    }
+    id
+}
+
+fn compile_add_op(
+    l: &Expr,
+    r: &Expr,
+    span: Span,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let t_l = l.infer_type(v, ctx, state);
+    let t_r = r.infer_type(v, ctx, state);
+    if t_l != t_r
+        || !matches!(
+            t_l,
+            DataType::String | DataType::Array(_) | DataType::Float | DataType::Int
+        )
+    {
+        throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, "+"));
+    }
+    // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
+    if t_l == DataType::Int
+        && let Some(Expr::Var(src_name, _)) = {
+            if matches!(r, Expr::Int(1)) {
+                Some(l)
+            } else if matches!(l, Expr::Int(1)) {
+                Some(r)
+            } else {
+                None
+            }
+        }
+        && let Some(src_var) = v.iter().rfind(|x| x.name == *src_name)
+    {
+        let src_id = src_var.register_id;
+        let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
+        output.push(if src_id == id {
+            Instr::IncInt(id)
+        } else {
+            Instr::IncIntTo(src_id, id)
+        });
+        return id;
+    }
+    let id_l = get_id(l, v, ctx, state, output, None, false);
+    let id_r = get_id(r, v, ctx, state, output, None, false);
+    state.free_reg(id_l, v);
+    state.free_reg(id_r, v);
+    let id = state.alloc_reg_tgt(tgt_id);
+    if matches!(t_l, DataType::Array(_)) {
+        output.push(Instr::AddArray(id_l, id_r, id));
+    } else if t_l == DataType::String {
+        output.push(Instr::AddStr(id_l, id_r, id));
+    } else if t_l == DataType::Float {
+        output.push(Instr::AddFloat(id_l, id_r, id));
+    } else {
+        output.push(Instr::AddInt(id_l, id_r, id));
+    }
+    id
+}
+
+fn compile_sub_op(
+    l: &Expr,
+    r: &Expr,
+    span: Span,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let t_l = l.infer_type(v, ctx, state);
+    let t_r = r.infer_type(v, ctx, state);
+    if !((t_l == DataType::Float && t_r == DataType::Float)
+        || (t_l == DataType::Int && t_r == DataType::Int))
+    {
+        throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, "-"));
+    }
+    // var-1 uses the dedicated DecInt/DecIntTo instructions
+    if t_l == DataType::Int
+        && matches!(r, Expr::Int(1))
+        && let Expr::Var(src_name, _) = l
+        && let Some(src_var) = v.iter().rfind(|x| x.name == *src_name)
+    {
+        let src_id = src_var.register_id;
+        let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
+        output.push(if src_id == id {
+            Instr::DecInt(id)
+        } else {
+            Instr::DecIntTo(src_id, id)
+        });
+        return id;
+    }
+    let id_l = get_id(l, v, ctx, state, output, None, false);
+    let id_r = get_id(r, v, ctx, state, output, None, false);
+    state.free_reg(id_l, v);
+    state.free_reg(id_r, v);
+    let id = state.alloc_reg_tgt(tgt_id);
+    output.push(if t_l == DataType::Float {
+        Instr::SubFloat(id_l, id_r, id)
+    } else {
+        Instr::SubInt(id_l, id_r, id)
+    });
+    id
+}
+
+fn compile_mod_op(
+    l: &Expr,
+    r: &Expr,
+    span: Span,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    if let Expr::Int(n) = r
+        && *n == 0
+    {
+        throw_compiler_error(ctx.src, span, ErrType::ModuloByZero);
+    }
+    let id = uniform_op2(
+        Instr::ModFloat,
+        &DataType::Float,
+        Instr::ModInt,
+        &DataType::Int,
+        "%",
+        l,
+        r,
+        span,
+        tgt_id,
+        v,
+        ctx,
+        state,
+        output,
+    );
+    if matches!(output.last(), Some(Instr::ModInt(..))) {
+        state
+            .instr_src
+            .push((*output.last().unwrap(), span, ctx.current_src_file));
+    }
+    id
+}
+
+fn compile_eq_op(
+    l: &Expr,
+    r: &Expr,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let l_type = l.infer_type(v, ctx, state);
+    let r_type = r.infer_type(v, ctx, state);
+    let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
+        && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
+    let is_string = l_type == DataType::String || r_type == DataType::String;
+    let id_l = get_id(l, v, ctx, state, output, None, false);
+    let id_r = get_id(r, v, ctx, state, output, None, false);
+    state.free_reg(id_l, v);
+    state.free_reg(id_r, v);
+    let id = state.alloc_reg_tgt(tgt_id);
+    output.push(if is_array {
+        Instr::ObjEq(id_l, id_r, id)
+    } else if is_string {
+        Instr::StrEq(id_l, id_r, id)
+    } else {
+        Instr::Eq(id_l, id_r, id)
+    });
+    id
+}
+
+fn compile_neq_op(
+    l: &Expr,
+    r: &Expr,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let l_type = l.infer_type(v, ctx, state);
+    let r_type = r.infer_type(v, ctx, state);
+    let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
+        && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
+    let is_string = l_type == DataType::String || r_type == DataType::String;
+    let id_l = get_id(l, v, ctx, state, output, None, false);
+    let id_r = get_id(r, v, ctx, state, output, None, false);
+    state.free_reg(id_l, v);
+    state.free_reg(id_r, v);
+    let id = state.alloc_reg_tgt(tgt_id);
+    if is_array {
+        output.push(Instr::ObjNotEq(id_l, id_r, id));
+    } else if is_string {
+        output.push(Instr::StrNotEq(id_l, id_r, id));
+    } else {
+        output.push(Instr::NotEq(id_l, id_r, id));
+    }
+    id
+}
+
+fn compile_neg_op(
+    l: &Expr,
+    span: Span,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let operand_type = l.infer_type(v, ctx, state);
+    let id_l = get_id(l, v, ctx, state, output, None, false);
+    state.free_reg(id_l, v);
+    let id = state.alloc_reg_tgt(tgt_id);
+    if operand_type == DataType::Float {
+        output.push(Instr::NegFloat(id_l, id));
+    } else if operand_type == DataType::Int {
+        output.push(Instr::NegInt(id_l, id));
+    } else {
+        throw_compiler_error(ctx.src, span, ErrType::InvalidOp(&operand_type, "-"));
+    }
+    id
+}
+
+fn compile_bool_neg_op(
+    l: &Expr,
+    span: Span,
+    tgt_id: Option<u16>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let operand_type = l.infer_type(v, ctx, state);
+    let id_l = get_id(l, v, ctx, state, output, None, false);
+    state.free_reg(id_l, v);
+    let id = state.alloc_reg_tgt(tgt_id);
+    if operand_type != DataType::Bool {
+        throw_compiler_error(ctx.src, span, ErrType::InvalidOp(&operand_type, "!"));
+    }
+    output.push(Instr::NegBool(id_l, id));
+    id
+}
+
+fn compile_inline_condition_branch(
+    branch: &[Expr],
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+    tgt_id: u16,
+) {
+    let regs_before = state.registers.len() as u16;
+    let output_len = output.len();
+    output.extend(compile_expr(
+        &branch[..branch.len() - 1],
+        v,
+        ctx.advance_offset(output.len() as u16),
+        state,
+    ));
+    let val_id = branch[branch.len() - 1]
+        .compile(
+            v,
+            ctx.advance_offset(output.len() as u16),
+            state,
+            output,
+            Some(tgt_id),
+            false,
+            true,
+        )
+        .unwrap();
+    state.free_scope_registers(regs_before, &output[output_len..], v);
+    if val_id != tgt_id {
+        output.push(Instr::Mov(val_id, tgt_id));
+    }
+}
+
+fn compile_inline_condition(
+    main_condition: &Expr,
+    code: &[Expr],
+    span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+    tgt_id: Option<u16>,
+) -> u16 {
+    let return_id = state.alloc_reg_tgt(tgt_id);
+
+    // get first code limit (after which there are only else(if) blocks)
+    let main_code_limit = code
+        .iter()
+        .position(|x| matches!(x, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
+        .unwrap_or(code.len());
+
+    let condition_blocks_count = code.len() - main_code_limit;
+    let mut cmp_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
+    let mut jmp_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
+    let mut condition_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
+
+    // parse the main condition
+    let condition_id = get_id(main_condition, v, ctx, state, output, None, false);
+    add_cmp_false(condition_id, &mut 0, output, false);
+    cmp_markers.push(output.len() - 1);
+
+    compile_inline_condition_branch(&code[..main_code_limit], v, ctx, state, output, return_id);
+    if main_code_limit != code.len() {
+        output.push(Instr::Jmp(0));
+        jmp_markers.push(output.len() - 1);
+    }
+
+    let mut else_exists = false;
+    for elem in &code[main_code_limit..] {
+        if let Expr::ElseIfBlock(condition, code) = elem {
+            condition_markers.push(output.len());
+            let condition_id = get_id(condition, v, ctx, state, output, None, false);
+            add_cmp_false(condition_id, &mut 0, output, false);
+            state.free_reg(condition_id, v);
+            cmp_markers.push(output.len() - 1);
+            compile_inline_condition_branch(code, v, ctx, state, output, return_id);
+            output.push(Instr::Jmp(0));
+            jmp_markers.push(output.len() - 1);
+        } else if let Expr::ElseBlock(code) = elem {
+            else_exists = true;
+            condition_markers.push(output.len());
+            compile_inline_condition_branch(code, v, ctx, state, output, return_id);
+        }
+    }
+    if !else_exists {
+        throw_compiler_error(ctx.src, span, ErrType::InvalidConditionalExpression);
+    }
+
+    for y in jmp_markers {
+        let diff = output.len() - y;
+        output[y] = Instr::Jmp(diff as u16);
+    }
+    for (i, y) in cmp_markers.iter().enumerate() {
+        let diff = if i >= condition_markers.len() {
+            output.len() - 1 - y
+        } else {
+            condition_markers[i] - y
+        };
+        if let Some(
+            Instr::IsFalseJmp(_, jump_size)
+            | Instr::SupEqFloatJmp(_, _, jump_size)
+            | Instr::SupEqIntJmp(_, _, jump_size)
+            | Instr::SupFloatJmp(_, _, jump_size)
+            | Instr::SupIntJmp(_, _, jump_size)
+            | Instr::InfEqFloatJmp(_, _, jump_size)
+            | Instr::InfEqIntJmp(_, _, jump_size)
+            | Instr::InfFloatJmp(_, _, jump_size)
+            | Instr::InfIntJmp(_, _, jump_size)
+            | Instr::NotEqJmp(_, _, jump_size)
+            | Instr::ObjNotEqJmp(_, _, jump_size)
+            | Instr::EqJmp(_, _, jump_size)
+            | Instr::ObjEqJmp(_, _, jump_size),
+        ) = output.get_mut(*y)
+        {
+            *jump_size = diff as u16;
+        }
+    }
+    state.free_reg(condition_id, v);
+    return_id
+}
+
 pub fn get_id(
     input: &Expr,
     v: &mut Vec<Variable>,
@@ -268,1992 +1199,1325 @@ pub fn get_id(
     output: &mut Vec<Instr>,
     tgt_id: Option<u16>,
     var_assignment: bool,
-    offset: u16,
-    single_run: bool,
 ) -> u16 {
-    let src = ctx.src;
-    macro_rules! uniform_op {
-        ($instr: ident,$symbol:expr, $l: expr, $r: expr, $markers: expr, $type:expr) => {{
-            let (t_l, t_r) = (infer_type($l, v, ctx, state), infer_type($r, v, ctx, state));
-            if t_l != $type || t_r != $type {
-                throw_compiler_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
-            }
-            let id_l = get_id($l, v, ctx, state, output, None, false, offset, single_run);
-            let id_r = get_id($r, v, ctx, state, output, None, false, offset, single_run);
-            state.free_reg(id_l, v);
-            state.free_reg(id_r, v);
-            let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
-            output.push(Instr::$instr(id_l, id_r, id));
-            id
-        }};
-        ($instr: ident, $instr2:ident,$symbol:expr, $l: expr, $r: expr, $markers: expr, $type1:expr, $type2:expr) => {{
-            let (t_l, t_r) = (infer_type($l, v, ctx, state), infer_type($r, v, ctx, state));
-            if !((t_l == $type1 && t_r == $type1) || (t_l == $type2 && t_r == $type2)) {
-                throw_compiler_error(src, $markers, ErrType::OpError(&t_l, &t_r, $symbol))
-            }
-            let id_l = get_id($l, v, ctx, state, output, None, false, offset, single_run);
-            let id_r = get_id($r, v, ctx, state, output, None, false, offset, single_run);
-            state.free_reg(id_l, v);
-            state.free_reg(id_r, v);
-            let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
-            output.push(if t_l == $type1 {
-                Instr::$instr(id_l, id_r, id)
-            } else {
-                Instr::$instr2(id_l, id_r, id)
-            });
-            id
-        }};
+    input
+        .compile(v, ctx, state, output, tgt_id, var_assignment, true)
+        .unwrap()
+}
+
+fn compile_array_index_assignment(
+    array: &Expr,
+    index: &Expr,
+    value: &Expr,
+    index_markers: Span,
+    elem_markers: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    let array_type = array.infer_type(v, ctx, state);
+    if !array_type.is_indexable() {
+        throw_compiler_error(ctx.src, index_markers, ErrType::NotIndexable(&array_type));
     }
-    match input {
-        Expr::Float(num) => {
-            if var_assignment {
-                state.registers.push((*num).into());
-                return (state.registers.len() - 1) as u16;
-            }
-            let data = (*num).into();
-            if let Some(&id) = state.const_registers.get(&data) {
-                id
-            } else {
-                state.registers.push(data);
-                let id = (state.registers.len() - 1) as u16;
-                state.const_registers.insert(data, id);
-                id
-            }
-        }
-        Expr::Int(num) => {
-            if var_assignment {
-                state.registers.push((*num).into());
-                return (state.registers.len() - 1) as u16;
-            }
-            let data = (*num).into();
-            if let Some(&id) = state.const_registers.get(&data) {
-                id
-            } else {
-                let id = state.registers.len() as u16;
-                state.const_registers.insert(data, id);
-                state.registers.push(data);
-                id
-            }
-        }
-        Expr::String(str) => {
-            if var_assignment {
-                state
-                    .registers
-                    .push(Data::p_str(str, &mut state.pools.strings));
-                return (state.registers.len() - 1) as u16;
-            }
-            let data = Data::p_str(str, &mut state.pools.strings);
-            if let Some(&id) = state.const_registers.get(&data) {
-                id
-            } else {
-                let id = state.registers.len() as u16;
-                state.const_registers.insert(data, id);
-                state.registers.push(data);
-                id
-            }
-        }
-        Expr::Null => {
-            if var_assignment {
-                state.registers.push(NULL);
-                return (state.registers.len() - 1) as u16;
-            }
-            if let Some(&id) = state.const_registers.get(&NULL) {
-                id
-            } else {
-                let id = state.registers.len() as u16;
-                state.const_registers.insert(NULL, id);
-                state.registers.push(NULL);
-                id
-            }
-        }
-        Expr::Bool(bool) => {
-            if var_assignment {
-                state.registers.push((*bool).into());
-                return (state.registers.len() - 1) as u16;
-            }
-            let data: Data = (*bool).into();
-            if let Some(&id) = state.const_registers.get(&data) {
-                id
-            } else {
-                let id = state.registers.len() as u16;
-                state.const_registers.insert(data, id);
-                state.registers.push(data);
-                id
-            }
-        }
-        Expr::Var(name, markers) => {
-            if let Some(Variable {
-                name: _,
-                register_id,
-                var_type: _,
-            }) = v.iter().rfind(|v_temp| *name == v_temp.name)
-            {
-                *register_id
-            } else {
-                throw_compiler_error(src, *markers, ErrType::UnknownVariable(name))
-            }
-        }
-        Expr::Array(elems, markers) => {
-            if let Some(first) = elems.first() {
-                let first_type = infer_type(first, v, ctx, state);
-                if !elems
-                    .iter()
-                    .all(|x| infer_type(x, v, ctx, state) == first_type)
-                {
-                    throw_compiler_error(src, *markers, ErrType::ArrayWithDiffType);
-                }
-            }
-            let array_id = {
-                state.pools.objs.push(Vec::with_capacity(elems.len()));
-                state.pools.objs.len() - 1
-            };
-            if elems.is_empty() && !single_run {
-                let array_reg = {
-                    state.registers.push(Data::array(array_id as u32));
-                    state.registers.len() - 1
-                } as u16;
-                output.push(Instr::EmptyArray(array_reg));
-                return array_reg;
-            }
-            if single_run {
-                for elem in elems {
-                    let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
-                    if x.is_empty() {
-                        state
-                            .pools
-                            .objs
-                            .get_mut(array_id)
-                            .unwrap()
-                            .push(state.registers.pop_unchecked());
-                    } else {
-                        let c_id = get_expr_tgt_id(&x, (state.registers.len() - 1) as u16).unwrap();
-                        state.pools.objs.get_mut(array_id).unwrap().push(NULL);
+    // Get the id of the source array/string (may be a nested GetIndex)
+    let id = get_id(array, v, ctx, state, output, None, false);
 
-                        output.extend(x);
-                        output.push(Instr::ObjElemMov(
-                            c_id,
-                            array_id as u16,
-                            (state.pools.objs[array_id].len() - 1) as u16,
-                        ));
-                    }
-                }
-                state.registers.push(Data::array(array_id as u32));
-                (state.registers.len() - 1) as u16
-            } else {
-                // Check if all elements are constant (no instructions emitted)
-                let mut constant_array = true;
-                let mut elem_ids: Vec<(Vec<Instr>, u16)> = Vec::with_capacity(elems.len());
-                for elem in elems {
-                    let x = compile_expr(slice::from_ref(elem), v, ctx, state, 0, single_run);
-                    if x.is_empty() {
-                        let reg_id = (state.registers.len() - 1) as u16;
-                        state
-                            .pools
-                            .objs
-                            .get_mut(array_id)
-                            .unwrap()
-                            .push(state.registers.pop_unchecked());
-                        elem_ids.push((Vec::new(), reg_id));
-                    } else {
-                        constant_array = false;
-                        let c_id = get_expr_tgt_id(&x, (state.registers.len() - 1) as u16).unwrap();
-                        state.pools.objs.get_mut(array_id).unwrap().push(NULL);
-                        elem_ids.push((x, c_id));
-                    }
-                }
+    let final_id = get_id(index, v, ctx, state, output, None, false);
 
-                if constant_array {
-                    // The template array is held by a register to prevent it from being freed by the GC
-                    let template_reg = {
-                        state.registers.push(Data::array(array_id as u32));
-                        (state.registers.len() - 1) as u16
-                    };
-                    let dest_reg = {
-                        state.registers.push(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
-                        (state.registers.len() - 1) as u16
-                    };
-                    output.push(Instr::CloneArray(
-                        template_reg,
-                        dest_reg,
-                        state.pools.objs[array_id].len() as u16,
-                    ));
-                    dest_reg
-                } else {
-                    let dest_reg = {
-                        state.registers.push(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
-                        (state.registers.len() - 1) as u16
-                    };
-                    output.push(Instr::EmptyArray(dest_reg));
-                    for (instrs, elem_reg) in elem_ids {
-                        output.extend(instrs);
-                        output.push(Instr::Push(dest_reg, elem_reg));
-                    }
-                    dest_reg
-                }
-            }
+    let elem_type = value.infer_type(v, ctx, state);
+    let elem_id = get_id(value, v, ctx, state, output, None, false);
+    state.free_reg(elem_id, v);
+    if {
+        if let DataType::Array(Some(array_type)) = &array_type
+            && array_type.as_ref() != &elem_type
+        {
+            true
+        } else {
+            false
         }
-        Expr::Struct(namespace, fields, span) => {
-            let name = &namespace[namespace.len() - 1];
-            let namespace = &namespace[..(namespace.len() - 1)];
-            let Some(expected_struct_idx) =
-                find_struct(state.namespace, state.structs, namespace, name)
-            else {
-                throw_compiler_error(src, *span, ErrType::UnknownStruct(name));
-            };
-            let type_id = state.structs[expected_struct_idx].id;
-            let expected_fields_len = state.structs[expected_struct_idx].fields.len();
-            if expected_fields_len != fields.len() {
+    } || (array_type == DataType::String && elem_type != DataType::String)
+    {
+        throw_compiler_error(
+            ctx.src,
+            elem_markers,
+            ErrType::CannotPushTypeToArray(&elem_type, &array_type),
+        );
+    }
+
+    let to_push = if array_type == DataType::String {
+        Instr::SetElementString(id, elem_id, final_id)
+    } else {
+        Instr::SetElementObj(id, elem_id, final_id)
+    };
+    state
+        .instr_src
+        .push((to_push, index_markers, ctx.current_src_file));
+    output.push(to_push);
+    state.free_reg(id, v);
+}
+
+fn compile_struct_field_assignment(
+    struct_expr: &Expr,
+    field: &SmolStr,
+    new_val: &Expr,
+    struct_span: Span,
+    field_span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    let t = struct_expr.infer_type(v, ctx, state);
+    let new_val_type = new_val.infer_type(v, ctx, state);
+    let DataType::Struct(struct_id) = t else {
+        throw_compiler_error(
+            ctx.src,
+            struct_span,
+            ErrType::InvalidType(&DataType::Struct(0), &t),
+        );
+    };
+    let mut field_index: Option<u16> = None;
+    for (i, (f, f_t)) in state.structs[struct_id as usize].fields.iter().enumerate() {
+        if f == field {
+            if !struct_field_type_matches(f_t, &new_val_type) {
                 throw_compiler_error(
-                    src,
-                    *span,
-                    ErrType::InvalidStructFieldCount(
-                        name,
-                        expected_fields_len as u16,
-                        fields.len() as u16,
-                    ),
+                    ctx.src,
+                    field_span,
+                    ErrType::InvalidType(f_t, &new_val_type),
                 );
             }
-            let struct_id = {
-                state.pools.objs.push(Vec::with_capacity(fields.len()));
-                state.pools.objs.len() - 1
-            };
-            if single_run {
-                for field_idx in 0..expected_fields_len {
-                    if let Some((_, field_expr, field_span)) = fields.iter().find(|(f, _, _)| {
-                        f == &state.structs[expected_struct_idx].fields[field_idx].0
-                    }) {
-                        let field_type = infer_type(field_expr, v, ctx, state);
-                        let field = &state.structs[expected_struct_idx].fields[field_idx];
-                        if !struct_field_type_matches(&field.1, &field_type) {
-                            throw_compiler_error(
-                                src,
-                                *field_span,
-                                ErrType::InvalidType(&field.1, &field_type),
-                            );
-                        }
-                        let compiled = compile_expr(
-                            std::slice::from_ref(field_expr),
-                            v,
-                            ctx,
-                            state,
-                            offset,
-                            single_run,
-                        );
-                        if compiled.is_empty() {
-                            state
-                                .pools
-                                .objs
-                                .get_mut(struct_id)
-                                .unwrap()
-                                .push(state.registers.pop_unchecked());
-                        } else {
-                            let c_id =
-                                get_expr_tgt_id(&compiled, (state.registers.len() - 1) as u16)
-                                    .unwrap();
-                            output.extend(compiled);
-                            state.pools.objs.get_mut(struct_id).unwrap().push(NULL);
-                            output.push(Instr::ObjElemMov(
-                                c_id,
-                                struct_id as u16,
-                                (state.pools.objs[struct_id].len() - 1) as u16,
-                            ));
-                        }
-                    } else {
-                        throw_compiler_error(
-                            src,
-                            *span,
-                            ErrType::StructMissingField(
-                                name,
-                                &state.structs[expected_struct_idx].fields[field_idx].0,
-                            ),
-                        );
-                    }
-                }
+            field_index = Some(i as u16);
+            break;
+        }
+    }
+    if field_index.is_none() {
+        throw_compiler_error(
+            ctx.src,
+            field_span,
+            ErrType::StructUnknownField(&state.structs[struct_id as usize].name, field),
+        );
+    }
+    let id = get_id(struct_expr, v, ctx, state, output, None, false);
+    let new_elem_reg_id = get_id(new_val, v, ctx, state, output, None, false);
+    output.push(Instr::SetFieldStruct(
+        id,
+        new_elem_reg_id,
+        field_index.unwrap(),
+    ));
+}
 
-                state
-                    .registers
-                    .push(Data::struct_instance(type_id, struct_id as u32));
-                (state.registers.len() - 1) as u16
-            } else {
-                let mut dynamic: Vec<(Vec<Instr>, u16, u16)> =
-                    Vec::with_capacity(expected_fields_len);
-                for field_idx in 0..expected_fields_len {
-                    if let Some((_, field_expr, field_span)) = fields.iter().find(|(f, _, _)| {
-                        f == &state.structs[expected_struct_idx].fields[field_idx].0
-                    }) {
-                        let field_type = infer_type(field_expr, v, ctx, state);
-                        let field = &state.structs[expected_struct_idx].fields[field_idx];
-                        if !struct_field_type_matches(&field.1, &field_type) {
-                            throw_compiler_error(
-                                src,
-                                *field_span,
-                                ErrType::InvalidType(&field.1, &field_type),
-                            );
-                        }
-                        let compiled_field = compile_expr(
-                            slice::from_ref(field_expr),
-                            v,
-                            ctx,
-                            state,
-                            offset,
-                            single_run,
-                        );
-                        if compiled_field.is_empty() {
-                            state
-                                .pools
-                                .objs
-                                .get_mut(struct_id)
-                                .unwrap()
-                                .push(state.registers.pop_unchecked());
-                        } else {
-                            let c_id = get_expr_tgt_id(
-                                &compiled_field,
-                                (state.registers.len() - 1) as u16,
-                            )
-                            .unwrap();
-                            state.pools.objs.get_mut(struct_id).unwrap().push(NULL);
-                            dynamic.push((compiled_field, c_id, field_idx as u16));
-                        }
-                    } else {
-                        throw_compiler_error(
-                            src,
-                            *span,
-                            ErrType::StructMissingField(
-                                name,
-                                &state.structs[expected_struct_idx].fields[field_idx].0,
-                            ),
-                        );
-                    }
-                }
+fn compile_condition(
+    main_condition: &Expr,
+    code: &[Expr],
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    // get first code limit (after which there are only else(if) blocks)
+    let main_code_limit = code
+        .iter()
+        .position(|x| matches!(x, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
+        .unwrap_or(code.len());
 
-                let template_reg = {
-                    state
-                        .registers
-                        .push(Data::struct_instance(type_id, struct_id as u32));
-                    (state.registers.len() - 1) as u16
-                };
-                let dest_reg = {
-                    state.registers.push(Data::struct_instance(type_id, 0));
-                    (state.registers.len() - 1) as u16
-                };
-                output.push(Instr::CloneStruct(template_reg, dest_reg));
-                for (instrs, val_reg, slot) in dynamic {
-                    output.extend(instrs);
-                    output.push(Instr::SetFieldStruct(dest_reg, val_reg, slot));
-                }
-                dest_reg
-            }
-        }
-        Expr::Map(kv_pairs, span) => {
-            let mut key_type: DataType = DataType::Unknown;
-            let mut val_type: DataType = DataType::Unknown;
-            let map_id = state.pools.maps.len();
-            state.pools.maps.push(HashMap::with_capacity_and_hasher(
-                kv_pairs.len(),
-                BuildNoHashHasher::default(),
-            ));
-            if single_run {
-                for (i, (key, val)) in kv_pairs.iter().enumerate() {
-                    if kv_pairs.iter().skip(i + 1).any(|(k, _)| k == key) {
-                        throw_compiler_error(src, *span, ErrType::DuplicateMapKey);
-                    }
-                    let key_t = infer_type(key, v, ctx, state);
-                    let val_t = infer_type(val, v, ctx, state);
-                    if i == 0 {
-                        key_type = key_t;
-                        val_type = val_t;
-                    } else {
-                        if key_t != key_type {
-                            throw_compiler_error(
-                                src,
-                                *span,
-                                ErrType::InvalidType(&key_type, &key_t),
-                            );
-                        }
-                        if val_t != val_type {
-                            throw_compiler_error(
-                                src,
-                                *span,
-                                ErrType::InvalidType(&val_type, &val_t),
-                            );
-                        }
-                    }
-                    let compiled_key =
-                        compile_expr(slice::from_ref(key), v, ctx, state, offset, single_run);
-                    if !compiled_key.is_empty() {
-                        throw_compiler_error(src, *span, ErrType::NotLiteralMapKey);
-                    }
-                    let key_val = state.registers.pop_unchecked();
-                    let compiled_val =
-                        compile_expr(slice::from_ref(val), v, ctx, state, offset, single_run);
-                    if compiled_val.is_empty() {
-                        state
-                            .pools
-                            .maps
-                            .get_mut(map_id)
-                            .unwrap()
-                            .insert(key_val, state.registers.pop_unchecked());
-                    } else {
-                        let c_id =
-                            get_expr_tgt_id(&compiled_val, (state.registers.len() - 1) as u16)
-                                .unwrap();
-                        output.extend(compiled_val);
-                        state
-                            .pools
-                            .maps
-                            .get_mut(map_id)
-                            .unwrap()
-                            .insert(key_val, NULL);
-                        state.registers.push(key_val);
-                        output.push(Instr::MapInsert(
-                            map_id as u16,
-                            (state.registers.len() - 1) as u16,
-                            c_id,
-                        ));
-                        state.free_reg((state.registers.len() - 1) as u16, v);
-                    }
-                }
-                let dest_id = state.registers.len();
-                state.registers.push(Data::map(map_id as u32));
-                dest_id as u16
-            } else {
-                let mut dynamic: Vec<(Vec<Instr>, Data, u16)> = Vec::with_capacity(kv_pairs.len());
-                for (i, (key, val)) in kv_pairs.iter().enumerate() {
-                    if kv_pairs.iter().skip(i + 1).any(|(k, _)| k == key) {
-                        throw_compiler_error(src, *span, ErrType::DuplicateMapKey);
-                    }
-                    let key_t = infer_type(key, v, ctx, state);
-                    let val_t = infer_type(val, v, ctx, state);
-                    if i == 0 {
-                        key_type = key_t;
-                        val_type = val_t;
-                    } else {
-                        if key_t != key_type {
-                            throw_compiler_error(
-                                src,
-                                *span,
-                                ErrType::InvalidType(&key_type, &key_t),
-                            );
-                        }
-                        if val_t != val_type {
-                            throw_compiler_error(
-                                src,
-                                *span,
-                                ErrType::InvalidType(&val_type, &val_t),
-                            );
-                        }
-                    }
-                    let compiled_key =
-                        compile_expr(slice::from_ref(key), v, ctx, state, offset, single_run);
-                    if !compiled_key.is_empty() {
-                        throw_compiler_error(src, *span, ErrType::NotLiteralMapKey);
-                    }
-                    let key_val = state.registers.pop_unchecked();
-                    let compiled_val =
-                        compile_expr(slice::from_ref(val), v, ctx, state, offset, single_run);
-                    if compiled_val.is_empty() {
-                        state
-                            .pools
-                            .maps
-                            .get_mut(map_id)
-                            .unwrap()
-                            .insert(key_val, state.registers.pop_unchecked());
-                    } else {
-                        let c_id =
-                            get_expr_tgt_id(&compiled_val, (state.registers.len() - 1) as u16)
-                                .unwrap();
-                        state
-                            .pools
-                            .maps
-                            .get_mut(map_id)
-                            .unwrap()
-                            .insert(key_val, NULL);
-                        dynamic.push((compiled_val, key_val, c_id));
-                    }
-                }
+    let condition_blocks_count = code.len() - main_code_limit;
+    // Each entry is the list of false-jump instruction indices for one condition block.
+    let mut conditional_false_jmp_idxs: Vec<Vec<usize>> =
+        Vec::with_capacity(condition_blocks_count + 1);
+    let mut jmp_instr_idx: Vec<usize> = Vec::with_capacity(condition_blocks_count);
+    let mut condition_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
 
-                let template_reg = {
-                    state.registers.push(Data::map(map_id as u32));
-                    (state.registers.len() - 1) as u16
-                };
-                let dest_reg = {
-                    state.registers.push(Data::map(0));
-                    (state.registers.len() - 1) as u16
-                };
-                output.push(Instr::CloneMap(template_reg, dest_reg));
-                for (instrs, key_val, val_id) in dynamic {
-                    output.extend(instrs);
-                    let key_reg = if let Some(&id) = state.const_registers.get(&key_val) {
-                        id
-                    } else {
-                        let id = state.registers.len() as u16;
-                        state.const_registers.insert(key_val, id);
-                        state.registers.push(key_val);
-                        id
-                    };
-                    output.push(Instr::MapInsertReg(dest_reg, key_reg, val_id));
-                }
-                dest_reg
-            }
-        }
-        Expr::GetStructField(struct_expr, field, struct_span, field_span) => {
-            let t = infer_type(struct_expr, v, ctx, state);
-            if let DataType::Struct(s_id) = t {
-                let s = &state.structs[s_id as usize];
-                let idx = s
-                    .fields
-                    .iter()
-                    .position(|f| &f.0 == field)
-                    .unwrap_or_else(|| {
-                        throw_compiler_error(
-                            src,
-                            *field_span,
-                            ErrType::StructUnknownField(&s.name, field),
-                        );
-                    });
-                let id = get_id(
-                    struct_expr,
-                    v,
-                    ctx,
-                    state,
-                    output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-                let dest_reg_id = state.alloc_reg();
-                output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
-                dest_reg_id
-            } else {
-                throw_compiler_error(
-                    src,
-                    *struct_span,
-                    ErrType::InvalidType(&DataType::Struct(0), &t),
-                );
-            }
-        }
-        // array[index]
-        Expr::ArrayGetIndex(array, index, markers) => {
-            let infered = infer_type(array, v, ctx, state);
-            if !infered.is_indexable() {
-                throw_compiler_error(src, *markers, ErrType::NotIndexable(&infered));
-            }
+    // Compile the main condition
+    let (true_jump_idxs, false_jump_idxs) =
+        compile_short_circuit_condition(main_condition, v, ctx, state, output, false);
+    conditional_false_jmp_idxs.push(false_jump_idxs);
 
-            let id = get_id(
-                array, v, ctx, state, output, None, false, offset, single_run,
-            );
+    // Modify true jump instructions to point to body_start
+    let body_start = output.len();
+    for j in true_jump_idxs {
+        set_jmp_size(&mut output[j], (body_start - j) as u16);
+    }
 
-            let index_inferred = infer_type(index, v, ctx, state);
-            if index_inferred != DataType::Int {
-                throw_compiler_error(src, *markers, ErrType::InvalidIndexType(&index_inferred));
-            }
-            let index_id = get_id(
-                index, v, ctx, state, output, None, false, offset, single_run,
-            );
-            state.free_reg(index_id, v);
-            let dest_reg_id = state.alloc_reg();
+    // parse the main code block
+    let cond_code = compile_expr(
+        &code[0..main_code_limit],
+        v,
+        ctx.advance_offset(output.len() as u16),
+        state,
+    );
+    output.extend(cond_code);
+    if main_code_limit != code.len() {
+        output.push(Instr::Jmp(0));
+        jmp_instr_idx.push(output.len() - 1);
+    }
 
-            let to_push = if infered == DataType::String {
-                Instr::GetIndexString(id, index_id, dest_reg_id)
-            } else {
-                Instr::GetIndexArray(id, index_id, dest_reg_id)
-            };
-            state
-                .instr_src
-                .push((to_push, *markers, ctx.current_src_file));
-            output.push(to_push);
-            dest_reg_id
-        }
-        // array[start..end]
-        Expr::ArrayGetSlice(array, idx_start, idx_end, markers) => {
-            let infered = infer_type(array, v, ctx, state);
-            if !infered.is_indexable() {
-                throw_compiler_error(src, *markers, ErrType::NotIndexable(&infered));
-            }
-            let id = get_id(
-                array, v, ctx, state, output, None, false, offset, single_run,
-            );
-            let idx_start_inferred = infer_type(idx_start, v, ctx, state);
-            if idx_start_inferred != DataType::Int {
-                throw_compiler_error(
-                    src,
-                    *markers,
-                    ErrType::InvalidIndexType(&idx_start_inferred),
-                );
-            }
-            let idx_start_id = get_id(
-                idx_start, v, ctx, state, output, None, false, offset, single_run,
-            );
-            let idx_end_inferred = infer_type(idx_end, v, ctx, state);
-            if idx_end_inferred != DataType::Int {
-                throw_compiler_error(src, *markers, ErrType::InvalidIndexType(&idx_end_inferred));
-            }
-            let idx_end_id = get_id(
-                idx_end, v, ctx, state, output, None, false, offset, single_run,
-            );
-            output.push(Instr::StoreFuncArg(idx_end_id));
-            state.free_reg(idx_start_id, v);
-            state.free_reg(idx_end_id, v);
-            let dest_reg_id = state.alloc_reg();
-            let to_push = if infered == DataType::String {
-                Instr::GetSliceString(id, idx_start_id, dest_reg_id)
-            } else {
-                Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
-            };
-            state
-                .instr_src
-                .push((to_push, *markers, ctx.current_src_file));
-            output.push(to_push);
-            dest_reg_id
-        }
-        Expr::Mul(l, r, markers) => {
-            uniform_op!(
-                MulFloat,
-                MulInt,
-                "*",
-                l,
-                r,
-                *markers,
-                DataType::Float,
-                DataType::Int
-            )
-        }
-        Expr::Div(l, r, markers) => {
-            if let Expr::Int(n) = r.as_ref()
-                && *n == 0
-            {
-                throw_compiler_error(src, *markers, ErrType::DivisionByZero);
-            }
-            let id = uniform_op!(
-                DivFloat,
-                DivInt,
-                "/",
-                l,
-                r,
-                *markers,
-                DataType::Float,
-                DataType::Int
-            );
-            if matches!(output.last(), Some(Instr::DivInt(..))) {
-                state
-                    .instr_src
-                    .push((*output.last().unwrap(), *markers, ctx.current_src_file));
-            }
-            id
-        }
-        Expr::Add(l, r, markers) => {
-            let t_l = infer_type(l, v, ctx, state);
-            let t_r = infer_type(r, v, ctx, state);
-            if t_l != t_r
-                || !matches!(
-                    t_l,
-                    DataType::String | DataType::Array(_) | DataType::Float | DataType::Int
-                )
-            {
-                throw_compiler_error(src, *markers, ErrType::OpError(&t_l, &t_r, "+"));
-            }
-            // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
-            if t_l == DataType::Int
-                && let Some(Expr::Var(src_name, _)) = {
-                    if matches!(r.as_ref(), Expr::Int(1)) {
-                        Some(l.as_ref())
-                    } else if matches!(l.as_ref(), Expr::Int(1)) {
-                        Some(r.as_ref())
-                    } else {
-                        None
-                    }
-                }
-                && let Some(src_var) = v.iter().rfind(|x| x.name == *src_name)
-            {
-                let src_id = src_var.register_id;
-                let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
-                output.push(if src_id == id {
-                    Instr::IncInt(id)
-                } else {
-                    Instr::IncIntTo(src_id, id)
-                });
-                return id;
-            }
-            let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
-            let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
-            state.free_reg(id_l, v);
-            state.free_reg(id_r, v);
-            let id = if let Some(tgt_register_id) = tgt_id {
-                tgt_register_id
-            } else {
-                state.alloc_reg()
-            };
-            if matches!(t_l, DataType::Array(_)) {
-                output.push(Instr::AddArray(id_l, id_r, id));
-            } else if t_l == DataType::String {
-                output.push(Instr::AddStr(id_l, id_r, id));
-            } else if t_l == DataType::Float {
-                output.push(Instr::AddFloat(id_l, id_r, id));
-            } else {
-                output.push(Instr::AddInt(id_l, id_r, id));
-            }
-            id
-        }
-        Expr::Sub(l, r, markers) => {
-            let t_l = infer_type(l, v, ctx, state);
-            let t_r = infer_type(r, v, ctx, state);
-            if !((t_l == DataType::Float && t_r == DataType::Float)
-                || (t_l == DataType::Int && t_r == DataType::Int))
-            {
-                throw_compiler_error(src, *markers, ErrType::OpError(&t_l, &t_r, "-"));
-            }
-            // var-1 uses the dedicated DecInt/DecIntTo instructions
-            if t_l == DataType::Int
-                && matches!(r.as_ref(), Expr::Int(1))
-                && let Expr::Var(src_name, _) = l.as_ref()
-                && let Some(src_var) = v.iter().rfind(|x| x.name == *src_name)
-            {
-                let src_id = src_var.register_id;
-                let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
-                output.push(if src_id == id {
-                    Instr::DecInt(id)
-                } else {
-                    Instr::DecIntTo(src_id, id)
-                });
-                return id;
-            }
-            let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
-            let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
-            state.free_reg(id_l, v);
-            state.free_reg(id_r, v);
-            let id = if let Some(tgt_register_id) = tgt_id {
-                tgt_register_id
-            } else {
-                state.alloc_reg()
-            };
-            output.push(if t_l == DataType::Float {
-                Instr::SubFloat(id_l, id_r, id)
-            } else {
-                Instr::SubInt(id_l, id_r, id)
-            });
-            id
-        }
-        Expr::Mod(l, r, markers) => {
-            if let Expr::Int(n) = r.as_ref()
-                && *n == 0
-            {
-                throw_compiler_error(src, *markers, ErrType::ModuloByZero);
-            }
-            let id = uniform_op!(
-                ModFloat,
-                ModInt,
-                "%",
-                l,
-                r,
-                *markers,
-                DataType::Float,
-                DataType::Int
-            );
-            if matches!(output.last(), Some(Instr::ModInt(..))) {
-                state
-                    .instr_src
-                    .push((*output.last().unwrap(), *markers, ctx.current_src_file));
-            }
-            id
-        }
-        Expr::Pow(l, r, markers) => {
-            uniform_op!(
-                PowFloat,
-                PowInt,
-                "^",
-                l,
-                r,
-                *markers,
-                DataType::Float,
-                DataType::Int
-            )
-        }
-        Expr::Eq(l, r) => {
-            let l_type = infer_type(l, v, ctx, state);
-            let r_type = infer_type(r, v, ctx, state);
-            let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
-                && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
-            let is_string = l_type == DataType::String || r_type == DataType::String;
-            let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
-            let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
-            state.free_reg(id_l, v);
-            state.free_reg(id_r, v);
-            let id = if let Some(tgt_register_id) = tgt_id {
-                tgt_register_id
-            } else {
-                state.alloc_reg()
-            };
-            output.push(if is_array {
-                Instr::ObjEq(id_l, id_r, id)
-            } else if is_string {
-                Instr::StrEq(id_l, id_r, id)
-            } else {
-                Instr::Eq(id_l, id_r, id)
-            });
-            id
-        }
-        Expr::NotEq(l, r) => {
-            let l_type = infer_type(l, v, ctx, state);
-            let r_type = infer_type(r, v, ctx, state);
-            let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
-                && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
-            let is_string = l_type == DataType::String || r_type == DataType::String;
-            let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
-            let id_r = get_id(r, v, ctx, state, output, None, false, offset, single_run);
-            state.free_reg(id_l, v);
-            state.free_reg(id_r, v);
-            let id = if let Some(tgt_register_id) = tgt_id {
-                tgt_register_id
-            } else {
-                state.alloc_reg()
-            };
-            if is_array {
-                output.push(Instr::ObjNotEq(id_l, id_r, id));
-            } else if is_string {
-                output.push(Instr::StrNotEq(id_l, id_r, id));
-            } else {
-                output.push(Instr::NotEq(id_l, id_r, id));
-            }
-            id
-        }
-        Expr::Sup(l, r, markers) => {
-            uniform_op!(
-                SupFloat,
-                SupInt,
-                ">",
-                l,
-                r,
-                *markers,
-                DataType::Float,
-                DataType::Int
-            )
-        }
-        Expr::SupEq(l, r, markers) => {
-            uniform_op!(
-                SupEqFloat,
-                SupEqInt,
-                ">=",
-                l,
-                r,
-                *markers,
-                DataType::Float,
-                DataType::Int
-            )
-        }
-        Expr::Inf(l, r, markers) => {
-            uniform_op!(
-                InfFloat,
-                InfInt,
-                "<",
-                l,
-                r,
-                *markers,
-                DataType::Float,
-                DataType::Int
-            )
-        }
-        Expr::InfEq(l, r, markers) => {
-            uniform_op!(
-                InfEqFloat,
-                InfEqInt,
-                "<=",
-                l,
-                r,
-                *markers,
-                DataType::Float,
-                DataType::Int
-            )
-        }
-        Expr::BoolAnd(l, r, markers) => {
-            uniform_op!(BoolAnd, "&&", l, r, *markers, DataType::Bool)
-        }
-        Expr::BoolOr(l, r, markers) => {
-            uniform_op!(BoolOr, "||", l, r, *markers, DataType::Bool)
-        }
-        Expr::Neg(l, markers) => {
-            let operand_type = infer_type(l, v, ctx, state);
-            let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
-            state.free_reg(id_l, v);
-            let id = if let Some(tgt_register_id) = tgt_id {
-                tgt_register_id
-            } else {
-                state.alloc_reg()
-            };
-            if operand_type == DataType::Float {
-                output.push(Instr::NegFloat(id_l, id));
-            } else if operand_type == DataType::Int {
-                output.push(Instr::NegInt(id_l, id));
-            } else {
-                throw_compiler_error(src, *markers, ErrType::InvalidOp(&operand_type, "-"));
-            }
-            id
-        }
-        Expr::BoolNeg(l, markers) => {
-            let operand_type = infer_type(l, v, ctx, state);
-            let id_l = get_id(l, v, ctx, state, output, None, false, offset, single_run);
-            state.free_reg(id_l, v);
-            let id = if let Some(tgt_register_id) = tgt_id {
-                tgt_register_id
-            } else {
-                state.alloc_reg()
-            };
-            if operand_type != DataType::Bool {
-                throw_compiler_error(src, *markers, ErrType::InvalidOp(&operand_type, "!"));
-            }
-            output.push(Instr::NegBool(id_l, id));
-            id
-        }
-        Expr::InlineCondition(main_condition, code, markers) => {
-            let return_id = state.alloc_reg();
-
-            // get first code limit (after which there are only else(if) blocks)
-            let main_code_limit = code
-                .iter()
-                .position(|x| matches!(x, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
-                .unwrap_or(code.len());
-
-            let condition_blocks_count = code.len() - main_code_limit;
-            let mut cmp_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-            let mut jmp_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-            let mut condition_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-
-            // parse the main condition
-            let condition_id = get_id(
-                main_condition,
-                v,
-                ctx,
-                state,
-                output,
-                None,
-                false,
-                offset,
-                single_run,
-            );
-            add_cmp_false(condition_id, &mut 0, output, false);
-            cmp_markers.push(output.len() - 1);
-
-            let v_len = v.len();
-            let regs_before = state.registers.len() as u16;
-            // parse the main code block
-            let cond_code = compile_expr(
-                &code[0..main_code_limit],
-                v,
-                ctx,
-                state,
-                offset + output.len() as u16,
-                single_run,
-            );
-            v.truncate(v_len);
-            state.free_scope_registers(regs_before, &cond_code, v);
-            let is_empty = cond_code.is_empty();
-            output.extend(cond_code);
-            output.push(Instr::Mov(
-                if is_empty {
-                    (state.registers.len() - 1) as u16
-                } else {
-                    get_last_tgt_id(output).unwrap()
-                },
-                return_id,
-            ));
-            if main_code_limit != code.len() {
-                output.push(Instr::Jmp(0));
-                jmp_markers.push(output.len() - 1);
-            }
-
-            let mut else_exists = false;
-            for elem in &code[main_code_limit..] {
-                if let Expr::ElseIfBlock(condition, code) = elem {
-                    condition_markers.push(output.len());
-                    let condition_id = get_id(
-                        condition, v, ctx, state, output, None, false, offset, single_run,
-                    );
-                    add_cmp_false(condition_id, &mut 0, output, false);
-                    state.free_reg(condition_id, v);
-                    cmp_markers.push(output.len() - 1);
-                    let v_len = v.len();
-                    let regs_before = state.registers.len() as u16;
-                    let cond_code = compile_expr(
-                        code,
-                        v,
-                        ctx,
-                        state,
-                        offset + output.len() as u16,
-                        single_run,
-                    );
-                    v.truncate(v_len);
-                    state.free_scope_registers(regs_before, &cond_code, v);
-                    let is_empty = cond_code.is_empty();
-                    output.extend(cond_code);
-                    output.push(Instr::Mov(
-                        if is_empty {
-                            (state.registers.len() - 1) as u16
-                        } else {
-                            get_last_tgt_id(output).unwrap()
-                        },
-                        return_id,
-                    ));
-                    output.push(Instr::Jmp(0));
-                    jmp_markers.push(output.len() - 1);
-                } else if let Expr::ElseBlock(code) = elem {
-                    else_exists = true;
-                    condition_markers.push(output.len());
-                    let v_len = v.len();
-                    let regs_before = state.registers.len() as u16;
-                    let cond_code = compile_expr(
-                        code,
-                        v,
-                        ctx,
-                        state,
-                        offset + output.len() as u16,
-                        single_run,
-                    );
-                    v.truncate(v_len);
-                    state.free_scope_registers(regs_before, &cond_code, v);
-                    let is_empty = cond_code.is_empty();
-                    output.extend(cond_code);
-                    output.push(Instr::Mov(
-                        if is_empty {
-                            (state.registers.len() - 1) as u16
-                        } else {
-                            get_last_tgt_id(output).unwrap()
-                        },
-                        return_id,
-                    ));
-                }
-            }
-            if !else_exists {
-                throw_compiler_error(src, *markers, ErrType::InvalidConditionalExpression);
-            }
-
-            for y in jmp_markers {
-                let diff = output.len() - y;
-                output[y] = Instr::Jmp(diff as u16);
-            }
-            for (i, y) in cmp_markers.iter().enumerate() {
-                let diff = if i >= condition_markers.len() {
-                    output.len() - 1 - y
-                } else {
-                    condition_markers[i] - y
-                };
-                if let Some(
-                    Instr::IsFalseJmp(_, jump_size)
-                    | Instr::SupEqFloatJmp(_, _, jump_size)
-                    | Instr::SupEqIntJmp(_, _, jump_size)
-                    | Instr::SupFloatJmp(_, _, jump_size)
-                    | Instr::SupIntJmp(_, _, jump_size)
-                    | Instr::InfEqFloatJmp(_, _, jump_size)
-                    | Instr::InfEqIntJmp(_, _, jump_size)
-                    | Instr::InfFloatJmp(_, _, jump_size)
-                    | Instr::InfIntJmp(_, _, jump_size)
-                    | Instr::NotEqJmp(_, _, jump_size)
-                    | Instr::ObjNotEqJmp(_, _, jump_size)
-                    | Instr::EqJmp(_, _, jump_size)
-                    | Instr::ObjEqJmp(_, _, jump_size),
-                ) = output.get_mut(*y)
-                {
-                    *jump_size = diff as u16;
-                }
-            }
+    for elem in &code[main_code_limit..] {
+        if let Expr::ElseIfBlock(condition, code) = elem {
+            condition_markers.push(output.len());
+            let condition_id = get_id(condition, v, ctx, state, output, None, false);
             state.free_reg(condition_id, v);
-            return_id
+            add_cmp_false(condition_id, &mut 0, output, false);
+            conditional_false_jmp_idxs.push(vec![output.len() - 1]);
+            let cond_code = compile_expr(code, v, ctx.advance_offset(output.len() as u16), state);
+            output.extend(cond_code);
+            output.push(Instr::Jmp(0));
+            jmp_instr_idx.push(output.len() - 1);
+        } else if let Expr::ElseBlock(code) = elem {
+            condition_markers.push(output.len());
+            let cond_code = compile_expr(code, v, ctx.advance_offset(output.len() as u16), state);
+            output.extend(cond_code);
         }
-        Expr::FunctionCall(args, namespace, markers, args_indexes) => handle_functions(
-            output,
-            v,
-            ctx,
-            state,
-            args,
-            namespace,
-            *markers,
-            args_indexes,
-            offset,
-            single_run,
-        )
-        .unwrap_or_else(|| {
-            get_last_tgt_id(output).unwrap_or_else(|| (state.registers.len() - 1) as u16)
-        }),
-        Expr::AnonymousFunction(_, _, _) => {
-            if let Some(&id) = state.const_registers.get(&NULL) {
-                id
-            } else {
-                let id = state.registers.len() as u16;
-                state.const_registers.insert(NULL, id);
-                state.registers.push(NULL);
-                id
-            }
-        }
-        other => {
-            let output_code = compile_expr(
-                slice::from_ref(other),
-                v,
-                ctx,
-                state,
-                offset + output.len() as u16,
-                single_run,
-            );
-            if output_code.is_empty() {
-                (state.registers.len() - 1) as u16
-            } else {
-                let result_id = get_expr_tgt_id(&output_code, (state.registers.len() - 1) as u16)
-                    .unwrap_or((state.registers.len() - 1) as u16);
-                output.extend(output_code);
-                result_id
-            }
+    }
+
+    for y in jmp_instr_idx {
+        let diff = output.len() - y;
+        output[y] = Instr::Jmp(diff as u16);
+    }
+    // Fix all false-jump instructions for each condition block
+    for (cm_idx, false_idxs) in conditional_false_jmp_idxs.iter().enumerate() {
+        let target = if cm_idx < condition_markers.len() {
+            condition_markers[cm_idx]
+        } else {
+            output.len()
+        };
+        for &y in false_idxs {
+            set_jmp_size(&mut output[y], (target - y) as u16);
         }
     }
 }
 
-#[inline(always)]
+fn compile_while_loop(
+    condition: &Expr,
+    code: &[Expr],
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    let output_len_before = output.len();
+
+    let (true_jump_idxs, false_jump_idxs) =
+        compile_short_circuit_condition(condition, v, ctx, state, output, false);
+
+    let body_start = output.len();
+    for j in true_jump_idxs {
+        set_jmp_size(&mut output[j], (body_start - j) as u16);
+    }
+
+    // parse the code block, clone the vars to avoid overriding anything
+    let loop_id = ctx.block_id + 1;
+
+    let mut cond_code = compile_expr(
+        code,
+        v,
+        ctx.no_single_run().advance_offset(output.len() as u16),
+        state,
+    );
+
+    let exit = output.len() + cond_code.len() + 1;
+    for j in false_jump_idxs {
+        set_jmp_size(&mut output[j], (exit - j) as u16);
+    }
+
+    let cond_len = (output.len() - output_len_before) as u16;
+    let body_len = cond_code.len() as u16;
+    let len = cond_len + body_len; // full span used by JmpBack
+    // Break/Continue offsets are relative to cond_code, so pass body_len+1 (body remaining + JmpBack)
+    parse_loop_flow_control(&mut cond_code, loop_id, body_len + 1, false, false);
+    output.extend(cond_code);
+    output.push(Instr::JmpBack(len));
+}
+
+fn compile_for_loop(
+    var_name: &SmolStr,
+    array: &Expr,
+    code: &[Expr],
+    span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    let real_var = var_name.as_str() != "_";
+
+    // parse the array, get its id (the target array is the first Expr in array_code)
+    let array_type = array.infer_type(v, ctx, state);
+    let array = get_id(array, v, ctx, state, output, None, false);
+
+    let array_len_id = state.alloc_reg();
+
+    output.push(Instr::CallLibFunc(LibFunc::Len, array, array_len_id));
+
+    // set up the id of the index variable (0..len)
+    let index_id = if ctx.single_run {
+        state.registers.push(0.into());
+        (state.registers.len() - 1) as u16
+    } else {
+        let id = state.alloc_reg();
+        output.push(Instr::SetInt(id, 0));
+        id
+    };
+
+    // do the 'i < len' condition, set up the condition's id (true/false)
+    let condition_id = state.alloc_reg();
+
+    output.push(Instr::InfInt(index_id, array_len_id, condition_id));
+
+    // set up the variable for the current element (for current_element_id in ... {}) => current_element_id = array[index]
+    let current_element_id = if real_var { state.alloc_reg() } else { 0 };
+
+    let v_len = v.len();
+
+    let is_str = array_type == DataType::String;
+
+    if real_var {
+        v.push(Variable {
+            name: var_name.clone(),
+            register_id: current_element_id,
+            var_type: match array_type {
+                DataType::String => DataType::String,
+                DataType::Array(a_type) => a_type.map_or(DataType::Null, |t| *t),
+                t => throw_compiler_error(ctx.src, span, ErrType::IsNotAnIterator(&t)),
+            },
+        });
+    }
+    let loop_id = ctx.block_id + 1;
+
+    // accounts for the GetIndexArray/GetIndexString instruction
+    let pending = real_var as u16;
+
+    let regs_before = state.registers.len() as u16;
+    let mut cond_code = compile_expr(
+        code,
+        v,
+        ctx.no_single_run()
+            .advance_offset(output.len() as u16 + pending),
+        state,
+    );
+    // Clean up variables
+    v.truncate(v_len);
+    state.free_loop_scope_registers(regs_before, &cond_code, v);
+
+    // add the condition ('i < len') jumping logic
+    let mut len = (cond_code.len() + 3) as u16 + pending;
+    add_cmp_false(condition_id, &mut len, output, true);
+
+    // make the current_element_id register actually hold the element's value
+    if real_var {
+        if is_str {
+            output.push(Instr::GetIndexString(array, index_id, current_element_id));
+        } else {
+            output.push(Instr::GetIndexArray(array, index_id, current_element_id));
+        }
+    }
+    parse_loop_flow_control(&mut cond_code, loop_id, len, true, false);
+    // then add the condition code
+    output.extend(cond_code);
+    // add 1 to the index (i+=1) so that the next loop iteration will have the next element in the array
+    output.push(Instr::IncInt(index_id));
+
+    // jump back to the loop if still inside of it
+    output.push(Instr::JmpBack(len));
+
+    if ctx.single_run {
+        state.free_reg(array_len_id, v);
+        state.free_reg(index_id, v);
+        state.free_reg(condition_id, v);
+        if real_var {
+            state.free_reg(current_element_id, v);
+        }
+    }
+}
+
+fn compile_int_for_loop(
+    var_name: &SmolStr,
+    start_elem: &Expr,
+    end_elem: &Expr,
+    code: &[Expr],
+    span1: Span,
+    span2: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    // IntForLoop is compiled to:
+    // ----
+    // (1) if i >= end_elem jump out
+    // (2) loop_body
+    // (3) i += 1
+    // (4) if i < end_elem jump back to body
+    // ----
+    //
+    //
+    // Check start and elem type
+    let t1 = start_elem.infer_type(v, ctx, state);
+    let t2 = end_elem.infer_type(v, ctx, state);
+    t1.expect(&DataType::Int, ctx.src, span1);
+    t2.expect(&DataType::Int, ctx.src, span2);
+    let elem_id = if ctx.single_run {
+        get_id(start_elem, v, ctx, state, output, None, false)
+    } else {
+        let start_elem_id = get_id(start_elem, v, ctx, state, output, None, false);
+        let start_val = state.registers[start_elem_id as usize];
+        let elem_id = state.alloc_reg();
+        if state.const_registers.values().any(|&v| v == start_elem_id) && start_val.is_int() {
+            output.push(Instr::SetInt(elem_id, start_val.as_int()));
+        } else {
+            output.push(Instr::Mov(start_elem_id, elem_id));
+        }
+        elem_id
+    };
+    let end_elem_id = get_id(end_elem, v, ctx, state, output, None, false);
+
+    // elem_id is a fresh mutable register -> remove from const_registers just in case
+    state.const_registers.retain(|_, &mut v| v != elem_id);
+
+    let v_len = v.len();
+    v.push(Variable {
+        name: var_name.clone(),
+        register_id: elem_id,
+        var_type: DataType::Int,
+    });
+    let loop_id = ctx.block_id + 1;
+
+    // (1) if i >= end_elem jump out -> push placeholder first so that compile_expr sees the correct offset
+    let jmp_idx = output.len();
+    output.push(Instr::SupEqIntJmp(elem_id, end_elem_id, 0));
+
+    let regs_before = state.registers.len() as u16;
+    let compiled_loop_code = compile_expr(
+        code,
+        v,
+        ctx.no_single_run().advance_offset(output.len() as u16),
+        state,
+    );
+    state.free_loop_scope_registers(regs_before, &compiled_loop_code, v);
+    let compiled_loop_code_len = compiled_loop_code.len() as u16;
+
+    // (2) loop_body
+    output.extend(compiled_loop_code);
+
+    // (3) i+= 1
+    output.push(Instr::IncInt(elem_id));
+
+    // (4) if i < end_elem jump back to body
+    output.push(Instr::InfIntJmpBack(
+        elem_id,
+        end_elem_id,
+        compiled_loop_code_len + 1,
+    ));
+
+    let exit_size = (output.len() - jmp_idx) as u16;
+    output[jmp_idx] = Instr::SupEqIntJmp(elem_id, end_elem_id, exit_size);
+
+    parse_loop_flow_control(&mut output[jmp_idx + 1..], loop_id, exit_size, true, false);
+    v.truncate(v_len);
+
+    if ctx.single_run {
+        state.free_reg(end_elem_id, v);
+        state.free_reg(elem_id, v);
+    }
+}
+
+fn compile_loop_block(
+    code: &[Expr],
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    let loop_id = ctx.block_id + 1;
+    let regs_before = state.registers.len() as u16;
+    let mut compiled = compile_expr(
+        code,
+        v,
+        ctx.no_single_run().advance_offset(output.len() as u16),
+        state,
+    );
+    state.free_loop_scope_registers(regs_before, &compiled, v);
+    let code_length = compiled.len() as u16;
+    parse_loop_flow_control(&mut compiled, loop_id, code_length + 1, false, true);
+    output.extend(compiled);
+    output.push(Instr::JmpBack(code_length));
+}
+
+fn compile_try_catch_block(
+    e: &[Expr],
+    err_var: &SmolStr,
+    catch_code: &[Expr],
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    output.push(Instr::StartErrorCatch(0, 0)); // patched later on
+    let err_catch_instr = output.len() - 1;
+    let main_code = compile_expr(e, v, ctx, state);
+    output.extend(main_code);
+    output.push(Instr::StopErrorCatch);
+    output.push(Instr::Jmp(0)); // jumps over the catch handler if no error arises
+    let jmp_catch_instr = output.len() - 1;
+
+    let v_len = v.len();
+    let err_reg_id = state.alloc_reg();
+    v.push(Variable {
+        name: err_var.clone(),
+        register_id: err_reg_id,
+        var_type: DataType::String,
+    });
+    output[err_catch_instr] =
+        Instr::StartErrorCatch((output.len() - err_catch_instr) as u16, err_reg_id);
+    let catch_code = compile_expr(catch_code, v, ctx, state);
+    v.truncate(v_len);
+    output.extend(catch_code);
+    output[jmp_catch_instr] = Instr::Jmp((output.len() - jmp_catch_instr) as u16);
+    state.free_reg(err_reg_id, v);
+}
+
+fn compile_var_declaration(
+    name: &SmolStr,
+    value: &Expr,
+    remaining_code: &[Expr],
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    let var_type = value.infer_type(v, ctx, state);
+
+    let var_id = if ctx.single_run {
+        get_id(value, v, ctx, state, output, None, true)
+    } else {
+        let src_id = get_id(value, v, ctx, state, output, None, false);
+        if contains_var_reassign(name, remaining_code) {
+            let mutable_id = state.alloc_reg();
+            move_reg_to_reg(output, src_id, mutable_id, state.registers[src_id as usize]);
+            mutable_id
+        } else {
+            src_id
+        }
+    };
+
+    if let DataType::Fn(fn_id) = &var_type {
+        state.namespace.fns.push((name.clone(), *fn_id));
+    }
+    v.push(Variable {
+        name: name.clone(),
+        register_id: var_id,
+        var_type,
+    });
+}
+
+fn compile_var_assignment(
+    name: &SmolStr,
+    value: &Expr,
+    span: Span,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    let var_type = value.infer_type(v, ctx, state);
+    let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
+        throw_compiler_error(ctx.src, span, ErrType::UnknownVariable(name));
+    });
+    let id = v[var_pos].register_id;
+
+    if var_type == DataType::Int {
+        // (is_inc, src_var_name)
+        let inc_dec: Option<(bool, &str)> = match value {
+            // var+1/1+var use the dedicated IncInt/IncIntTo instructions
+            Expr::Add(l, r, _) => {
+                let src = if matches!(r.as_ref(), Expr::Int(1)) {
+                    Some(l.as_ref())
+                } else if matches!(l.as_ref(), Expr::Int(1)) {
+                    Some(r.as_ref())
+                } else {
+                    None
+                };
+                src.and_then(|e| {
+                    if let Expr::Var(src_name, _) = e {
+                        v.iter()
+                            .rfind(|x| x.name == *src_name)
+                            .filter(|x| x.var_type == DataType::Int)
+                            .map(|_| (true, src_name.as_str()))
+                    } else {
+                        None
+                    }
+                })
+            }
+            // var-1 uses the dedicated DecInt/DecIntTo instructions
+            Expr::Sub(l, r, _) => {
+                if matches!(r.as_ref(), Expr::Int(1)) {
+                    if let Expr::Var(src_name, _) = l.as_ref() {
+                        v.iter()
+                            .rfind(|x| x.name == *src_name)
+                            .filter(|x| x.var_type == DataType::Int)
+                            .map(|_| (false, src_name.as_str()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if let Some((is_inc, src_name)) = inc_dec {
+            let src_id = v.iter().rfind(|x| x.name == src_name).unwrap().register_id;
+            output.push(if src_id == id {
+                if is_inc {
+                    Instr::IncInt(id)
+                } else {
+                    Instr::DecInt(id)
+                }
+            } else {
+                if is_inc {
+                    Instr::IncIntTo(src_id, id)
+                } else {
+                    Instr::DecIntTo(src_id, id)
+                }
+            });
+            return;
+        }
+    }
+
+    let output_len = output.len();
+    let obj_id = get_id(value, v, ctx, state, output, Some(id), false);
+    if output.len() != output_len {
+        move_to_id(output, id);
+    } else if state.const_registers.values().any(|&v| v == obj_id) {
+        move_reg_to_reg(output, obj_id, id, state.registers[obj_id as usize]);
+    } else {
+        output.push(Instr::Mov(obj_id, id));
+    }
+    if !v
+        .iter()
+        .any(|var| &var.name != name && var.register_id == obj_id)
+    {
+        state.free_reg(obj_id, v);
+    }
+    v[var_pos].var_type = var_type;
+}
+
+fn compile_struct_definition(
+    name: &SmolStr,
+    fields: &[(SmolStr, SmolStr)],
+    span: Span,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    _output: &mut Vec<Instr>,
+) {
+    let struct_id = state.structs.len() as u16;
+    state.structs.push(Struct {
+        // pushing it first allows structs to be recursive
+        name: name.clone(),
+        fields: Box::from([]),
+        id: struct_id,
+    });
+    let parsed_fields = fields
+        .iter()
+        .map(|(f, f_t)| {
+            (
+                f.clone(),
+                parse_keel_type(f_t, state.structs, span, ctx.src),
+            )
+        })
+        .collect();
+    state.structs[struct_id as usize].fields = parsed_fields;
+    state.struct_fields.push((
+        name.clone(),
+        fields
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect::<Vec<SmolStr>>(),
+    ));
+    state
+        .namespace
+        .structs
+        .push((name.clone(), (state.structs.len() - 1) as u16));
+}
+
+fn compile_function_definition(
+    fn_name: &SmolStr,
+    fn_args: &[SmolStr],
+    fn_code: &Rc<[Expr]>,
+    span: Span,
+    _v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    _output: &mut Vec<Instr>,
+) {
+    if state.fns.iter().any(|func| &func.name == fn_name) {
+        throw_compiler_error(ctx.src, span, ErrType::FunctionAlreadyExists(fn_name));
+    }
+    let mut callees = Vec::new();
+    collect_direct_fn_calls(fn_code, &mut callees);
+    state.fns.push(Function {
+        name: fn_name.clone(),
+        args: Box::from(fn_args),
+        code: fn_code.clone(),
+        impls: Vec::new(),
+        is_recursive: None,
+        returns_null: check_if_returns_void(fn_code),
+        src_file: ctx.current_src_file,
+        return_type_cache: Vec::new(),
+        direct_calls: callees.into_boxed_slice(),
+    });
+    state.fn_registers.push(Vec::new());
+    state
+        .namespace
+        .fns
+        .push((fn_name.clone(), (state.fns.len() - 1) as u16));
+}
+
+fn compile_return(
+    return_value: &Option<Expr>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    if let Some(x) = return_value {
+        let id = get_id(x, v, ctx, state, output, None, false);
+        if ctx.is_parsing_recursive {
+            output.push(Instr::RecursiveReturn(id));
+        } else {
+            output.push(Instr::Return(id));
+        }
+    }
+}
+
+#[inline]
+fn compile_loop_break(ctx: Ctx<'_>, output: &mut Vec<Instr>) {
+    output.push(Instr::NotEqJmp(ctx.block_id + 1, 0, 0));
+}
+
+#[inline]
+fn compile_loop_continue(ctx: Ctx<'_>, output: &mut Vec<Instr>) {
+    output.push(Instr::EqJmp(ctx.block_id + 1, 0, 0));
+}
+
+#[inline]
+fn compile_eval_block(
+    code: &[Expr],
+    v: &mut Vec<Variable>,
+    ctx: Ctx<'_>,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    output.extend(compile_expr(
+        code,
+        v,
+        ctx.set_offset(output.len() as u16),
+        state,
+    ));
+}
+
 pub fn compile_expr(
     input: &[Expr],
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
-    offset: u16,
-    single_run: bool,
 ) -> Vec<Instr> {
+    let v_len = v.len();
+    let fn_len = state.fns.len();
     let mut output: Vec<Instr> = Vec::with_capacity(input.len());
-
-    let src = ctx.src;
-    let block_id = ctx.block_id;
-    let is_parsing_recursive = ctx.is_parsing_recursive;
-    let current_src_file = ctx.current_src_file;
-
     for (idx, x) in input.iter().enumerate() {
-        match x {
-            // if number / bool / str, just push it to the registers, and the caller will grab the last index
-            Expr::Float(num) => state.registers.push((*num).into()),
-            Expr::Int(num) => state.registers.push((*num).into()),
-            Expr::Bool(bool) => state.registers.push((*bool).into()),
-            Expr::Null => state.registers.push(NULL),
-            Expr::String(str) => state
-                .registers
-                .push(Data::p_str(str, &mut state.pools.strings)),
-            Expr::Var(name, markers) => {
+        if let Some(id) = x.compile_with_code_context(
+            v,
+            ctx,
+            state,
+            &mut output,
+            None,
+            false,
+            &input[idx + 1..],
+            false,
+        ) {
+            state.free_reg(id, v);
+        }
+    }
+    v.truncate(v_len);
+    state.fns.truncate(fn_len);
+    output
+}
+
+impl Expr {
+    pub const fn is_constant_literal(&self) -> bool {
+        matches!(
+            self,
+            Self::Int(_) | Self::Float(_) | Self::String(_) | Self::Bool(_) | Self::Null
+        )
+    }
+    #[inline(always)]
+    pub fn compile(
+        &self,
+        v: &mut Vec<Variable>,
+        ctx: Ctx<'_>,
+        state: &mut State<'_>,
+        output: &mut Vec<Instr>,
+        tgt_id: Option<u16>,
+        var_assignment: bool,
+        uses_id: bool,
+    ) -> Option<u16> {
+        self.compile_with_code_context(v, ctx, state, output, tgt_id, var_assignment, &[], uses_id)
+    }
+    pub fn compile_with_code_context(
+        &self,
+        v: &mut Vec<Variable>,
+        ctx: Ctx<'_>,
+        state: &mut State<'_>,
+        output: &mut Vec<Instr>,
+        tgt_id: Option<u16>,
+        var_assignment: bool,
+        remaining_code: &[Self],
+        uses_id: bool,
+    ) -> Option<u16> {
+        match self {
+            Self::Int(num) => {
+                debug_assert!(uses_id);
+                if var_assignment {
+                    state.registers.push((*num).into());
+                    return Some((state.registers.len() - 1) as u16);
+                }
+                let data = (*num).into();
+                if let Some(&id) = state.const_registers.get(&data) {
+                    Some(id)
+                } else {
+                    let id = state.registers.len() as u16;
+                    state.const_registers.insert(data, id);
+                    state.registers.push(data);
+                    Some(id)
+                }
+            }
+            Self::Float(num) => {
+                debug_assert!(uses_id);
+                if var_assignment {
+                    state.registers.push((*num).into());
+                    return Some((state.registers.len() - 1) as u16);
+                }
+                let data = (*num).into();
+                if let Some(&id) = state.const_registers.get(&data) {
+                    Some(id)
+                } else {
+                    state.registers.push(data);
+                    let id = (state.registers.len() - 1) as u16;
+                    state.const_registers.insert(data, id);
+                    Some(id)
+                }
+            }
+            Self::String(str) => {
+                debug_assert!(uses_id);
+                if var_assignment {
+                    state
+                        .registers
+                        .push(Data::p_str(str, &mut state.pools.strings));
+                    return Some((state.registers.len() - 1) as u16);
+                }
+                let data = Data::p_str(str, &mut state.pools.strings);
+                if let Some(&id) = state.const_registers.get(&data) {
+                    Some(id)
+                } else {
+                    let id = state.registers.len() as u16;
+                    state.const_registers.insert(data, id);
+                    state.registers.push(data);
+                    Some(id)
+                }
+            }
+            Self::Null => {
+                debug_assert!(uses_id);
+                if var_assignment {
+                    state.registers.push(NULL);
+                    return Some((state.registers.len() - 1) as u16);
+                }
+                if let Some(&id) = state.const_registers.get(&NULL) {
+                    Some(id)
+                } else {
+                    let id = state.registers.len() as u16;
+                    state.const_registers.insert(NULL, id);
+                    state.registers.push(NULL);
+                    Some(id)
+                }
+            }
+            Self::Bool(bool) => {
+                debug_assert!(uses_id);
+                if var_assignment {
+                    state.registers.push((*bool).into());
+                    return Some((state.registers.len() - 1) as u16);
+                }
+                let data: Data = (*bool).into();
+                if let Some(&id) = state.const_registers.get(&data) {
+                    Some(id)
+                } else {
+                    let id = state.registers.len() as u16;
+                    state.const_registers.insert(data, id);
+                    state.registers.push(data);
+                    Some(id)
+                }
+            }
+            Self::Var(name, markers) => {
+                debug_assert!(uses_id);
                 if let Some(Variable {
                     name: _,
                     register_id,
                     var_type: _,
-                }) = v.iter().find(|v_temp| *name == v_temp.name)
+                }) = v.iter().rfind(|v_temp| *name == v_temp.name)
                 {
-                    output.push(Instr::Mov(*register_id, state.alloc_reg()));
+                    Some(*register_id)
                 } else {
-                    throw_compiler_error(src, *markers, ErrType::UnknownVariable(name))
+                    cold_path();
+                    throw_compiler_error(ctx.src, *markers, ErrType::UnknownVariable(name))
                 }
             }
-
-            // x[y] = z;
-            Expr::ArrayModify(array, index, value, index_markers, elem_markers) => {
-                let array_type = infer_type(array, v, ctx, state);
-                if !array_type.is_indexable() {
-                    throw_compiler_error(src, *index_markers, ErrType::NotIndexable(&array_type));
-                }
-                // Get the id of the source array/string (may be a nested GetIndex)
-                let id = get_id(
-                    array,
+            Self::Array(array_items, span) => {
+                debug_assert!(uses_id);
+                Some(compile_array_literal(
+                    array_items,
+                    *span,
                     v,
                     ctx,
                     state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-
-                let final_id = get_id(
-                    index,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-
-                let elem_type = infer_type(value, v, ctx, state);
-                let elem_id = get_id(
-                    value,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-                state.free_reg(elem_id, v);
-                if {
-                    if let DataType::Array(Some(array_type)) = &array_type
-                        && array_type.as_ref() != &elem_type
-                    {
-                        true
-                    } else {
-                        false
-                    }
-                } || (array_type == DataType::String && elem_type != DataType::String)
-                {
-                    throw_compiler_error(
-                        src,
-                        *elem_markers,
-                        ErrType::CannotPushTypeToArray(&elem_type, &array_type),
-                    );
-                }
-
-                let to_push = if array_type == DataType::String {
-                    Instr::SetElementString(id, elem_id, final_id)
-                } else {
-                    Instr::SetElementObj(id, elem_id, final_id)
-                };
-                state
-                    .instr_src
-                    .push((to_push, *index_markers, current_src_file));
-                output.push(to_push);
-                state.free_reg(id, v);
+                    output,
+                ))
             }
-            Expr::SetStructField(struct_expr, field, new_val, struct_span, field_span) => {
-                let t = infer_type(struct_expr, v, ctx, state);
-                let new_val_type = infer_type(new_val, v, ctx, state);
-                let DataType::Struct(struct_id) = t else {
-                    throw_compiler_error(
-                        src,
-                        *struct_span,
-                        ErrType::InvalidType(&DataType::Struct(0), &t),
-                    );
-                };
-                let mut field_index: Option<u16> = None;
-                for (i, (f, f_t)) in state.structs[struct_id as usize].fields.iter().enumerate() {
-                    if f == field {
-                        if !struct_field_type_matches(f_t, &new_val_type) {
-                            throw_compiler_error(
-                                src,
-                                *field_span,
-                                ErrType::InvalidType(f_t, &new_val_type),
-                            );
-                        }
-                        field_index = Some(i as u16);
-                        break;
-                    }
-                }
-                if field_index.is_none() {
-                    throw_compiler_error(
-                        src,
-                        *field_span,
-                        ErrType::StructUnknownField(&state.structs[struct_id as usize].name, field),
-                    );
-                }
-                let id = get_id(
+            Self::Struct(namespace, fields, span) => {
+                debug_assert!(uses_id);
+                Some(compile_struct_literal(
+                    namespace, fields, *span, v, ctx, state, output,
+                ))
+            }
+            Self::Map(kv_pairs, span) => {
+                debug_assert!(uses_id);
+                Some(compile_map_literal(kv_pairs, *span, v, ctx, state, output))
+            }
+            Self::GetStructField(struct_expr, field, struct_span, field_span) => {
+                debug_assert!(uses_id);
+                Some(compile_struct_field_access(
                     struct_expr,
+                    field,
+                    *struct_span,
+                    *field_span,
                     v,
                     ctx,
                     state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-                let new_elem_reg_id = get_id(
-                    new_val,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-                output.push(Instr::SetFieldStruct(
-                    id,
-                    new_elem_reg_id,
-                    field_index.unwrap(),
-                ));
+                    output,
+                ))
             }
-            Expr::Condition(main_condition, code, _) => {
-                // get first code limit (after which there are only else(if) blocks)
-                let main_code_limit = code
-                    .iter()
-                    .position(|x| matches!(x, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
-                    .unwrap_or(code.len());
-
-                let condition_blocks_count = code.len() - main_code_limit;
-                // Each entry is the list of false-jump instruction indices for one condition block.
-                let mut conditional_false_jmp_idxs: Vec<Vec<usize>> =
-                    Vec::with_capacity(condition_blocks_count + 1);
-                let mut jmp_instr_idx: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-                let mut condition_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-
-                // Compile the main condition
-                let (true_jump_idxs, false_jump_idxs) = compile_short_circuit_condition(
+            // array[index]
+            Self::ArrayGetIndex(array, index, span) => {
+                debug_assert!(uses_id);
+                Some(compile_array_indexing(
+                    array, index, *span, v, ctx, state, output,
+                ))
+            }
+            // array[start..end]
+            Self::ArrayGetSlice(array, idx_start, idx_end, span) => {
+                debug_assert!(uses_id);
+                Some(compile_array_slice(
+                    array, idx_start, idx_end, *span, v, ctx, state, output,
+                ))
+            }
+            Self::Mul(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(uniform_op2(
+                    Instr::MulFloat,
+                    &DataType::Float,
+                    Instr::MulInt,
+                    &DataType::Int,
+                    "*",
+                    l,
+                    r,
+                    *span,
+                    tgt_id,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                ))
+            }
+            Self::Div(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(compile_div_op(l, r, *span, tgt_id, v, ctx, state, output))
+            }
+            Self::Add(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(compile_add_op(l, r, *span, tgt_id, v, ctx, state, output))
+            }
+            Self::Sub(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(compile_sub_op(l, r, *span, tgt_id, v, ctx, state, output))
+            }
+            Self::Mod(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(compile_mod_op(l, r, *span, tgt_id, v, ctx, state, output))
+            }
+            Self::Pow(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(uniform_op2(
+                    Instr::PowFloat,
+                    &DataType::Float,
+                    Instr::PowInt,
+                    &DataType::Int,
+                    "^",
+                    l,
+                    r,
+                    *span,
+                    tgt_id,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                ))
+            }
+            Self::Eq(l, r) => {
+                debug_assert!(uses_id);
+                Some(compile_eq_op(l, r, tgt_id, v, ctx, state, output))
+            }
+            Self::NotEq(l, r) => {
+                debug_assert!(uses_id);
+                Some(compile_neq_op(l, r, tgt_id, v, ctx, state, output))
+            }
+            Self::Sup(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(uniform_op2(
+                    Instr::SupFloat,
+                    &DataType::Float,
+                    Instr::SupInt,
+                    &DataType::Int,
+                    ">",
+                    l,
+                    r,
+                    *span,
+                    tgt_id,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                ))
+            }
+            Self::SupEq(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(uniform_op2(
+                    Instr::SupEqFloat,
+                    &DataType::Float,
+                    Instr::SupEqInt,
+                    &DataType::Int,
+                    ">=",
+                    l,
+                    r,
+                    *span,
+                    tgt_id,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                ))
+            }
+            Self::Inf(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(uniform_op2(
+                    Instr::InfFloat,
+                    &DataType::Float,
+                    Instr::InfInt,
+                    &DataType::Int,
+                    "<",
+                    l,
+                    r,
+                    *span,
+                    tgt_id,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                ))
+            }
+            Self::InfEq(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(uniform_op2(
+                    Instr::InfEqFloat,
+                    &DataType::Float,
+                    Instr::InfEqInt,
+                    &DataType::Int,
+                    "<=",
+                    l,
+                    r,
+                    *span,
+                    tgt_id,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                ))
+            }
+            Self::BoolAnd(l, r, markers) => {
+                debug_assert!(uses_id);
+                Some(uniform_op(
+                    Instr::BoolAnd,
+                    "&&",
+                    l,
+                    r,
+                    *markers,
+                    &DataType::Bool,
+                    tgt_id,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                ))
+            }
+            Self::BoolOr(l, r, span) => {
+                debug_assert!(uses_id);
+                Some(uniform_op(
+                    Instr::BoolOr,
+                    "||",
+                    l,
+                    r,
+                    *span,
+                    &DataType::Bool,
+                    tgt_id,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                ))
+            }
+            Self::Neg(l, span) => {
+                debug_assert!(uses_id);
+                Some(compile_neg_op(l, *span, tgt_id, v, ctx, state, output))
+            }
+            Self::BoolNeg(l, span) => {
+                debug_assert!(uses_id);
+                Some(compile_bool_neg_op(l, *span, tgt_id, v, ctx, state, output))
+            }
+            Self::InlineCondition(main_condition, code, span) => {
+                debug_assert!(uses_id);
+                Some(compile_inline_condition(
                     main_condition,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    offset,
-                    single_run,
-                    false,
-                );
-                conditional_false_jmp_idxs.push(false_jump_idxs);
-
-                // Modify true jump instructions to point to body_start
-                let body_start = output.len();
-                for j in true_jump_idxs {
-                    set_jmp_size(&mut output[j], (body_start - j) as u16);
-                }
-
-                let v_len = v.len();
-                // parse the main code block
-                let cond_code = compile_expr(
-                    &code[0..main_code_limit],
-                    v,
-                    ctx,
-                    state,
-                    offset + output.len() as u16,
-                    single_run,
-                );
-                v.truncate(v_len);
-                output.extend(cond_code);
-                if main_code_limit != code.len() {
-                    output.push(Instr::Jmp(0));
-                    jmp_instr_idx.push(output.len() - 1);
-                }
-
-                for elem in &code[main_code_limit..] {
-                    if let Expr::ElseIfBlock(condition, code) = elem {
-                        condition_markers.push(output.len());
-                        let condition_id = get_id(
-                            condition,
-                            v,
-                            ctx,
-                            state,
-                            &mut output,
-                            None,
-                            false,
-                            offset,
-                            single_run,
-                        );
-                        state.free_reg(condition_id, v);
-                        add_cmp_false(condition_id, &mut 0, &mut output, false);
-                        conditional_false_jmp_idxs.push(vec![output.len() - 1]);
-                        let v_len = v.len();
-                        let cond_code = compile_expr(
-                            code,
-                            v,
-                            ctx,
-                            state,
-                            offset + output.len() as u16,
-                            single_run,
-                        );
-                        v.truncate(v_len);
-                        output.extend(cond_code);
-                        output.push(Instr::Jmp(0));
-                        jmp_instr_idx.push(output.len() - 1);
-                    } else if let Expr::ElseBlock(code) = elem {
-                        condition_markers.push(output.len());
-                        let v_len = v.len();
-                        let cond_code = compile_expr(
-                            code,
-                            v,
-                            ctx,
-                            state,
-                            offset + output.len() as u16,
-                            single_run,
-                        );
-                        v.truncate(v_len);
-                        output.extend(cond_code);
-                    }
-                }
-
-                for y in jmp_instr_idx {
-                    let diff = output.len() - y;
-                    output[y] = Instr::Jmp(diff as u16);
-                }
-                // Fix all false-jump instructions for each condition block
-                for (cm_idx, false_idxs) in conditional_false_jmp_idxs.iter().enumerate() {
-                    let target = if cm_idx < condition_markers.len() {
-                        condition_markers[cm_idx]
-                    } else {
-                        output.len()
-                    };
-                    for &y in false_idxs {
-                        set_jmp_size(&mut output[y], (target - y) as u16);
-                    }
-                }
-            }
-            Expr::WhileBlock(condition, code) => {
-                let output_len_before = output.len();
-
-                let (true_jump_idxs, false_jump_idxs) = compile_short_circuit_condition(
-                    condition,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    offset,
-                    single_run,
-                    false,
-                );
-
-                let body_start = output.len();
-                for j in true_jump_idxs {
-                    set_jmp_size(&mut output[j], (body_start - j) as u16);
-                }
-
-                // parse the code block, clone the vars to avoid overriding anything
-                let v_len = v.len();
-                let loop_id = block_id + 1;
-
-                let mut cond_code =
-                    compile_expr(code, v, ctx, state, offset + output.len() as u16, false);
-                v.truncate(v_len);
-
-                let exit = output.len() + cond_code.len() + 1;
-                for j in false_jump_idxs {
-                    set_jmp_size(&mut output[j], (exit - j) as u16);
-                }
-
-                let cond_len = (output.len() - output_len_before) as u16;
-                let body_len = cond_code.len() as u16;
-                let len = cond_len + body_len; // full span used by JmpBack
-                // Break/Continue offsets are relative to cond_code, so pass body_len+1 (body remaining + JmpBack)
-                parse_loop_flow_control(&mut cond_code, loop_id, body_len + 1, false, false);
-                output.extend(cond_code);
-                output.push(Instr::JmpBack(len));
-            }
-            Expr::ForLoop(var_name, array, code, markers) => {
-                let real_var = var_name.as_str() != "_";
-
-                // parse the array, get its id (the target array is the first Expr in array_code)
-                let array_type = infer_type(array, v, ctx, state);
-                let array = get_id(
-                    array,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-
-                let array_len_id = state.alloc_reg();
-
-                output.push(Instr::CallLibFunc(LibFunc::Len, array, array_len_id));
-
-                // set up the id of the index variable (0..len)
-                let index_id = if single_run {
-                    state.registers.push(0.into());
-                    (state.registers.len() - 1) as u16
-                } else {
-                    let id = state.alloc_reg();
-                    output.push(Instr::SetInt(id, 0));
-                    id
-                };
-
-                // do the 'i < len' condition, set up the condition's id (true/false)
-                let condition_id = state.alloc_reg();
-
-                output.push(Instr::InfInt(index_id, array_len_id, condition_id));
-
-                // set up the variable for the current element (for current_element_id in ... {}) => current_element_id = array[index]
-                let current_element_id = if real_var { state.alloc_reg() } else { 0 };
-
-                let v_len = v.len();
-
-                let is_str = array_type == DataType::String;
-
-                if real_var {
-                    v.push(Variable {
-                        name: var_name.clone(),
-                        register_id: current_element_id,
-                        var_type: match array_type {
-                            DataType::String => DataType::String,
-                            DataType::Array(a_type) => a_type.map_or(DataType::Null, |t| *t),
-                            t => throw_compiler_error(src, *markers, ErrType::IsNotAnIterator(&t)),
-                        },
-                    });
-                }
-                let loop_id = block_id + 1;
-
-                // accounts for the GetIndexArray/GetIndexString instruction
-                let pending = real_var as u16;
-
-                let regs_before = state.registers.len() as u16;
-                let mut cond_code = compile_expr(
                     code,
+                    *span,
                     v,
                     ctx,
                     state,
-                    offset + output.len() as u16 + pending,
-                    false,
-                );
-                // Clean up variables
-                v.truncate(v_len);
-                state.free_loop_scope_registers(regs_before, &cond_code, v);
-
-                // add the condition ('i < len') jumping logic
-                let mut len = (cond_code.len() + 3) as u16 + pending;
-                add_cmp_false(condition_id, &mut len, &mut output, true);
-
-                // make the current_element_id register actually hold the element's value
-                if real_var {
-                    if is_str {
-                        output.push(Instr::GetIndexString(array, index_id, current_element_id));
-                    } else {
-                        output.push(Instr::GetIndexArray(array, index_id, current_element_id));
-                    }
-                }
-                parse_loop_flow_control(&mut cond_code, loop_id, len, true, false);
-                // then add the condition code
-                output.extend(cond_code);
-                // add 1 to the index (i+=1) so that the next loop iteration will have the next element in the array
-                output.push(Instr::IncInt(index_id));
-
-                // jump back to the loop if still inside of it
-                output.push(Instr::JmpBack(len));
-
-                if single_run {
-                    state.free_reg(array_len_id, v);
-                    state.free_reg(index_id, v);
-                    state.free_reg(condition_id, v);
-                    if real_var {
-                        state.free_reg(current_element_id, v);
-                    }
-                }
+                    output,
+                    tgt_id,
+                ))
             }
-            Expr::IntForLoop(var_name, start_elem, end_elem, code, markers1, markers2) => {
-                // IntForLoop is compiled to:
-                // ----
-                // (1) if i >= end_elem jump out
-                // (2) loop_body
-                // (3) i += 1
-                // (4) if i < end_elem jump back to body
-                // ----
-                //
-                //
-                // Check start and elem type
-                let t1 = infer_type(start_elem, v, ctx, state);
-                let t2 = infer_type(end_elem, v, ctx, state);
-                if t1 != DataType::Int {
-                    throw_compiler_error(src, *markers1, ErrType::InvalidType(&DataType::Int, &t1));
-                }
-                if t2 != DataType::Int {
-                    throw_compiler_error(src, *markers2, ErrType::InvalidType(&DataType::Int, &t2));
-                }
-                let elem_id = if single_run {
-                    get_id(
-                        start_elem,
-                        v,
-                        ctx,
-                        state,
-                        &mut output,
-                        None,
-                        false,
-                        offset,
-                        single_run,
-                    )
-                } else {
-                    let start_elem_id = get_id(
-                        start_elem,
-                        v,
-                        ctx,
-                        state,
-                        &mut output,
-                        None,
-                        false,
-                        offset,
-                        single_run,
-                    );
-                    let start_val = state.registers[start_elem_id as usize];
-                    let elem_id = state.alloc_reg();
-                    if state.const_registers.values().any(|&v| v == start_elem_id)
-                        && start_val.is_int()
-                    {
-                        output.push(Instr::SetInt(elem_id, start_val.as_int()));
-                    } else {
-                        output.push(Instr::Mov(start_elem_id, elem_id));
-                    }
-                    elem_id
-                };
-                let end_elem_id = get_id(
-                    end_elem,
+            Self::FunctionCall(args, namespace, markers, args_indexes) if uses_id => Some(
+                handle_functions(
+                    output,
                     v,
                     ctx,
                     state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
-                );
-
-                // elem_id is a fresh mutable register -> remove from const_registers just in case
-                state.const_registers.retain(|_, &mut v| v != elem_id);
-
-                let v_len = v.len();
-                v.push(Variable {
-                    name: var_name.clone(),
-                    register_id: elem_id,
-                    var_type: DataType::Int,
-                });
-                let loop_id = block_id + 1;
-
-                // (1) if i >= end_elem jump out -> push placeholder first so that compile_expr sees the correct offset
-                let jmp_idx = output.len();
-                output.push(Instr::SupEqIntJmp(elem_id, end_elem_id, 0));
-
-                let regs_before = state.registers.len() as u16;
-                let compiled_loop_code =
-                    compile_expr(code, v, ctx, state, offset + output.len() as u16, false);
-                state.free_loop_scope_registers(regs_before, &compiled_loop_code, v);
-                let compiled_loop_code_len = compiled_loop_code.len() as u16;
-
-                // (2) loop_body
-                output.extend(compiled_loop_code);
-
-                // (3) i+= 1
-                output.push(Instr::IncInt(elem_id));
-
-                // (4) if i < end_elem jump back to body
-                output.push(Instr::InfIntJmpBack(
-                    elem_id,
-                    end_elem_id,
-                    compiled_loop_code_len + 1,
-                ));
-
-                let exit_size = (output.len() - jmp_idx) as u16;
-                output[jmp_idx] = Instr::SupEqIntJmp(elem_id, end_elem_id, exit_size);
-
-                parse_loop_flow_control(
-                    &mut output[jmp_idx + 1..],
-                    loop_id,
-                    exit_size,
-                    true,
-                    false,
-                );
-                v.truncate(v_len);
-
-                if single_run {
-                    state.free_reg(end_elem_id, v);
-                    state.free_reg(elem_id, v);
-                }
-            }
-            Expr::LoopBlock(code) => {
-                let loop_id = block_id + 1;
-                let v_len = v.len();
-                let regs_before = state.registers.len() as u16;
-                let mut compiled =
-                    compile_expr(code, v, ctx, state, offset + output.len() as u16, false);
-                v.truncate(v_len);
-                state.free_loop_scope_registers(regs_before, &compiled, v);
-                let code_length = compiled.len() as u16;
-                parse_loop_flow_control(&mut compiled, loop_id, code_length + 1, false, true);
-                output.extend(compiled);
-                output.push(Instr::JmpBack(code_length));
-            }
-            Expr::TryCatchBlock(e, err_var, catch_code) => {
-                output.push(Instr::StartErrorCatch(0, 0)); // patched later on
-                let err_catch_instr = output.len() - 1;
-                let main_code = compile_expr(e, v, ctx, state, offset, single_run);
-                output.extend(main_code);
-                output.push(Instr::StopErrorCatch);
-                output.push(Instr::Jmp(0)); // jumps over the catch handler if no error arises
-                let jmp_catch_instr = output.len() - 1;
-
-                let v_len = v.len();
-                let err_reg_id = state.alloc_reg();
-                v.push(Variable {
-                    name: err_var.clone(),
-                    register_id: err_reg_id,
-                    var_type: DataType::String,
-                });
-                output[err_catch_instr] =
-                    Instr::StartErrorCatch((output.len() - err_catch_instr) as u16, err_reg_id);
-                let catch_code = compile_expr(catch_code, v, ctx, state, offset, single_run);
-                v.truncate(v_len);
-                output.extend(catch_code);
-                output[jmp_catch_instr] = Instr::Jmp((output.len() - jmp_catch_instr) as u16);
-                state.free_reg(err_reg_id, v);
-            }
-            Expr::VarDeclare(x, y) => {
-                let var_type = infer_type(y, v, ctx, state);
-
-                let var_id = if single_run {
-                    get_id(
-                        y,
-                        v,
-                        ctx,
-                        state,
-                        &mut output,
-                        None,
-                        true,
-                        offset,
-                        single_run,
-                    )
-                } else {
-                    let src_id = get_id(
-                        y,
-                        v,
-                        ctx,
-                        state,
-                        &mut output,
-                        None,
-                        false,
-                        offset,
-                        single_run,
-                    );
-                    if contains_var_reassign(x, &input[idx + 1..]) {
-                        let mutable_id = state.alloc_reg();
-                        move_reg_to_reg(
-                            &mut output,
-                            src_id,
-                            mutable_id,
-                            state.registers[src_id as usize],
-                        );
-                        mutable_id
-                    } else {
-                        src_id
-                    }
-                };
-
-                if let DataType::Fn(fn_id) = &var_type {
-                    state.namespace.fns.push((x.clone(), *fn_id));
-                }
-                v.push(Variable {
-                    name: x.clone(),
-                    register_id: var_id,
-                    var_type,
-                });
-            }
-            Expr::VarAssign(name, y, markers) => {
-                let var_type = infer_type(y, v, ctx, state);
-                let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
-                    throw_compiler_error(src, *markers, ErrType::UnknownVariable(name));
-                });
-                let id = v[var_pos].register_id;
-
-                if var_type == DataType::Int {
-                    // (is_inc, src_var_name)
-                    let inc_dec: Option<(bool, &str)> = match y.as_ref() {
-                        // var+1/1+var use the dedicated IncInt/IncIntTo instructions
-                        Expr::Add(l, r, _) => {
-                            let src = if matches!(r.as_ref(), Expr::Int(1)) {
-                                Some(l.as_ref())
-                            } else if matches!(l.as_ref(), Expr::Int(1)) {
-                                Some(r.as_ref())
-                            } else {
-                                None
-                            };
-                            src.and_then(|e| {
-                                if let Expr::Var(src_name, _) = e {
-                                    v.iter()
-                                        .rfind(|x| x.name == *src_name)
-                                        .filter(|x| x.var_type == DataType::Int)
-                                        .map(|_| (true, src_name.as_str()))
-                                } else {
-                                    None
-                                }
-                            })
-                        }
-                        // var-1 uses the dedicated DecInt/DecIntTo instructions
-                        Expr::Sub(l, r, _) => {
-                            if matches!(r.as_ref(), Expr::Int(1)) {
-                                if let Expr::Var(src_name, _) = l.as_ref() {
-                                    v.iter()
-                                        .rfind(|x| x.name == *src_name)
-                                        .filter(|x| x.var_type == DataType::Int)
-                                        .map(|_| (false, src_name.as_str()))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    };
-                    if let Some((is_inc, src_name)) = inc_dec {
-                        let src_id = v.iter().rfind(|x| x.name == src_name).unwrap().register_id;
-                        output.push(if src_id == id {
-                            if is_inc {
-                                Instr::IncInt(id)
-                            } else {
-                                Instr::DecInt(id)
-                            }
-                        } else {
-                            if is_inc {
-                                Instr::IncIntTo(src_id, id)
-                            } else {
-                                Instr::DecIntTo(src_id, id)
-                            }
-                        });
-                        continue;
-                    }
-                }
-
-                let output_len = output.len();
-                let obj_id = get_id(
-                    y,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    Some(id),
-                    false,
-                    offset,
-                    single_run,
-                );
-                if output.len() != output_len {
-                    move_to_id(&mut output, id);
-                } else if state.const_registers.values().any(|&v| v == obj_id) {
-                    move_reg_to_reg(&mut output, obj_id, id, state.registers[obj_id as usize]);
-                } else {
-                    output.push(Instr::Mov(obj_id, id));
-                }
-                if is_reg_free(v, obj_id, name) {
-                    state.free_reg(obj_id, v);
-                }
-                v[var_pos].var_type = var_type;
-            }
-            Expr::StructDeclare(name, fields, span) => {
-                let struct_id = state.structs.len() as u16;
-                state.structs.push(Struct {
-                    // pushing it first allows structs to be recursive
-                    name: name.clone(),
-                    fields: Box::from([]),
-                    id: struct_id,
-                });
-                let parsed_fields = fields
-                    .iter()
-                    .map(|(f, f_t)| (f.clone(), str_to_keel_type(f_t, state.structs, *span, src)))
-                    .collect();
-                state.structs[struct_id as usize].fields = parsed_fields;
-                state.struct_fields.push((
-                    name.clone(),
-                    fields
-                        .iter()
-                        .map(|(n, _)| n.clone())
-                        .collect::<Vec<SmolStr>>(),
-                ));
-                state
-                    .namespace
-                    .structs
-                    .push((name.clone(), (state.structs.len() - 1) as u16));
-            }
-            Expr::FunctionCall(args, namespace, markers, args_indexes) => {
-                let output_id = handle_functions(
-                    &mut output,
-                    v,
-                    ctx,
-                    state,
+                    tgt_id,
                     args,
                     namespace,
                     *markers,
                     args_indexes,
-                    offset,
-                    single_run,
+                )
+                .unwrap_or_else(|| {
+                    if let Some(&id) = state.const_registers.get(&NULL) {
+                        id
+                    } else {
+                        let id = state.registers.len() as u16;
+                        state.const_registers.insert(NULL, id);
+                        state.registers.push(NULL);
+                        id
+                    }
+                }),
+            ),
+            Self::AnonymousFunction(_, _, _) => {
+                debug_assert!(uses_id);
+                if let Some(&id) = state.const_registers.get(&NULL) {
+                    Some(id)
+                } else {
+                    let id = state.registers.len() as u16;
+                    state.const_registers.insert(NULL, id);
+                    state.registers.push(NULL);
+                    Some(id)
+                }
+            }
+
+            // ------------------
+            // --- STATEMENTS ---
+            // ------------------
+
+            // x[y] = z;
+            Self::ArrayModify(array, index, value, index_markers, elem_markers) => {
+                debug_assert!(!uses_id);
+                compile_array_index_assignment(
+                    array,
+                    index,
+                    value,
+                    *index_markers,
+                    *elem_markers,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                );
+                None
+            }
+            Self::SetStructField(struct_expr, field, new_val, struct_span, field_span) => {
+                debug_assert!(!uses_id);
+                compile_struct_field_assignment(
+                    struct_expr,
+                    field,
+                    new_val,
+                    *struct_span,
+                    *field_span,
+                    v,
+                    ctx,
+                    state,
+                    output,
+                );
+                None
+            }
+            Self::Condition(main_condition, code, _) => {
+                debug_assert!(!uses_id);
+                compile_condition(main_condition, code, v, ctx, state, output);
+                None
+            }
+            Self::WhileBlock(condition, code) => {
+                debug_assert!(!uses_id);
+                compile_while_loop(condition, code, v, ctx, state, output);
+                None
+            }
+            Self::ForLoop(var_name, array, code, span) => {
+                debug_assert!(!uses_id);
+                compile_for_loop(var_name, array, code, *span, v, ctx, state, output);
+                None
+            }
+            Self::IntForLoop(var_name, start_elem, end_elem, code, span1, span2) => {
+                debug_assert!(!uses_id);
+                compile_int_for_loop(
+                    var_name, start_elem, end_elem, code, *span1, *span2, v, ctx, state, output,
+                );
+                None
+            }
+            Self::LoopBlock(code) => {
+                debug_assert!(!uses_id);
+                compile_loop_block(code, v, ctx, state, output);
+                None
+            }
+            Self::TryCatchBlock(e, err_var, catch_code) => {
+                debug_assert!(!uses_id);
+                compile_try_catch_block(e, err_var, catch_code, v, ctx, state, output);
+                None
+            }
+            Self::VarDeclare(name, value) => {
+                debug_assert!(!uses_id);
+                compile_var_declaration(name, value, remaining_code, v, ctx, state, output);
+                None
+            }
+            Self::VarAssign(name, value, span) => {
+                debug_assert!(!uses_id);
+                compile_var_assignment(name, value, *span, v, ctx, state, output);
+                None
+            }
+            Self::StructDeclare(name, fields, span) => {
+                debug_assert!(!uses_id);
+                compile_struct_definition(name, fields, *span, ctx, state, output);
+                None
+            }
+            Self::FunctionCall(args, namespace, markers, args_indexes) if !uses_id => {
+                let output_id = handle_functions(
+                    output,
+                    v,
+                    ctx,
+                    state,
+                    tgt_id,
+                    args,
+                    namespace,
+                    *markers,
+                    args_indexes,
                 );
                 if let Some(id) = output_id {
                     state.free_reg(id, v);
                 }
+                None
             }
-            Expr::ObjFunctionCall(obj, args, namespace, obj_markers, fn_markers, args_indexes) => {
-                handle_method_calls(
-                    &mut output,
+            Self::ObjFunctionCall(obj, args, namespace, obj_markers, fn_markers, args_indexes)
+                if !uses_id =>
+            {
+                let output_id = handle_method_calls(
+                    output,
                     v,
                     ctx,
                     state,
+                    tgt_id,
                     obj,
                     args,
                     namespace,
                     *obj_markers,
                     *fn_markers,
                     args_indexes,
-                    offset,
-                    single_run,
                 );
-            }
-            Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
-                if state.fns.iter().any(|func| &func.name == fn_name) {
-                    throw_compiler_error(src, *markers, ErrType::FunctionAlreadyExists(fn_name));
+                if let Some(id) = output_id {
+                    state.free_reg(id, v);
                 }
-                let mut callees = Vec::new();
-                collect_direct_fn_calls(fn_code, &mut callees);
-                state.fns.push(Function {
-                    name: fn_name.clone(),
-                    args: fn_args.clone(),
-                    code: fn_code.clone(),
-                    impls: Vec::new(),
-                    is_recursive: None,
-                    returns_null: check_if_returns_void(fn_code),
-                    src_file: current_src_file,
-                    return_type_cache: Vec::new(),
-                    direct_calls: callees.into_boxed_slice(),
-                });
-                state.fn_registers.push(Vec::new());
-                state
-                    .namespace
-                    .fns
-                    .push((fn_name.clone(), (state.fns.len() - 1) as u16));
+                None
             }
-            Expr::ReturnVal(val) => {
-                if let Some(x) = &**val {
-                    let id = get_id(
-                        x,
+            Self::ObjFunctionCall(obj, args, namespace, obj_markers, fn_markers, args_indexes)
+                if uses_id =>
+            {
+                Some(
+                    handle_method_calls(
+                        output,
                         v,
                         ctx,
                         state,
-                        &mut output,
-                        None,
-                        false,
-                        offset,
-                        single_run,
-                    );
-                    if is_parsing_recursive {
-                        output.push(Instr::RecursiveReturn(id));
-                    } else {
-                        output.push(Instr::Return(id));
-                    }
-                }
+                        tgt_id,
+                        obj,
+                        args,
+                        namespace,
+                        *obj_markers,
+                        *fn_markers,
+                        args_indexes,
+                    )
+                    .unwrap_or_else(|| {
+                        if let Some(&id) = state.const_registers.get(&NULL) {
+                            id
+                        } else {
+                            let id = state.registers.len() as u16;
+                            state.const_registers.insert(NULL, id);
+                            state.registers.push(NULL);
+                            id
+                        }
+                    }),
+                )
             }
-            Expr::Break => output.push(Instr::NotEqJmp(block_id + 1, 0, 0)),
-            Expr::Continue => output.push(Instr::EqJmp(block_id + 1, 0, 0)),
-            Expr::EvalBlock(code) => {
-                let v_len = v.len();
-                output.extend(compile_expr(
-                    code,
-                    v,
-                    ctx,
-                    state,
-                    output.len() as u16,
-                    single_run,
-                ));
-                v.truncate(v_len);
-            }
-            Expr::AnonymousFunction(_, _, _) => {}
-            other => {
-                get_id(
-                    other,
-                    v,
-                    ctx,
-                    state,
-                    &mut output,
-                    None,
-                    false,
-                    offset,
-                    single_run,
+            Self::FunctionDecl(fn_name, fn_args, fn_code, span) => {
+                debug_assert!(!uses_id);
+                compile_function_definition(
+                    fn_name, fn_args, fn_code, *span, v, ctx, state, output,
                 );
+                None
             }
+            Self::ReturnVal(return_value) => {
+                debug_assert!(!uses_id);
+                compile_return(return_value, v, ctx, state, output);
+                None
+            }
+            Self::Break => {
+                debug_assert!(!uses_id);
+                compile_loop_break(ctx, output);
+                None
+            }
+            Self::Continue => {
+                debug_assert!(!uses_id);
+                compile_loop_continue(ctx, output);
+                None
+            }
+            Self::EvalBlock(code) => {
+                debug_assert!(!uses_id);
+                compile_eval_block(code, v, ctx, state, output);
+                None
+            }
+            _ => unsafe { unreachable_unchecked() },
         }
     }
-    output
 }
 
 #[cfg(target_os = "macos")]
@@ -2337,7 +2601,7 @@ fn parse_toplevel(
                     .map(|(f, f_t)| {
                         (
                             f.clone(),
-                            str_to_keel_type(f_t, structs, span, use_line_markers),
+                            parse_keel_type(f_t, structs, span, use_line_markers),
                         )
                     })
                     .collect();
@@ -2399,8 +2663,8 @@ fn parse_toplevel(
                 let fns = fn_signatures
                         .iter()
                         .map(|(fn_name, fn_args, fn_return_type)| {
-                            let fn_args = fn_args.iter().map(|t| str_to_keel_type(t, structs, markers, use_line_markers)).collect::<Vec<DataType>>().into_boxed_slice();
-                            let fn_return_type = str_to_keel_type(fn_return_type, structs, markers, use_line_markers);
+                            let fn_args = fn_args.iter().map(|t| parse_keel_type(t, structs, markers, use_line_markers)).collect::<Vec<DataType>>().into_boxed_slice();
+                            let fn_return_type = parse_keel_type(fn_return_type, structs, markers, use_line_markers);
                             let return_val = FnSignature {
                                 name: fn_name.clone(),
                                 args: fn_args.clone(),
@@ -2642,6 +2906,8 @@ pub fn compile(
         src: (filename, &contents),
         is_parsing_recursive: false,
         current_src_file: 0,
+        single_run: true,
+        offset: 0,
     };
     let mut state = State {
         registers: &mut registers,
@@ -2678,8 +2944,6 @@ pub fn compile(
         &mut variables,
         ctx,
         &mut state,
-        0,
-        true
     );
     instructions.push(Instr::Halt(0));
     for x in &mut fn_registers {

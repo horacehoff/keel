@@ -1,24 +1,23 @@
+use crate::builtin_functions::builtin_functions;
 use crate::compiler::Namespace;
 use crate::compiler::get_id;
 use crate::compiler_data::Ctx;
 use crate::compiler_data::State;
 use crate::compiler_data::Variable;
-use crate::data::NULL;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
-#[cfg(target_arch = "wasm32")]
-use crate::errors::wasm_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::fs_lib_functions::fs_lib_functions;
 use crate::instr::Instr;
-use crate::std_lib_functions::std_lib_functions;
 use crate::type_system::DataType;
-use crate::type_system::infer_type;
 use crate::user_functions::handle_user_function;
 use crate::util::check_args;
 use smol_strc::SmolStr;
 use std::slice;
+
+#[cfg(target_arch = "wasm32")]
+use crate::errors::wasm_error;
 
 pub fn check_arg_type(
     v: &mut Vec<Variable>,
@@ -29,7 +28,7 @@ pub fn check_arg_type(
     arg_idx: usize,
     expected: &[DataType],
 ) {
-    let inferred = infer_type(&args[arg_idx], v, ctx, state);
+    let inferred = args[arg_idx].infer_type(v, ctx, state);
     let matches = if let DataType::Poly(polytype) = &inferred {
         polytype.iter().all(|x| expected.contains(x))
     } else {
@@ -61,14 +60,12 @@ pub fn handle_functions(
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
-
+    tgt_id: Option<u16>,
     // method call data
     args: &[Expr],
     namespace: &[SmolStr],
     markers: Span,
     args_indexes: &[Span],
-    offset: u16,
-    single_run: bool,
 ) -> Option<u16> {
     let src = ctx.src;
     let current_src_file = ctx.current_src_file;
@@ -76,18 +73,17 @@ pub fn handle_functions(
     let name = namespace[len].as_str();
     let namespace = &namespace[0..len];
     if namespace.is_empty() {
-        return std_lib_functions(
+        builtin_functions(
             name,
             output,
             v,
             ctx,
             state,
+            tgt_id,
             args,
             markers,
             args_indexes,
-            offset,
-            single_run,
-        );
+        )
     } else if namespace == ["fs"] {
         #[cfg(target_arch = "wasm32")]
         wasm_error("WASM does not support the file system library");
@@ -98,12 +94,11 @@ pub fn handle_functions(
             v,
             ctx,
             state,
+            tgt_id,
             args,
             markers,
             args_indexes,
-            offset,
-            single_run,
-        );
+        )
     } else if let Some((fn_args, returns_null, dyn_id)) = state
         .dyn_libs
         .iter()
@@ -117,7 +112,7 @@ pub fn handle_functions(
         }
 
         for arg in args {
-            let arg_id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
+            let arg_id = get_id(arg, v, ctx, state, output, None, false);
             output.push(Instr::StoreFuncArg(arg_id));
             // This may break stuff
             state.free_reg(arg_id, v);
@@ -127,8 +122,7 @@ pub fn handle_functions(
         let register_id = if returns_null {
             0
         } else {
-            state.registers.push(NULL);
-            (state.registers.len() - 1) as u16
+            state.alloc_reg_tgt(tgt_id)
         };
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
         state.instr_src.push((
@@ -136,20 +130,24 @@ pub fn handle_functions(
             markers,
             current_src_file,
         ));
+        if returns_null {
+            None
+        } else {
+            Some(register_id)
+        }
     } else if let Some(fn_id) = walk_namespace_fn(state.namespace, namespace, name) {
-        return Some(handle_user_function(
+        handle_user_function(
             name,
             fn_id as usize,
             output,
             v,
             ctx,
             state,
+            tgt_id,
             args,
             markers,
             args_indexes,
-            offset,
-            single_run,
-        ));
+        )
     } else {
         throw_compiler_error(
             src,
@@ -164,5 +162,4 @@ pub fn handle_functions(
             ),
         );
     }
-    None
 }

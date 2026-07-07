@@ -109,8 +109,7 @@ impl Data {
     #[inline(always)]
     /// Same as str(), except this never runs the GC because this function is called by the parser
     pub fn p_str(s: &str, string_pool: &mut Vec<String>) -> Self {
-        let len = s.len();
-        if len <= 6 {
+        if s.len() <= 6 {
             Self::small_str(s)
         } else if let Some(id) = string_pool.iter().position(|existing| existing == s) {
             Self(NAN_STRING_LARGE | id as u64)

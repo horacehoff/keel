@@ -9,12 +9,11 @@ use crate::data::TRUE;
 use crate::errors::ErrType;
 use crate::errors::ErrorCtx;
 use crate::errors::throw_error;
-#[cfg(target_arch = "wasm32")]
-use crate::errors::wasm_error;
 use crate::fs;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
+use crate::map_gc::alloc_map;
 use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
 use lexical_core::FormattedSize;
@@ -28,6 +27,9 @@ use std::hint::cold_path;
 use std::io::Write;
 use std::ops::Index;
 use std::ops::IndexMut;
+
+#[cfg(target_arch = "wasm32")]
+use crate::errors::wasm_error;
 
 pub type ObjectPool = Vec<Vec<Data>>;
 pub type MapPool = Vec<HashMap<Data, Data, BuildHasherDefault<NoHashHasher<Data>>>>;
@@ -214,8 +216,10 @@ pub fn execute(
     let mut handle = crate::captured_output::CapturedOutputWriter;
 
     let mut free_arrays: Vec<u32> = Vec::with_capacity(obj_pool.len());
+    let mut free_maps: Vec<u32> = Vec::with_capacity(map_pool.len());
     let mut free_strings: Vec<u16> = Vec::with_capacity(string_pool.len());
     let mut array_live: Vec<bool> = Vec::new();
+    let mut map_live: Vec<bool> = Vec::new();
     let mut string_live: Vec<bool> = Vec::new();
 
     let mut dyn_lib_args: Vec<u64> = Vec::new();
@@ -224,6 +228,7 @@ pub fn execute(
 
     let mut gc_string_threshold: u32 = 256;
     let mut gc_array_threshold: u32 = 256;
+    let mut gc_map_threshold: u32 = 256;
 
     let mut error_handles: Vec<ErrorCatch> = Vec::new();
 
@@ -452,11 +457,13 @@ pub fn execute(
             Instr::EmptyArray(arr_reg_id) => {
                 let array_id = alloc_array(
                     obj_pool,
+                    map_pool,
                     &mut free_arrays,
                     r,
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut map_live,
                     &mut obj_gc_stack,
                 );
                 r[arr_reg_id] = Data::array(array_id);
@@ -465,11 +472,13 @@ pub fn execute(
                 let src_id = r[src_reg].as_array();
                 let new_id = alloc_array(
                     obj_pool,
+                    map_pool,
                     &mut free_arrays,
                     r,
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut map_live,
                     &mut obj_gc_stack,
                 ) as usize;
                 unsafe {
@@ -484,11 +493,13 @@ pub fn execute(
             Instr::CloneStruct(src_reg, dest_reg) => {
                 let new_id = alloc_array(
                     obj_pool,
+                    map_pool,
                     &mut free_arrays,
                     r,
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut map_live,
                     &mut obj_gc_stack,
                 ) as usize;
                 let src_reg = r[src_reg];
@@ -508,11 +519,13 @@ pub fn execute(
                 let arr_b_id = r[o2].as_array();
                 let array_id = alloc_array(
                     obj_pool,
+                    map_pool,
                     &mut free_arrays,
                     r,
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut map_live,
                     &mut obj_gc_stack,
                 );
                 let array_idx = array_id as usize;
@@ -840,11 +853,13 @@ pub fn execute(
                 }
                 let new_array_id = alloc_array(
                     obj_pool,
+                    map_pool,
                     &mut free_arrays,
                     r,
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut map_live,
                     &mut obj_gc_stack,
                 );
                 if arr_id < (new_array_id as usize) {
@@ -925,8 +940,21 @@ pub fn execute(
                     .insert(r[key_reg_id], r[val_reg_id]);
             },
             Instr::CloneMap(src_reg, dest_reg) => {
-                let new_id = map_pool.len() as u32;
-                map_pool.push(unsafe { map_pool.get_unchecked(r[src_reg].as_map()).clone() });
+                let new_map = unsafe { map_pool.get_unchecked(r[src_reg].as_map()) }.clone();
+                let new_id = alloc_map(
+                    map_pool,
+                    obj_pool,
+                    &mut free_maps,
+                    r,
+                    &recursion_stack,
+                    &mut gc_map_threshold,
+                    &mut map_live,
+                    &mut array_live,
+                    &mut obj_gc_stack,
+                );
+                unsafe {
+                    *map_pool.get_unchecked_mut(new_id as usize) = new_map;
+                }
                 r[dest_reg] = Data::map(new_id);
             }
             Instr::CallLibFunc(LibFunc::Uppercase, source_string_reg_id, dest_reg_id) => {
@@ -1029,11 +1057,13 @@ pub fn execute(
                     let repeat_count = r[args.pop_unchecked()].as_int();
                     let array_id = alloc_array(
                         obj_pool,
+                        map_pool,
                         &mut free_arrays,
                         r,
                         &recursion_stack,
                         &mut gc_array_threshold,
                         &mut array_live,
+                        &mut map_live,
                         &mut obj_gc_stack,
                     );
                     unsafe {
@@ -1180,11 +1210,13 @@ pub fn execute(
                 if source.is_str() {
                     let output_str_reg_id = alloc_array(
                         obj_pool,
+                        map_pool,
                         &mut free_arrays,
                         r,
                         &recursion_stack,
                         &mut gc_array_threshold,
                         &mut array_live,
+                        &mut map_live,
                         &mut obj_gc_stack,
                     );
                     let source = source.as_str(string_pool);
@@ -1248,11 +1280,13 @@ pub fn execute(
                     for (start, end) in split_ranges {
                         let dest_array_id = alloc_array(
                             obj_pool,
+                            map_pool,
                             &mut free_arrays,
                             r,
                             &recursion_stack,
                             &mut gc_array_threshold,
                             &mut array_live,
+                            &mut map_live,
                             &mut obj_gc_stack,
                         ) as usize;
                         if dest_array_id < source_array_id {
@@ -1269,11 +1303,13 @@ pub fn execute(
 
                     let array_id = alloc_array(
                         obj_pool,
+                        map_pool,
                         &mut free_arrays,
                         r,
                         &recursion_stack,
                         &mut gc_array_threshold,
                         &mut array_live,
+                        &mut map_live,
                         &mut obj_gc_stack,
                     );
                     *unsafe { obj_pool.get_unchecked_mut(array_id as usize) } = sub_arrays;
@@ -1286,11 +1322,13 @@ pub fn execute(
                 let max = r[max].as_int();
                 let output_array_id = alloc_array(
                     obj_pool,
+                    map_pool,
                     &mut free_arrays,
                     r,
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut map_live,
                     &mut obj_gc_stack,
                 );
                 let range_arr = unsafe { obj_pool.get_unchecked_mut(output_array_id as usize) };
@@ -1380,11 +1418,13 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
                 r[dest] = Data::array(alloc_array(
                     obj_pool,
+                    map_pool,
                     &mut free_arrays,
                     r,
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut map_live,
                     &mut obj_gc_stack,
                 ))
             }
@@ -1392,11 +1432,13 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
                 let array_id = alloc_array(
                     obj_pool,
+                    map_pool,
                     &mut free_arrays,
                     r,
                     &recursion_stack,
                     &mut gc_array_threshold,
                     &mut array_live,
+                    &mut map_live,
                     &mut obj_gc_stack,
                 );
                 *unsafe { obj_pool.get_unchecked_mut(array_id as usize) } = std::env::args()

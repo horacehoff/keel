@@ -1,10 +1,9 @@
+use crate::builtin_methods::builtin_methods;
 use crate::compiler::get_id;
 use crate::compiler_data::Variable;
 use crate::compiler_data::{Ctx, State};
 use crate::expr::{Expr, Span};
 use crate::instr::Instr;
-use crate::std_lib_methods::std_lib_methods;
-use crate::type_system::infer_type;
 use smol_strc::SmolStr;
 
 pub fn handle_method_calls(
@@ -12,22 +11,21 @@ pub fn handle_method_calls(
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
+    tgt_id: Option<u16>,
     obj: &Expr,
     args: &[Expr],
     namespace: &[SmolStr],
     obj_markers: Span,
     fn_markers: Span,
     args_indexes: &[Span],
-    offset: u16,
-    single_run: bool,
-) {
+) -> Option<u16> {
     let name = namespace[namespace.len() - 1].as_str();
 
-    let obj_type = infer_type(obj, v, ctx, state);
-    let id = get_id(obj, v, ctx, state, output, None, false, offset, single_run);
+    let obj_type = obj.infer_type(v, ctx, state);
+    let id = get_id(obj, v, ctx, state, output, None, false);
     state.free_reg(id, v);
 
-    std_lib_methods(
+    builtin_methods(
         name,
         id,
         obj_type,
@@ -35,12 +33,11 @@ pub fn handle_method_calls(
         v,
         ctx,
         state,
+        tgt_id,
         obj,
         args,
         obj_markers,
         fn_markers,
         args_indexes,
-        offset,
-        single_run,
-    );
+    )
 }

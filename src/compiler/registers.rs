@@ -1,25 +1,7 @@
-use crate::compiler_data::Variable;
 use crate::data::Data;
 use crate::errors::dev_error;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
-use smol_strc::SmolStr;
-
-pub fn get_expr_tgt_id(x: &[Instr], fallback_reg: u16) -> Option<u16> {
-    if x.is_empty() {
-        return None;
-    }
-    if matches!(x.last().unwrap(), Instr::ObjElemMov(_, _, _)) {
-        return Some(fallback_reg);
-    }
-    match x[0] {
-        Instr::EmptyArray(dest)
-        | Instr::CloneArray(_, dest, _)
-        | Instr::CloneStruct(_, dest)
-        | Instr::CloneMap(_, dest) => Some(dest),
-        _ => get_last_tgt_id(x),
-    }
-}
 
 pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()
@@ -330,21 +312,6 @@ pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
     ids.sort_unstable();
     ids.dedup();
     ids
-}
-
-pub fn get_last_tgt_id(x: &[Instr]) -> Option<u16> {
-    debug_assert!(!(x.is_empty() || matches!(x.last().unwrap(), Instr::ObjElemMov(_, _, _))));
-    for y in x.iter().rev() {
-        if let Some(id) = y.get_tgt_id() {
-            return Some(id);
-        }
-    }
-    None
-}
-
-pub fn is_reg_free(v: &[Variable], id: u16, name: &SmolStr) -> bool {
-    !v.iter()
-        .any(|var| &var.name != name && var.register_id == id)
 }
 
 /// Write v, located in the src_id register, into the dest_id register using the cheapest instruction

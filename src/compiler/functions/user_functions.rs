@@ -5,8 +5,6 @@ use crate::compiler_data::FunctionImpl;
 use crate::compiler_data::State;
 use crate::compiler_data::Variable;
 use crate::data::NULL;
-use crate::errors::ErrType;
-use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::instr::Instr;
@@ -14,8 +12,6 @@ use crate::registers::get_tgt_ids;
 use crate::registers::move_to_id;
 use crate::type_system::DataType;
 use crate::type_system::can_reach;
-use crate::type_system::check_poly;
-use crate::type_system::infer_type;
 use crate::type_system::track_returns;
 use crate::util::check_args;
 use smol_strc::SmolStr;
@@ -29,13 +25,11 @@ pub fn handle_user_function(
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
+    tgt_id: Option<u16>,
     args: &[Expr],
     markers: Span,
     args_indexes: &[Span],
-    offset: u16,
-    single_run: bool,
-) -> u16 {
-    let src = ctx.src;
+) -> Option<u16> {
     // let fn_id = state
     //     .namespace
     //     .fns
@@ -62,7 +56,7 @@ pub fn handle_user_function(
 
     // Check if the arguments are correct
     let args_len = state.fns[fn_id].args.len();
-    check_args(args, args_len, fn_name, src, markers);
+    check_args(args, args_len, fn_name, ctx.src, markers);
 
     //This inlines dylib wrappers
     // Actual general function inlining is coming soon
@@ -89,17 +83,11 @@ pub fn handle_user_function(
         let returns_null = fn_sig.return_type == DataType::Null;
         let expected_arg_types = fn_sig.args.clone();
         for (i, arg) in args.iter().enumerate() {
-            let inferred = infer_type(arg, v, ctx, state);
-            if inferred != expected_arg_types[i] {
-                throw_compiler_error(
-                    ctx.src,
-                    args_indexes[i],
-                    ErrType::InvalidType(&expected_arg_types[i], &inferred),
-                );
-            }
+            let inferred = arg.infer_type(v, ctx, state);
+            inferred.expect(&expected_arg_types[i], ctx.src, args_indexes[i]);
         }
         for arg in args {
-            let arg_id = get_id(arg, v, ctx, state, output, None, false, offset, single_run);
+            let arg_id = get_id(arg, v, ctx, state, output, None, false);
             output.push(Instr::StoreFuncArg(arg_id));
             state.free_reg(arg_id, v);
             *state.allocated_arg_count += 1;
@@ -108,8 +96,7 @@ pub fn handle_user_function(
         let register_id = if returns_null {
             0
         } else {
-            state.registers.push(NULL);
-            (state.registers.len() - 1) as u16
+            state.alloc_reg_tgt(tgt_id)
         };
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
         state.instr_src.push((
@@ -117,13 +104,13 @@ pub fn handle_user_function(
             markers,
             ctx.current_src_file,
         ));
-        return register_id;
+        return Some(register_id);
     }
 
     // Infer arg types
     let infered_arg_types = args
         .iter()
-        .map(|x| infer_type(x, v, ctx, state))
+        .map(|arg| arg.infer_type(v, ctx, state))
         .collect::<Vec<DataType>>();
 
     // Try to check if function has already been compiled for these specific arg types
@@ -151,7 +138,6 @@ pub fn handle_user_function(
             &fn_code,
             fn_id as u16,
             is_recursive,
-            offset,
         );
     }
     // Re-derive index after possible mutation
@@ -179,17 +165,7 @@ pub fn handle_user_function(
         }
 
         let start_len = output.len();
-        let arg_id = get_id(
-            &args[i],
-            v,
-            ctx,
-            state,
-            output,
-            Some(tgt_id),
-            false,
-            offset,
-            single_run,
-        );
+        let arg_id = get_id(&args[i], v, ctx, state, output, Some(tgt_id), false);
         if output.len() == start_len {
             output.push(Instr::Mov(arg_id, tgt_id));
         } else {
@@ -207,7 +183,7 @@ pub fn handle_user_function(
     let return_register_id = if fn_returns_null {
         0
     } else {
-        state.alloc_reg()
+        state.alloc_reg_tgt(tgt_id)
     };
     if is_recursive {
         output.push(Instr::CallFuncRecursive(loc, return_register_id));
@@ -224,7 +200,11 @@ pub fn handle_user_function(
         );
     }
 
-    return_register_id
+    if fn_returns_null {
+        None
+    } else {
+        Some(return_register_id)
+    }
 }
 
 fn compile_function(
@@ -240,7 +220,6 @@ fn compile_function(
     fn_code: &[Expr],
     fn_id: u16,
     is_recursive: bool,
-    offset: u16,
 ) {
     let src = ctx.src;
     let current_src_file = ctx.current_src_file;
@@ -282,7 +261,7 @@ fn compile_function(
 
     // Record start location for the compiled func body
     let fn_start = output.len();
-    let loc = fn_start as u16 + offset;
+    let loc = fn_start as u16 + ctx.offset;
 
     let v_len_before_args = v.len();
     let fn_len = state.namespace.fns.len();
@@ -312,7 +291,7 @@ fn compile_function(
         DataType::Null
     } else {
         // If function returns anything, check if it returns the same thing each time
-        check_poly(DataType::Poly(Box::from(fn_type)))
+        DataType::Poly(Box::from(fn_type)).check_poly()
     };
 
     v.truncate(v_len_before_args);
@@ -342,11 +321,11 @@ fn compile_function(
             is_parsing_recursive: is_recursive,
             src: fn_src,
             current_src_file: fn_src_file,
+            single_run: false,
+            offset: ctx.offset + output.len() as u16,
             ..ctx
         },
         state,
-        offset + output.len() as u16,
-        false,
     );
     state.namespace.fns.truncate(fn_len);
 

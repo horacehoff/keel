@@ -101,7 +101,30 @@ pub struct Ctx<'a> {
     pub block_id: u16,
     pub src: (&'a str, &'a str),
     pub is_parsing_recursive: bool,
+    pub single_run: bool,
     pub current_src_file: u16,
+    pub offset: u16,
+}
+
+impl Ctx<'_> {
+    #[inline(always)]
+    pub const fn no_single_run(self) -> Self {
+        Ctx {
+            single_run: false,
+            ..self
+        }
+    }
+    #[inline(always)]
+    pub const fn advance_offset(self, output_len: u16) -> Self {
+        Ctx {
+            offset: self.offset + output_len,
+            ..self
+        }
+    }
+    #[inline(always)]
+    pub const fn set_offset(self, offset: u16) -> Self {
+        Ctx { offset, ..self }
+    }
 }
 
 pub struct State<'a> {
@@ -148,6 +171,14 @@ impl State<'_> {
         } else {
             self.registers.push(NULL);
             (self.registers.len() - 1) as u16
+        }
+    }
+    #[inline(always)]
+    pub fn alloc_reg_tgt(&mut self, tgt_id: Option<u16>) -> u16 {
+        if let Some(id) = tgt_id {
+            id
+        } else {
+            self.alloc_reg()
         }
     }
     /// Frees registers that are written by instructions in scope_instrs & are not held by a variable & and are not in const_registers.

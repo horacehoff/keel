@@ -4,8 +4,6 @@
 
 set -e
 
-INSTALL_DIR="/usr/local/bin"
-
 if [ -t 1 ]; then
     RED="\033[31m" GREEN="\033[32m" BOLD="\033[1m" RESET="\033[0m"
 else
@@ -14,6 +12,22 @@ fi
 
 print()  { printf "${BOLD}[Keel]${RESET} %s\n" "$*"; }
 error() { printf "${RED}[Keel] Error:${RESET} %s\n" "$*" >&2; exit 1; }
+
+# Supported OS's: "Darwin" on macOS, "Linux" on Linux
+OS=$(uname -s)
+
+case "$OS" in
+    Darwin) INSTALL_DIR="/Library/Keel/" ;;
+    Linux) INSTALL_DIR="/usr/local/lib/keel/" ;;
+esac
+
+if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
+    :
+elif command -v sudo >/dev/null 2>&1; then
+    sudo mkdir $INSTALL_DIR
+else
+    error "Cannot write to $INSTALL_DIR and sudo is not available. Re-run as root or install sudo."
+fi
 
 if command -v curl >/dev/null 2>&1; then
     # Fail silently on HTTP errors & show errors even when silent & follow redirects & show progress bar
@@ -24,9 +38,6 @@ elif command -v wget >/dev/null 2>&1; then
 else
     error "curl or wget is required"
 fi
-
-# Supported OS's: "Darwin" on macOS, "Linux" on Linux
-OS=$(uname -s)
 
 # Supported archs: x86_64, arm64, aarch64
 ARCH=$(uname -m)
@@ -83,5 +94,13 @@ else
     error "Cannot write to $INSTALL_DIR and sudo is not available. Re-run as root or install sudo."
 fi
 
-printf "${GREEN}[Keel]${RESET} Installed $("$INSTALL_DIR/keel" --version) in $INSTALL_DIR/keel\n"
+if ln -sf "$INSTALL_DIR/keel" /usr/local/bin/keel 2>/dev/null; then
+    :
+elif command -v sudo >/dev/null 2>&1; then
+    sudo ln -sf "$INSTALL_DIR/keel" /usr/local/bin/keel
+else
+    error "Cannot write to /usr/local/bin and sudo is not available. Re-run as root or install sudo."
+fi
+
+printf "${GREEN}[Keel]${RESET} Installed $("$INSTALL_DIR/keel" --version) in $INSTALL_DIRkeel\n"
 printf "${GREEN}[Keel]${RESET} Run 'keel' to get started.\n"

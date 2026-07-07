@@ -65,13 +65,13 @@ pub fn parse_string(s: &str) -> SmolStr {
     SmolStr::from(processed)
 }
 
-pub fn str_to_keel_type(s: &str, structs: &[Struct], span: Span, src: (&str, &str)) -> DataType {
+pub fn parse_keel_type(s: &str, structs: &[Struct], span: Span, src: (&str, &str)) -> DataType {
     let b = s.as_bytes();
     if b[b.len() - 1] == b']' && b[b.len() - 2] == b'[' {
         DataType::Array(if b.len() == 2 {
             None
         } else {
-            Some(Box::from(str_to_keel_type(
+            Some(Box::from(parse_keel_type(
                 &s[..s.len() - 2],
                 structs,
                 span,

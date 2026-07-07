@@ -295,7 +295,6 @@ fn compile_array_literal(
                     .pools
                     .objs
                     .get_mut(array_id)
-                    .unwrap()
                     .push(state.registers[id as usize]);
             } else {
                 output.push(Instr::ObjElemMov(
@@ -303,7 +302,7 @@ fn compile_array_literal(
                     array_id as u16,
                     state.pools.objs[array_id].len() as u16,
                 ));
-                state.pools.objs.get_mut(array_id).unwrap().push(NULL);
+                state.pools.objs.get_mut(array_id).push(NULL);
             }
         }
         state.registers.push(Data::array(array_id as u32));
@@ -321,11 +320,10 @@ fn compile_array_literal(
                     .pools
                     .objs
                     .get_mut(array_id)
-                    .unwrap()
                     .push(state.registers[id as usize]);
             } else {
                 constant_array = false;
-                state.pools.objs.get_mut(array_id).unwrap().push(NULL);
+                state.pools.objs.get_mut(array_id).push(NULL);
             }
             elem_ids.push(id);
         }
@@ -411,7 +409,6 @@ fn compile_struct_literal(
                         .pools
                         .objs
                         .get_mut(struct_id)
-                        .unwrap()
                         .push(state.registers[id as usize]);
                 } else {
                     output.push(Instr::ObjElemMov(
@@ -419,7 +416,7 @@ fn compile_struct_literal(
                         struct_id as u16,
                         state.pools.objs[struct_id].len() as u16,
                     ));
-                    state.pools.objs.get_mut(struct_id).unwrap().push(NULL);
+                    state.pools.objs.get_mut(struct_id).push(NULL);
                 }
             } else {
                 throw_compiler_error(
@@ -461,10 +458,9 @@ fn compile_struct_literal(
                         .pools
                         .objs
                         .get_mut(struct_id)
-                        .unwrap()
                         .push(state.registers[id as usize]);
                 } else {
-                    state.pools.objs.get_mut(struct_id).unwrap().push(NULL);
+                    state.pools.objs.get_mut(struct_id).push(NULL);
                     dynamic.push((id, field_idx as u16));
                 }
             } else {
@@ -540,19 +536,9 @@ fn compile_map_literal(
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
             if val.is_constant_literal() {
-                state
-                    .pools
-                    .maps
-                    .get_mut(map_id)
-                    .unwrap()
-                    .insert(key_val, state.registers[id as usize]);
+                state.pools.maps[map_id].insert(key_val, state.registers[id as usize]);
             } else {
-                state
-                    .pools
-                    .maps
-                    .get_mut(map_id)
-                    .unwrap()
-                    .insert(key_val, NULL);
+                state.pools.maps[map_id].insert(key_val, NULL);
                 output.push(Instr::MapInsert(
                     map_id as u16,
                     state.registers.len() as u16,
@@ -593,19 +579,9 @@ fn compile_map_literal(
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
             if val.is_constant_literal() {
-                state
-                    .pools
-                    .maps
-                    .get_mut(map_id)
-                    .unwrap()
-                    .insert(key_val, state.registers[val_id as usize]);
+                state.pools.maps[map_id].insert(key_val, state.registers[val_id as usize]);
             } else {
-                state
-                    .pools
-                    .maps
-                    .get_mut(map_id)
-                    .unwrap()
-                    .insert(key_val, NULL);
+                state.pools.maps[map_id].insert(key_val, NULL);
                 dynamic.push((key_val, val_id));
             }
         }
@@ -1155,7 +1131,7 @@ fn compile_inline_condition_branch(
             false,
             true,
         )
-        .unwrap();
+        .unwrap_id();
     state.free_scope_registers(regs_before, &output[output_len..], v);
     if val_id != tgt_id {
         output.push(Instr::Mov(val_id, tgt_id));
@@ -1346,24 +1322,20 @@ fn compile_struct_field_assignment(
             break;
         }
     }
-    if field_index.is_none() {
+    let Some(field_index) = field_index else {
         throw_compiler_error(
             ctx.src,
             field_span,
             ErrType::StructUnknownField(&state.structs[struct_id as usize].name, field),
         );
-    }
+    };
     let id = struct_expr
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
     let new_elem_reg_id = new_val
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
-    output.push(Instr::SetFieldStruct(
-        id,
-        new_elem_reg_id,
-        field_index.unwrap(),
-    ));
+    output.push(Instr::SetFieldStruct(id, new_elem_reg_id, field_index));
 }
 
 fn compile_condition(
@@ -2738,52 +2710,57 @@ fn parse_toplevel(
                     })
                 });
                 let fns = fn_signatures
-                        .iter()
-                        .map(|(fn_name, fn_args, fn_return_type)| {
-                            let fn_args = fn_args.iter().map(|t| parse_keel_type(t, structs, markers, use_line_markers)).collect::<Vec<DataType>>().into_boxed_slice();
-                            let fn_return_type = parse_keel_type(fn_return_type, structs, markers, use_line_markers);
-                            let return_val = FnSignature {
-                                name: fn_name.clone(),
-                                args: fn_args.clone(),
-                                return_type: fn_return_type.clone(),
-                                id: *dyn_fn_id,
-                            };
-                            let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
-                            let return_type = datatype_to_c_type(&fn_return_type);
-                            let cif = libffi::middle::Cif::new(arg_types, return_type);
-                            let ptr = unsafe {
-                                libffi::middle::CodePtr(
-                                    lib.get::<*const ()>(fn_name.as_bytes())
-                                        .unwrap_or_else(|e| {
-                                            throw_compiler_error(
-                                                use_line_markers,
-                                                markers,
-                                                ErrType::Custom(
-                                                    format_args!(
-                                                        "Cannot find symbol \"{fn_name}\" in \"{path}\": {e}"
-                                                    )
-                                                    .to_smolstr(),
-                                                ),
-                                            )
-                                        })
-                                        .try_as_raw_ptr()
-                                        .unwrap_unchecked(),
-                                )
-                            };
+                    .iter()
+                    .map(|(fn_name, fn_args, fn_return_type)| {
+                        let fn_args = fn_args
+                            .iter()
+                            .map(|t| parse_keel_type(t, structs, markers, use_line_markers))
+                            .collect::<Vec<DataType>>()
+                            .into_boxed_slice();
+                        let fn_return_type =
+                            parse_keel_type(fn_return_type, structs, markers, use_line_markers);
+                        let return_val = FnSignature {
+                            name: fn_name.clone(),
+                            args: fn_args.clone(),
+                            return_type: fn_return_type.clone(),
+                            id: *dyn_fn_id,
+                        };
+                        let arg_types: Vec<_> = fn_args.iter().map(datatype_to_c_type).collect();
+                        let return_type = datatype_to_c_type(&fn_return_type);
+                        let cif = libffi::middle::Cif::new(arg_types, return_type);
+                        let ptr = unsafe {
+                            libffi::middle::CodePtr(
+                                lib.get::<*const ()>(fn_name.as_bytes())
+                                    .unwrap_or_else(|e| {
+                                        throw_compiler_error(
+                                            use_line_markers,
+                                            markers,
+                                            ErrType::Custom(
+                                                format_args!(
+                                                    "Cannot find symbol \"{fn_name}\" in \"{path}\": {e}"
+                                                )
+                                                .to_smolstr(),
+                                            ),
+                                        )
+                                    })
+                                    .try_as_raw_ptr()
+                                    .unwrap_unchecked(),
+                            )
+                        };
 
-                            let mut types = vec![fn_return_type];
-                            types.extend(fn_args);
+                        let mut types = vec![fn_return_type];
+                        types.extend(fn_args);
 
-                            dyn_lib_fns.push(DynamicLibFn {
-                                types: Box::from(types),
-                                _lib: Rc::clone(&lib),
-                                ptr,
-                                cif,
-                            });
-                            *dyn_fn_id += 1;
-                            return_val
-                        })
-                        .collect();
+                        dyn_lib_fns.push(DynamicLibFn {
+                            types: Box::from(types),
+                            _lib: Rc::clone(&lib),
+                            ptr,
+                            cif,
+                        });
+                        *dyn_fn_id += 1;
+                        return_val
+                    })
+                    .collect();
                 dyn_libs.push(Dynamiclib {
                     name: dylib_name,
                     fns,
@@ -2927,9 +2904,9 @@ pub fn compile(
     let mut variables: Vec<Variable> = Vec::new();
     let mut registers: Vec<Data> = Vec::new();
     let mut pools: Pools = Pools {
-        objs: Vec::with_capacity(10),
-        maps: Vec::with_capacity(2),
-        strings: Pool::init(10),
+        objs: Pool::with_capacity(10),
+        maps: Pool::with_capacity(2),
+        strings: Pool::with_capacity(10),
     };
     let mut instr_src: Vec<(Instr, Span, u16)> = Vec::new();
     let mut fn_registers: Vec<Vec<u16>> = Vec::new();

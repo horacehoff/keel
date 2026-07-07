@@ -17,7 +17,7 @@ pub fn alloc_map(
     obj_gc_stack: &mut Vec<Data>,
 ) -> u32 {
     if let Some(id) = free_maps.pop() {
-        unsafe { map_pool.get_unchecked_mut(id as usize) }.clear();
+        map_pool[id as usize].clear();
         id
     } else {
         if map_pool.len() >= (*gc_map_threshold as usize) {
@@ -34,7 +34,7 @@ pub fn alloc_map(
             );
         }
         if let Some(id) = free_maps.pop() {
-            unsafe { map_pool.get_unchecked_mut(id as usize) }.clear();
+            map_pool[id as usize].clear();
             id
         } else {
             let id = map_pool.len() as u32;
@@ -97,7 +97,7 @@ pub fn track_maps(
         return;
     }
     *is_live = true;
-    let map = unsafe { map_pool.get_unchecked(idx) };
+    let map = &map_pool[idx];
     let Some((&first_key, &first_val)) = map.iter().next() else {
         return;
     };

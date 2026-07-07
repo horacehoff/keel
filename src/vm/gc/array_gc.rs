@@ -15,7 +15,7 @@ pub fn alloc_array(
     obj_gc_stack: &mut Vec<Data>,
 ) -> u32 {
     if let Some(id) = free_arrays.pop() {
-        unsafe { obj_pool.get_unchecked_mut(id as usize) }.clear();
+        obj_pool[id as usize].clear();
         id
     } else {
         if obj_pool.len() >= (*gc_array_threshold as usize) {
@@ -32,7 +32,7 @@ pub fn alloc_array(
             );
         }
         if let Some(id) = free_arrays.pop() {
-            unsafe { obj_pool.get_unchecked_mut(id as usize) }.clear();
+            obj_pool[id as usize].clear();
             id
         } else {
             let id = obj_pool.len() as u32;
@@ -97,7 +97,7 @@ pub fn track(
             continue;
         }
         *is_live = true;
-        let arr = unsafe { obj_pool.get_unchecked(d.as_array()) };
+        let arr = &obj_pool[d.as_array()];
         if arr.is_empty() {
             continue;
         }

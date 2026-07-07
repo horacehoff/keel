@@ -316,14 +316,14 @@ impl Data {
                 format_args!("\"{}\"", self.as_str(string_pool)).to_smolstr()
             }
         } else if self.is_array() {
-            format_args!("[{}]", unsafe {
-                obj_pool
-                    .get_unchecked(self.as_array())
+            format_args!(
+                "[{}]",
+                obj_pool[self.as_array()]
                     .iter()
                     .map(|x| x.format(obj_pool, string_pool, map_pool, struct_fields, false))
                     .collect::<Vec<SmolStr>>()
                     .join(",")
-            })
+            )
             .to_smolstr()
         } else if self.is_null() {
             SmolStr::new_static("null")
@@ -333,9 +333,10 @@ impl Data {
                     .get_unchecked(self.struct_type_id() as usize)
                     .0
             };
-            format_args!("{} {{{}}}", s_name, unsafe {
-                obj_pool
-                    .get_unchecked(self.as_struct())
+            format_args!(
+                "{} {{{}}}",
+                s_name,
+                obj_pool[self.as_struct()]
                     .iter()
                     .map(|x| {
                         format_args!(
@@ -347,10 +348,10 @@ impl Data {
                     })
                     .collect::<Vec<SmolStr>>()
                     .join(",")
-            })
+            )
             .to_smolstr()
         } else if self.is_map() {
-            let m = unsafe { map_pool.get_unchecked(self.as_map()) };
+            let m = &map_pool[self.as_map()];
             format_args!(
                 "{{{}}}",
                 m.iter()

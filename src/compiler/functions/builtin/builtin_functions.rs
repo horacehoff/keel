@@ -192,6 +192,9 @@ pub fn builtin_functions(
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
             output.push(Instr::ThrowError(err_reg_id));
+            state
+                .instr_src
+                .push((*output.last().unwrap(), markers, current_src_file));
             None
         }
         fn_name => {

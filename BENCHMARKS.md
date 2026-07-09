@@ -48,6 +48,13 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | 540.7ms | 1264ms | 541.8ms |
 
 
+## Quicksort (N=10000)
+
+| Keel | Python 3.14.5 | LuaJIT (-joff) |
+| --- | --- | --- |
+| [quicksort.kl](/examples/benchmarks/quicksort/quicksort.kl) | [quicksort.py](/examples/benchmarks/quicksort/quicksort.py) | [quicksort.lua](/examples/benchmarks/quicksort/quicksort.lua) |
+| 348.4ms | 730.9ms | 1755ms |
+
 ## Sqrt (N=0 to 9999999)
 
 <table>

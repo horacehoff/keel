@@ -49,15 +49,15 @@ pub enum DataType {
 impl DataType {
     pub fn format(&self) -> SmolStr {
         match self {
-            Self::Float => SmolStr::new_static("Float"),
-            Self::Int => SmolStr::new_static("Integer"),
-            Self::Bool => SmolStr::new_static("Boolean"),
-            Self::String => SmolStr::new_static("String"),
+            Self::Float => SmolStr::new_static("float"),
+            Self::Int => SmolStr::new_static("int"),
+            Self::Bool => SmolStr::new_static("bool"),
+            Self::String => SmolStr::new_static("string"),
             Self::Array(array_type) => match array_type {
                 Some(array_type) => format_args!("{}[]", array_type.format()).to_smolstr(),
                 None => SmolStr::new_static("Unknown[]"),
             },
-            Self::Null => SmolStr::new_static("Null"),
+            Self::Null => SmolStr::new_static("null"),
             Self::Unknown => SmolStr::new_static("Unknown"),
             Self::Poly(types) => format_args!(
                 "{}",
@@ -68,29 +68,29 @@ impl DataType {
                     .join("|")
             )
             .to_smolstr(),
-            Self::Struct(_) => SmolStr::new_static("Struct"),
+            Self::Struct(_) => SmolStr::new_static("struct"),
             Self::Map(m) => format_args!(
-                "Map[{}, {}]",
+                "[{}: {}]",
                 m.0.as_ref().unwrap_or(&Self::Unknown).format(),
                 m.1.as_ref().unwrap_or(&Self::Unknown).format()
             )
             .to_smolstr(),
-            Self::Fn(_) => SmolStr::new_static("Function"),
+            Self::Fn(_) => SmolStr::new_static("function"),
         }
     }
     pub fn format_detailed(&self, state: &State<'_>) -> SmolStr {
         match self {
-            Self::Float => SmolStr::new_static("Float"),
-            Self::Int => SmolStr::new_static("Integer"),
-            Self::Bool => SmolStr::new_static("Boolean"),
-            Self::String => SmolStr::new_static("String"),
+            Self::Float => SmolStr::new_static("float"),
+            Self::Int => SmolStr::new_static("int"),
+            Self::Bool => SmolStr::new_static("bool"),
+            Self::String => SmolStr::new_static("string"),
             Self::Array(array_type) => match array_type {
                 Some(array_type) => {
                     format_args!("{}[]", array_type.format_detailed(state)).to_smolstr()
                 }
                 None => SmolStr::new_static("Unknown[]"),
             },
-            Self::Null => SmolStr::new_static("Null"),
+            Self::Null => SmolStr::new_static("null"),
             Self::Unknown => SmolStr::new_static("Unknown"),
             Self::Poly(types) => format_args!(
                 "{}",
@@ -115,7 +115,7 @@ impl DataType {
                 .to_smolstr()
             }
             Self::Map(m) => format_args!(
-                "Map[{}, {}]",
+                "[{}: {}]",
                 m.0.as_ref().unwrap_or(&Self::Unknown).format(),
                 m.1.as_ref().unwrap_or(&Self::Unknown).format()
             )
@@ -159,6 +159,7 @@ impl PartialEq for DataType {
                 (a.0.is_none() || b.0.is_none() || a.0 == b.0)
                     && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
             }
+            (t, Self::Poly(p)) | (Self::Poly(p), t) => p.contains(t),
             _ => false,
         }
     }

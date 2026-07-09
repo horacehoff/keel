@@ -53,6 +53,10 @@ fn main() {
         fs::read("pgo/pgo-std-library.kl");
         print(fs::exists("pgo/pgo-std-library.kl"));
         print(argv());
+        let map = {"test": 32, "othertest": 42};
+        print(map.get("test"));
+        map.insert("test", 42);
+        map.insert("test2", 42);
         count += length;
     }
     print(count);

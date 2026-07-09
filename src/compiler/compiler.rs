@@ -15,6 +15,7 @@ use crate::functions::handle_functions;
 use crate::instr::LibFunc;
 use crate::methods::handle_method_calls;
 use crate::parser;
+use crate::parser::TypeExpr;
 use crate::registers::move_reg_to_reg;
 use crate::registers::move_to_id;
 use crate::type_system::DataType;
@@ -1851,7 +1852,7 @@ fn compile_var_assignment(
 
 fn compile_struct_definition(
     name: &SmolStr,
-    fields: &[(SmolStr, SmolStr)],
+    fields: &[(SmolStr, TypeExpr)],
     span: Span,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
@@ -2817,17 +2818,6 @@ fn parse_toplevel(
                 sources.push((file_name.clone(), file_contents.clone()));
 
                 // Parse the imported file's contents
-                // let file_code: Vec<Expr> = grammar::FileParser::new()
-                //     .parse(
-                //         (file_name.as_str(), file_contents.as_str()),
-                //         file_contents.as_str(),
-                //     )
-                //     .unwrap_or_else(|x| {
-                //         lalrpop_error::<self::grammar::Token<'_>>(
-                //             x,
-                //             file_contents.as_str(),
-                //         )
-                //     });
                 let file_code = parser::parse(
                     file_contents.as_str(),
                     (file_name.as_str(), file_contents.as_str()),

@@ -2729,7 +2729,7 @@ pub fn type_function() {
     run_and_check_registers!(
         r#"
         fn main() {
-            print(type(42)+type("hello")+type(3.14)+type(true) == "IntegerStringFloatBoolean");
+            print(type(42)+type("hello")+type(3.14)+type(true) == "intstringfloatbool");
         }
         "#,
         true.into()

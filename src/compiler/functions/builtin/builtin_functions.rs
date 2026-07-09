@@ -199,7 +199,7 @@ pub fn builtin_functions(
                 .namespace
                 .fns
                 .iter_mut()
-                .find(|(func_name, _)| func_name == fn_name)
+                .find(|(func_name, _)| func_name == fn_name && func_name != "main")
             {
                 handle_user_function(
                     fn_name,

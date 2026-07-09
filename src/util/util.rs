@@ -3,6 +3,7 @@ use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::Span;
+use crate::parser::TypeExpr;
 use crate::type_system::DataType;
 use smol_strc::SmolStr;
 use std::hint::cold_path;
@@ -65,33 +66,41 @@ pub fn parse_string(s: &str) -> SmolStr {
     SmolStr::from(processed)
 }
 
-pub fn parse_keel_type(s: &str, structs: &[Struct], span: Span, src: (&str, &str)) -> DataType {
-    let b = s.as_bytes();
-    if b[b.len() - 1] == b']' && b[b.len() - 2] == b'[' {
-        DataType::Array(if b.len() == 2 {
-            None
-        } else {
-            Some(Box::from(parse_keel_type(
-                &s[..s.len() - 2],
-                structs,
-                span,
-                src,
-            )))
-        })
-    } else if s == "int" {
-        DataType::Int
-    } else if s == "float" {
-        DataType::Float
-    } else if s == "bool" {
-        DataType::Bool
-    } else if s == "string" {
-        DataType::String
-    } else if s == "null" {
-        DataType::Null
-    } else if let Some(s) = structs.iter().rposition(|candidate| candidate.name == s) {
-        DataType::Struct(s as u16)
-    } else {
-        throw_compiler_error(src, span, ErrType::UnknownType(s));
+pub fn parse_keel_type(
+    t: &TypeExpr,
+    structs: &[Struct],
+    span: Span,
+    src: (&str, &str),
+) -> DataType {
+    match t {
+        TypeExpr::Identifier(s) => match s.as_str() {
+            "int" => DataType::Int,
+            "float" => DataType::Float,
+            "bool" => DataType::Bool,
+            "string" => DataType::String,
+            "null" => DataType::Null,
+            other => {
+                if let Some(id) = structs.iter().rposition(|st| st.name == other) {
+                    DataType::Struct(id as u16)
+                } else {
+                    cold_path();
+                    throw_compiler_error(src, span, ErrType::UnknownType(s))
+                }
+            }
+        },
+        TypeExpr::Array(inner_t) => {
+            DataType::Array(Some(Box::new(parse_keel_type(inner_t, structs, span, src))))
+        }
+        TypeExpr::Map(k_t, v_t) => DataType::Map(Box::from((
+            Some(parse_keel_type(k_t, structs, span, src)),
+            Some(parse_keel_type(v_t, structs, span, src)),
+        ))),
+        TypeExpr::Union(poly) => DataType::Poly(
+            poly.iter()
+                .map(|t| parse_keel_type(t, structs, span, src))
+                .collect(),
+        )
+        .check_poly(),
     }
 }
 

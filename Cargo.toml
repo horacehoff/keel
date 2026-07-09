@@ -1,6 +1,6 @@
 [package]
 name = "keel"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 authors = ["Horace Hoff <horace.hoff@gmail.com>"]
 readme = "README.md"
@@ -45,7 +45,7 @@ embed = []
 [dependencies]
 smol_strc = "0.3.6"
 ariadne = "0.6.0"
-memchr = "2.8.2"
+memchr = "2.8.3"
 lexical-core = "1.0.6"
 zmij = "1.0.21"
 ahash = {version="0.8.12", features = ["compile-time-rng"]}

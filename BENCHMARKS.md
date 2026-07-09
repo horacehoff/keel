@@ -84,7 +84,7 @@ print(x)</code></pre></td>
 </table>
 
 
-## String.split(), Array.contains() × 50 000
+## String.split(), Array.contains() * 50 000
 
 <table>
 <tr>
@@ -185,7 +185,7 @@ print(last)</code></pre></td>
 </table>
 
 
-## Standard library operations × 100 000
+## Standard library operations * 100 000
 
 Almost all the functions from the standard library are tested, except file system functions to avoid IO interference.
 
@@ -337,7 +337,7 @@ print(count)</code></pre></td>
 </table>
 
 
-## C FFI call overhead × 10 000 000
+## C FFI call overhead * 10 000 000
 
 All programs call the same shared C library function in a huge loop. The C function is intentionally trivial so the measured time reflects the cost of crossing the language-C boundary, not the C computation itself.
 

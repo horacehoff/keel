@@ -41,6 +41,8 @@ pub enum Token<'a> {
     // OPS
     #[token("||")]
     OpOr,
+    #[token("|")]
+    Pipe,
     #[token("&&")]
     OpAnd,
     #[token("==")]

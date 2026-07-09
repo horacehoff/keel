@@ -4,6 +4,7 @@ use crate::expr::Expr;
 use crate::expr::Span;
 use crate::lexer::Token;
 use crate::parser::Parser;
+use crate::parser::TypeExpr;
 use crate::parser::parse_code;
 use crate::parser::parse_type;
 use crate::parser_expr::parse_expr;
@@ -297,7 +298,7 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
         );
     };
     parser.next_token_expect(Token::LBrace, "Expected '{'");
-    let mut fields: Vec<(SmolStr, SmolStr)> = Vec::with_capacity(4);
+    let mut fields: Vec<(SmolStr, TypeExpr)> = Vec::with_capacity(4);
     let end: u32;
     loop {
         let (next_token, span) = parser.next_token();

@@ -19,7 +19,7 @@ use crate::{
 };
 use logos::Logos;
 use logos::SpannedIter;
-use smol_strc::{SmolStr, ToSmolStr};
+use smol_strc::SmolStr;
 use std::hint::{cold_path, unreachable_unchecked};
 use std::iter::Peekable;
 
@@ -390,47 +390,59 @@ fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
     }
 }
 
-pub fn parse_type(parser: &mut Parser<'_>) -> SmolStr {
-    let mut t = String::with_capacity(8);
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum TypeExpr {
+    Identifier(SmolStr),
+    Array(Box<Self>),
+    Map(Box<Self>, Box<Self>),
+    Union(Box<[Self]>),
+}
+
+pub fn parse_type(parser: &mut Parser<'_>) -> TypeExpr {
+    let t = parse_atomic_type(parser);
+    if parser.peek_token() == Token::Pipe {
+        let mut poly = Vec::with_capacity(2);
+        poly.push(t);
+        while parser.peek_token() == Token::Pipe {
+            parser.next_token();
+            poly.push(parse_atomic_type(parser));
+        }
+        TypeExpr::Union(poly.into_boxed_slice())
+    } else {
+        t
+    }
+}
+
+fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
     let (next_token, span) = parser.next_token();
-    if let Token::Identifier(i) = next_token {
-        t.push_str(i);
+    let mut t = if next_token == Token::LBracket {
+        let key_t = parse_type(parser);
+        parser.next_token_expect(
+            Token::Colon,
+            "A colon must separate key and value types in map types",
+        );
+        let value_t = parse_type(parser);
+        parser.next_token_expect(Token::RBracket, "Unmatched '['");
+        TypeExpr::Map(Box::new(key_t), Box::new(value_t))
+    } else if let Token::Identifier(i) = next_token {
+        TypeExpr::Identifier(SmolStr::new(i))
     } else {
         cold_path();
         parser.error(
             span,
-            ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."),
+            ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type"),
         );
-    }
+    };
     loop {
-        let peek_token = parser.peek_token();
-        if peek_token == Token::LBracket {
-            if t.as_bytes().last().unwrap() == &b'[' {
-                cold_path();
-                let span = (span.start, parser.peek_token_end()).into();
-                parser.error(
-                    span,
-                    ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."),
-                );
-            }
-            t.push('[');
+        if parser.peek_token() == Token::LBracket {
             parser.next_token();
-        } else if peek_token == Token::RBracket {
-            if t.as_bytes().last().unwrap() != &b'[' {
-                cold_path();
-                let span = (span.start, parser.peek_token_end()).into();
-                parser.error(
-                    span,
-                    ParserErr::UnexpectedToken(Token::Identifier(""), next_token, "Invalid type."),
-                );
-            }
-            t.push(']');
-            parser.next_token();
+            parser.next_token_expect(Token::RBracket, "Unmatched '['");
+            t = TypeExpr::Array(Box::new(t));
         } else {
             break;
         }
     }
-    t.to_smolstr()
+    t
 }
 
 fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
@@ -447,7 +459,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
         );
     };
     parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'.");
-    let mut fn_signatures: Vec<(SmolStr, Box<[SmolStr]>, SmolStr)> = Vec::new();
+    let mut fn_signatures: Vec<(SmolStr, Box<[TypeExpr]>, TypeExpr)> = Vec::new();
     let end: u32;
     loop {
         if parser.peek_token() == Token::RBrace {
@@ -455,9 +467,21 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
             break;
         }
 
+        let type_start = parser.peek_token();
         let first = parse_type(parser);
         let (return_type, fn_name) = if parser.peek_token() == Token::LParen {
-            (SmolStr::new_static("null"), first)
+            if let TypeExpr::Identifier(name) = first {
+                (TypeExpr::Identifier(SmolStr::new_static("null")), name)
+            } else {
+                parser.error(
+                    span,
+                    ParserErr::UnexpectedToken(
+                        Token::Identifier(""),
+                        type_start,
+                        "Function names must be identifiers.",
+                    ),
+                );
+            }
         } else {
             let (next_token, span) = parser.next_token();
             let fn_name = if let Token::Identifier(name) = next_token {
@@ -479,7 +503,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
             Token::LParen,
             "Function arguments must be delimited by parentheses",
         );
-        let mut args: Vec<SmolStr> = Vec::with_capacity(2);
+        let mut args: Vec<TypeExpr> = Vec::with_capacity(2);
         loop {
             if parser.peek_token() == Token::RParen {
                 break;

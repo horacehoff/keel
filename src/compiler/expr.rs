@@ -1,4 +1,4 @@
-use crate::errors::dev_error;
+use crate::{errors::dev_error, parser::TypeExpr};
 use smol_strc::SmolStr;
 use std::rc::Rc;
 
@@ -18,7 +18,7 @@ pub enum Expr {
     /// Struct(name, fields, span)
     Struct(Box<[SmolStr]>, Box<[(SmolStr, Self, Span)]>, Span),
     /// StructDeclare(name, fields, span)
-    StructDeclare(SmolStr, Box<[(SmolStr, SmolStr)]>, Span),
+    StructDeclare(SmolStr, Box<[(SmolStr, TypeExpr)]>, Span),
     /// GetStructField(struct_expr, field, struct_span, field_span)
     GetStructField(Box<Self>, SmolStr, Span, Span),
     /// SetStructField(struct_expr, field, new_expr, struct_span, field_span)
@@ -67,7 +67,7 @@ pub enum Expr {
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
     IntForLoop(SmolStr, Box<Self>, Box<Self>, Box<[Self]>, Span, Span),
     /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
-    ImportDylib(SmolStr, Box<[(SmolStr, Box<[SmolStr]>, SmolStr)]>, Span),
+    ImportDylib(SmolStr, Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr)]>, Span),
 
     /// ImportFile(path,alias ,(start, end))
     ImportFile(SmolStr, Option<SmolStr>, Span),

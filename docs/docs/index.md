@@ -47,3 +47,6 @@ Once installed, you can use the `keel` command like any other:
 
 [^extension]: Keel files have the `.kl` file extension.
 *[REPL]: Read-Eval-Print-Loop
+
+## Benchmarks
+![Keel benchmarks](images/keel-benchmarks.png){ loading=lazy }

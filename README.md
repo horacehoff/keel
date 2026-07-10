@@ -47,7 +47,7 @@ fn main() {
 ```
 
 ## Benchmarks
-![Keel benchmarks](keel-benchmarks.png)
+![Keel benchmarks](docs/docs/images/keel-benchmarks.png)
 
 ## Installation
 

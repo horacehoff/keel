@@ -3,6 +3,7 @@ use crate::compiler_data::DynamicLibFn;
 use crate::compiler_data::ErrorCatch;
 use crate::compiler_data::Pools;
 use crate::data::Data;
+use crate::data::DataHash;
 use crate::data::FALSE;
 use crate::data::NULL;
 use crate::data::TRUE;
@@ -18,7 +19,6 @@ use crate::string_gc::raise_string_gc_threshold;
 use crate::type_system::DataType;
 use lexical_core::FormattedSize;
 use memchr::memmem;
-use nohash_hasher::NoHashHasher;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ use std::ops::IndexMut;
 use crate::errors::wasm_error;
 
 pub type ObjectPool = Pool<Vec<Data>>;
-pub type MapPool = Pool<HashMap<Data, Data, BuildHasherDefault<NoHashHasher<Data>>>>;
+pub type MapPool = Pool<HashMap<Data, Data, BuildHasherDefault<DataHash>>>;
 pub type StringPool = Pool<String>;
 
 /// Converts a Keel array to a C pointer for libffi

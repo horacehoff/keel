@@ -26,12 +26,14 @@ use crate::type_system::datatype_to_c_type;
 use crate::type_system::struct_field_type_matches;
 use crate::util::parse_keel_type;
 use crate::vm::Pool;
+use crate::vm::UncheckedVecOps;
 use crate::{data::Data, instr::Instr};
-use ahash::RandomState;
-use nohash_hasher::BuildNoHashHasher;
+use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
@@ -507,7 +509,7 @@ fn compile_map_literal(
     let map_id = state.pools.maps.len();
     state.pools.maps.push(HashMap::with_capacity_and_hasher(
         kv_pairs.len(),
-        BuildNoHashHasher::default(),
+        BuildHasherDefault::default(),
     ));
     if ctx.single_run {
         for (i, (key, val)) in kv_pairs.iter().enumerate() {
@@ -2605,7 +2607,7 @@ fn parse_toplevel(
     dyn_libs: &mut Vec<Dynamiclib>,
     dyn_lib_fns: &mut Vec<DynamicLibFn>,
     sources: &mut Vec<(SmolStr, Rc<String>)>,
-    visited_files: &mut HashSet<PathBuf>,
+    visited_files: &mut Vec<PathBuf>,
     dyn_fn_id: &mut u16,
     namespace: &mut Namespace,
 ) {
@@ -2804,7 +2806,7 @@ fn parse_toplevel(
                         ErrType::CircularImport(file_path.to_str().unwrap_or(path.as_str())),
                     );
                 }
-                visited_files.insert(file_path.clone());
+                visited_files.push(file_path.clone());
                 let file_contents =
                     Rc::new(std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
                         let current_src = &sources[src_file_idx as usize];
@@ -2853,6 +2855,7 @@ fn parse_toplevel(
                     dyn_fn_id,
                     &mut child_namespace,
                 );
+                visited_files.pop_unchecked();
                 namespace.children.push(child_namespace);
             }
             _ => {}
@@ -2908,7 +2911,7 @@ pub fn compile(
     let mut dyn_lib_fns: Vec<DynamicLibFn> = Vec::new();
     let mut allocated_arg_count = 0;
     let mut allocated_call_depth = 0;
-    let mut const_registers: HashMap<Data, u16, RandomState> = HashMap::default();
+    let mut const_registers: FxHashMap<Data, u16> = FxHashMap::default();
     let mut free_registers = Vec::new();
 
     // sources[0] = main file
@@ -2917,8 +2920,8 @@ pub fn compile(
     let main_path = PathBuf::from(filename)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(filename));
-    let mut visited: HashSet<PathBuf> = HashSet::new();
-    visited.insert(main_path.clone());
+    let mut visited: Vec<PathBuf> = Vec::with_capacity(1);
+    visited.push(main_path.clone());
     let mut namespace = Namespace {
         name: SmolStr::new_static(""),
         children: Vec::new(),
@@ -2967,7 +2970,7 @@ pub fn compile(
         const_registers: &mut const_registers,
         free_registers: &mut free_registers,
         sources: &mut sources,
-        reserved_registers: HashSet::default(),
+        reserved_registers: FxHashSet::default(),
         namespace: &mut namespace,
     };
     let mut instructions = compile_expr(

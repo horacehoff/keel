@@ -11,7 +11,7 @@ The PGO workflow is visible [here](.github/workflows/release.yml).
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [iter_fib.kl](/examples/benchmarks/iter_fib/iter_fib.kl) | [iter_fib.py](/examples/benchmarks/iter_fib/iter_fib.py) | [iter_fib.lua](/examples/benchmarks/iter_fib/iter_fib.lua) |
+| [iter_fib.kl](/examples/iter_fib/iter_fib.kl) | [iter_fib.py](/examples/iter_fib/iter_fib.py) | [iter_fib.lua](/examples/iter_fib/iter_fib.lua) |
 | 73.4ms | 740ms | 72.5ms |
 
 
@@ -19,7 +19,7 @@ The PGO workflow is visible [here](.github/workflows/release.yml).
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [fib.kl](/examples/benchmarks/fib/fib.kl) | [fib.py](/examples/benchmarks/fib/fib.py) | [fib.lua](/examples/benchmarks/fib/fib.lua) |
+| [fib.kl](/examples/fib/fib.kl) | [fib.py](/examples/fib/fib.py) | [fib.lua](/examples/fib/fib.lua) |
 | 189.1ms | 507.4ms | 183.4ms |
 
 
@@ -30,12 +30,12 @@ Based on [this benchmark from The Computer Language Benchmarks Game](https://ben
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [nbody_lua.kl](/examples/benchmarks/nbody/nbody_lua.kl) | [nbody_lua.py](/examples/benchmarks/nbody/nbody_lua.py) | [nbody_lua.lua](/examples/benchmarks/nbody/nbody_lua.lua) |
+| [nbody_lua.kl](/examples/nbody/nbody_lua.kl) | [nbody_lua.py](/examples/nbody/nbody_lua.py) | [nbody_lua.lua](/examples/nbody/nbody_lua.lua) |
 | 451.5ms | 2649ms | 458.5ms |
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [nbody_py.kl](/examples/benchmarks/nbody/nbody_py.kl) | [nbody_py.py](/examples/benchmarks/nbody/nbody_py.py) | [nbody_py.lua](/examples/benchmarks/nbody/nbody_py.lua) |
+| [nbody_py.kl](/examples/nbody/nbody_py.kl) | [nbody_py.py](/examples/nbody/nbody_py.py) | [nbody_py.lua](/examples/nbody/nbody_py.lua) |
 | 565.4ms | 2726ms | 581.2ms |
 
 ## Binary trees (N=16)
@@ -44,7 +44,7 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [binary-trees.kl](/examples/benchmarks/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/benchmarks/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/benchmarks/binary-trees/binary-trees.lua) |
+| [binary-trees.kl](/examples/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/binary-trees/binary-trees.lua) |
 | 540.7ms | 1264ms | 541.8ms |
 
 
@@ -52,7 +52,7 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
-| [quicksort.kl](/examples/benchmarks/quicksort/quicksort.kl) | [quicksort.py](/examples/benchmarks/quicksort/quicksort.py) | [quicksort.lua](/examples/benchmarks/quicksort/quicksort.lua) |
+| [quicksort.kl](/examples/quicksort/quicksort.kl) | [quicksort.py](/examples/quicksort/quicksort.py) | [quicksort.lua](/examples/quicksort/quicksort.lua) |
 | 348.4ms | 730.9ms | 1755ms |
 
 ## Sqrt (N=0 to 9999999)

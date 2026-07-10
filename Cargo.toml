@@ -48,13 +48,12 @@ ariadne = "0.6.0"
 memchr = "2.8.3"
 lexical-core = "1.0.6"
 zmij = "1.0.21"
-ahash = {version="0.8.12", features = ["compile-time-rng"]}
 logos = "0.16.1"
-nohash-hasher = "0.2.0"
+rustc-hash = "2.1.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.9.0"
-libffi = "5.1.0"
+libffi = "5.1.1"
 mimalloc = "0.1.52"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

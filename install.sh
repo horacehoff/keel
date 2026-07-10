@@ -4,15 +4,6 @@
 
 set -e
 
-if [ -t 1 ]; then
-    RED="\033[31m" GREEN="\033[32m" BOLD="\033[1m" RESET="\033[0m"
-else
-    RED="" GREEN="" BOLD="" RESET=""
-fi
-
-print()  { printf "${BOLD}[Keel]${RESET} %s\n" "$*"; }
-error() { printf "${RED}[Keel] Error:${RESET} %s\n" "$*" >&2; exit 1; }
-
 # Supported OS's: "Darwin" on macOS, "Linux" on Linux
 OS=$(uname -s)
 
@@ -26,7 +17,7 @@ if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
 elif command -v sudo >/dev/null 2>&1; then
     sudo mkdir $INSTALL_DIR
 else
-    error "Cannot write to $INSTALL_DIR and sudo is not available. Re-run as root or install sudo."
+    printf "[ERROR] Cannot write to $INSTALL_DIR and sudo is not available. Re-run as root or install sudo.\n"
 fi
 
 if command -v curl >/dev/null 2>&1; then
@@ -36,7 +27,7 @@ elif command -v wget >/dev/null 2>&1; then
     # Write output to stdout & show progress bar
     DOWNLOAD_CMD="wget -O- --show-progress"
 else
-    error "curl or wget is required"
+    printf "[ERROR] curl or wget is required\n"
 fi
 
 # Supported archs: x86_64, arm64, aarch64
@@ -47,7 +38,7 @@ case "$OS" in
         case "$ARCH" in
             x86_64)  ARTIFACT="keel-x86_64-apple-darwin" ;;
             arm64)   ARTIFACT="keel-aarch64-apple-darwin" ;;
-            *)       error "Unsupported macOS architecture: $ARCH" ;;
+            *)       printf "[ERROR] Unsupported macOS architecture: $ARCH\n" ;;
         esac
         ;;
     Linux)
@@ -62,17 +53,17 @@ case "$OS" in
                 fi
                 ;;
             aarch64) ARTIFACT="keel-aarch64-linux" ;;
-            *)       error "Unsupported Linux architecture: $ARCH" ;;
+            *)       printf "[ERROR] Unsupported Linux architecture: $ARCH\n" ;;
         esac
         ;;
     *)
         # Windows will eventually be supported by an installer
-        error "Unsupported OS: $OS. On Windows, download the .zip from https://github.com/horacehoff/keel/releases/latest"
+        printf "[ERROR] Unsupported OS: $OS. On Windows, download the .zip from https://github.com/horacehoff/keel/releases/latest\n"
         ;;
 esac
 
-print "Ground Control to Major Tom..."
-print "Downloading $ARTIFACT for $OS/$ARCH"
+printf "[Keel] Ground Control to Major Tom...\n"
+printf "[Keel] Downloading $ARTIFACT for $OS/$ARCH\n"
 
 TMP=$(mktemp -d)
 
@@ -83,7 +74,7 @@ $DOWNLOAD_CMD "https://github.com/horacehoff/keel/releases/latest/download/$ARTI
 
 if [ ! -f "$TMP/keel" ]; then
     # The github workflow packs the binary straight into an archive so something went very wrong here
-    error "Archive downloaded but binary not found inside. Please file a bug report at https://github.com/horacehoff/keel/issues"
+    printf "[ERROR] Archive downloaded but binary not found inside. Please file a bug report at https://github.com/horacehoff/keel/issues\n"
 fi
 
 if install "$TMP/keel" "$INSTALL_DIR/keel" 2>/dev/null; then
@@ -91,7 +82,7 @@ if install "$TMP/keel" "$INSTALL_DIR/keel" 2>/dev/null; then
 elif command -v sudo >/dev/null 2>&1; then
     sudo install -m755 "$TMP/keel" "$INSTALL_DIR/keel"
 else
-    error "Cannot write to $INSTALL_DIR and sudo is not available. Re-run as root or install sudo."
+    printf "[ERROR] Cannot write to $INSTALL_DIR and sudo is not available. Re-run as root or install sudo.\n"
 fi
 
 if ln -sf "$INSTALL_DIR/keel" /usr/local/bin/keel 2>/dev/null; then
@@ -99,8 +90,8 @@ if ln -sf "$INSTALL_DIR/keel" /usr/local/bin/keel 2>/dev/null; then
 elif command -v sudo >/dev/null 2>&1; then
     sudo ln -sf "$INSTALL_DIR/keel" /usr/local/bin/keel
 else
-    error "Cannot write to /usr/local/bin and sudo is not available. Re-run as root or install sudo."
+    printf "[ERROR] Cannot write to /usr/local/bin and sudo is not available. Re-run as root or install sudo.\n"
 fi
 
-printf "${GREEN}[Keel]${RESET} Installed $("$INSTALL_DIR/keel" --version) in $INSTALL_DIRkeel\n"
-printf "${GREEN}[Keel]${RESET} Run 'keel' to get started.\n"
+printf "[Keel] Installed $("$INSTALL_DIR/keel" --version) in $INSTALL_DIRkeel\n"
+printf "[Keel] Run 'keel' to get started.\n"

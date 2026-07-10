@@ -9,12 +9,11 @@ use crate::type_system::DataType;
 use crate::vm::MapPool;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
-use ahash::RandomState;
 #[cfg(not(target_arch = "wasm32"))]
 use libloading::Library;
+use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -139,10 +138,10 @@ pub struct State<'a> {
     pub dyn_libs: &'a mut Vec<Dynamiclib>,
     pub allocated_arg_count: &'a mut usize,
     pub allocated_call_depth: &'a mut usize,
-    pub const_registers: &'a mut HashMap<Data, u16, RandomState>,
+    pub const_registers: &'a mut FxHashMap<Data, u16>,
     pub free_registers: &'a mut Vec<u16>,
     pub sources: &'a mut Vec<(SmolStr, Rc<String>)>,
-    pub reserved_registers: HashSet<u16, RandomState>,
+    pub reserved_registers: FxHashSet<u16>,
     pub namespace: &'a mut Namespace,
 }
 

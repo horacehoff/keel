@@ -10,9 +10,9 @@ use crate::errors::throw_compiler_error;
 use crate::expr::Expr;
 use crate::expr::Span;
 use crate::expr::symbol_of_expr;
-use ahash::AHashSet;
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
+use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::cell::RefCell;
@@ -24,8 +24,8 @@ use std::rc::Rc;
 // Tracks which user-defined functions are currently being analysed for their
 // return type. Used to break mutual-recursion cycles in type inference
 thread_local! {
-    static RETURN_TYPE_INFERRING: RefCell<AHashSet<SmolStr>> =
-        RefCell::new(AHashSet::with_capacity(2));
+    static RETURN_TYPE_INFERRING: RefCell<FxHashSet<usize>> =
+        RefCell::new(FxHashSet::default());
 }
 
 #[derive(Debug, Clone)]
@@ -721,10 +721,10 @@ impl Expr {
                             .map(|x| x.infer_type(v, ctx, state))
                             .collect::<Vec<DataType>>();
 
-                        let func = state
+                        let fn_id = state
                             .fns
                             .iter()
-                            .find(|func| func.name == function_name)
+                            .rposition(|func| func.name == function_name)
                             .unwrap_or_else(|| {
                                 throw_compiler_error(
                                     ctx.src,
@@ -733,6 +733,7 @@ impl Expr {
                                 );
                             });
 
+                        let func = &state.fns[fn_id];
                         // Check the return type cache
                         if let Some((_, ret)) = func
                             .return_type_cache
@@ -757,14 +758,13 @@ impl Expr {
                         // Mutual-recursion cycle guard -> if we are already in the
                         // middle of inferring this function's return type, return Null to break the cycle
                         let already_inferring =
-                            RETURN_TYPE_INFERRING.with(|s| s.borrow().contains(function_name));
+                            RETURN_TYPE_INFERRING.with(|s| s.borrow().contains(&fn_id));
                         if already_inferring {
                             v.truncate(v_len_before_args);
                             return DataType::Unknown;
                         }
 
-                        RETURN_TYPE_INFERRING
-                            .with(|s| s.borrow_mut().insert(SmolStr::from(function_name)));
+                        RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().insert(fn_id));
 
                         let (fn_src_name, fn_src_contents) =
                             state.sources[func.src_file as usize].clone();
@@ -775,7 +775,7 @@ impl Expr {
                         };
                         let fn_type = track_returns(&fn_code, v, fn_ctx, state, function_name);
 
-                        RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(function_name));
+                        RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(&fn_id));
 
                         let to_return = if fn_type.is_empty() {
                             // If function doesn't return anything, return nothing

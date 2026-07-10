@@ -20,22 +20,38 @@ fn main() {
     let max_depth = if min_depth + 2 >= arg {min_depth + 2} else {arg};
     let stretch_depth = max_depth + 1;
 
-    print("stretch tree of depth "+str(stretch_depth)+"\t check:"+str(check_tree(make_tree(stretch_depth))));
+    print(
+        "stretch tree of depth "
+        + str(stretch_depth)
+        + "\t check:"
+        + str(check_tree(make_tree(stretch_depth)))
+    );
 
     let long_lived_tree = make_tree(max_depth);
 
     let iterations = 2 ^ max_depth;
     for depth in min_depth..stretch_depth {
-        if depth % 2 != 0 {continue;} // equivalent to Python's range step
+        if depth % 2 != 0 {continue;}
 
         let check = 0;
         for i in 1..iterations+1 {
             check += check_tree(make_tree(depth));
         }
 
-        print(str(iterations)+"\t trees of depth "+str(depth)+"\t check:"+str(check));
+        print(
+            str(iterations)
+            + "\t trees of depth "
+            + str(depth)
+            + "\t check:"
+            + str(check)
+        );
         iterations /= 4;
     }
 
-    print("long lived tree of depth"+str(max_depth)+"\t check:"+str(check_tree(long_lived_tree)));
+    print(
+        "long lived tree of depth"
+        + str(max_depth)
+        + "\t check:"
+        + str(check_tree(long_lived_tree))
+    );
 }

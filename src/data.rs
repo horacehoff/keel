@@ -1,8 +1,8 @@
 use crate::vm::{MapPool, RegisterFile, StringPool};
 use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ObjectPool};
-use nohash_hasher::IsEnabled;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
+use std::hash::Hasher;
 use std::hint::unreachable_unchecked;
 
 // 51 bits of total payload => 3 bits for data type & 48 bits of actual payload
@@ -26,7 +26,20 @@ pub const TRUE: Data = Data(NAN_BOOL | 1);
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Data(pub u64);
 
-impl IsEnabled for Data {}
+#[derive(Default, Clone, Copy)]
+pub struct DataHash(u64);
+
+impl Hasher for DataHash {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, _bytes: &[u8]) {
+        unsafe { unreachable_unchecked() }
+    }
+    fn write_u64(&mut self, i: u64) {
+        self.0 = i;
+    }
+}
 
 impl Data {
     #[inline(always)]

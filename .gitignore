@@ -5,4 +5,4 @@ test.kl
 docs/benchmarks.py
 /lib_testing
 /testing
-pgo/pgo_dynlib.dylib
+*.dylib

@@ -1,15 +1,28 @@
 use crate::expr::Span;
 use crate::lexer::Token;
 use crate::{instr::Instr, type_system::DataType};
+use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use smol_strc::{SmolStr, ToSmolStr};
 use std::fmt::Arguments;
 use std::rc::Rc;
 
 pub const BLUE: &str = "\x1B[94m";
+pub fn blue<F: std::fmt::Display>(t: F) -> String {
+    format!("{BLUE}{t}{RESET}")
+}
 pub const RED: &str = "\x1B[31m";
+pub fn red<F: std::fmt::Display>(t: F) -> String {
+    format!("{RED}{t}{RESET}")
+}
 pub const BOLD: &str = "\x1B[1m";
-pub const GREEN: &str = "\x1B[102m";
+pub fn bold<F: std::fmt::Display>(t: F) -> String {
+    format!("{BOLD}{t}{RESET}")
+}
+pub const GREEN: &str = "\x1B[32m";
+pub fn green<F: std::fmt::Display>(t: F) -> String {
+    format!("{GREEN}{t}{RESET}")
+}
 pub const YELLOW: &str = "\x1B[103m";
 pub const RESET: &str = "\x1B[0m\x1B[39m";
 
@@ -213,25 +226,25 @@ impl From<ErrType<'_>> for SmolStr {
                 "Missing field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
             ErrType::ArrayWithDiffType => "Arrays can only hold a single type".into(),
             ErrType::NotIndexable(t) => format_args!(
-                "The type {BLUE}{BOLD}{}{RESET} cannot be indexed", t.format()
+                "The type {BLUE}{BOLD}{}{RESET} cannot be indexed", t
             )
             .to_smolstr(),
             ErrType::InvalidIndexType(t) => format_args!(
-                "The type {BLUE}{BOLD}{}{RESET} is not a valid index", t.format()
+                "The type {BLUE}{BOLD}{}{RESET} is not a valid index", t
             )
             .to_smolstr(),
-            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{}{RESET} in {}", elem_t.format(), array_t.format()).to_smolstr(),
+            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{}{RESET} in {}", elem_t, array_t).to_smolstr(),
             ErrType::CannotInferType(t) => format_args!(
                 "Cannot infer the type of {BLUE}{BOLD}{t}{RESET}"
             )
             .to_smolstr(),
             ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects {expected} argument{} but received {received}", if expected == 1 {""} else {"s"}).to_smolstr(),
             ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
-            ErrType::InvalidType(expected, received) => format_args!("Expected type {}, found {BLUE}{BOLD}{}{RESET}", expected.format(), received.format()).to_smolstr(),
+            ErrType::InvalidType(expected, received) => format_args!("Expected type {}, found {BLUE}{BOLD}{}{RESET}", expected, received).to_smolstr(),
             ErrType::OpError(l, r, op) => format_args!(
-                "Cannot perform operation {BLUE}{BOLD}{} {RED}{op}{BLUE} {}{RESET}", l.format(), r.format()).to_smolstr(),
+                "Cannot perform operation {BLUE}{BOLD}{} {RED}{op}{BLUE} {}{RESET}", l, r).to_smolstr(),
             ErrType::InvalidOp(t, op) => format_args!(
-                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{}{RESET}", t.format()).to_smolstr(),
+                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{}{RESET}", t).to_smolstr(),
             ErrType::InvalidConditionalExpression => "Conditional expressions must have an else clause".into(),
             ErrType::FunctionAlreadyExists(fn_name) => format_args!(
                 "Function {RED}{BOLD}{fn_name}{RESET} is already defined",
@@ -242,24 +255,24 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::DuplicateFunctionInImport(fn_name, file_path) => format_args!(
                 "Function {BLUE}{BOLD}{fn_name}{RESET} imported from {RED}{BOLD}{file_path}{RESET} is already defined"
             ).to_smolstr(),
-            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{}{RESET} is not a collection", t.format()).to_smolstr(),
+            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{}{RESET} is not a collection", t).to_smolstr(),
             ErrType::InvalidArgType(expected, received) => {
                 let expected_str = expected
                     .iter()
-                    .map(|t| format!("{BLUE}{BOLD}{}{RESET}", t.format()))
+                    .map(|t| format!("{BLUE}{BOLD}{}{RESET}", t))
                     .collect::<Vec<String>>()
                     .join(" or ");
                 format_args!(
-                    "Expected {expected_str}, found {RED}{BOLD}{}{RESET}", received.format()
+                    "Expected {expected_str}, found {RED}{BOLD}{}{RESET}", received
                 ).to_smolstr()
             }
             ErrType::InvalidObjType(expected, received) => format_args!(
-                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{}{RESET}", received.format()
+                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{}{RESET}", received
             ).to_smolstr(),
             ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
-            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{}{RESET}", t.format()).to_smolstr(),
+            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{}{RESET}", t).to_smolstr(),
             ErrType::CArrayReturnTypeNotSupported => "Array return types are not supported: C does not convey the length of a returned array".into(),
             ErrType::UnknownMapKey(key) => format_args!("Unknown key {RED}{BOLD}{key}{RESET}").to_smolstr(),
             ErrType::DuplicateMapKey => format_args!("Duplicate key in map").to_smolstr(),
@@ -384,6 +397,57 @@ pub fn wasm_error(msg: &str) -> ! {
     crate::captured_output::print(&format!("KEEL ERROR\n{msg}\n"));
     wasm_bindgen::throw_str("keel error");
 }
+
+#[cold]
+#[inline(never)]
+pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>>(
+    report: F,
+    sources: &'a [(SmolStr, Rc<String>)],
+) -> ! {
+    let report = report();
+
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+    report
+        .eprint(
+            FnCache::new((move |id| Err(format!("Failed to fetch source {}", id))) as fn(&_) -> _)
+                .with_sources(
+                    sources
+                        .iter()
+                        .map(|(name, contents)| (name.as_str(), Source::from(contents.as_str())))
+                        .collect(),
+                ),
+        )
+        .unwrap();
+
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+    report
+        .write(
+            (src.0, Source::from(src.1)),
+            crate::captured_output::CapturedOutputWriter,
+        )
+        .unwrap();
+
+    #[cfg(debug_assertions)]
+    panic!();
+
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
+    std::process::exit(1);
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen::throw_str("keel_error");
+
+    #[cfg(all(feature = "embed", not(debug_assertions)))]
+    panic!();
+}
+
+// fn multi_source_cache<'a>(sources: &'a [(SmolStr, Rc<String>)]) -> impl ariadne::Cache<&'a str> {
+//     ariadne::FnCache::new(()).with_sources(
+//         sources
+//             .iter()
+//             .map(|(name, contents)| (name.as_str(), Source::from(contents.as_str())))
+//             .collect(),
+//     )
+// }
 
 #[cold]
 #[inline(never)]

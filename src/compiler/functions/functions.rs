@@ -106,7 +106,7 @@ pub fn handle_functions(
         .and_then(|lib| lib.fns.iter().find(|x| x.name == name))
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
-        check_args(args, fn_args.len(), name, src, markers);
+        check_args(args, fn_args.len(), name, src, markers, state.sources);
         for (i, a) in fn_args.iter().enumerate() {
             check_arg_type(v, ctx, state, args, args_indexes, i, slice::from_ref(a));
         }

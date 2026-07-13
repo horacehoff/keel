@@ -17,9 +17,9 @@ use smol_strc::ToSmolStr;
 // Must be called right after LParen is skipped
 // Identifier LParen Expr RParen
 // Parses: Expr RParen
-pub fn parse_fn_call(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
-    let (args, arg_markers, end) = parse_args(parser);
-    Expr::FunctionCall(args, namespace, (start, end).into(), arg_markers)
+pub fn parse_fn_call(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, span: Span) -> Expr {
+    let (args, arg_markers, _) = parse_args(parser);
+    Expr::FunctionCall(args, namespace, span, arg_markers)
 }
 
 // Must be called right after LParen is skipped
@@ -91,7 +91,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 // Identifier LParen Expr RParen
                 Some(Token::LParen) => {
                     parser.next_token();
-                    parse_fn_call(parser, Box::new([s.to_smolstr()]), start)
+                    parse_fn_call(parser, Box::new([s.to_smolstr()]), t_span)
                 }
                 // STRUCT
                 Some(Token::LBrace) if allow_struct => {
@@ -101,21 +101,22 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 // NAMESPACE
                 Some(Token::DoubleColon) => {
                     parser.next_token();
-                    let (namespace, terminator, span) = parse_namespace(parser, SmolStr::new(s));
-                    if terminator == Token::LParen {
+                    let (namespace, end) = parse_namespace(parser, SmolStr::new(s));
+                    let (next_token, _) = parser.next_token();
+                    if next_token == Token::LParen {
                         // FUNCTION CALL WITH NAMESPACE:
                         // (Identifier DoubleColon)+ Identifier LParen Expr RParen
-                        parse_fn_call(parser, namespace, start)
-                    } else if terminator == Token::LBrace {
+                        parse_fn_call(parser, namespace, (t_span.start, end).into())
+                    } else if next_token == Token::LBrace {
                         // STRUCT WITH NAMESPACE
                         parse_struct(parser, namespace, start)
                     } else {
                         cold_path();
                         parser.error(
-                            span,
+                            (t_span.start, end).into(),
                             ParserErr::UnexpectedTokenStr(
                                 "'(' (function call), '{' (struct), or '::' (namespace)",
-                                terminator,
+                                next_token,
                                 "",
                             ),
                         );

@@ -159,16 +159,16 @@ impl<'a> Parser<'a> {
 }
 
 // Call after DoubleColon is skipped
-pub fn parse_namespace<'a>(
-    parser: &mut Parser<'a>,
-    initial: SmolStr,
-) -> (Box<[SmolStr]>, Token<'a>, Span) {
+// Returns end
+pub fn parse_namespace<'a>(parser: &mut Parser<'a>, initial: SmolStr) -> (Box<[SmolStr]>, u32) {
     let mut namespace: Vec<SmolStr> = Vec::with_capacity(2);
     namespace.push(initial);
+    let mut end: u32;
     loop {
         let (next_token, span) = parser.next_token();
         if let Token::Identifier(i) = next_token {
             namespace.push(SmolStr::new(i));
+            end = span.end;
         } else {
             cold_path();
             parser.error(
@@ -180,11 +180,11 @@ pub fn parse_namespace<'a>(
                 ),
             );
         }
-        let (next_token, s) = parser.next_token();
+        let next_token = parser.peek_token();
         if next_token == Token::DoubleColon {
             continue;
         }
-        return (Box::from(namespace), next_token, s);
+        return (Box::from(namespace), end);
     }
 }
 

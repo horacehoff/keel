@@ -46,38 +46,41 @@ pub enum DataType {
     Map(Box<(Option<Self>, Option<Self>)>),
 }
 
-impl DataType {
-    pub fn format(&self) -> SmolStr {
+impl std::fmt::Display for DataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Float => SmolStr::new_static("float"),
-            Self::Int => SmolStr::new_static("int"),
-            Self::Bool => SmolStr::new_static("bool"),
-            Self::String => SmolStr::new_static("string"),
+            Self::Float => write!(f, "float"),
+            Self::Int => write!(f, "int"),
+            Self::Bool => write!(f, "bool"),
+            Self::String => write!(f, "string"),
             Self::Array(array_type) => match array_type {
-                Some(array_type) => format_args!("{}[]", array_type.format()).to_smolstr(),
-                None => SmolStr::new_static("Unknown[]"),
+                Some(array_type) => write!(f, "{}[]", array_type),
+                None => write!(f, "Unknown[]"),
             },
-            Self::Null => SmolStr::new_static("null"),
-            Self::Unknown => SmolStr::new_static("Unknown"),
-            Self::Poly(types) => format_args!(
+            Self::Null => write!(f, "null"),
+            Self::Unknown => write!(f, "Unknown"),
+            Self::Poly(types) => write!(
+                f,
                 "{}",
                 types
                     .into_iter()
-                    .map(|x| x.format())
-                    .collect::<Vec<SmolStr>>()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
                     .join("|")
-            )
-            .to_smolstr(),
-            Self::Struct(_) => SmolStr::new_static("struct"),
-            Self::Map(m) => format_args!(
+            ),
+            Self::Struct(_) => write!(f, "struct"),
+            Self::Map(m) => write!(
+                f,
                 "[{}: {}]",
-                m.0.as_ref().unwrap_or(&Self::Unknown).format(),
-                m.1.as_ref().unwrap_or(&Self::Unknown).format()
-            )
-            .to_smolstr(),
-            Self::Fn(_) => SmolStr::new_static("function"),
+                m.0.as_ref().unwrap_or(&Self::Unknown),
+                m.1.as_ref().unwrap_or(&Self::Unknown)
+            ),
+            Self::Fn(_) => write!(f, "function"),
         }
     }
+}
+
+impl DataType {
     pub fn format_detailed(&self, state: &State<'_>) -> SmolStr {
         match self {
             Self::Float => SmolStr::new_static("float"),
@@ -108,7 +111,10 @@ impl DataType {
                     s.name,
                     s.fields
                         .iter()
-                        .map(|(n, t)| format_args!("{n}: {}", t.format_detailed(state)).to_smolstr())
+                        .map(
+                            |(n, t, _)| format_args!("{n}: {}", t.format_detailed(state))
+                                .to_smolstr()
+                        )
                         .collect::<Vec<SmolStr>>()
                         .join(", ")
                 )
@@ -116,8 +122,8 @@ impl DataType {
             }
             Self::Map(m) => format_args!(
                 "[{}: {}]",
-                m.0.as_ref().unwrap_or(&Self::Unknown).format(),
-                m.1.as_ref().unwrap_or(&Self::Unknown).format()
+                m.0.as_ref().unwrap_or(&Self::Unknown),
+                m.1.as_ref().unwrap_or(&Self::Unknown)
             )
             .to_smolstr(),
             Self::Fn(id) => {
@@ -252,7 +258,7 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 expr_stack.extend(fields.iter().map(|(_, expr, _)| expr));
             }
             Expr::GetStructField(expr, _, _, _) => expr_stack.push(expr),
-            Expr::SetStructField(expr, _, value, _, _) => {
+            Expr::SetStructField(expr, _, value, _, _, _) => {
                 expr_stack.push(expr);
                 expr_stack.push(value);
             }
@@ -911,6 +917,7 @@ impl Expr {
                     src_file: ctx.current_src_file,
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
+                    name_span: *span,
                 });
                 state.fn_registers.push(Vec::new());
                 // state.namespace.fns.push((x.clone(), id));

@@ -28,7 +28,7 @@ pub fn fs_lib_functions(
     let current_src_file = ctx.current_src_file;
     match name {
         "read" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -42,7 +42,7 @@ pub fn fs_lib_functions(
             return Some(output_id);
         }
         "exists" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -56,7 +56,7 @@ pub fn fs_lib_functions(
             return Some(output_id);
         }
         "write" => {
-            check_args(args, 2, name, src, markers);
+            check_args(args, 2, name, src, markers, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
             let filepath = args[0]
@@ -77,7 +77,7 @@ pub fn fs_lib_functions(
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "append" => {
-            check_args(args, 2, name, src, markers);
+            check_args(args, 2, name, src, markers, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
             let filepath = args[0]
@@ -98,7 +98,7 @@ pub fn fs_lib_functions(
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "delete" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let path = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -110,7 +110,7 @@ pub fn fs_lib_functions(
                 .push((*output.last().unwrap(), markers, current_src_file));
         }
         "delete_dir" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let path = args[0]
                 .compile(v, ctx, state, output, None, false, true)

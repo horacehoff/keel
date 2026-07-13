@@ -36,6 +36,7 @@ pub struct Function {
     /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
     pub direct_calls: Box<[SmolStr]>,
+    pub name_span: Span,
 }
 
 #[derive(Debug)]
@@ -85,7 +86,7 @@ impl DynamicLibFn {
 #[derive(Debug)]
 pub struct Struct {
     pub name: SmolStr,
-    pub fields: Box<[(SmolStr, DataType)]>,
+    pub fields: Box<[(SmolStr, DataType, Span)]>,
     pub id: u16,
 }
 

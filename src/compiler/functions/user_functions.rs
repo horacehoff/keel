@@ -13,7 +13,7 @@ use crate::registers::move_to_id;
 use crate::type_system::DataType;
 use crate::type_system::can_reach;
 use crate::type_system::track_returns;
-use crate::util::check_args;
+use crate::util::check_args_user_fn;
 use smol_strc::SmolStr;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -56,7 +56,15 @@ pub fn handle_user_function(
 
     // Check if the arguments are correct
     let args_len = state.fns[fn_id].args.len();
-    check_args(args, args_len, fn_name, ctx.src, markers);
+    check_args_user_fn(
+        args,
+        args_len,
+        fn_name,
+        ctx.src,
+        markers,
+        (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
+        state,
+    );
 
     //This inlines dylib wrappers
     // Actual general function inlining is coming soon
@@ -366,7 +374,7 @@ fn compile_function(
                         Instr::SaveFrame(_, _, cid) => Some(*cid),
                         _ => None,
                     })
-                    .unwrap();
+                    .unwrap_id();
 
                 let mut live_regs: Vec<u16> = Vec::new();
                 for after_instr in &parsed[pos + 1..] {

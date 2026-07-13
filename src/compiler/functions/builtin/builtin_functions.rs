@@ -40,7 +40,7 @@ pub fn builtin_functions(
             None
         }
         "type" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             let infered = args[0].infer_type(v, ctx, state);
             state.registers.push(Data::p_str(
                 infered.format_detailed(state).as_str(),
@@ -49,7 +49,7 @@ pub fn builtin_functions(
             Some((state.registers.len() - 1) as u16)
         }
         "float" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             check_arg_type(
                 v,
                 ctx,
@@ -71,7 +71,7 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "int" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             check_arg_type(
                 v,
                 ctx,
@@ -93,7 +93,7 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "str" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -103,7 +103,7 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "bool" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -161,13 +161,13 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "the_answer" => {
-            check_args(args, 0, name, src, markers);
+            check_args(args, 0, name, src, markers, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TheAnswer, 0, output_id));
             Some(output_id)
         }
         "argv" => {
-            check_args(args, 0, name, src, markers);
+            check_args(args, 0, name, src, markers, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Argv, 0, output_id));
             Some(output_id)
@@ -186,7 +186,7 @@ pub fn builtin_functions(
             None
         }
         "throw" => {
-            check_args(args, 1, name, src, markers);
+            check_args(args, 1, name, src, markers, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let err_reg_id = args[0]
                 .compile(v, ctx, state, output, None, false, true)

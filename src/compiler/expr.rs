@@ -1,6 +1,6 @@
 use crate::{errors::dev_error, parser::TypeExpr};
 use smol_strc::SmolStr;
-use std::rc::Rc;
+use std::{hint::unreachable_unchecked, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -18,11 +18,11 @@ pub enum Expr {
     /// Struct(name, fields, span)
     Struct(Box<[SmolStr]>, Box<[(SmolStr, Self, Span)]>, Span),
     /// StructDeclare(name, fields, span)
-    StructDeclare(SmolStr, Box<[(SmolStr, TypeExpr)]>, Span),
-    /// GetStructField(struct_expr, field, struct_span, field_span)
+    StructDeclare(SmolStr, Box<[(SmolStr, TypeExpr, Span)]>, Span),
+    /// GetStructField(struct_expr, field, struct_span, field_span, value_span)
     GetStructField(Box<Self>, SmolStr, Span, Span),
-    /// SetStructField(struct_expr, field, new_expr, struct_span, field_span)
-    SetStructField(Box<Self>, SmolStr, Box<Self>, Span, Span),
+    /// SetStructField(struct_expr, field, new_expr, struct_span, field_span, value_span)
+    SetStructField(Box<Self>, SmolStr, Box<Self>, Span, Span, Span),
     /// VarDeclare(name, value),
     VarDeclare(SmolStr, Box<Self>),
     /// VarDeclare(name, value, start, end)
@@ -147,9 +147,16 @@ pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) 
     } else if let Expr::ArrayGetIndex(base, idx, _) = target {
         Expr::ArrayModify(base, idx, Box::from(value), expr_span, value_span)
     } else if let Expr::GetStructField(obj, field, obj_span, field_span) = target {
-        Expr::SetStructField(obj, field, Box::from(value), obj_span, field_span)
+        Expr::SetStructField(
+            obj,
+            field,
+            Box::from(value),
+            obj_span,
+            field_span,
+            value_span,
+        )
     } else {
-        todo!()
+        unsafe { unreachable_unchecked() }
     }
 }
 
@@ -176,6 +183,20 @@ impl From<std::ops::Range<usize>> for Span {
             start: value.start as u32,
             end: value.end as u32,
         }
+    }
+}
+
+impl Into<std::ops::Range<usize>> for Span {
+    #[inline(always)]
+    fn into(self) -> std::ops::Range<usize> {
+        self.start as usize..self.end as usize
+    }
+}
+
+impl Into<std::ops::Range<usize>> for &Span {
+    #[inline(always)]
+    fn into(self) -> std::ops::Range<usize> {
+        self.start as usize..self.end as usize
     }
 }
 

@@ -78,6 +78,7 @@ pub fn builtin_methods(
                         end: args_indexes.last().unwrap().end,
                     }
                 },
+                state.sources,
             )
         };
         ($expected:pat,$expected_str:expr, $args_min:expr,$args_max:expr) => {

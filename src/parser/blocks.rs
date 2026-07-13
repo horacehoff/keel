@@ -144,7 +144,7 @@ pub fn parse_eval_block(parser: &mut Parser<'_>) -> Expr {
 }
 
 pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
-    let (t, Span { start, end: _ }) = parser.next_token();
+    let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Function);
     let (t_fn_id, span) = parser.next_token();
     let fn_name = if let Token::Identifier(fn_name) = t_fn_id {
@@ -161,10 +161,9 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
         "Function arguments must be delimited by parentheses",
     );
     let mut args: Vec<SmolStr> = Vec::with_capacity(4);
-    let end: u32;
     loop {
         if parser.peek_token() == Token::RParen {
-            end = parser.next_token().1.end;
+            parser.next_token();
             break;
         }
         let (arg, span) = parser.next_token();
@@ -190,12 +189,7 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
         }
     }
     let fn_code = parse_block(parser);
-    Expr::FunctionDecl(
-        fn_name,
-        Box::from(args),
-        std::rc::Rc::from(fn_code),
-        (start, end).into(),
-    )
+    Expr::FunctionDecl(fn_name, Box::from(args), std::rc::Rc::from(fn_code), span)
 }
 
 pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
@@ -298,7 +292,7 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
         );
     };
     parser.next_token_expect(Token::LBrace, "Expected '{'");
-    let mut fields: Vec<(SmolStr, TypeExpr)> = Vec::with_capacity(4);
+    let mut fields: Vec<(SmolStr, TypeExpr, Span)> = Vec::with_capacity(4);
     let end: u32;
     loop {
         let (next_token, span) = parser.next_token();
@@ -316,8 +310,14 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
             );
         };
         parser.next_token_expect(Token::Colon, "A colon must separate a field from its type.");
+        let field_type_start = parser.peek_token_start();
         let field_type = parse_type(parser);
-        fields.push((field_name, field_type));
+        let field_type_end = parser.peek_token_end();
+        fields.push((
+            field_name,
+            field_type,
+            (field_type_start, field_type_end).into(),
+        ));
         let (next_token, span) = parser.next_token();
         if next_token == Token::RBrace {
             end = span.end;

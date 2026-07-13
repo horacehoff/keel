@@ -249,7 +249,7 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                     base = obj_function_call;
                 } else {
                     let get_struct_field =
-                        Expr::GetStructField(Box::new(base), SmolStr::new(id), id_span, base_span);
+                        Expr::GetStructField(Box::new(base), SmolStr::new(id), base_span, id_span);
                     base_span.end = id_span.end;
                     base = get_struct_field;
                 }

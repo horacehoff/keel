@@ -5,7 +5,10 @@ use crate::errors::BOLD;
 use crate::errors::ErrType;
 use crate::errors::RED;
 use crate::errors::RESET;
+use crate::errors::blue;
+use crate::errors::red;
 use crate::errors::throw_compiler_error;
+use crate::errors::throw_compiler_error_exp;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
 use crate::expr::Expr;
@@ -28,6 +31,8 @@ use crate::util::parse_keel_type;
 use crate::vm::Pool;
 use crate::vm::UncheckedVecOps;
 use crate::{data::Data, instr::Instr};
+use ariadne::Label;
+use ariadne::Report;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
@@ -631,10 +636,13 @@ fn compile_struct_field_access(
             .iter()
             .position(|f| &f.0 == field)
             .unwrap_or_else(|| {
-                throw_compiler_error(
+                error_struct_unknown_field(
                     ctx.src,
                     field_span,
-                    ErrType::StructUnknownField(&s.name, field),
+                    field,
+                    &s.name,
+                    &s.fields,
+                    state.sources,
                 );
             });
         let id = struct_expr
@@ -650,6 +658,103 @@ fn compile_struct_field_access(
             ErrType::InvalidType(&DataType::Struct(0), &t),
         );
     }
+}
+
+#[inline(never)]
+#[cold]
+fn error_struct_unknown_field(
+    src: (&str, &str),
+    field_span: Span,
+    field: &SmolStr,
+    struct_name: &SmolStr,
+    fields: &[(SmolStr, DataType, Span)],
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            Report::build(ariadne::ReportKind::Error, (src.0, field_span.into()))
+                .with_message("Unknown field")
+                .with_label(
+                    Label::new((src.0, field_span.into()))
+                        .with_message(format_args!(
+                            "The field {} isn't defined in struct {}",
+                            red(field),
+                            blue(struct_name)
+                        ))
+                        .with_color(ariadne::Color::Red),
+                )
+                .with_help(format_args!(
+                    "The available fields are: {}",
+                    fields
+                        .iter()
+                        .map(|(field, _, _)| blue(field))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ))
+                .finish()
+        },
+        sources,
+    );
+}
+
+#[cold]
+#[inline(never)]
+fn error_struct_field_invalid_type(
+    src: (&str, &str),
+    struct_name: &SmolStr,
+    struct_field_span: Span,
+    struct_field_name: &SmolStr,
+    struct_field_type: &DataType,
+    value_span: Span,
+    value_type: &DataType,
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.0, struct_field_span.into()),
+            )
+            .with_message("Incompatible types")
+            .with_label(
+                Label::new((src.0, struct_field_span.into()))
+                    .with_message(format_args!(
+                        "Field {} in struct {} expects type {}",
+                        blue(struct_field_name),
+                        blue(struct_name),
+                        blue(struct_field_type)
+                    ))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.0, value_span.into()))
+                    .with_message(format_args!(
+                        "This expression is of type {}",
+                        red(value_type)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            if struct_field_type == &DataType::Int
+                && (value_type == &DataType::Float || value_type == &DataType::String)
+            {
+                report = report.with_help(format_args!("Try using the {} function", blue("int()")));
+            } else if struct_field_type == &DataType::Float
+                && (value_type == &DataType::Int || value_type == &DataType::String)
+            {
+                report =
+                    report.with_help(format_args!("Try using the {} function", blue("float()")));
+            } else if struct_field_type == &DataType::Bool && value_type == &DataType::String {
+                report =
+                    report.with_help(format_args!("Try using the {} function", blue("bool()")));
+            } else if struct_field_type == &DataType::String {
+                report = report.with_help(format_args!("Try using the {} function", blue("str()")));
+            }
+
+            report.finish()
+        },
+        sources,
+    );
 }
 
 fn compile_array_indexing(
@@ -1297,6 +1402,7 @@ fn compile_struct_field_assignment(
     new_val: &Expr,
     struct_span: Span,
     field_span: Span,
+    value_span: Span,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
@@ -1312,13 +1418,22 @@ fn compile_struct_field_assignment(
         );
     };
     let mut field_index: Option<u16> = None;
-    for (i, (f, f_t)) in state.structs[struct_id as usize].fields.iter().enumerate() {
-        if f == field {
-            if !struct_field_type_matches(f_t, &new_val_type) {
-                throw_compiler_error(
+    let field_struct = &state.structs[struct_id as usize];
+    let struct_name = &field_struct.name;
+    for (i, (expected_field_name, expected_field_type, expected_field_span)) in
+        field_struct.fields.iter().enumerate()
+    {
+        if expected_field_name == field {
+            if !struct_field_type_matches(expected_field_type, &new_val_type) {
+                error_struct_field_invalid_type(
                     ctx.src,
-                    field_span,
-                    ErrType::InvalidType(f_t, &new_val_type),
+                    struct_name,
+                    *expected_field_span,
+                    expected_field_name,
+                    expected_field_type,
+                    value_span,
+                    &new_val_type,
+                    state.sources,
                 );
             }
             field_index = Some(i as u16);
@@ -1326,10 +1441,13 @@ fn compile_struct_field_assignment(
         }
     }
     let Some(field_index) = field_index else {
-        throw_compiler_error(
+        error_struct_unknown_field(
             ctx.src,
             field_span,
-            ErrType::StructUnknownField(&state.structs[struct_id as usize].name, field),
+            field,
+            struct_name,
+            &field_struct.fields,
+            state.sources,
         );
     };
     let id = struct_expr
@@ -1854,7 +1972,7 @@ fn compile_var_assignment(
 
 fn compile_struct_definition(
     name: &SmolStr,
-    fields: &[(SmolStr, TypeExpr)],
+    fields: &[(SmolStr, TypeExpr, Span)],
     span: Span,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
@@ -1869,10 +1987,11 @@ fn compile_struct_definition(
     });
     let parsed_fields = fields
         .iter()
-        .map(|(f, f_t)| {
+        .map(|(f, f_t, f_span)| {
             (
                 f.clone(),
                 parse_keel_type(f_t, state.structs, span, ctx.src),
+                *f_span,
             )
         })
         .collect();
@@ -1881,7 +2000,7 @@ fn compile_struct_definition(
         name.clone(),
         fields
             .iter()
-            .map(|(n, _)| n.clone())
+            .map(|(n, _, _)| n.clone())
             .collect::<Vec<SmolStr>>(),
     ));
     state
@@ -1915,6 +2034,7 @@ fn compile_function_definition(
         src_file: ctx.current_src_file,
         return_type_cache: Vec::new(),
         direct_calls: callees.into_boxed_slice(),
+        name_span: span,
     });
     state.fn_registers.push(Vec::new());
     state
@@ -2411,7 +2531,14 @@ impl Expr {
                 );
                 None
             }
-            Self::SetStructField(struct_expr, field, new_val, struct_span, field_span) => {
+            Self::SetStructField(
+                struct_expr,
+                field,
+                new_val,
+                struct_span,
+                field_span,
+                value_span,
+            ) => {
                 debug_assert!(!uses_id);
                 compile_struct_field_assignment(
                     struct_expr,
@@ -2419,6 +2546,7 @@ impl Expr {
                     new_val,
                     *struct_span,
                     *field_span,
+                    *value_span,
                     v,
                     ctx,
                     state,
@@ -2638,6 +2766,7 @@ fn parse_toplevel(
                     src_file: src_file_idx,
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
+                    name_span: markers,
                 });
                 namespace.fns.push((fn_name, (fns.len() - 1) as u16));
             }
@@ -2650,10 +2779,11 @@ fn parse_toplevel(
                 });
                 let parsed_fields = fields
                     .iter()
-                    .map(|(f, f_t)| {
+                    .map(|(f, f_t, f_span)| {
                         (
                             f.clone(),
                             parse_keel_type(f_t, structs, span, use_line_markers),
+                            *f_span,
                         )
                     })
                     .collect();
@@ -2662,7 +2792,7 @@ fn parse_toplevel(
                     name.clone(),
                     fields
                         .iter()
-                        .map(|(n, _)| n.clone())
+                        .map(|(n, _, _)| n.clone())
                         .collect::<Vec<SmolStr>>(),
                 ));
                 namespace.structs.push((name, struct_id));

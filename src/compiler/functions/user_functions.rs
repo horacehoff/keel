@@ -1,18 +1,18 @@
+use super::super::expr::Expr;
+use super::super::expr::Span;
+use super::super::registers::get_tgt_ids;
+use super::super::registers::move_to_id;
+use super::super::type_system::DataType;
+use super::super::type_system::can_reach;
+use super::super::type_system::track_returns;
 use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
-use crate::compiler_data::Ctx;
-use crate::compiler_data::FunctionImpl;
-use crate::compiler_data::State;
-use crate::compiler_data::Variable;
+use crate::compiler::compiler_data::Ctx;
+use crate::compiler::compiler_data::FunctionImpl;
+use crate::compiler::compiler_data::State;
+use crate::compiler::compiler_data::Variable;
 use crate::data::NULL;
-use crate::expr::Expr;
-use crate::expr::Span;
 use crate::instr::Instr;
-use crate::registers::get_tgt_ids;
-use crate::registers::move_to_id;
-use crate::type_system::DataType;
-use crate::type_system::can_reach;
-use crate::type_system::track_returns;
 use crate::util::check_args_user_fn;
 use smol_strc::SmolStr;
 use std::collections::HashSet;
@@ -64,6 +64,7 @@ pub fn handle_user_function(
         markers,
         (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
         state,
+        args_indexes,
     );
 
     //This inlines dylib wrappers

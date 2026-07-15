@@ -1,14 +1,14 @@
+use super::ParserErr;
+use super::lexer::Token;
+use super::parser_expr::parse_expr;
+use super::parser_expr::parse_expr_no_struct;
 use crate::cold_path;
-use crate::errors::ParserErr;
-use crate::expr::Expr;
-use crate::expr::Span;
-use crate::lexer::Token;
+use crate::compiler::expr::Expr;
+use crate::compiler::expr::Span;
 use crate::parser::Parser;
 use crate::parser::TypeExpr;
 use crate::parser::parse_code;
 use crate::parser::parse_type;
-use crate::parser_expr::parse_expr;
-use crate::parser_expr::parse_expr_no_struct;
 use smol_strc::SmolStr;
 
 // call right after peeking Token::If
@@ -279,7 +279,7 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
 }
 
 pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
-    let (t, Span { start, end: _ }) = parser.next_token();
+    let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Struct);
     let (next_token, span) = parser.next_token();
     let struct_name = if let Token::Identifier(id) = next_token {
@@ -293,9 +293,8 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
     };
     parser.next_token_expect(Token::LBrace, "Expected '{'");
     let mut fields: Vec<(SmolStr, TypeExpr, Span)> = Vec::with_capacity(4);
-    let end: u32;
     loop {
-        let (next_token, span) = parser.next_token();
+        let (next_token, _) = parser.next_token();
         let field_name = if let Token::Identifier(i) = next_token {
             SmolStr::new(i)
         } else {
@@ -320,7 +319,6 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
         ));
         let (next_token, span) = parser.next_token();
         if next_token == Token::RBrace {
-            end = span.end;
             break;
         } else if next_token != Token::Comma {
             cold_path();
@@ -333,11 +331,11 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
                 ),
             );
         } else if parser.peek_token() == Token::RBrace {
-            end = parser.next_token().1.end;
+            parser.next_token();
             break;
         }
     }
-    Expr::StructDeclare(struct_name, Box::from(fields), (start, end).into())
+    Expr::StructDeclare(struct_name, Box::from(fields), span)
 }
 
 pub fn parse_loop_block(input: &mut Parser<'_>) -> Expr {

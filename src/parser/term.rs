@@ -1,39 +1,39 @@
+use super::ParserErr;
+use super::lexer::Token;
+use super::parse_expr;
+use super::parser_expr;
+use super::parser_expr::parse_expr_no_struct;
+use super::parser_expr::parse_expr_with_precedence;
 use crate::cold_path;
-use crate::errors::ParserErr;
-use crate::expr::Expr;
-use crate::expr::Span;
-use crate::lexer::Token;
+use crate::compiler::expr::Expr;
+use crate::compiler::expr::Span;
 use crate::parser::Parser;
 use crate::parser::parse_args;
 use crate::parser::parse_code;
 use crate::parser::parse_namespace;
-use crate::parser_expr;
-use crate::parser_expr::parse_expr;
-use crate::parser_expr::parse_expr_no_struct;
-use crate::parser_expr::parse_expr_with_precedence;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 
 // Must be called right after LParen is skipped
 // Identifier LParen Expr RParen
 // Parses: Expr RParen
-pub fn parse_fn_call(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, span: Span) -> Expr {
+fn parse_fn_call(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, span: Span) -> Expr {
     let (args, arg_markers, _) = parse_args(parser);
     Expr::FunctionCall(args, namespace, span, arg_markers)
 }
 
 // Must be called right after LParen is skipped
-pub fn parse_struct(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
-    let mut fields: Vec<(SmolStr, Expr, Span)> = Vec::with_capacity(4);
+fn parse_struct(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
+    let mut fields: Vec<(SmolStr, Expr, Span, Span)> = Vec::with_capacity(4);
     let end: u32;
     loop {
-        let (next_token, span) = parser.next_token();
+        let (next_token, field_name_span) = parser.next_token();
         let field_name = if let Token::Identifier(i) = next_token {
             SmolStr::new(i)
         } else {
             cold_path();
             parser.error(
-                span,
+                field_name_span,
                 ParserErr::UnexpectedToken(
                     Token::Identifier(""),
                     next_token,
@@ -50,6 +50,7 @@ pub fn parse_struct(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u
         fields.push((
             field_name,
             field_value,
+            field_name_span,
             (field_start, parser.peek_token_start()).into(),
         ));
         let (next_token, span) = parser.next_token();
@@ -126,15 +127,18 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
             }
         }
         Token::LBracket => {
-            let start = t_span.start;
-            let end: u32;
+            let mut elem_spans: Vec<Span> = Vec::with_capacity(2);
+            elem_spans.push((t_span.start, 0u32).into());
             let mut elems = Vec::with_capacity(4);
             loop {
                 if parser.peek_token_opt() == Some(Token::RBracket) {
-                    end = parser.next_token().1.end;
+                    elem_spans[0].end = parser.next_token().1.end;
                     break;
                 }
+                let start = parser.peek_token_start();
                 elems.push(parse_expr(parser));
+                let end = parser.peek_token_end() - 1;
+                elem_spans.push((start, end).into());
                 if parser.peek_token_opt() == Some(Token::Comma) {
                     parser.next_token();
                 } else if !(parser.peek_token_opt() == Some(Token::RBracket)) {
@@ -143,7 +147,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                     parser.error(span, ParserErr::ArrayElementsMissingComma);
                 }
             }
-            Expr::Array(Box::from(elems), (start, end).into())
+            Expr::Array(Box::from(elems), Box::from(elem_spans))
         }
         // LParen Expr RParen
         Token::LParen => {

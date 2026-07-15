@@ -1,17 +1,17 @@
+use super::super::expr::Expr;
+use super::super::expr::Span;
+use super::super::type_system::DataType;
+use super::check_arg_type;
+use super::user_functions::handle_user_function;
 use crate::compiler::UnwrapId;
-use crate::compiler_data::Ctx;
-use crate::compiler_data::State;
-use crate::compiler_data::Variable;
+use crate::compiler::compiler_data::Ctx;
+use crate::compiler::compiler_data::State;
+use crate::compiler::compiler_data::Variable;
 use crate::data::Data;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
-use crate::expr::Expr;
-use crate::expr::Span;
-use crate::functions::check_arg_type;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
-use crate::type_system::DataType;
-use crate::user_functions::handle_user_function;
 use crate::util::check_args;
 use crate::util::check_args_range;
 

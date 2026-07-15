@@ -1,11 +1,11 @@
+use super::ParserErr;
+use super::lexer::Token;
+use super::term::parse_term;
 use crate::cold_path;
-use crate::errors::ParserErr;
-use crate::expr::Expr;
-use crate::expr::Span;
-use crate::lexer::Token;
+use crate::compiler::expr::Expr;
+use crate::compiler::expr::Span;
 use crate::parser::Parser;
 use crate::parser::parse_args;
-use crate::term::parse_term;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::hint::unreachable_unchecked;

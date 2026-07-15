@@ -16,57 +16,27 @@ use wasm_bindgen::prelude::*;
 
 #[path = "./vm/gc/array_gc.rs"]
 mod array_gc;
-#[path = "./parser/blocks.rs"]
-mod blocks;
-#[path = "./compiler/functions/builtin/builtin_functions.rs"]
-mod builtin_functions;
-#[path = "./compiler/functions/builtin/builtin_methods.rs"]
-mod builtin_methods;
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
 #[path = "./compiler/compiler.rs"]
 mod compiler;
-#[path = "./compiler/compiler_data.rs"]
-mod compiler_data;
 #[path = "./data.rs"]
 mod data;
-#[path = "./util/display.rs"]
-mod display;
 #[path = "./util/errors.rs"]
 mod errors;
-#[path = "./compiler/expr.rs"]
-mod expr;
-#[path = "./compiler/functions/fs/fs_lib_functions.rs"]
-mod fs_lib_functions;
-#[path = "./compiler/functions/functions.rs"]
-mod functions;
 #[path = "./instr.rs"]
 mod instr;
-#[path = "./parser/lexer.rs"]
-mod lexer;
 #[path = "./vm/gc/map_gc.rs"]
 mod map_gc;
-#[path = "./compiler/functions/methods.rs"]
-mod methods;
 #[path = "./parser/parser.rs"]
 mod parser;
-#[path = "./parser/parser_expr.rs"]
-mod parser_expr;
-#[path = "./compiler/registers.rs"]
-mod registers;
 #[path = "./repl.rs"]
 mod repl;
 #[path = "./vm/gc/string_gc.rs"]
 mod string_gc;
-#[path = "./parser/term.rs"]
-mod term;
 #[path = "./tests.rs"]
 #[cfg(test)]
 mod tests;
-#[path = "./type_system.rs"]
-mod type_system;
-#[path = "./compiler/functions/user_functions.rs"]
-mod user_functions;
 #[path = "./util/util.rs"]
 mod util;
 #[path = "./vm/vm.rs"]
@@ -130,7 +100,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
         ) = compile(code, "embedded.kl", false);
         vm::execute(
             &instructions,
-            &mut registers,
+            &mut RegisterFile(registers),
             &mut arrays,
             &ErrorCtx { instr_src, sources },
             &fn_registers,

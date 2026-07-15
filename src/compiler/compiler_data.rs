@@ -1,11 +1,11 @@
+use super::expr::Expr;
+use super::expr::Span;
+use super::registers::get_tgt_ids;
+use super::type_system::DataType;
 use crate::compiler::Namespace;
 use crate::data::Data;
 use crate::data::NULL;
-use crate::expr::Expr;
-use crate::expr::Span;
 use crate::instr::Instr;
-use crate::registers::get_tgt_ids;
-use crate::type_system::DataType;
 use crate::vm::MapPool;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
@@ -88,6 +88,7 @@ pub struct Struct {
     pub name: SmolStr,
     pub fields: Box<[(SmolStr, DataType, Span)]>,
     pub id: u16,
+    pub name_span: Span,
 }
 
 pub struct Pools {

@@ -1,17 +1,16 @@
+use super::expr::Expr;
+use super::expr::Span;
+use super::expr::symbol_of_expr;
+use crate::compiler::compiler_data::Ctx;
+use crate::compiler::compiler_data::FnSignature;
+use crate::compiler::compiler_data::Function;
+use crate::compiler::compiler_data::State;
+use crate::compiler::compiler_data::Variable;
+use crate::compiler::error_unknown_struct;
 use crate::compiler::find_struct;
-use crate::compiler_data::Ctx;
-use crate::compiler_data::FnSignature;
-use crate::compiler_data::Function;
-use crate::compiler_data::State;
-use crate::compiler_data::Variable;
 use crate::errors::ErrType;
 use crate::errors::dev_error;
 use crate::errors::throw_compiler_error;
-use crate::expr::Expr;
-use crate::expr::Span;
-use crate::expr::symbol_of_expr;
-#[cfg(not(target_arch = "wasm32"))]
-use libffi::middle::Type;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
@@ -20,6 +19,9 @@ use std::collections::HashSet;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
 use std::rc::Rc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use libffi::middle::Type;
 
 // Tracks which user-defined functions are currently being analysed for their
 // return type. Used to break mutual-recursion cycles in type inference
@@ -54,7 +56,7 @@ impl std::fmt::Display for DataType {
             Self::Bool => write!(f, "bool"),
             Self::String => write!(f, "string"),
             Self::Array(array_type) => match array_type {
-                Some(array_type) => write!(f, "{}[]", array_type),
+                Some(array_type) => write!(f, "{array_type}[]"),
                 None => write!(f, "Unknown[]"),
             },
             Self::Null => write!(f, "null"),
@@ -255,7 +257,7 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
             }
             Expr::Array(elems, _) => expr_stack.extend(elems.iter()),
             Expr::Struct(_, fields, _) => {
-                expr_stack.extend(fields.iter().map(|(_, expr, _)| expr));
+                expr_stack.extend(fields.iter().map(|(_, expr, _, _)| expr));
             }
             Expr::GetStructField(expr, _, _, _) => expr_stack.push(expr),
             Expr::SetStructField(expr, _, value, _, _, _) => {
@@ -888,7 +890,7 @@ impl Expr {
                 DataType::Struct(
                     find_struct(state.namespace, state.structs, namespace, name).unwrap_or_else(
                         || {
-                            throw_compiler_error(ctx.src, *span, ErrType::UnknownStruct(name));
+                            error_unknown_struct(name, *span, state.sources, ctx.src);
                         },
                     ) as u16,
                 )

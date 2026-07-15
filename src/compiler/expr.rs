@@ -11,12 +11,12 @@ pub enum Expr {
     String(SmolStr),
     /// Var(name, start, end)
     Var(SmolStr, Span),
-    /// Array(contents, span)
-    Array(Box<[Self]>, Span),
+    /// Array(contents, [entire_array, elem_spans...])
+    Array(Box<[Self]>, Box<[Span]>),
     /// Map(key-value pairs, span)
     Map(Box<[(Self, Self)]>, Span),
     /// Struct(name, fields, span)
-    Struct(Box<[SmolStr]>, Box<[(SmolStr, Self, Span)]>, Span),
+    Struct(Box<[SmolStr]>, Box<[(SmolStr, Self, Span, Span)]>, Span),
     /// StructDeclare(name, fields, span)
     StructDeclare(SmolStr, Box<[(SmolStr, TypeExpr, Span)]>, Span),
     /// GetStructField(struct_expr, field, struct_span, field_span, value_span)
@@ -186,17 +186,10 @@ impl From<std::ops::Range<usize>> for Span {
     }
 }
 
-impl Into<std::ops::Range<usize>> for Span {
+impl From<Span> for std::ops::Range<usize> {
     #[inline(always)]
-    fn into(self) -> std::ops::Range<usize> {
-        self.start as usize..self.end as usize
-    }
-}
-
-impl Into<std::ops::Range<usize>> for &Span {
-    #[inline(always)]
-    fn into(self) -> std::ops::Range<usize> {
-        self.start as usize..self.end as usize
+    fn from(val: Span) -> Self {
+        val.start as usize..val.end as usize
     }
 }
 

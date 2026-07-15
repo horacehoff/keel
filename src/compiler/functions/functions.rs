@@ -1,20 +1,28 @@
-use crate::builtin_functions::builtin_functions;
+use super::expr::Expr;
+use super::expr::Span;
+use super::type_system::DataType;
 use crate::compiler::Namespace;
 use crate::compiler::UnwrapId;
-use crate::compiler_data::Ctx;
-use crate::compiler_data::State;
-use crate::compiler_data::Variable;
+use crate::compiler::compiler_data::Ctx;
+use crate::compiler::compiler_data::State;
+use crate::compiler::compiler_data::Variable;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
-use crate::expr::Expr;
-use crate::expr::Span;
-use crate::fs_lib_functions::fs_lib_functions;
 use crate::instr::Instr;
-use crate::type_system::DataType;
-use crate::user_functions::handle_user_function;
 use crate::util::check_args;
+use builtin_functions::builtin_functions;
+use fs_lib_functions::fs_lib_functions;
 use smol_strc::SmolStr;
 use std::slice;
+use user_functions::handle_user_function;
+
+mod user_functions;
+
+#[path = "builtin/builtin_functions.rs"]
+mod builtin_functions;
+
+#[path = "fs/fs_lib_functions.rs"]
+mod fs_lib_functions;
 
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;

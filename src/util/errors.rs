@@ -1,6 +1,5 @@
-use crate::expr::Span;
-use crate::lexer::Token;
-use crate::{instr::Instr, type_system::DataType};
+use crate::compiler::expr::Span;
+use crate::{compiler::type_system::DataType, instr::Instr};
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use smol_strc::{SmolStr, ToSmolStr};
@@ -23,7 +22,6 @@ pub const GREEN: &str = "\x1B[32m";
 pub fn green<F: std::fmt::Display>(t: F) -> String {
     format!("{GREEN}{t}{RESET}")
 }
-pub const YELLOW: &str = "\x1B[103m";
 pub const RESET: &str = "\x1B[0m\x1B[39m";
 
 #[cold]
@@ -124,7 +122,6 @@ pub enum ErrType<'a> {
     // PARSER ERRORS
     UnknownVariable(&'a str),
     UnknownFunction(&'a str),
-    UnknownStruct(&'a str),
     UnknownNamespace(&'a str),
     UnknownType(&'a str),
     InvalidStructFieldCount(&'a str, u16, u16),
@@ -205,10 +202,6 @@ impl From<ErrType<'_>> for SmolStr {
                 "Unknown function {BLUE}{BOLD}{f}{RESET}"
             )
             .to_smolstr(),
-            ErrType::UnknownStruct(f) => format_args!(
-                "Unknown struct {BLUE}{BOLD}{f}{RESET}"
-            )
-            .to_smolstr(),
             ErrType::UnknownVariable(v) => format_args!(
                 "Unknown variable {BLUE}{BOLD}{v}{RESET}"
             )
@@ -226,25 +219,25 @@ impl From<ErrType<'_>> for SmolStr {
                 "Missing field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
             ErrType::ArrayWithDiffType => "Arrays can only hold a single type".into(),
             ErrType::NotIndexable(t) => format_args!(
-                "The type {BLUE}{BOLD}{}{RESET} cannot be indexed", t
+                "The type {BLUE}{BOLD}{t}{RESET} cannot be indexed"
             )
             .to_smolstr(),
             ErrType::InvalidIndexType(t) => format_args!(
-                "The type {BLUE}{BOLD}{}{RESET} is not a valid index", t
+                "The type {BLUE}{BOLD}{t}{RESET} is not a valid index"
             )
             .to_smolstr(),
-            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{}{RESET} in {}", elem_t, array_t).to_smolstr(),
+            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{elem_t}{RESET} in {array_t}").to_smolstr(),
             ErrType::CannotInferType(t) => format_args!(
                 "Cannot infer the type of {BLUE}{BOLD}{t}{RESET}"
             )
             .to_smolstr(),
             ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects {expected} argument{} but received {received}", if expected == 1 {""} else {"s"}).to_smolstr(),
             ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
-            ErrType::InvalidType(expected, received) => format_args!("Expected type {}, found {BLUE}{BOLD}{}{RESET}", expected, received).to_smolstr(),
+            ErrType::InvalidType(expected, received) => format_args!("Expected type {expected}, found {BLUE}{BOLD}{received}{RESET}").to_smolstr(),
             ErrType::OpError(l, r, op) => format_args!(
-                "Cannot perform operation {BLUE}{BOLD}{} {RED}{op}{BLUE} {}{RESET}", l, r).to_smolstr(),
+                "Cannot perform operation {BLUE}{BOLD}{l} {RED}{op}{BLUE} {r}{RESET}").to_smolstr(),
             ErrType::InvalidOp(t, op) => format_args!(
-                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{}{RESET}", t).to_smolstr(),
+                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::InvalidConditionalExpression => "Conditional expressions must have an else clause".into(),
             ErrType::FunctionAlreadyExists(fn_name) => format_args!(
                 "Function {RED}{BOLD}{fn_name}{RESET} is already defined",
@@ -255,24 +248,24 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::DuplicateFunctionInImport(fn_name, file_path) => format_args!(
                 "Function {BLUE}{BOLD}{fn_name}{RESET} imported from {RED}{BOLD}{file_path}{RESET} is already defined"
             ).to_smolstr(),
-            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{}{RESET} is not a collection", t).to_smolstr(),
+            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{t}{RESET} is not a collection").to_smolstr(),
             ErrType::InvalidArgType(expected, received) => {
                 let expected_str = expected
                     .iter()
-                    .map(|t| format!("{BLUE}{BOLD}{}{RESET}", t))
+                    .map(|t| format!("{BLUE}{BOLD}{t}{RESET}"))
                     .collect::<Vec<String>>()
                     .join(" or ");
                 format_args!(
-                    "Expected {expected_str}, found {RED}{BOLD}{}{RESET}", received
+                    "Expected {expected_str}, found {RED}{BOLD}{received}{RESET}",
                 ).to_smolstr()
             }
             ErrType::InvalidObjType(expected, received) => format_args!(
-                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{}{RESET}", received
+                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{received}{RESET}",
             ).to_smolstr(),
             ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
-            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{}{RESET}", t).to_smolstr(),
+            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::CArrayReturnTypeNotSupported => "Array return types are not supported: C does not convey the length of a returned array".into(),
             ErrType::UnknownMapKey(key) => format_args!("Unknown key {RED}{BOLD}{key}{RESET}").to_smolstr(),
             ErrType::DuplicateMapKey => format_args!("Duplicate key in map").to_smolstr(),
@@ -306,7 +299,6 @@ impl ErrType<'_> {
             ErrType::SliceOutOfBounds(_, _, _) => "slice_out_of_bounds",
             ErrType::UnknownVariable(_) => "unknown_variable",
             ErrType::UnknownFunction(_) => "unknown_function",
-            ErrType::UnknownStruct(_) => "unknown_struct",
             ErrType::UnknownNamespace(_) => "unknown_namespace",
             ErrType::UnknownType(_) => "unknown_type",
             ErrType::InvalidStructFieldCount(_, _, _) => "invalid_struct_field_count",
@@ -377,17 +369,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
         )
         .unwrap();
 
-    #[cfg(debug_assertions)]
-    panic!();
-
-    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
-    std::process::exit(1);
-
-    #[cfg(target_arch = "wasm32")]
-    wasm_bindgen::throw_str("keel_error");
-
-    #[cfg(all(feature = "embed", not(debug_assertions)))]
-    panic!();
+    crash();
 }
 
 #[cold]
@@ -409,7 +391,7 @@ pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::R
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     report
         .eprint(
-            FnCache::new((move |id| Err(format!("Failed to fetch source {}", id))) as fn(&_) -> _)
+            FnCache::new((move |id| Err(format!("Failed to fetch source {id}"))) as fn(&_) -> _)
                 .with_sources(
                     sources
                         .iter()
@@ -422,11 +404,23 @@ pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::R
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (src.0, Source::from(src.1)),
+            FnCache::new((move |id| Err(format!("Failed to fetch source {id}"))) as fn(&_) -> _)
+                .with_sources(
+                    sources
+                        .iter()
+                        .map(|(name, contents)| (name.as_str(), Source::from(contents.as_str())))
+                        .collect(),
+                ),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
 
+    crash();
+}
+
+#[cold]
+#[inline(never)]
+fn crash() -> ! {
     #[cfg(debug_assertions)]
     panic!();
 
@@ -439,15 +433,6 @@ pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::R
     #[cfg(all(feature = "embed", not(debug_assertions)))]
     panic!();
 }
-
-// fn multi_source_cache<'a>(sources: &'a [(SmolStr, Rc<String>)]) -> impl ariadne::Cache<&'a str> {
-//     ariadne::FnCache::new(()).with_sources(
-//         sources
-//             .iter()
-//             .map(|(name, contents)| (name.as_str(), Source::from(contents.as_str())))
-//             .collect(),
-//     )
-// }
 
 #[cold]
 #[inline(never)]
@@ -473,220 +458,5 @@ pub fn throw_compiler_error(src: (&str, &str), Span { start, end }: Span, t: Err
         )
         .unwrap();
 
-    #[cfg(debug_assertions)]
-    panic!();
-
-    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
-    std::process::exit(1);
-
-    #[cfg(target_arch = "wasm32")]
-    wasm_bindgen::throw_str("keel_error");
-
-    #[cfg(all(feature = "embed", not(debug_assertions)))]
-    panic!();
+    crash();
 }
-
-#[derive(Clone, Copy)]
-pub enum ParserErr<'a> {
-    UnexpectedEOF,
-    UnknownToken,
-    /// (expected, received)
-    UnexpectedToken(Token<'a>, Token<'a>, &'static str),
-    /// (expected, received)
-    UnexpectedTokenStr(&'static str, Token<'a>, &'static str),
-    ArrayElementsMissingComma,
-    InlineConditionNoElseBlock,
-    DivisionByZero,
-    ModuloByZero,
-    IntegerNegativeExponent,
-    ArgumentsMissingCommaSeparator,
-    TryBlockNoCatch,
-    MatchBlockNoNonWildcardArm,
-    MatchBlockZeroArms,
-}
-
-#[cold]
-#[inline(never)]
-pub fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ParserErr) -> ! {
-    let err_message = match t {
-        ParserErr::UnexpectedEOF => "Unexpected EOF",
-        ParserErr::UnknownToken => "Unknown token",
-        ParserErr::UnexpectedToken(expected, received, msg) => &format_args!(
-            "Expected {BLUE}{BOLD}{expected}{RESET}, but got {RED}{BOLD}{received}{RESET}. {msg}"
-        )
-        .to_string(),
-        ParserErr::UnexpectedTokenStr(expected, received, msg) => &format_args!(
-            "Expected {BLUE}{BOLD}{expected}{RESET}, but got {RED}{BOLD}{received}{RESET}. {msg}"
-        )
-        .to_string(),
-        ParserErr::ArrayElementsMissingComma => "Array elements must be separated by a comma",
-        ParserErr::InlineConditionNoElseBlock => "Inline conditions must have an else block",
-        ParserErr::DivisionByZero => "Division by zero",
-        ParserErr::ModuloByZero => "Modulo by zero",
-        ParserErr::IntegerNegativeExponent => "Integers cannot be raised to a negative exponent",
-        ParserErr::ArgumentsMissingCommaSeparator => "Arguments must be separated by a comma",
-        ParserErr::TryBlockNoCatch => {
-            "A {BLUE}{BOLD}try{RESET} block must have at least one {BLUE}{BOLD}catch{RESET} block"
-        }
-        ParserErr::MatchBlockNoNonWildcardArm => {
-            "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one non-wildcard arm{RESET}"
-        }
-        ParserErr::MatchBlockZeroArms => {
-            "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}"
-        }
-    };
-    eprintln!("{RED}KEEL ERROR{RESET}");
-    let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
-        .with_label(
-            Label::new((src.0, (start as usize)..(end as usize)))
-                .with_message(err_message)
-                .with_color(Color::Red),
-        )
-        .finish();
-
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report.eprint((src.0, Source::from(src.1))).unwrap();
-
-    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    report
-        .write(
-            (src.0, Source::from(src.1)),
-            crate::captured_output::CapturedOutputWriter,
-        )
-        .unwrap();
-
-    #[cfg(debug_assertions)]
-    panic!();
-
-    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
-    std::process::exit(1);
-
-    #[cfg(target_arch = "wasm32")]
-    wasm_bindgen::throw_str("keel_error");
-
-    #[cfg(all(feature = "embed", not(debug_assertions)))]
-    panic!();
-}
-
-// #[cold]
-// #[inline(never)]
-// pub fn lalrpop_error<'a, T>(x: lalrpop_util::ParseError<usize, T, &str>, file: &str, filename: &str) -> !
-// where
-//     lalrpop_util::lexer::Token<'a>: From<T>,
-// {
-//     eprintln!("{RED}KEEL ERROR{RESET}");
-//     match x {
-//         lalrpop_util::ParseError::InvalidToken { location } => {
-//             let report = Report::build(ReportKind::Error, (filename, location..location + 1))
-//                 .with_message("Invalid token")
-//                 .with_label(
-//                     Label::new((filename, location..location + 1))
-//                         .with_message(format_args!("This token is invalid"))
-//                         .with_color(Color::Red),
-//                 )
-//                 .finish();
-//             #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-//             report.eprint((filename, Source::from(file))).unwrap();
-//             #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-//             report
-//                 .write(
-//                     (filename, Source::from(file)),
-//                     crate::captured_output::CapturedOutputWriter,
-//                 )
-//                 .unwrap();
-//         }
-//         lalrpop_util::ParseError::UnrecognizedEof {
-//             location,
-//             expected: _,
-//         } => {
-//             let report = Report::build(ReportKind::Error, (filename, location..location + 1))
-//                 .with_message("Unrecognized EOF")
-//                 .with_label(
-//                     Label::new((filename, location..location + 1))
-//                         .with_message(format_args!(
-//                             "Expected one or more {BLUE}{BOLD}}}{RESET}"
-//                         ))
-//                         .with_color(Color::Red),
-//                 )
-//                 .finish();
-//             #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-//             report.eprint((filename, Source::from(file))).unwrap();
-//             #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-//             report
-//                 .write(
-//                     (filename, Source::from(file)),
-//                     crate::captured_output::CapturedOutputWriter,
-//                 )
-//                 .unwrap();
-//         }
-//         lalrpop_util::ParseError::UnrecognizedToken { token, expected } => {
-//             let begin = token.0;
-//             let end = token.2;
-
-//             let expected = expected
-//                 .into_iter()
-//                 .map(|x| {
-//                     {
-//                         if x == "\"false\"" || x == "\"true\"" {
-//                             "Boolean"
-//                         } else if x == "r#\"[a-zA-Z_][a-zA-Z0-9_]*\"#" {
-//                             "Variable"
-//                         } else if x.contains("[^") {
-//                             "String"
-//                         } else if x == "r#\"[0-9]*[.][0-9]+\"#" {
-//                             "Float"
-//                         } else if x == "r#\"[0-9]+\"#" {
-//                             "Integer"
-//                         } else {
-//                             x.trim_matches('\"')
-//                         }
-//                     }
-//                     .to_smolstr()
-//                 })
-//                 .collect::<Vec<SmolStr>>();
-
-//             const STATEMENT_KEYWORDS: [&str; 7] =
-//                 ["let", "if", "while", "for", "loop", "match", "return"];
-//             let is_statement_set = STATEMENT_KEYWORDS
-//                 .iter()
-//                 .all(|k| expected.iter().any(|n| n == k));
-
-//             let expected_tokens = if is_statement_set {
-//                 format_args!(
-//                     "{BLUE}{BOLD}Statement{RESET} OR {BLUE}{BOLD}{{{RESET} OR {BLUE}{BOLD}}}{RESET}"
-//                 )
-//             } else {
-//                 format_args!(
-//                     "{BLUE}{BOLD}{}{RESET}",
-//                     expected.join(&format!(
-//                         "{RESET} OR {BLUE}{BOLD}"
-//                     ))
-//                 )
-//             };
-
-//             let report = Report::build(ReportKind::Error, (filename, begin..end))
-//                 .with_message("Unrecognized token")
-//                 .with_label(
-//                     Label::new((filename, begin..end))
-//                         .with_message(format_args!("Expected {expected_tokens}"))
-//                         .with_color(Color::Red),
-//                 )
-//                 .finish();
-//             #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-//             report.eprint((filename, Source::from(file))).unwrap();
-//             #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-//             report
-//                 .write(
-//                     (filename, Source::from(file)),
-//                     crate::captured_output::CapturedOutputWriter,
-//                 )
-//                 .unwrap();
-//         }
-//         _ => unreachable!(),
-//     }
-
-//     #[cfg(target_arch = "wasm32")]
-//     wasm_bindgen::throw_str("keel_error");
-//     #[cfg(not(target_arch = "wasm32"))]
-//     panic!();
-// }

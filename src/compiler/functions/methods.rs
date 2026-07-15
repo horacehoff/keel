@@ -1,10 +1,13 @@
-use crate::builtin_methods::builtin_methods;
+use super::expr::{Expr, Span};
 use crate::compiler::UnwrapId;
-use crate::compiler_data::Variable;
-use crate::compiler_data::{Ctx, State};
-use crate::expr::{Expr, Span};
+use crate::compiler::compiler_data::Variable;
+use crate::compiler::compiler_data::{Ctx, State};
 use crate::instr::Instr;
+use builtin_methods::builtin_methods;
 use smol_strc::SmolStr;
+
+#[path = "builtin/builtin_methods.rs"]
+mod builtin_methods;
 
 pub fn handle_method_calls(
     output: &mut Vec<Instr>,

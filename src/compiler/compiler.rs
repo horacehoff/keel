@@ -1,4 +1,4 @@
-use crate::compiler_data::*;
+// use crate::compiler_data::*;
 use crate::data::NULL;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
@@ -11,28 +11,31 @@ use crate::errors::throw_compiler_error;
 use crate::errors::throw_compiler_error_exp;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
-use crate::expr::Expr;
-use crate::expr::Span;
-use crate::expr::contains_var_reassign;
-use crate::functions::handle_functions;
 use crate::instr::LibFunc;
-use crate::methods::handle_method_calls;
 use crate::parser;
 use crate::parser::TypeExpr;
-use crate::registers::move_reg_to_reg;
-use crate::registers::move_to_id;
-use crate::type_system::DataType;
-use crate::type_system::check_if_returns_void;
-use crate::type_system::collect_direct_fn_calls;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::type_system::datatype_to_c_type;
-use crate::type_system::struct_field_type_matches;
 use crate::util::parse_keel_type;
 use crate::vm::Pool;
 use crate::vm::UncheckedVecOps;
 use crate::{data::Data, instr::Instr};
 use ariadne::Label;
 use ariadne::Report;
+use compiler_data::Ctx;
+use compiler_data::DynamicLibFn;
+use compiler_data::Dynamiclib;
+use compiler_data::FnSignature;
+use compiler_data::Function;
+use compiler_data::Pools;
+use compiler_data::State;
+use compiler_data::Struct;
+use compiler_data::Variable;
+use expr::Expr;
+use expr::Span;
+use expr::contains_var_reassign;
+use functions::handle_functions;
+use methods::handle_method_calls;
+use registers::move_reg_to_reg;
+use registers::move_to_id;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
@@ -43,6 +46,25 @@ use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use type_system::DataType;
+use type_system::check_if_returns_void;
+use type_system::collect_direct_fn_calls;
+use type_system::struct_field_type_matches;
+
+#[cfg(not(target_arch = "wasm32"))]
+use type_system::datatype_to_c_type;
+
+pub mod compiler_data;
+pub mod type_system;
+
+pub mod expr;
+
+#[path = "functions/functions.rs"]
+mod functions;
+#[path = "functions/methods.rs"]
+mod methods;
+
+mod registers;
 
 pub trait UnwrapId {
     fn unwrap_id(self) -> u16;
@@ -263,10 +285,47 @@ pub fn find_struct(
     }
 }
 
+#[inline(never)]
+#[cold]
+fn error_array_diff_types(
+    src: (&str, &str),
+    sources: &[(SmolStr, Rc<String>)],
+    array_span: Span,
+    array_elem_type: &DataType,
+    failing_elem_span: Span,
+    failing_elem_type: &DataType,
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            Report::build(ariadne::ReportKind::Error, (src.0, array_span.into()))
+                .with_message("Invalid array types")
+                .with_label(
+                    Label::new((src.0, array_span.into()))
+                        .with_message(format_args!(
+                            "This expression is of type {}",
+                            blue(array_elem_type)
+                        ))
+                        .with_color(ariadne::Color::Blue),
+                )
+                .with_label(
+                    Label::new((src.0, failing_elem_span.into()))
+                        .with_message(format_args!(
+                            "This expression is of type {}",
+                            red(failing_elem_type),
+                        ))
+                        .with_color(ariadne::Color::Red),
+                )
+                .with_note("Arrays are homogeneous and can only hold elements of a single type")
+                .finish()
+        },
+        sources,
+    );
+}
+
 #[inline(always)]
 fn compile_array_literal(
     array_items: &[Expr],
-    span: Span,
+    spans: &[Span],
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
@@ -274,11 +333,21 @@ fn compile_array_literal(
 ) -> u16 {
     if let Some(first) = array_items.first() {
         let first_type = first.infer_type(v, ctx, state);
-        if !array_items
+        if let Some(failing_elem_idx) = array_items
             .iter()
-            .all(|x| x.infer_type(v, ctx, state) == first_type)
+            .skip(1)
+            .position(|x| x.infer_type(v, ctx, state) != first_type)
         {
-            throw_compiler_error(ctx.src, span, ErrType::ArrayWithDiffType);
+            let failing_elem_type = array_items[failing_elem_idx + 1].infer_type(v, ctx, state);
+            let failing_elem_span = spans[failing_elem_idx + 2];
+            error_array_diff_types(
+                ctx.src,
+                state.sources,
+                spans[1],
+                &first_type,
+                failing_elem_span,
+                &failing_elem_type,
+            )
         }
     }
     let array_id = {
@@ -366,9 +435,107 @@ fn compile_array_literal(
     }
 }
 
+#[inline(never)]
+#[cold]
+pub fn error_unknown_struct(
+    struct_name: &SmolStr,
+    struct_span: Span,
+    sources: &[(SmolStr, Rc<String>)],
+    src: (&str, &str),
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            Report::build(ariadne::ReportKind::Error, (src.0, struct_span.into()))
+                .with_message("Unknown struct")
+                .with_label(
+                    Label::new((src.0, struct_span.into()))
+                        .with_message(format_args!("Unknown struct {}", red(struct_name)))
+                        .with_color(ariadne::Color::Red),
+                )
+                .finish()
+        },
+        sources,
+    );
+}
+
+fn error_struct_no_such_field(
+    src: (&str, &str),
+    struct_name: &SmolStr,
+    struct_span: Span,
+    struct_field_span: Span,
+    struct_field_name: &SmolStr,
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            let report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.0, struct_field_span.into()),
+            )
+            .with_message("Unknown struct field")
+            .with_label(
+                Label::new((src.0, struct_span.into()))
+                    .with_message(format_args!("Struct defined here"))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.0, struct_field_span.into()))
+                    .with_message(format_args!(
+                        "There is no field {} in {}",
+                        red(struct_field_name),
+                        blue(struct_name)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            report.finish()
+        },
+        sources,
+    );
+}
+
+fn error_struct_missing_fields(
+    src: (&str, &str),
+    struct_span: Span,
+    struct_literal_span: Span,
+    sources: &[(SmolStr, Rc<String>)],
+    missing_fields: &[&SmolStr],
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            let report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.0, struct_literal_span.into()),
+            )
+            .with_message("Missing struct fields")
+            .with_label(
+                Label::new((src.0, struct_span.into()))
+                    .with_message(format_args!("Struct defined here"))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.0, struct_literal_span.into()))
+                    .with_message(format_args!(
+                        "This is missing field{} {}",
+                        if missing_fields.len() > 1 { "s" } else { "" },
+                        missing_fields
+                            .iter()
+                            .map(|f| blue(f).to_smolstr())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            report.finish()
+        },
+        sources,
+    );
+}
+
 fn compile_struct_literal(
     namespace: &[SmolStr],
-    fields: &[(SmolStr, Expr, Span)],
+    fields: &[(SmolStr, Expr, Span, Span)],
     span: Span,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -379,16 +546,20 @@ fn compile_struct_literal(
     let namespace = &namespace[..(namespace.len() - 1)];
     let Some(expected_struct_idx) = find_struct(state.namespace, state.structs, namespace, name)
     else {
-        throw_compiler_error(ctx.src, span, ErrType::UnknownStruct(name));
+        error_unknown_struct(name, span, state.sources, ctx.src);
     };
     let type_id = state.structs[expected_struct_idx].id;
     let expected_fields_len = state.structs[expected_struct_idx].fields.len();
-    if expected_fields_len != fields.len() {
-        throw_compiler_error(
+    if expected_fields_len < fields.len() {
+        let unexpected_field = &fields[expected_fields_len];
+        error_struct_no_such_field(
             ctx.src,
-            span,
-            ErrType::InvalidStructFieldCount(name, expected_fields_len as u16, fields.len() as u16),
-        );
+            name,
+            state.structs[expected_struct_idx].name_span,
+            unexpected_field.2,
+            &unexpected_field.0,
+            state.sources,
+        )
     }
     let struct_id = {
         state.pools.objs.push(Vec::with_capacity(fields.len()));
@@ -396,17 +567,22 @@ fn compile_struct_literal(
     };
     if ctx.single_run {
         for field_idx in 0..expected_fields_len {
-            if let Some((_, field_expr, field_span)) = fields
+            if let Some((_, field_expr, _, field_value_span)) = fields
                 .iter()
-                .find(|(f, _, _)| f == &state.structs[expected_struct_idx].fields[field_idx].0)
+                .find(|(f, _, _, _)| f == &state.structs[expected_struct_idx].fields[field_idx].0)
             {
                 let field_type = field_expr.infer_type(v, ctx, state);
                 let field = &state.structs[expected_struct_idx].fields[field_idx];
                 if !struct_field_type_matches(&field.1, &field_type) {
-                    throw_compiler_error(
+                    error_struct_field_invalid_type(
                         ctx.src,
-                        *field_span,
-                        ErrType::InvalidType(&field.1, &field_type),
+                        name,
+                        field.2,
+                        &field.0,
+                        &field.1,
+                        *field_value_span,
+                        &field_type,
+                        state.sources,
                     );
                 }
                 let id = field_expr
@@ -427,14 +603,22 @@ fn compile_struct_literal(
                     state.pools.objs.get_mut(struct_id).push(NULL);
                 }
             } else {
-                throw_compiler_error(
+                let missing_elems = (0..expected_fields_len)
+                    .into_iter()
+                    .filter(|i| {
+                        !fields.iter().any(|(f, _, _, _)| {
+                            f == &state.structs[expected_struct_idx].fields[*i].0
+                        })
+                    })
+                    .map(|i| &state.structs[struct_id].fields[i].0)
+                    .collect::<Vec<&SmolStr>>();
+                error_struct_missing_fields(
                     ctx.src,
+                    state.structs[expected_struct_idx].name_span,
                     span,
-                    ErrType::StructMissingField(
-                        name,
-                        &state.structs[expected_struct_idx].fields[field_idx].0,
-                    ),
-                );
+                    state.sources,
+                    &missing_elems,
+                )
             }
         }
 
@@ -445,17 +629,22 @@ fn compile_struct_literal(
     } else {
         let mut dynamic: Vec<(u16, u16)> = Vec::with_capacity(expected_fields_len);
         for field_idx in 0..expected_fields_len {
-            if let Some((_, field_expr, field_span)) = fields
+            if let Some((_, field_expr, _, field_value_span)) = fields
                 .iter()
-                .find(|(f, _, _)| f == &state.structs[expected_struct_idx].fields[field_idx].0)
+                .find(|(f, _, _, _)| f == &state.structs[expected_struct_idx].fields[field_idx].0)
             {
                 let field_type = field_expr.infer_type(v, ctx, state);
                 let field = &state.structs[expected_struct_idx].fields[field_idx];
                 if !struct_field_type_matches(&field.1, &field_type) {
-                    throw_compiler_error(
+                    error_struct_field_invalid_type(
                         ctx.src,
-                        *field_span,
-                        ErrType::InvalidType(&field.1, &field_type),
+                        name,
+                        field.2,
+                        &field.0,
+                        &field.1,
+                        *field_value_span,
+                        &field_type,
+                        state.sources,
                     );
                 }
                 let id = field_expr
@@ -472,13 +661,21 @@ fn compile_struct_literal(
                     dynamic.push((id, field_idx as u16));
                 }
             } else {
-                throw_compiler_error(
+                let missing_elems = (0..expected_fields_len)
+                    .into_iter()
+                    .filter(|i| {
+                        !fields.iter().any(|(f, _, _, _)| {
+                            f == &state.structs[expected_struct_idx].fields[*i].0
+                        })
+                    })
+                    .map(|i| &state.structs[struct_id].fields[i].0)
+                    .collect::<Vec<&SmolStr>>();
+                error_struct_missing_fields(
                     ctx.src,
+                    state.structs[expected_struct_idx].name_span,
                     span,
-                    ErrType::StructMissingField(
-                        name,
-                        &state.structs[expected_struct_idx].fields[field_idx].0,
-                    ),
+                    state.sources,
+                    &missing_elems,
                 );
             }
         }
@@ -1984,6 +2181,7 @@ fn compile_struct_definition(
         name: name.clone(),
         fields: Box::from([]),
         id: struct_id,
+        name_span: span,
     });
     let parsed_fields = fields
         .iter()
@@ -2044,7 +2242,7 @@ fn compile_function_definition(
 }
 
 fn compile_return(
-    return_value: &Option<Expr>,
+    return_value: Option<&Expr>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
@@ -2243,11 +2441,11 @@ impl Expr {
                     throw_compiler_error(ctx.src, *markers, ErrType::UnknownVariable(name))
                 }
             }
-            Self::Array(array_items, span) => {
+            Self::Array(array_items, spans) => {
                 debug_assert!(uses_id);
                 Some(compile_array_literal(
                     array_items,
-                    *span,
+                    spans,
                     v,
                     ctx,
                     state,
@@ -2677,7 +2875,7 @@ impl Expr {
             }
             Self::ReturnVal(return_value) => {
                 debug_assert!(!uses_id);
-                compile_return(return_value, v, ctx, state, output);
+                compile_return(return_value.as_ref().as_ref(), v, ctx, state, output);
                 None
             }
             Self::Break => {
@@ -2776,6 +2974,7 @@ fn parse_toplevel(
                     name: name.clone(),
                     fields: Box::from([]),
                     id: struct_id,
+                    name_span: span,
                 });
                 let parsed_fields = fields
                     .iter()
@@ -3128,7 +3327,34 @@ pub fn compile(
         x.dedup();
     }
     if debug {
-        crate::display::print_debug(&instructions, &registers, &pools, &struct_fields);
+        println!("---- DEBUG ----");
+        if !pools.objs.is_empty() {
+            println!("---  ARRAYS  ---");
+            for (i, data) in pools.objs.iter().enumerate() {
+                println!(" {i} {data:?}");
+            }
+        }
+        println!("-- REGISTERS --");
+        for (i, data) in registers.iter().enumerate() {
+            println!(
+                " [{i}] {}({})",
+                data.type_name(),
+                data.format(
+                    &pools.objs,
+                    &pools.strings,
+                    &pools.maps,
+                    &struct_fields,
+                    true
+                )
+            );
+        }
+        if !instructions.is_empty() {
+            println!("-- INSTRUCTIONS --");
+            for (i, instr) in instructions.iter().enumerate() {
+                println!(" {i}: {instr:?}");
+            }
+        }
+        println!("------------------");
     }
     (
         instructions,

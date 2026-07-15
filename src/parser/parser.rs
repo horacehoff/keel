@@ -1,27 +1,36 @@
-use crate::blocks::parse_condition_block;
-use crate::blocks::parse_eval_block;
-use crate::blocks::parse_for_loop;
-use crate::blocks::parse_function;
-use crate::blocks::parse_loop_block;
-use crate::blocks::parse_match;
-use crate::blocks::parse_struct_declare;
-use crate::blocks::parse_try_catch_block;
-use crate::blocks::parse_while_block;
-use crate::parser_expr::add_op;
-use crate::parser_expr::parse_expr;
-use crate::{
-    errors::{ParserErr, throw_parser_error},
-    expr::{
-        Expr::{self},
-        Span, var_assign,
-    },
-    lexer::Token,
-};
-use logos::Logos;
+use crate::BOLD;
+use crate::RED;
+use crate::RESET;
+use crate::compiler::expr::{Expr, Span, var_assign};
+use crate::errors::BLUE;
+use ariadne::Color;
+use ariadne::Label;
+use ariadne::Report;
+use ariadne::ReportKind;
+use ariadne::Source;
+use blocks::parse_condition_block;
+use blocks::parse_eval_block;
+use blocks::parse_for_loop;
+use blocks::parse_function;
+use blocks::parse_loop_block;
+use blocks::parse_match;
+use blocks::parse_struct_declare;
+use blocks::parse_try_catch_block;
+use blocks::parse_while_block;
 use logos::SpannedIter;
+use parser_expr::add_op;
+use parser_expr::parse_expr;
 use smol_strc::SmolStr;
 use std::hint::{cold_path, unreachable_unchecked};
 use std::iter::Peekable;
+
+use lexer::Token;
+use logos::Logos;
+
+mod blocks;
+mod lexer;
+mod parser_expr;
+mod term;
 
 type TokenIter<'a> = Peekable<SpannedIter<'a, Token<'a>>>;
 
@@ -30,9 +39,91 @@ struct ParserCtx<'a> {
     src: (&'a str, &'a str),
 }
 
-pub struct Parser<'a> {
+struct Parser<'a> {
     input: TokenIter<'a>,
     ctx: ParserCtx<'a>,
+}
+
+#[derive(Clone, Copy)]
+enum ParserErr<'a> {
+    UnexpectedEOF,
+    UnknownToken,
+    /// (expected, received)
+    UnexpectedToken(Token<'a>, Token<'a>, &'static str),
+    /// (expected, received)
+    UnexpectedTokenStr(&'static str, Token<'a>, &'static str),
+    ArrayElementsMissingComma,
+    InlineConditionNoElseBlock,
+    DivisionByZero,
+    ModuloByZero,
+    IntegerNegativeExponent,
+    ArgumentsMissingCommaSeparator,
+    TryBlockNoCatch,
+    MatchBlockNoNonWildcardArm,
+    MatchBlockZeroArms,
+}
+
+#[cold]
+#[inline(never)]
+fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ParserErr) -> ! {
+    let err_message = match t {
+        ParserErr::UnexpectedEOF => "Unexpected EOF",
+        ParserErr::UnknownToken => "Unknown token",
+        ParserErr::UnexpectedToken(expected, received, msg) => &format_args!(
+            "Expected {BLUE}{BOLD}{expected}{RESET}, but got {RED}{BOLD}{received}{RESET}. {msg}"
+        )
+        .to_string(),
+        ParserErr::UnexpectedTokenStr(expected, received, msg) => &format_args!(
+            "Expected {BLUE}{BOLD}{expected}{RESET}, but got {RED}{BOLD}{received}{RESET}. {msg}"
+        )
+        .to_string(),
+        ParserErr::ArrayElementsMissingComma => "Array elements must be separated by a comma",
+        ParserErr::InlineConditionNoElseBlock => "Inline conditions must have an else block",
+        ParserErr::DivisionByZero => "Division by zero",
+        ParserErr::ModuloByZero => "Modulo by zero",
+        ParserErr::IntegerNegativeExponent => "Integers cannot be raised to a negative exponent",
+        ParserErr::ArgumentsMissingCommaSeparator => "Arguments must be separated by a comma",
+        ParserErr::TryBlockNoCatch => {
+            "A {BLUE}{BOLD}try{RESET} block must have at least one {BLUE}{BOLD}catch{RESET} block"
+        }
+        ParserErr::MatchBlockNoNonWildcardArm => {
+            "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one non-wildcard arm{RESET}"
+        }
+        ParserErr::MatchBlockZeroArms => {
+            "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}"
+        }
+    };
+    eprintln!("{RED}KEEL ERROR{RESET}");
+    let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
+        .with_label(
+            Label::new((src.0, (start as usize)..(end as usize)))
+                .with_message(err_message)
+                .with_color(Color::Red),
+        )
+        .finish();
+
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+    report.eprint((src.0, Source::from(src.1))).unwrap();
+
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+    report
+        .write(
+            (src.0, Source::from(src.1)),
+            crate::captured_output::CapturedOutputWriter,
+        )
+        .unwrap();
+
+    #[cfg(debug_assertions)]
+    panic!();
+
+    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
+    std::process::exit(1);
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen::throw_str("keel_error");
+
+    #[cfg(all(feature = "embed", not(debug_assertions)))]
+    panic!();
 }
 
 impl<'a> Parser<'a> {
@@ -43,11 +134,11 @@ impl<'a> Parser<'a> {
     }
     #[cold]
     #[inline(never)]
-    pub fn error(&self, span: Span, error: ParserErr) -> ! {
+    fn error(&self, span: Span, error: ParserErr) -> ! {
         throw_parser_error(self.ctx.src, span, error)
     }
     #[inline(always)]
-    pub fn next_token(&mut self) -> (Token<'a>, Span) {
+    fn next_token(&mut self) -> (Token<'a>, Span) {
         let t = self.input.next().unwrap_or_else(
             #[cold]
             || {
@@ -67,7 +158,7 @@ impl<'a> Parser<'a> {
         )
     }
     #[inline(always)]
-    pub fn peek_token(&mut self) -> Token<'a> {
+    fn peek_token(&mut self) -> Token<'a> {
         let Some((t, start, end)) = self
             .input
             .peek()
@@ -85,7 +176,7 @@ impl<'a> Parser<'a> {
         )
     }
     #[inline(always)]
-    pub fn peek_token_span(&mut self) -> Span {
+    fn peek_token_span(&mut self) -> Span {
         let Some((_, start, end)) = self
             .input
             .peek()
@@ -100,7 +191,7 @@ impl<'a> Parser<'a> {
         }
     }
     #[inline(always)]
-    pub fn peek_token_start(&mut self) -> u32 {
+    fn peek_token_start(&mut self) -> u32 {
         let Some((_, span)) = self.input.peek() else {
             cold_path();
             self.error(self.eof_span(), ParserErr::UnexpectedEOF);
@@ -108,7 +199,7 @@ impl<'a> Parser<'a> {
         span.start as u32
     }
     #[inline(always)]
-    pub fn peek_token_end(&mut self) -> u32 {
+    fn peek_token_end(&mut self) -> u32 {
         let Some((_, span)) = self.input.peek() else {
             cold_path();
             self.error(self.eof_span(), ParserErr::UnexpectedEOF);
@@ -116,11 +207,11 @@ impl<'a> Parser<'a> {
         span.end as u32
     }
     #[inline(always)]
-    pub fn peek_token_end_opt(&mut self) -> Option<u32> {
+    fn peek_token_end_opt(&mut self) -> Option<u32> {
         self.input.peek().map(|t| t.1.end as u32)
     }
     #[inline(always)]
-    pub fn peek_token_opt(&mut self) -> Option<Token<'a>> {
+    fn peek_token_opt(&mut self) -> Option<Token<'a>> {
         let (t, start, end) = self
             .input
             .peek()
@@ -134,13 +225,13 @@ impl<'a> Parser<'a> {
         ))
     }
     #[inline(always)]
-    pub fn peek_span_opt(&mut self) -> Option<Span> {
+    fn peek_span_opt(&mut self) -> Option<Span> {
         self.input
             .peek()
             .map(|x| (x.1.start as u32, x.1.end as u32).into())
     }
     #[inline(always)]
-    pub fn next_token_expect(&mut self, expected: Token, msg: &'static str) {
+    fn next_token_expect(&mut self, expected: Token, msg: &'static str) {
         let (next_token, span) = self.next_token();
         if next_token != expected {
             cold_path();
@@ -148,7 +239,7 @@ impl<'a> Parser<'a> {
         }
     }
     #[inline(always)]
-    pub fn next_token_expect_end(&mut self, expected: Token, msg: &'static str) -> u32 {
+    fn next_token_expect_end(&mut self, expected: Token, msg: &'static str) -> u32 {
         let (next_token, span) = self.next_token();
         if next_token != expected {
             cold_path();
@@ -160,7 +251,7 @@ impl<'a> Parser<'a> {
 
 // Call after DoubleColon is skipped
 // Returns end
-pub fn parse_namespace<'a>(parser: &mut Parser<'a>, initial: SmolStr) -> (Box<[SmolStr]>, u32) {
+fn parse_namespace(parser: &mut Parser<'_>, initial: SmolStr) -> (Box<[SmolStr]>, u32) {
     let mut namespace: Vec<SmolStr> = Vec::with_capacity(2);
     namespace.push(initial);
     let mut end: u32;
@@ -189,7 +280,7 @@ pub fn parse_namespace<'a>(parser: &mut Parser<'a>, initial: SmolStr) -> (Box<[S
 }
 
 // Must be called after LParen is skipped
-pub fn parse_args(parser: &mut Parser<'_>) -> (Box<[Expr]>, Box<[Span]>, u32) {
+fn parse_args(parser: &mut Parser<'_>) -> (Box<[Expr]>, Box<[Span]>, u32) {
     let mut args = Vec::with_capacity(4);
     let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
     loop {
@@ -337,7 +428,7 @@ fn parse_line(input: &mut Parser<'_>, peek: Token<'_>) -> Expr {
     line_code
 }
 
-pub fn parse_code(input: &mut Parser<'_>) -> Vec<Expr> {
+fn parse_code(input: &mut Parser<'_>) -> Vec<Expr> {
     let mut output: Vec<Expr> = Vec::with_capacity(2);
     while let Some(e) = parse_statement(input) {
         output.push(e);
@@ -398,7 +489,7 @@ pub enum TypeExpr {
     Union(Box<[Self]>),
 }
 
-pub fn parse_type(parser: &mut Parser<'_>) -> TypeExpr {
+fn parse_type(parser: &mut Parser<'_>) -> TypeExpr {
     let t = parse_atomic_type(parser);
     if parser.peek_token() == Token::Pipe {
         let mut poly = Vec::with_capacity(2);

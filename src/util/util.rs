@@ -1,14 +1,14 @@
-use crate::compiler_data::State;
-use crate::compiler_data::Struct;
+use crate::compiler::compiler_data::State;
+use crate::compiler::compiler_data::Struct;
+use crate::compiler::expr::Expr;
+use crate::compiler::expr::Span;
+use crate::compiler::type_system::DataType;
 use crate::errors::ErrType;
 use crate::errors::blue;
 use crate::errors::bold;
 use crate::errors::throw_compiler_error;
 use crate::errors::throw_compiler_error_exp;
-use crate::expr::Expr;
-use crate::expr::Span;
 use crate::parser::TypeExpr;
-use crate::type_system::DataType;
 use ariadne::Label;
 use ariadne::Report;
 use smol_strc::SmolStr;
@@ -122,7 +122,7 @@ pub fn check_args(
     if args.len() != expected_args_len {
         throw_compiler_error_exp(
             || {
-                let mut report = Report::build(ariadne::ReportKind::Error, (filename, span.into()))
+                let report = Report::build(ariadne::ReportKind::Error, (filename, span.into()))
                     .with_message("Invalid argument count")
                     .with_label(
                         Label::new((filename, span.into()))
@@ -150,8 +150,10 @@ pub fn check_args_user_fn(
     span: Span,
     fn_decl_span: (Span, u16),
     compiler_state: &State,
+    args_indexes: &[Span],
 ) {
-    if args.len() != expected_args_len {
+    let args_len = args.len();
+    if args_len != expected_args_len {
         throw_compiler_error_exp(
             || {
                 let fn_src = &compiler_state.sources[fn_decl_span.1 as usize];
@@ -176,9 +178,31 @@ pub fn check_args_user_fn(
                             .with_color(ariadne::Color::Red),
                     );
 
+                if args_len > expected_args_len {
+                    let span: Span = (
+                        args_indexes[expected_args_len].start,
+                        args_indexes[args_indexes.len() - 1].end,
+                    )
+                        .into();
+                    report = report.with_label(
+                        Label::new((src.0, span.into()))
+                            .with_message(format_args!(
+                                "{}: Remove {}",
+                                blue("Help"),
+                                if args_len - expected_args_len == 1 {
+                                    "this argument"
+                                } else {
+                                    "those arguments"
+                                }
+                            ))
+                            .with_color(ariadne::Color::Blue)
+                            .with_priority(-1),
+                    );
+                }
+
                 report.finish()
             },
-            &compiler_state.sources,
+            compiler_state.sources,
         );
     }
 }

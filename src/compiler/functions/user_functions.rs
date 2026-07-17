@@ -30,16 +30,6 @@ pub fn handle_user_function(
     markers: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
-    // let fn_id = state
-    //     .namespace
-    //     .fns
-    //     .iter_mut()
-    //     .find(|(func_name, _)| func_name == fn_name)
-    //     .unwrap_or_else(|| {
-    //         throw_parser_error(src, markers, ErrType::UnknownFunction(fn_name));
-    //     })
-    //     .1 as usize;
-
     // Lazily resolve mutual recursion the first time this function is compiled
     let is_recursive = if let Some(is_recursive) = state.fns[fn_id].is_recursive {
         is_recursive
@@ -387,7 +377,9 @@ fn compile_function(
                 }
                 live_regs.sort_unstable();
                 live_regs.dedup();
-                *state.fn_registers.get_mut(callsite_id as usize).unwrap() = live_regs;
+                unsafe {
+                    *state.fn_registers.get_unchecked_mut(callsite_id as usize) = live_regs;
+                }
             }
         }
     } else {

@@ -6,8 +6,7 @@ use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
-use crate::errors::ErrType;
-use crate::errors::throw_compiler_error;
+use crate::compiler::error_unknown_function;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
@@ -21,14 +20,14 @@ pub fn fs_lib_functions(
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     args: &[Expr],
-    markers: Span,
+    span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
     let src = ctx.src;
     let current_src_file = ctx.current_src_file;
     match name {
         "read" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -38,11 +37,11 @@ pub fn fs_lib_functions(
             output.push(Instr::CallLibFunc(LibFunc::FsRead, id, output_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
             return Some(output_id);
         }
         "exists" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -52,11 +51,11 @@ pub fn fs_lib_functions(
             output.push(Instr::CallLibFunc(LibFunc::FsExists, id, output_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
             return Some(output_id);
         }
         "write" => {
-            check_args(args, 2, name, src, markers, state.sources);
+            check_args(args, 2, name, src, span, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
             let filepath = args[0]
@@ -74,10 +73,10 @@ pub fn fs_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
         }
         "append" => {
-            check_args(args, 2, name, src, markers, state.sources);
+            check_args(args, 2, name, src, span, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
             let filepath = args[0]
@@ -95,10 +94,10 @@ pub fn fs_lib_functions(
             ));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
         }
         "delete" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let path = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -107,10 +106,10 @@ pub fn fs_lib_functions(
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, 0));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
         }
         "delete_dir" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let path = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -119,10 +118,10 @@ pub fn fs_lib_functions(
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, 0));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
         }
-        name => {
-            throw_compiler_error(src, markers, ErrType::UnknownFunction(name));
+        fn_name => {
+            error_unknown_function(fn_name, span, std::iter::empty(), src, state.sources);
         }
     }
     None

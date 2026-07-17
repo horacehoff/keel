@@ -3,6 +3,8 @@ use crate::RED;
 use crate::RESET;
 use crate::compiler::expr::{Expr, Span, var_assign};
 use crate::errors::BLUE;
+use crate::errors::blue;
+use crate::errors::crash;
 use ariadne::Color;
 use ariadne::Label;
 use ariadne::Report;
@@ -17,6 +19,7 @@ use blocks::parse_match;
 use blocks::parse_struct_declare;
 use blocks::parse_try_catch_block;
 use blocks::parse_while_block;
+use lexer::parse_string;
 use logos::SpannedIter;
 use parser_expr::add_op;
 use parser_expr::parse_expr;
@@ -42,6 +45,7 @@ struct ParserCtx<'a> {
 struct Parser<'a> {
     input: TokenIter<'a>,
     ctx: ParserCtx<'a>,
+    last_token_end: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -146,6 +150,7 @@ impl<'a> Parser<'a> {
                 self.error(self.eof_span(), ParserErr::UnexpectedEOF);
             },
         );
+        self.last_token_end = t.1.end;
         (
             t.0.unwrap_or_else(
                 #[cold]
@@ -246,6 +251,29 @@ impl<'a> Parser<'a> {
             self.error(span, ParserErr::UnexpectedToken(expected, next_token, msg));
         }
         span.end
+    }
+    #[inline(never)]
+    #[cold]
+    pub fn throw_parser_err<'b, F: Fn() -> Report<'b, (&'b str, core::ops::Range<usize>)>>(
+        &self,
+        report: F,
+    ) -> ! {
+        let report = report();
+
+        #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+        report
+            .eprint((self.ctx.src.0, Source::from(self.ctx.src.1)))
+            .unwrap();
+
+        #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+        report
+            .write(
+                (src.0, Source::from(src.1)),
+                crate::captured_output::CapturedOutputWriter,
+            )
+            .unwrap();
+
+        crash();
     }
 }
 
@@ -360,12 +388,13 @@ fn parse_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32) -> Expr {
 }
 
 fn parse_op_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32, op: Token<'_>) -> Expr {
+    let operand_end = input.last_token_end as u32;
     let (t, _) = input.next_token();
     debug_assert_eq!(t, op);
     let e_end = input.peek_token_end_opt();
     let v_start = input.peek_token_start();
     let v = parse_expr(input);
-    let v_end = input.peek_token_start();
+    let v_end = input.last_token_end as u32;
     let op = match op {
         Token::AssignOpAdd => Token::OpAdd,
         Token::AssignOpSub => Token::OpSub,
@@ -377,7 +406,14 @@ fn parse_op_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32, op: Token<
     };
     var_assign(
         e.clone(),
-        add_op(input, op, e, v, (e_start, v_end).into()),
+        add_op(
+            input,
+            op,
+            e,
+            v,
+            (e_start, operand_end).into(),
+            (v_start, v_end).into(),
+        ),
         (e_start, e_end.unwrap()).into(),
         (v_start, v_end).into(),
     )
@@ -424,8 +460,37 @@ fn parse_line(input: &mut Parser<'_>, peek: Token<'_>) -> Expr {
             }
         }
     };
-    input.next_token_expect(Token::SemiColon, "Lines must end with a ';'.");
+    if input.peek_token_opt() != Some(Token::SemiColon) {
+        error_missing_semicolon(input);
+    }
+    input.next_token();
+    // input.next_token_expect(Token::SemiColon, "Lines must end with a ';'.");
     line_code
+}
+
+#[cold]
+#[inline(never)]
+fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
+    parser.throw_parser_err(|| {
+        Report::build(
+            ariadne::ReportKind::Error,
+            (
+                parser.ctx.src.0,
+                (parser.last_token_end..parser.last_token_end),
+            ),
+        )
+        .with_message("Missing semicolon")
+        .with_label(
+            Label::new((
+                parser.ctx.src.0,
+                (parser.last_token_end..parser.last_token_end),
+            ))
+            .with_message(format_args!("Add a {} here", blue(';')))
+            .with_color(ariadne::Color::Blue),
+        )
+        .with_help("All statements end with a ';'")
+        .finish()
+    })
 }
 
 fn parse_code(input: &mut Parser<'_>) -> Vec<Expr> {
@@ -441,7 +506,7 @@ fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
     debug_assert_eq!(t, Token::Import);
     let (next_token, span) = parser.next_token();
     let path = if let Token::String(s) = next_token {
-        SmolStr::new(crate::util::parse_string(s))
+        SmolStr::new(parse_string(s))
     } else {
         cold_path();
         parser.error(
@@ -541,7 +606,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
     debug_assert_eq!(t, Token::Dylib);
     let (next_token, span) = parser.next_token();
     let path = if let Token::String(s) = next_token {
-        SmolStr::new(crate::util::parse_string(s))
+        SmolStr::new(parse_string(s))
     } else {
         cold_path();
         parser.error(
@@ -642,5 +707,6 @@ pub fn parse(input: &str, src: (&str, &str)) -> Vec<Expr> {
     parse_file(&mut Parser {
         input: Token::lexer(input).spanned().peekable(),
         ctx: ParserCtx { src },
+        last_token_end: 0,
     })
 }

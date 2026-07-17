@@ -6,6 +6,7 @@ use crate::errors::ErrType;
 use crate::errors::RED;
 use crate::errors::RESET;
 use crate::errors::blue;
+use crate::errors::green;
 use crate::errors::red;
 use crate::errors::throw_compiler_error;
 use crate::errors::throw_compiler_error_exp;
@@ -42,7 +43,6 @@ use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
-use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -139,7 +139,7 @@ fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
 
 /// Sets the jump size field of a jump instruction
 #[inline(always)]
-fn set_jmp_size(instr: &mut Instr, size: u16) {
+const fn set_jmp_size(instr: &mut Instr, size: u16) {
     match instr {
         Instr::IsFalseJmp(_, jump_size)
         | Instr::IsTrueJmp(_, jump_size)
@@ -159,7 +159,7 @@ fn set_jmp_size(instr: &mut Instr, size: u16) {
         | Instr::ObjEqJmp(_, _, jump_size)
         | Instr::StrNotEqJmp(_, _, jump_size)
         | Instr::StrEqJmp(_, _, jump_size) => *jump_size = size,
-        _ => unreachable!(),
+        _ => unsafe { unreachable_unchecked() },
     }
 }
 
@@ -177,7 +177,7 @@ fn compile_short_circuit_condition(
     bool_or_mode: bool,
 ) -> (Vec<usize>, Vec<usize>) {
     match expr {
-        Expr::BoolOr(left, right, _) => {
+        Expr::BoolOr(left, right, _, _) => {
             // left side of || always uses true jump mode
             let (mut true_jumps, _) =
                 compile_short_circuit_condition(left, v, ctx, state, output, true);
@@ -186,7 +186,7 @@ fn compile_short_circuit_condition(
             true_jumps.extend(right_true);
             (true_jumps, right_false)
         }
-        Expr::BoolAnd(left, right, _) => {
+        Expr::BoolAnd(left, right, _, _) => {
             if bool_or_mode {
                 // && inside left side of ||
                 let id_l = left
@@ -258,15 +258,19 @@ fn parse_loop_flow_control(
     });
 }
 
-pub fn walk_namespace_struct(root: &Namespace, path: &[SmolStr], fn_name: &str) -> Option<usize> {
+pub fn walk_namespace(
+    root: &Namespace,
+    path: &[SmolStr],
+    symbol_name: &str,
+    select_symbol_type: fn(&Namespace) -> &[(SmolStr, u16)],
+) -> Option<usize> {
     let mut current = root;
     for sub in path {
         current = current.children.iter().find(|n| n.name == *sub)?;
     }
-    current
-        .structs
+    select_symbol_type(current)
         .iter()
-        .find(|(n, _)| n.as_str() == fn_name)
+        .find(|(n, _)| n.as_str() == symbol_name)
         .map(|(_, id)| *id as usize)
 }
 
@@ -276,7 +280,7 @@ pub fn find_struct(
     namespace: &[SmolStr],
     name: &str,
 ) -> Option<usize> {
-    if let Some(idx) = walk_namespace_struct(root, namespace, name) {
+    if let Some(idx) = walk_namespace(root, namespace, name, |ns| &ns.structs) {
         Some(idx)
     } else if namespace.is_empty() {
         structs.iter().rposition(|s| s.name == name)
@@ -869,7 +873,7 @@ fn error_struct_unknown_field(
 ) -> ! {
     throw_compiler_error_exp(
         || {
-            Report::build(ariadne::ReportKind::Error, (src.0, field_span.into()))
+            let mut report = Report::build(ariadne::ReportKind::Error, (src.0, field_span.into()))
                 .with_message("Unknown field")
                 .with_label(
                     Label::new((src.0, field_span.into()))
@@ -879,16 +883,25 @@ fn error_struct_unknown_field(
                             blue(struct_name)
                         ))
                         .with_color(ariadne::Color::Red),
-                )
-                .with_help(format_args!(
+                );
+
+            let similar_field = find_closest_str(field, fields.iter().map(|(f, _, _)| f.as_str()));
+            if let Some(similar_field) = similar_field {
+                report = report.with_help(format_args!(
+                    "A field with a similar name exists: {}",
+                    blue(similar_field)
+                ));
+            } else {
+                report = report.with_help(format_args!(
                     "The available fields are: {}",
                     fields
                         .iter()
                         .map(|(field, _, _)| blue(field))
                         .collect::<Vec<_>>()
                         .join(", "),
-                ))
-                .finish()
+                ));
+            }
+            report.finish()
         },
         sources,
     );
@@ -1041,12 +1054,127 @@ fn compile_array_slice(
     dest_reg_id
 }
 
+#[cold]
+#[inline(never)]
+fn error_op(
+    l: &DataType,
+    r: &DataType,
+    op: &str,
+    span_l: Span,
+    span_r: Span,
+    src: (&str, &str),
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.0, span_l.extend(span_r).into()),
+            );
+
+            if (op == "-" && l == &DataType::Null) || op == "!" {
+                report = report
+                    .with_message(format_args!(
+                        "Cannot perform operation {} {}",
+                        red(op),
+                        blue(r)
+                    ))
+                    .with_label(
+                        Label::new((src.0, span_r.into()))
+                            .with_message(format_args!("This expression is of type {}", blue(r)))
+                            .with_color(ariadne::Color::Red),
+                    );
+            } else {
+                report = report
+                    .with_message(format_args!(
+                        "Cannot perform operation {} {} {}",
+                        blue(l),
+                        red(op),
+                        green(r)
+                    ))
+                    .with_label(
+                        Label::new((src.0, span_l.into()))
+                            .with_message(format_args!("This expression is of type {}", blue(l)))
+                            .with_color(ariadne::Color::Red),
+                    )
+                    .with_label(
+                        Label::new((src.0, span_r.into()))
+                            .with_message(format_args!("This expression is of type {}", green(r)))
+                            .with_color(ariadne::Color::Red),
+                    );
+            }
+
+            if op == "+" {
+                report = report.with_note(format_args!(
+                    "The supported types are:\n- {} {} {}\n- {} {} {}\n- {} {} {}\n- {} {} {}",
+                    blue(DataType::Int),
+                    red(op),
+                    green(DataType::Int),
+                    blue(DataType::Float),
+                    red(op),
+                    green(DataType::Float),
+                    blue(DataType::String),
+                    red(op),
+                    green(DataType::String),
+                    blue("T[]"),
+                    red(op),
+                    green("T[]")
+                ));
+            } else if op == "-" && l == &DataType::Null {
+                report = report.with_note(format_args!(
+                    "The supported types are:\n- {} {}\n- {} {}",
+                    red(op),
+                    blue(DataType::Int),
+                    red(op),
+                    green(DataType::Float),
+                ));
+            } else if op == "*"
+                || op == "/"
+                || op == "-"
+                || op == "%"
+                || op == "^"
+                || op == ">"
+                || op == ">="
+                || op == "<"
+                || op == "<="
+            {
+                report = report.with_note(format_args!(
+                    "The supported types are:\n- {} {} {}\n- {} {} {}",
+                    blue(DataType::Int),
+                    red(op),
+                    green(DataType::Int),
+                    blue(DataType::Float),
+                    red(op),
+                    green(DataType::Float),
+                ));
+            } else if op == "&&" || op == "||" {
+                report = report.with_note(format_args!(
+                    "The supported types are:\n- {} {} {}",
+                    blue(DataType::Bool),
+                    red(op),
+                    green(DataType::Bool),
+                ));
+            } else if op == "!" {
+                report = report.with_note(format_args!(
+                    "The supported types are:\n- {} {}",
+                    red(op),
+                    blue(DataType::Bool),
+                ));
+            }
+
+            report.finish()
+        },
+        sources,
+    );
+}
+
 fn uniform_op(
     instr: fn(u16, u16, u16) -> Instr,
     symbol: &'static str,
     l: &Expr,
     r: &Expr,
-    span: Span,
+    span_l: Span,
+    span_r: Span,
     t: &DataType,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
@@ -1056,7 +1184,7 @@ fn uniform_op(
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(v, ctx, state), r.infer_type(v, ctx, state));
     if &t_l != t || &t_r != t {
-        throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, symbol))
+        error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.src, state.sources);
     }
 
     let id_l = l
@@ -1081,7 +1209,8 @@ fn uniform_op2(
     symbol: &'static str,
     l: &Expr,
     r: &Expr,
-    span: Span,
+    span_l: Span,
+    span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -1090,7 +1219,7 @@ fn uniform_op2(
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(v, ctx, state), r.infer_type(v, ctx, state));
     if !((&t_l == t_1 && &t_r == t_1) || (&t_l == t_2 && &t_r == t_2)) {
-        throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, symbol))
+        error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.src, state.sources);
     }
     let id_l = l
         .compile(v, ctx, state, output, None, false, true)
@@ -1112,7 +1241,8 @@ fn uniform_op2(
 fn compile_div_op(
     l: &Expr,
     r: &Expr,
-    span: Span,
+    span_l: Span,
+    span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -1122,7 +1252,7 @@ fn compile_div_op(
     if let Expr::Int(n) = r
         && *n == 0
     {
-        throw_compiler_error(ctx.src, span, ErrType::DivisionByZero);
+        throw_compiler_error(ctx.src, span_l.extend(span_r), ErrType::DivisionByZero);
     }
     let id = uniform_op2(
         Instr::DivFloat,
@@ -1132,7 +1262,8 @@ fn compile_div_op(
         "/",
         l,
         r,
-        span,
+        span_l,
+        span_r,
         tgt_id,
         v,
         ctx,
@@ -1140,9 +1271,11 @@ fn compile_div_op(
         output,
     );
     if matches!(output.last(), Some(Instr::DivInt(..))) {
-        state
-            .instr_src
-            .push((*output.last().unwrap(), span, ctx.current_src_file));
+        state.instr_src.push((
+            *output.last().unwrap(),
+            span_l.extend(span_r),
+            ctx.current_src_file,
+        ));
     }
     id
 }
@@ -1150,7 +1283,8 @@ fn compile_div_op(
 fn compile_add_op(
     l: &Expr,
     r: &Expr,
-    span: Span,
+    span_l: Span,
+    span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -1165,7 +1299,7 @@ fn compile_add_op(
             DataType::String | DataType::Array(_) | DataType::Float | DataType::Int
         )
     {
-        throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, "+"));
+        error_op(&t_l, &t_r, "+", span_l, span_r, ctx.src, state.sources);
     }
     // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
     if t_l == DataType::Int
@@ -1213,7 +1347,8 @@ fn compile_add_op(
 fn compile_sub_op(
     l: &Expr,
     r: &Expr,
-    span: Span,
+    span_l: Span,
+    span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -1225,7 +1360,7 @@ fn compile_sub_op(
     if !((t_l == DataType::Float && t_r == DataType::Float)
         || (t_l == DataType::Int && t_r == DataType::Int))
     {
-        throw_compiler_error(ctx.src, span, ErrType::OpError(&t_l, &t_r, "-"));
+        error_op(&t_l, &t_r, "-", span_l, span_r, ctx.src, state.sources);
     }
     // var-1 uses the dedicated DecInt/DecIntTo instructions
     if t_l == DataType::Int
@@ -1262,7 +1397,8 @@ fn compile_sub_op(
 fn compile_mod_op(
     l: &Expr,
     r: &Expr,
-    span: Span,
+    span_l: Span,
+    span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -1272,7 +1408,7 @@ fn compile_mod_op(
     if let Expr::Int(n) = r
         && *n == 0
     {
-        throw_compiler_error(ctx.src, span, ErrType::ModuloByZero);
+        throw_compiler_error(ctx.src, span_l.extend(span_r), ErrType::ModuloByZero);
     }
     let id = uniform_op2(
         Instr::ModFloat,
@@ -1282,7 +1418,8 @@ fn compile_mod_op(
         "%",
         l,
         r,
-        span,
+        span_l,
+        span_r,
         tgt_id,
         v,
         ctx,
@@ -1290,9 +1427,11 @@ fn compile_mod_op(
         output,
     );
     if matches!(output.last(), Some(Instr::ModInt(..))) {
-        state
-            .instr_src
-            .push((*output.last().unwrap(), span, ctx.current_src_file));
+        state.instr_src.push((
+            *output.last().unwrap(),
+            span_l.extend(span_r),
+            ctx.current_src_file,
+        ));
     }
     id
 }
@@ -1365,7 +1504,8 @@ fn compile_neq_op(
 
 fn compile_neg_op(
     l: &Expr,
-    span: Span,
+    span_l: Span,
+    span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -1383,14 +1523,23 @@ fn compile_neg_op(
     } else if operand_type == DataType::Int {
         output.push(Instr::NegInt(id_l, id));
     } else {
-        throw_compiler_error(ctx.src, span, ErrType::InvalidOp(&operand_type, "-"));
+        error_op(
+            &DataType::Null,
+            &operand_type,
+            "-",
+            span_l,
+            span_r,
+            ctx.src,
+            state.sources,
+        );
     }
     id
 }
 
 fn compile_bool_neg_op(
     l: &Expr,
-    span: Span,
+    span_l: Span,
+    span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
@@ -1404,7 +1553,15 @@ fn compile_bool_neg_op(
     state.free_reg(id_l, v);
     let id = state.alloc_reg_tgt(tgt_id);
     if operand_type != DataType::Bool {
-        throw_compiler_error(ctx.src, span, ErrType::InvalidOp(&operand_type, "!"));
+        error_op(
+            &DataType::Null,
+            &operand_type,
+            "-",
+            span_l,
+            span_r,
+            ctx.src,
+            state.sources,
+        );
     }
     output.push(Instr::NegBool(id_l, id));
     id
@@ -2073,6 +2230,196 @@ fn compile_var_declaration(
     });
 }
 
+fn find_closest_str<'a>(name: &'a str, list: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let mut best: Option<(&str, usize)> = None;
+    for candidate in list {
+        let dist = levenshtein(name, candidate);
+        if dist <= (name.len().max(candidate.len()) / 3).max(1)
+            && best.is_none_or(|(_, d)| dist < d)
+        {
+            best = Some((candidate, dist));
+        }
+    }
+    best.map(|(s, _)| s)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let m = a.len();
+    let n = b.len();
+
+    let mut v0: Vec<usize> = (0..=n).collect();
+    let mut v1: Vec<usize> = vec![0; n + 1];
+
+    for i in 0..m {
+        v1[0] = i + 1;
+
+        for j in 0..n {
+            let deletion_cost = v0[j + 1] + 1;
+            let insertion_cost = v1[j] + 1;
+            let substitution_cost = if a.as_bytes()[i] == b.as_bytes()[j] {
+                v0[j]
+            } else {
+                v0[j] + 1
+            };
+            v1[j + 1] = std::cmp::min(
+                deletion_cost,
+                std::cmp::min(insertion_cost, substitution_cost),
+            );
+        }
+
+        std::mem::swap(&mut v0, &mut v1);
+    }
+
+    v0[n]
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_unknown_variable(
+    var_name: &SmolStr,
+    span: Span,
+    v: &[Variable],
+    src: (&str, &str),
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            let mut report = Report::build(ariadne::ReportKind::Error, (src.0, span.into()))
+                .with_message("Unknown variable")
+                .with_label(
+                    Label::new((src.0, span.into()))
+                        .with_message(format_args!(
+                            "Cannot find variable {} in this scope",
+                            red(var_name),
+                        ))
+                        .with_color(ariadne::Color::Red),
+                );
+
+            let similar_var = find_closest_str(var_name, v.iter().map(|v| v.name.as_str()));
+            if let Some(similar_var) = similar_var {
+                report = report.with_help(format_args!(
+                    "A variable with a similar name exists: {}",
+                    blue(similar_var)
+                ));
+            }
+
+            report.finish()
+        },
+        sources,
+    )
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_unknown_function<'a>(
+    fn_name: &'a str,
+    span: Span,
+    fns: impl Iterator<Item = &'a str>,
+    src: (&str, &str),
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    let similar_fn = find_closest_str(fn_name, fns);
+    throw_compiler_error_exp(
+        || {
+            let mut report = Report::build(ariadne::ReportKind::Error, (src.0, span.into()))
+                .with_message("Unknown function")
+                .with_label(
+                    Label::new((src.0, span.into()))
+                        .with_message(format_args!(
+                            "Cannot find function {} in this scope",
+                            red(fn_name),
+                        ))
+                        .with_color(ariadne::Color::Red),
+                );
+
+            if let Some(similar_fn) = similar_fn {
+                report = report.with_help(format_args!(
+                    "A function with a similar name exists: {}",
+                    blue(similar_fn)
+                ));
+            }
+
+            report.finish()
+        },
+        sources,
+    )
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_unknown_namespace(
+    namespace: &[SmolStr],
+    span: Span,
+    src: (&str, &str),
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            let report = Report::build(ariadne::ReportKind::Error, (src.0, span.into()))
+                .with_message("Unknown namespace")
+                .with_label(
+                    Label::new((src.0, span.into()))
+                        .with_message(format_args!(
+                            "{} is not a valid namespace",
+                            red(namespace.join("::")),
+                        ))
+                        .with_color(ariadne::Color::Red),
+                );
+
+            report.finish()
+        },
+        sources,
+    )
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_unknown_function_in_namespace(
+    fn_name: &str,
+    namespace_root: &Namespace,
+    namespace: &[SmolStr],
+    span: Span,
+    src: (&str, &str),
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    let mut current = namespace_root;
+    for sub in namespace {
+        current = if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
+            c
+        } else {
+            error_unknown_namespace(namespace, span, src, sources);
+        };
+    }
+    let namespace_str = namespace.join("::");
+
+    let similar_fn = find_closest_str(fn_name, current.fns.iter().map(|f| f.0.as_str()));
+    throw_compiler_error_exp(
+        || {
+            let mut report = Report::build(ariadne::ReportKind::Error, (src.0, span.into()))
+                .with_message("Unknown function in namespace")
+                .with_label(
+                    Label::new((src.0, span.into()))
+                        .with_message(format_args!(
+                            "Cannot find function {} in namespace {}",
+                            red(fn_name),
+                            blue(&namespace_str)
+                        ))
+                        .with_color(ariadne::Color::Red),
+                );
+
+            if let Some(similar_fn) = similar_fn {
+                report = report.with_help(format_args!(
+                    "A function with a similar name exists: {}",
+                    blue(format_args!("{namespace_str}::{similar_fn}"))
+                ));
+            }
+
+            report.finish()
+        },
+        sources,
+    )
+}
+
 fn compile_var_assignment(
     name: &SmolStr,
     value: &Expr,
@@ -2084,7 +2431,7 @@ fn compile_var_assignment(
 ) {
     let var_type = value.infer_type(v, ctx, state);
     let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
-        throw_compiler_error(ctx.src, span, ErrType::UnknownVariable(name));
+        error_unknown_variable(name, span, v, ctx.src, state.sources);
     });
     let id = v[var_pos].register_id;
 
@@ -2092,7 +2439,7 @@ fn compile_var_assignment(
         // (is_inc, src_var_name)
         let inc_dec: Option<(bool, &str)> = match value {
             // var+1/1+var use the dedicated IncInt/IncIntTo instructions
-            Expr::Add(l, r, _) => {
+            Expr::Add(l, r, _, _) => {
                 let src = if matches!(r.as_ref(), Expr::Int(1)) {
                     Some(l.as_ref())
                 } else if matches!(l.as_ref(), Expr::Int(1)) {
@@ -2112,7 +2459,7 @@ fn compile_var_assignment(
                 })
             }
             // var-1 uses the dedicated DecInt/DecIntTo instructions
-            Expr::Sub(l, r, _) => {
+            Expr::Sub(l, r, _, _) => {
                 if matches!(r.as_ref(), Expr::Int(1)) {
                     if let Expr::Var(src_name, _) = l.as_ref() {
                         v.iter()
@@ -2207,6 +2554,42 @@ fn compile_struct_definition(
         .push((name.clone(), (state.structs.len() - 1) as u16));
 }
 
+#[cold]
+#[inline(never)]
+fn error_function_already_defined(
+    func: &Function,
+    redeclaration_span: Span,
+    src: (&str, &str),
+    sources: &[(SmolStr, Rc<String>)],
+) -> ! {
+    throw_compiler_error_exp(
+        || {
+            let fn_src = &sources[func.src_file as usize];
+            let report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.0, redeclaration_span.into()),
+            )
+            .with_message(format_args!("Function already exists"))
+            .with_label(
+                Label::new((fn_src.0.as_str(), func.name_span.into()))
+                    .with_message(format_args!("Already defined here"))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.0, redeclaration_span.into()))
+                    .with_message(format_args!(
+                        "Function {} is already defined",
+                        blue(&func.name)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            report.finish()
+        },
+        sources,
+    )
+}
+
 fn compile_function_definition(
     fn_name: &SmolStr,
     fn_args: &[SmolStr],
@@ -2217,8 +2600,9 @@ fn compile_function_definition(
     state: &mut State<'_>,
     _output: &mut Vec<Instr>,
 ) {
-    if state.fns.iter().any(|func| &func.name == fn_name) {
-        throw_compiler_error(ctx.src, span, ErrType::FunctionAlreadyExists(fn_name));
+    if let Some(func) = state.fns.iter().find(|func| &func.name == fn_name) {
+        error_function_already_defined(func, span, ctx.src, state.sources);
+        // throw_compiler_error(ctx.src, span, ErrType::FunctionAlreadyExists(fn_name));
     }
     let mut callees = Vec::new();
     collect_direct_fn_calls(fn_code, &mut callees);
@@ -2427,7 +2811,7 @@ impl Expr {
                     Some(id)
                 }
             }
-            Self::Var(name, markers) => {
+            Self::Var(name, span) => {
                 debug_assert!(uses_id);
                 if let Some(Variable {
                     name: _,
@@ -2437,8 +2821,7 @@ impl Expr {
                 {
                     Some(*register_id)
                 } else {
-                    cold_path();
-                    throw_compiler_error(ctx.src, *markers, ErrType::UnknownVariable(name))
+                    error_unknown_variable(name, *span, v, ctx.src, state.sources);
                 }
             }
             Self::Array(array_items, spans) => {
@@ -2489,7 +2872,7 @@ impl Expr {
                     array, idx_start, idx_end, *span, v, ctx, state, output,
                 ))
             }
-            Self::Mul(l, r, span) => {
+            Self::Mul(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op2(
                     Instr::MulFloat,
@@ -2499,7 +2882,8 @@ impl Expr {
                     "*",
                     l,
                     r,
-                    *span,
+                    *span1,
+                    *span2,
                     tgt_id,
                     v,
                     ctx,
@@ -2507,23 +2891,31 @@ impl Expr {
                     output,
                 ))
             }
-            Self::Div(l, r, span) => {
+            Self::Div(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_div_op(l, r, *span, tgt_id, v, ctx, state, output))
+                Some(compile_div_op(
+                    l, r, *span1, *span2, tgt_id, v, ctx, state, output,
+                ))
             }
-            Self::Add(l, r, span) => {
+            Self::Add(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_add_op(l, r, *span, tgt_id, v, ctx, state, output))
+                Some(compile_add_op(
+                    l, r, *span1, *span2, tgt_id, v, ctx, state, output,
+                ))
             }
-            Self::Sub(l, r, span) => {
+            Self::Sub(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_sub_op(l, r, *span, tgt_id, v, ctx, state, output))
+                Some(compile_sub_op(
+                    l, r, *span1, *span2, tgt_id, v, ctx, state, output,
+                ))
             }
-            Self::Mod(l, r, span) => {
+            Self::Mod(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_mod_op(l, r, *span, tgt_id, v, ctx, state, output))
+                Some(compile_mod_op(
+                    l, r, *span1, *span2, tgt_id, v, ctx, state, output,
+                ))
             }
-            Self::Pow(l, r, span) => {
+            Self::Pow(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op2(
                     Instr::PowFloat,
@@ -2533,7 +2925,8 @@ impl Expr {
                     "^",
                     l,
                     r,
-                    *span,
+                    *span1,
+                    *span2,
                     tgt_id,
                     v,
                     ctx,
@@ -2549,7 +2942,7 @@ impl Expr {
                 debug_assert!(uses_id);
                 Some(compile_neq_op(l, r, tgt_id, v, ctx, state, output))
             }
-            Self::Sup(l, r, span) => {
+            Self::Sup(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op2(
                     Instr::SupFloat,
@@ -2559,7 +2952,8 @@ impl Expr {
                     ">",
                     l,
                     r,
-                    *span,
+                    *span1,
+                    *span2,
                     tgt_id,
                     v,
                     ctx,
@@ -2567,7 +2961,7 @@ impl Expr {
                     output,
                 ))
             }
-            Self::SupEq(l, r, span) => {
+            Self::SupEq(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op2(
                     Instr::SupEqFloat,
@@ -2577,7 +2971,8 @@ impl Expr {
                     ">=",
                     l,
                     r,
-                    *span,
+                    *span1,
+                    *span2,
                     tgt_id,
                     v,
                     ctx,
@@ -2585,7 +2980,7 @@ impl Expr {
                     output,
                 ))
             }
-            Self::Inf(l, r, span) => {
+            Self::Inf(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op2(
                     Instr::InfFloat,
@@ -2595,7 +2990,8 @@ impl Expr {
                     "<",
                     l,
                     r,
-                    *span,
+                    *span1,
+                    *span2,
                     tgt_id,
                     v,
                     ctx,
@@ -2603,7 +2999,7 @@ impl Expr {
                     output,
                 ))
             }
-            Self::InfEq(l, r, span) => {
+            Self::InfEq(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op2(
                     Instr::InfEqFloat,
@@ -2613,7 +3009,8 @@ impl Expr {
                     "<=",
                     l,
                     r,
-                    *span,
+                    *span1,
+                    *span2,
                     tgt_id,
                     v,
                     ctx,
@@ -2621,14 +3018,15 @@ impl Expr {
                     output,
                 ))
             }
-            Self::BoolAnd(l, r, markers) => {
+            Self::BoolAnd(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op(
                     Instr::BoolAnd,
                     "&&",
                     l,
                     r,
-                    *markers,
+                    *span1,
+                    *span2,
                     &DataType::Bool,
                     tgt_id,
                     v,
@@ -2637,14 +3035,15 @@ impl Expr {
                     output,
                 ))
             }
-            Self::BoolOr(l, r, span) => {
+            Self::BoolOr(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op(
                     Instr::BoolOr,
                     "||",
                     l,
                     r,
-                    *span,
+                    *span1,
+                    *span2,
                     &DataType::Bool,
                     tgt_id,
                     v,
@@ -2653,13 +3052,17 @@ impl Expr {
                     output,
                 ))
             }
-            Self::Neg(l, span) => {
+            Self::Neg(l, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_neg_op(l, *span, tgt_id, v, ctx, state, output))
+                Some(compile_neg_op(
+                    l, *span1, *span2, tgt_id, v, ctx, state, output,
+                ))
             }
-            Self::BoolNeg(l, span) => {
+            Self::BoolNeg(l, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_bool_neg_op(l, *span, tgt_id, v, ctx, state, output))
+                Some(compile_bool_neg_op(
+                    l, *span1, *span2, tgt_id, v, ctx, state, output,
+                ))
             }
             Self::InlineCondition(main_condition, code, span) => {
                 debug_assert!(uses_id);
@@ -2939,15 +3342,10 @@ fn parse_toplevel(
 ) {
     for expr in code {
         match expr {
-            Expr::FunctionDecl(fn_name, fn_args, fn_code, markers) => {
+            Expr::FunctionDecl(fn_name, fn_args, fn_code, span) => {
                 if let Some((_, func_id)) = namespace.fns.iter().find(|(f, _)| f == &fn_name) {
                     let func = &fns[*func_id as usize];
-                    let func_file = &sources[func.src_file as usize].0;
-                    throw_compiler_error(
-                        use_line_markers,
-                        markers,
-                        ErrType::DuplicateFunctionInImport(&fn_name, func_file.as_str()),
-                    );
+                    error_function_already_defined(func, span, use_line_markers, sources);
                 }
                 fn_registers.push(Vec::new());
                 let returns_void = check_if_returns_void(&fn_code);
@@ -2964,7 +3362,7 @@ fn parse_toplevel(
                     src_file: src_file_idx,
                     return_type_cache: Vec::new(),
                     direct_calls: callees.into_boxed_slice(),
-                    name_span: markers,
+                    name_span: span,
                 });
                 namespace.fns.push((fn_name, (fns.len() - 1) as u16));
             }
@@ -3322,10 +3720,8 @@ pub fn compile(
         &mut state,
     );
     instructions.push(Instr::Halt(0));
-    for x in &mut fn_registers {
-        x.sort_unstable();
-        x.dedup();
-    }
+
+    #[cfg(debug_assertions)]
     if debug {
         println!("---- DEBUG ----");
         if !pools.objs.is_empty() {
@@ -3356,6 +3752,7 @@ pub fn compile(
         }
         println!("------------------");
     }
+
     (
         instructions,
         registers,

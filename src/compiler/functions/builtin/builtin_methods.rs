@@ -5,6 +5,7 @@ use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
+use crate::compiler::error_unknown_function;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 use crate::instr::Instr;
@@ -25,7 +26,7 @@ pub fn builtin_methods(
     obj: &Expr,
     args: &[Expr],
     obj_markers: Span,
-    fn_markers: Span,
+    fn_span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
     let src = ctx.src;
@@ -71,7 +72,7 @@ pub fn builtin_methods(
                 name,
                 src,
                 if args_indexes.is_empty() {
-                    fn_markers
+                    fn_span
                 } else {
                     Span {
                         start: args_indexes[0].start,
@@ -186,7 +187,7 @@ pub fn builtin_methods(
             output.push(Instr::CallLibFunc(LibFunc::Find, id, output_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), fn_markers, current_src_file));
+                .push((*output.last().unwrap(), fn_span, current_src_file));
             Some(output_id)
         }
         "is_float" => {
@@ -338,9 +339,9 @@ pub fn builtin_methods(
                     obj_type == expected
                 }
             } {
-                throw_compiler_error(src, fn_markers, ErrType::InvalidType(&expected, &obj_type));
+                throw_compiler_error(src, fn_span, ErrType::InvalidType(&expected, &obj_type));
             }
-            check_args_range(args, 0, 1, "join", src, fn_markers);
+            check_args_range(args, 0, 1, "join", src, fn_span);
             if !args.is_empty() {
                 let arg_type = args[0].infer_type(v, ctx, state);
                 arg_type.expect(&DataType::String, src, args_indexes[0]);
@@ -362,7 +363,7 @@ pub fn builtin_methods(
             output.push(Instr::Remove(id, arg_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), fn_markers, current_src_file));
+                .push((*output.last().unwrap(), fn_span, current_src_file));
             None
         }
         "sort" => {
@@ -410,8 +411,6 @@ pub fn builtin_methods(
             output.push(Instr::MapInsertReg(id, key_id, val_id));
             None
         }
-        name => {
-            throw_compiler_error(src, fn_markers, ErrType::UnknownFunction(name));
-        }
+        fn_name => error_unknown_function(fn_name, fn_span, std::iter::empty(), src, state.sources),
     }
 }

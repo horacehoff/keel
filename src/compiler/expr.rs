@@ -1,4 +1,4 @@
-use crate::{errors::dev_error, parser::TypeExpr};
+use crate::parser::TypeExpr;
 use smol_strc::SmolStr;
 use std::{hint::unreachable_unchecked, rc::Rc};
 
@@ -81,47 +81,43 @@ pub enum Expr {
     /// TryCatchBlock(try_code, err_var, catch_code)
     TryCatchBlock(Box<[Self]>, SmolStr, Box<[Self]>),
 
-    Mul(Box<Self>, Box<Self>, Span),
-    Div(Box<Self>, Box<Self>, Span),
-    Add(Box<Self>, Box<Self>, Span),
-    Sub(Box<Self>, Box<Self>, Span),
-    Mod(Box<Self>, Box<Self>, Span),
-    Pow(Box<Self>, Box<Self>, Span),
+    Mul(Box<Self>, Box<Self>, Span, Span),
+    Div(Box<Self>, Box<Self>, Span, Span),
+    Add(Box<Self>, Box<Self>, Span, Span),
+    Sub(Box<Self>, Box<Self>, Span, Span),
+    Mod(Box<Self>, Box<Self>, Span, Span),
+    Pow(Box<Self>, Box<Self>, Span, Span),
     Eq(Box<Self>, Box<Self>),
     NotEq(Box<Self>, Box<Self>),
-    Sup(Box<Self>, Box<Self>, Span),
-    SupEq(Box<Self>, Box<Self>, Span),
-    Inf(Box<Self>, Box<Self>, Span),
-    InfEq(Box<Self>, Box<Self>, Span),
-    BoolAnd(Box<Self>, Box<Self>, Span),
-    BoolOr(Box<Self>, Box<Self>, Span),
-    BoolNeg(Box<Self>, Span),
-    Neg(Box<Self>, Span),
+    Sup(Box<Self>, Box<Self>, Span, Span),
+    SupEq(Box<Self>, Box<Self>, Span, Span),
+    Inf(Box<Self>, Box<Self>, Span, Span),
+    InfEq(Box<Self>, Box<Self>, Span, Span),
+    BoolAnd(Box<Self>, Box<Self>, Span, Span),
+    BoolOr(Box<Self>, Box<Self>, Span, Span),
+    BoolNeg(Box<Self>, Span, Span),
+    Neg(Box<Self>, Span, Span),
 }
 
 #[cold]
 #[inline(never)]
-pub fn symbol_of_expr(expr: &Expr) -> &str {
+pub const fn symbol_of_expr(expr: &Expr) -> &'static str {
     match expr {
-        Expr::Mul(_, _, _) => "*",
-        Expr::Div(_, _, _) => "/",
-        Expr::Add(_, _, _) => "+",
-        Expr::Sub(_, _, _) | Expr::Neg(_, _) => "-",
-        Expr::Mod(_, _, _) => "%",
-        Expr::Pow(_, _, _) => "^",
+        Expr::Mul(_, _, _, _) => "*",
+        Expr::Div(_, _, _, _) => "/",
+        Expr::Add(_, _, _, _) => "+",
+        Expr::Sub(_, _, _, _) | Expr::Neg(_, _, _) => "-",
+        Expr::Mod(_, _, _, _) => "%",
+        Expr::Pow(_, _, _, _) => "^",
         Expr::Eq(_, _) => "==",
         Expr::NotEq(_, _) => "!=",
-        Expr::Sup(_, _, _) => ">",
-        Expr::SupEq(_, _, _) => ">=",
-        Expr::Inf(_, _, _) => "<",
-        Expr::InfEq(_, _, _) => "<=",
-        Expr::BoolAnd(_, _, _) => "&&",
-        Expr::BoolOr(_, _, _) => "||",
-        other => dev_error(
-            "parser.rs",
-            "symbol_of_expr",
-            format_args!("Tried to get symbol of {other:?}"),
-        ),
+        Expr::Sup(_, _, _, _) => ">",
+        Expr::SupEq(_, _, _, _) => ">=",
+        Expr::Inf(_, _, _, _) => "<",
+        Expr::InfEq(_, _, _, _) => "<=",
+        Expr::BoolAnd(_, _, _, _) => "&&",
+        Expr::BoolOr(_, _, _, _) => "||",
+        _ => unsafe { unreachable_unchecked() },
     }
 }
 
@@ -142,8 +138,8 @@ pub fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
 }
 
 pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) -> Expr {
-    if let Expr::Var(n, _) = target {
-        Expr::VarAssign(n, Box::from(value), expr_span)
+    if let Expr::Var(n, s) = target {
+        Expr::VarAssign(n, Box::from(value), s)
     } else if let Expr::ArrayGetIndex(base, idx, _) = target {
         Expr::ArrayModify(base, idx, Box::from(value), expr_span, value_span)
     } else if let Expr::GetStructField(obj, field, obj_span, field_span) = target {
@@ -164,6 +160,15 @@ pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) 
 pub struct Span {
     pub start: u32,
     pub end: u32,
+}
+
+impl Span {
+    pub const fn extend(self, span: Self) -> Self {
+        Self {
+            start: self.start,
+            end: span.end,
+        }
+    }
 }
 
 impl From<std::range::Range<usize>> for Span {

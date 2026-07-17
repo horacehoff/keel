@@ -7,9 +7,8 @@ use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
+use crate::compiler::error_unknown_function;
 use crate::data::Data;
-use crate::errors::ErrType;
-use crate::errors::throw_compiler_error;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::util::check_args;
@@ -23,7 +22,7 @@ pub fn builtin_functions(
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     args: &[Expr],
-    markers: Span,
+    span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
     let src = ctx.src;
@@ -40,7 +39,7 @@ pub fn builtin_functions(
             None
         }
         "type" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             let infered = args[0].infer_type(v, ctx, state);
             state.registers.push(Data::p_str(
                 infered.format_detailed(state).as_str(),
@@ -49,7 +48,7 @@ pub fn builtin_functions(
             Some((state.registers.len() - 1) as u16)
         }
         "float" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             check_arg_type(
                 v,
                 ctx,
@@ -67,11 +66,11 @@ pub fn builtin_functions(
             output.push(Instr::CallLibFunc(LibFunc::Float, id, output_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
             Some(output_id)
         }
         "int" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             check_arg_type(
                 v,
                 ctx,
@@ -89,11 +88,11 @@ pub fn builtin_functions(
             output.push(Instr::CallLibFunc(LibFunc::Int, id, output_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
             Some(output_id)
         }
         "str" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -103,7 +102,7 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "bool" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -113,11 +112,11 @@ pub fn builtin_functions(
             output.push(Instr::CallLibFunc(LibFunc::Bool, id, output_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
             Some(output_id)
         }
         "input" => {
-            check_args_range(args, 0, 1, name, src, markers);
+            check_args_range(args, 0, 1, name, src, span);
             let id = if args.is_empty() {
                 state
                     .registers
@@ -135,7 +134,7 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "range" => {
-            check_args_range(args, 1, 2, name, src, markers);
+            check_args_range(args, 1, 2, name, src, span);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
             if args.len() != 1 {
                 check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::Int]);
@@ -161,19 +160,19 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "the_answer" => {
-            check_args(args, 0, name, src, markers, state.sources);
+            check_args(args, 0, name, src, span, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TheAnswer, 0, output_id));
             Some(output_id)
         }
         "argv" => {
-            check_args(args, 0, name, src, markers, state.sources);
+            check_args(args, 0, name, src, span, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Argv, 0, output_id));
             Some(output_id)
         }
         "exit" => {
-            check_args_range(args, 0, 1, name, src, markers);
+            check_args_range(args, 0, 1, name, src, span);
             let halt_code = if args.is_empty() {
                 0
             } else {
@@ -186,7 +185,7 @@ pub fn builtin_functions(
             None
         }
         "throw" => {
-            check_args(args, 1, name, src, markers, state.sources);
+            check_args(args, 1, name, src, span, state.sources);
             check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
             let err_reg_id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -194,7 +193,7 @@ pub fn builtin_functions(
             output.push(Instr::ThrowError(err_reg_id));
             state
                 .instr_src
-                .push((*output.last().unwrap(), markers, current_src_file));
+                .push((*output.last().unwrap(), span, current_src_file));
             None
         }
         fn_name => {
@@ -213,11 +212,17 @@ pub fn builtin_functions(
                     state,
                     tgt_id,
                     args,
-                    markers,
+                    span,
                     args_indexes,
                 )
             } else {
-                throw_compiler_error(src, markers, ErrType::UnknownFunction(fn_name));
+                error_unknown_function(
+                    fn_name,
+                    span,
+                    state.namespace.fns.iter().map(|(n, _)| n.as_str()),
+                    src,
+                    state.sources,
+                );
             }
         }
     }

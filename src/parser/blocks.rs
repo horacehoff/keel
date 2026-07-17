@@ -1,5 +1,6 @@
 use super::ParserErr;
 use super::lexer::Token;
+use super::lexer::parse_string;
 use super::parser_expr::parse_expr;
 use super::parser_expr::parse_expr_no_struct;
 use crate::cold_path;
@@ -217,10 +218,7 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
             has_catch = true;
             break;
         } else if let Token::String(s) = next_token {
-            catch_blocks.push((
-                SmolStr::new(crate::util::parse_string(s)),
-                parse_block(parser),
-            ));
+            catch_blocks.push((SmolStr::new(parse_string(s)), parse_block(parser)));
             has_catch = true;
         }
     }

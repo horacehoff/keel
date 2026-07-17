@@ -1,5 +1,6 @@
+use std::hint::unreachable_unchecked;
+
 use crate::data::Data;
-use crate::errors::dev_error;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
 
@@ -78,11 +79,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
                 }
             }
         }
-        other => dev_error(
-            "parser.rs",
-            "move_to_id",
-            format_args!("Tried to move {other:?} to tgt_id={tgt_id}"),
-        ),
+        _ => unsafe { unreachable_unchecked() },
     }
 }
 

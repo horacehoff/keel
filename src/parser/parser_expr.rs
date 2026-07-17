@@ -15,90 +15,107 @@ pub fn parse_expr_with_precedence(
     min_precedence: u8,
     allow_struct: bool,
 ) -> Expr {
-    let start = input.peek_token_start();
+    let lhs_start = input.peek_token_start();
     let mut end = input.peek_token_end();
     let mut lhs = parse_term(input, allow_struct);
     end = input.peek_token_end_opt().unwrap_or(end);
-    lhs = parse_postfix_op(input, lhs, (start, end).into());
+    lhs = parse_postfix_op(input, lhs, (lhs_start, end).into());
+    let mut lhs_end = input.last_token_end as u32;
     while let Some(peek) = input.peek_token_opt() {
         let Some((op, op_precedence)) = check_op(peek, min_precedence) else {
             break;
         };
         input.next_token();
-        let end = input.peek_token_end();
+        let rhs_start = input.peek_token_start();
         let rhs = parse_expr_with_precedence(input, op_precedence, allow_struct);
-        lhs = add_op(input, op, lhs, rhs, (start, end).into());
+        let rhs_end = input.last_token_end as u32;
+        lhs = add_op(
+            input,
+            op,
+            lhs,
+            rhs,
+            (lhs_start, lhs_end).into(),
+            (rhs_start, rhs_end).into(),
+        );
+        lhs_end = rhs_end;
     }
     lhs
 }
 
-pub fn add_op(parser: &Parser<'_>, op: Token, lhs: Expr, rhs: Expr, span: Span) -> Expr {
+pub fn add_op(
+    parser: &Parser<'_>,
+    op: Token,
+    lhs: Expr,
+    rhs: Expr,
+    span_l: Span,
+    span_r: Span,
+) -> Expr {
     match op {
         Token::OpOr => match (lhs, rhs) {
             (Expr::Bool(false), c) | (c, Expr::Bool(false)) => c,
             (Expr::Bool(true), _) | (_, Expr::Bool(true)) => Expr::Bool(true),
-            (lhs, rhs) => Expr::BoolOr(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::BoolOr(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpAnd => match (lhs, rhs) {
             (Expr::Bool(false), _) | (_, Expr::Bool(false)) => Expr::Bool(false),
             (Expr::Bool(true), c) | (c, Expr::Bool(true)) => c,
-            (lhs, rhs) => Expr::BoolAnd(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::BoolAnd(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpEq => Expr::Eq(Box::new(lhs), Box::new(rhs)),
         Token::OpNEq => Expr::NotEq(Box::new(lhs), Box::new(rhs)),
         Token::OpInf => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x < y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x < y),
-            (lhs, rhs) => Expr::Inf(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::Inf(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpInfEq => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x <= y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x <= y),
-            (lhs, rhs) => Expr::InfEq(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::InfEq(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpSup => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x > y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x > y),
-            (lhs, rhs) => Expr::Sup(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::Sup(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpSupEq => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x >= y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x >= y),
-            (lhs, rhs) => Expr::SupEq(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::SupEq(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpAdd => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x + y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x + y),
             (Expr::String(x), Expr::String(y)) => Expr::String(format_args!("{x}{y}").to_smolstr()),
-            (lhs, rhs) => Expr::Add(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::Add(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpSub => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x - y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x - y),
-            (lhs, rhs) => Expr::Sub(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::Sub(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpMul => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x * y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x * y),
-            (lhs, rhs) => Expr::Mul(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::Mul(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpDiv => match (lhs, rhs) {
             (_, Expr::Int(0)) => {
                 cold_path();
-                parser.error(span, ParserErr::DivisionByZero);
+                parser.error(span_l.extend(span_r), ParserErr::DivisionByZero);
             }
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x / y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x / y),
-            (lhs, rhs) => Expr::Div(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::Div(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpMod => match (lhs, rhs) {
             (_, Expr::Int(0) | Expr::Float(0.0)) => {
                 cold_path();
-                parser.error(span, ParserErr::ModuloByZero);
+                parser.error(span_l.extend(span_r), ParserErr::ModuloByZero);
             }
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x % y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x % y),
-            (lhs, rhs) => Expr::Mod(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::Mod(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpPow => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => {
@@ -106,12 +123,12 @@ pub fn add_op(parser: &Parser<'_>, op: Token, lhs: Expr, rhs: Expr, span: Span) 
                     Expr::Int(x.pow(y as u32))
                 } else {
                     cold_path();
-                    parser.error(span, ParserErr::IntegerNegativeExponent);
+                    parser.error(span_l.extend(span_r), ParserErr::IntegerNegativeExponent);
                 }
             }
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x.powf(y)),
             (Expr::Float(x), Expr::Int(y)) => Expr::Float(x.powi(y)),
-            (lhs, rhs) => Expr::Pow(Box::new(lhs), Box::new(rhs), span),
+            (lhs, rhs) => Expr::Pow(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         _ => unsafe { unreachable_unchecked() },
     }

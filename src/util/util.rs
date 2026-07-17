@@ -15,64 +15,6 @@ use smol_strc::SmolStr;
 use std::hint::cold_path;
 use std::rc::Rc;
 
-/// Strips the surrounding quotes & processes escape sequences \n \t \r \\ \" \0
-pub fn parse_string(s: &str) -> SmolStr {
-    let inner = &s[1..s.len() - 1]; // Strip the surrounding quotes
-
-    // Return the stripped string directly if it doesn't contain any escape sequences
-    let Some(first_escape) = memchr::memchr(b'\\', inner.as_bytes()) else {
-        return SmolStr::from(inner);
-    };
-    let mut processed = String::with_capacity(inner.len());
-
-    // Find returns the first occurence, so we know that inner[..first_escape] does not contain any escape sequence
-    processed.push_str(&inner[..first_escape]);
-    let mut to_process = &inner[first_escape..];
-    loop {
-        match memchr::memchr(b'\\', to_process.as_bytes()) {
-            None => {
-                // there are no escape sequences left
-                processed.push_str(to_process);
-                break;
-            }
-            Some(escape_seq_idx) => {
-                processed.push_str(&to_process[..escape_seq_idx]);
-                let after = &to_process[escape_seq_idx + 1..];
-                if after.is_empty() {
-                    processed.push('\\');
-                    break;
-                }
-                let escape_seq = after.as_bytes()[0];
-                if escape_seq == b'n'
-                    || escape_seq == b't'
-                    || escape_seq == b'r'
-                    || escape_seq == b'\\'
-                    || escape_seq == b'"'
-                    || escape_seq == b'0'
-                {
-                    processed.push(match escape_seq {
-                        b'n' => '\n',
-                        b't' => '\t',
-                        b'r' => '\r',
-                        b'\\' => '\\',
-                        b'"' => '"',
-                        b'0' => '\0',
-                        _ => unreachable!(),
-                    });
-                    to_process = &after[1..];
-                } else {
-                    // chars() is used to correctly handle multi-byte characters
-                    let c = after.chars().next().unwrap();
-                    processed.push('\\');
-                    processed.push(c);
-                    to_process = &after[c.len_utf8()..];
-                }
-            }
-        }
-    }
-    SmolStr::from(processed)
-}
-
 pub fn parse_keel_type(
     t: &TypeExpr,
     structs: &[Struct],

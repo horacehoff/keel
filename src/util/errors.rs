@@ -3,7 +3,7 @@ use crate::{compiler::type_system::DataType, instr::Instr};
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use smol_strc::{SmolStr, ToSmolStr};
-use std::fmt::Arguments;
+use std::hint::unreachable_unchecked;
 use std::rc::Rc;
 
 pub const BLUE: &str = "\x1B[94m";
@@ -23,15 +23,6 @@ pub fn green<F: std::fmt::Display>(t: F) -> String {
     format!("{GREEN}{t}{RESET}")
 }
 pub const RESET: &str = "\x1B[0m\x1B[39m";
-
-#[cold]
-#[inline(always)]
-pub fn dev_error(file: &str, function: &str, additional_data: Arguments) -> ! {
-    unreachable!(
-        "\n--------------\n{RED}KEEL COMPILATION ERROR:{RESET}\nFROM FILE: {}\nFROM FUNCTION: {}\nADDITIONAL DATA: {}\n--------------",
-        file, function, additional_data
-    );
-}
 
 pub struct ErrorCtx {
     pub instr_src: Vec<(Instr, Span, u16)>,
@@ -67,12 +58,7 @@ impl From<std::num::IntErrorKind> for ErrType<'_> {
             | std::num::IntErrorKind::InvalidDigit
             | std::num::IntErrorKind::NegOverflow
             | std::num::IntErrorKind::PosOverflow => ErrType::InvalidInt,
-            std::num::IntErrorKind::Zero => dev_error(
-                file!(),
-                "impl From<std::num::IntErrorKind> for ErrType<'_>",
-                format_args!("Encountered std::num::IntErrorKind::Zero"),
-            ),
-            _ => unreachable!(),
+            _ => unsafe { unreachable_unchecked() },
         }
     }
 }
@@ -120,9 +106,6 @@ pub enum ErrType<'a> {
     CArrayReturnTypeNotSupported,
 
     // PARSER ERRORS
-    UnknownVariable(&'a str),
-    UnknownFunction(&'a str),
-    UnknownNamespace(&'a str),
     UnknownType(&'a str),
     InvalidStructFieldCount(&'a str, u16, u16),
     /// StructMissingField(struct, field)
@@ -136,22 +119,14 @@ pub enum ErrType<'a> {
     /// CannotPushTypeToArray(elem_type, array_type)
     CannotPushTypeToArray(&'a DataType, &'a DataType),
     CannotInferType(&'a str),
-    /// IncorrectArgCount(fn_name, expected, received)
-    IncorrectArgCount(&'a str, u16, u16),
     IncorrectArgCountVariable(&'a str, u16, u16, u16),
     /// InvalidType(expected_type, received_type)
     InvalidType(&'a DataType, &'a DataType),
-    /// OpError(l, r, op)
-    OpError(&'a DataType, &'a DataType, &'a str),
-    /// InvalidOp(type, op)
-    InvalidOp(&'a DataType, &'a str),
     InvalidConditionalExpression,
     FunctionAlreadyExists(&'a str),
     CannotReadImportedFile(&'a str),
     /// CircularImport(path)
     CircularImport(&'a str),
-    /// DuplicateFunctionInImport(fn_name, file_path)
-    DuplicateFunctionInImport(&'a str, &'a str),
     IsNotAnIterator(&'a DataType),
     /// InvalidArgType(expected_types, received_type)
     InvalidArgType(&'a [DataType], DataType),
@@ -198,18 +173,6 @@ impl From<ErrType<'_>> for SmolStr {
             }
             ErrType::FsStorageFull => "Storage is full".into(),
             ErrType::FsTimedOut => "This operation timed out".into(),
-            ErrType::UnknownFunction(f) => format_args!(
-                "Unknown function {BLUE}{BOLD}{f}{RESET}"
-            )
-            .to_smolstr(),
-            ErrType::UnknownVariable(v) => format_args!(
-                "Unknown variable {BLUE}{BOLD}{v}{RESET}"
-            )
-            .to_smolstr(),
-            ErrType::UnknownNamespace(n) => format_args!(
-                "Unknown namespace {BLUE}{BOLD}{n}{RESET}"
-            )
-            .to_smolstr(),
             ErrType::UnknownType(t) => format_args!("Unknown type {RED}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::InvalidStructFieldCount(name, expected, received) => format_args!(
                 "Struct {BLUE}{BOLD}{name}{RESET} expects {expected} fields while this has {RED}{BOLD}{received}{RESET} fields").to_smolstr(),
@@ -231,22 +194,14 @@ impl From<ErrType<'_>> for SmolStr {
                 "Cannot infer the type of {BLUE}{BOLD}{t}{RESET}"
             )
             .to_smolstr(),
-            ErrType::IncorrectArgCount(fn_name, expected, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects {expected} argument{} but received {received}", if expected == 1 {""} else {"s"}).to_smolstr(),
             ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
             ErrType::InvalidType(expected, received) => format_args!("Expected type {expected}, found {BLUE}{BOLD}{received}{RESET}").to_smolstr(),
-            ErrType::OpError(l, r, op) => format_args!(
-                "Cannot perform operation {BLUE}{BOLD}{l} {RED}{op}{BLUE} {r}{RESET}").to_smolstr(),
-            ErrType::InvalidOp(t, op) => format_args!(
-                "Operation {RED}{BOLD}{op}{RESET} is not supported for type {BLUE}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::InvalidConditionalExpression => "Conditional expressions must have an else clause".into(),
             ErrType::FunctionAlreadyExists(fn_name) => format_args!(
                 "Function {RED}{BOLD}{fn_name}{RESET} is already defined",
             ).to_smolstr(),
             ErrType::CircularImport(path) => format_args!(
                 "Circular import detected: {RED}{BOLD}{path}{RESET} is already being imported"
-            ).to_smolstr(),
-            ErrType::DuplicateFunctionInImport(fn_name, file_path) => format_args!(
-                "Function {BLUE}{BOLD}{fn_name}{RESET} imported from {RED}{BOLD}{file_path}{RESET} is already defined"
             ).to_smolstr(),
             ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{t}{RESET} is not a collection").to_smolstr(),
             ErrType::InvalidArgType(expected, received) => {
@@ -297,9 +252,6 @@ impl ErrType<'_> {
             ErrType::InvalidBool => "invalid_bool",
             ErrType::IndexOutOfBounds(_, _) => "index_out_of_bounds",
             ErrType::SliceOutOfBounds(_, _, _) => "slice_out_of_bounds",
-            ErrType::UnknownVariable(_) => "unknown_variable",
-            ErrType::UnknownFunction(_) => "unknown_function",
-            ErrType::UnknownNamespace(_) => "unknown_namespace",
             ErrType::UnknownType(_) => "unknown_type",
             ErrType::InvalidStructFieldCount(_, _, _) => "invalid_struct_field_count",
             ErrType::StructMissingField(_, _) => "struct_missing_field",
@@ -309,16 +261,12 @@ impl ErrType<'_> {
             ErrType::InvalidIndexType(_) => "invalid_index_type",
             ErrType::CannotPushTypeToArray(_, _) => "cannot_push_type_to_array",
             ErrType::CannotInferType(_) => "cannot_infer_type",
-            ErrType::IncorrectArgCount(_, _, _)
-            | ErrType::IncorrectArgCountVariable(_, _, _, _) => "incorrect_arg_count",
+            ErrType::IncorrectArgCountVariable(_, _, _, _) => "incorrect_arg_count",
             ErrType::InvalidType(_, _) => "invalid_type",
-            ErrType::OpError(_, _, _) => "op_error",
-            ErrType::InvalidOp(_, _) => "invalid_op",
             ErrType::InvalidConditionalExpression => "invalid_conditional_expression",
             ErrType::FunctionAlreadyExists(_) => "function_already_exists",
             ErrType::CannotReadImportedFile(_) => "cannot_read_imported_file",
             ErrType::CircularImport(_) => "circular_import",
-            ErrType::DuplicateFunctionInImport(_, _) => "duplicate_function_in_import",
             ErrType::IsNotAnIterator(_) => "is_not_an_iterator",
             ErrType::InvalidArgType(_, _) => "invalid_arg_type",
             ErrType::InvalidObjType(_, _) => "invalid_obj_type",
@@ -420,7 +368,7 @@ pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::R
 
 #[cold]
 #[inline(never)]
-fn crash() -> ! {
+pub fn crash() -> ! {
     #[cfg(debug_assertions)]
     panic!();
 

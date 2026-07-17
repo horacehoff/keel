@@ -351,7 +351,7 @@ pub fn execute(
                 i = err_handle.catch_loc as usize;
                 continue;
             }
-            throw_error(err_ctx, instructions[i], $err);
+            throw_error(err_ctx, unsafe {*instructions.get_unchecked(i)}, $err);
         };
         ($err:expr, $label:lifetime) => {
             cold_path();
@@ -365,7 +365,7 @@ pub fn execute(
                 i = err_handle.catch_loc as usize;
                 continue $label;
             }
-            throw_error(err_ctx, instructions[i], $err);
+            throw_error(err_ctx, unsafe {*instructions.get_unchecked(i)}, $err);
         };
     }
 
@@ -447,7 +447,7 @@ pub fn execute(
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            Instr::CallDynamicLibFunc(_, _) => unreachable!(),
+            Instr::CallDynamicLibFunc(_, _) => unsafe { unreachable_unchecked() },
             #[cfg(not(target_arch = "wasm32"))]
             Instr::CallDynamicLibFunc(fn_id, dest) => {
                 let func = unsafe { dyn_libs.get_unchecked(fn_id as usize) };
@@ -456,7 +456,7 @@ pub fn execute(
                 keep_alive.clear();
 
                 for idx in 0..args.len() {
-                    let data = r[args[idx]];
+                    let data = r[unsafe { *args.get_unchecked(idx) }];
                     dyn_lib_args.push({
                         match func.get_nth_arg_type(idx) {
                             DataType::Int => data.as_int() as u64,
@@ -903,7 +903,9 @@ pub fn execute(
             }
             Instr::SetFieldStruct(struct_reg_id, new_elem_reg_id, idx) => {
                 let s = obj_pool.get_mut(r[struct_reg_id].as_struct());
-                s[idx as usize] = r[new_elem_reg_id];
+                unsafe {
+                    *s.get_unchecked_mut(idx as usize) = r[new_elem_reg_id];
+                }
             }
             Instr::GetIndexArray(array_reg_id, index, dest) => {
                 let idx = r[index].as_int();
@@ -941,14 +943,22 @@ pub fn execute(
                     &mut map_live,
                     &mut obj_gc_stack,
                 );
-                if arr_id < (new_array_id as usize) {
-                    let (left, right) = unsafe { obj_pool.split_at_mut(new_array_id as usize) };
-                    right[0]
-                        .extend_from_slice(&left[arr_id][(idx_start as usize)..(idx_end as usize)]);
-                } else {
-                    let (left, right) = unsafe { obj_pool.split_at_mut(arr_id) };
-                    left[new_array_id as usize]
-                        .extend_from_slice(&right[0][(idx_start as usize)..(idx_end as usize)]);
+                unsafe {
+                    if arr_id < (new_array_id as usize) {
+                        let (left, right) = obj_pool.split_at_mut(new_array_id as usize);
+                        right.get_unchecked_mut(0).extend_from_slice(
+                            left.get_unchecked(arr_id)
+                                .get_unchecked((idx_start as usize)..(idx_end as usize)),
+                        );
+                    } else {
+                        let (left, right) = obj_pool.split_at_mut(arr_id);
+                        left.get_unchecked_mut(new_array_id as usize)
+                            .extend_from_slice(
+                                right
+                                    .get_unchecked(0)
+                                    .get_unchecked((idx_start as usize)..(idx_end as usize)),
+                            );
+                    }
                 }
                 r[dest_reg_id] = Data::array(new_array_id);
             }
@@ -1326,7 +1336,7 @@ pub fn execute(
                     let source_array = &obj_pool[source_array_id];
 
                     let mut split_ranges: Vec<(usize, usize)> =
-                        Vec::with_capacity(source_array.len());
+                        Vec::with_capacity(source_array.len() + 1);
 
                     let mut start = 0;
                     for (idx, item) in source_array.iter().enumerate() {
@@ -1351,12 +1361,19 @@ pub fn execute(
                             &mut map_live,
                             &mut obj_gc_stack,
                         ) as usize;
-                        if dest_array_id < source_array_id {
-                            let (left, right) = unsafe { obj_pool.split_at_mut(source_array_id) };
-                            left[dest_array_id].extend_from_slice(&right[0][start..end]);
-                        } else {
-                            let (left, right) = unsafe { obj_pool.split_at_mut(dest_array_id) };
-                            right[0].extend_from_slice(&left[source_array_id][start..end]);
+                        unsafe {
+                            if dest_array_id < source_array_id {
+                                let (left, right) = obj_pool.split_at_mut(source_array_id);
+                                left.get_unchecked_mut(dest_array_id).extend_from_slice(
+                                    right.get_unchecked(0).get_unchecked(start..end),
+                                );
+                            } else {
+                                let (left, right) = obj_pool.split_at_mut(dest_array_id);
+                                right.get_unchecked_mut(0).extend_from_slice(
+                                    left.get_unchecked(source_array_id)
+                                        .get_unchecked(start..end),
+                                );
+                            }
                         }
                         sub_arrays.push(Data::array(dest_array_id as u32));
                     }

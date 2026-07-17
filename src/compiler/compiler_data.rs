@@ -75,11 +75,11 @@ pub struct DynamicLibFn {
 impl DynamicLibFn {
     #[inline(always)]
     pub fn get_return_type(&self) -> &DataType {
-        &self.types[0]
+        unsafe { self.types.get_unchecked(0) }
     }
     #[inline(always)]
     pub fn get_nth_arg_type(&self, idx: usize) -> &DataType {
-        &self.types[1 + idx]
+        unsafe { self.types.get_unchecked(1 + idx) }
     }
 }
 

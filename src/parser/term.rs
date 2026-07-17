@@ -1,5 +1,6 @@
 use super::ParserErr;
 use super::lexer::Token;
+use super::lexer::parse_string;
 use super::parse_expr;
 use super::parser_expr;
 use super::parser_expr::parse_expr_no_struct;
@@ -81,7 +82,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
     match t {
         Token::Int(i) => Expr::Int(i),
         Token::Float(f) => Expr::Float(f),
-        Token::String(s) => Expr::String(crate::util::parse_string(s)),
+        Token::String(s) => Expr::String(parse_string(s)),
         Token::True => Expr::Bool(true),
         Token::False => Expr::Bool(false),
         Token::Null => Expr::Null,
@@ -156,22 +157,30 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
             v
         }
         // - Expr
-        Token::OpSub => match parse_expr_with_precedence(parser, 8, allow_struct) {
-            Expr::Int(i) => Expr::Int(i.wrapping_neg()),
-            Expr::Float(f) => Expr::Float(-f),
-            other => Expr::Neg(
-                Box::new(other),
-                (t_span.start, parser.peek_token_start()).into(),
-            ),
-        },
+        Token::OpSub => {
+            let expr_start = parser.peek_token_start();
+            match parse_expr_with_precedence(parser, 8, allow_struct) {
+                Expr::Int(i) => Expr::Int(i.wrapping_neg()),
+                Expr::Float(f) => Expr::Float(-f),
+                other => Expr::Neg(
+                    Box::new(other),
+                    (t_span.start, parser.peek_token_start()).into(),
+                    (expr_start, parser.peek_token_start()).into(),
+                ),
+            }
+        }
         // ! Expr
-        Token::OpNot => match parse_expr_with_precedence(parser, 8, allow_struct) {
-            Expr::Bool(b) => Expr::Bool(!b),
-            other => Expr::BoolNeg(
-                Box::new(other),
-                (t_span.start, parser.peek_token_start()).into(),
-            ),
-        },
+        Token::OpNot => {
+            let expr_start = parser.peek_token_start();
+            match parse_expr_with_precedence(parser, 8, allow_struct) {
+                Expr::Bool(b) => Expr::Bool(!b),
+                other => Expr::BoolNeg(
+                    Box::new(other),
+                    (t_span.start, parser.peek_token_start()).into(),
+                    (expr_start, parser.peek_token_start()).into(),
+                ),
+            }
+        }
         // Inline condition
         Token::If => {
             let condition = parse_expr_no_struct(parser);

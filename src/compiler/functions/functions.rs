@@ -1,11 +1,12 @@
 use super::expr::Expr;
 use super::expr::Span;
 use super::type_system::DataType;
-use crate::compiler::Namespace;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
+use crate::compiler::error_unknown_function_in_namespace;
+use crate::compiler::walk_namespace;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 use crate::instr::Instr;
@@ -51,18 +52,6 @@ pub fn check_arg_type(
     }
 }
 
-fn walk_namespace_fn(root: &Namespace, path: &[SmolStr], fn_name: &str) -> Option<u16> {
-    let mut current = root;
-    for sub in path {
-        current = current.children.iter().find(|n| n.name == *sub)?;
-    }
-    current
-        .fns
-        .iter()
-        .find(|(n, _)| n.as_str() == fn_name)
-        .map(|(_, id)| *id)
-}
-
 pub fn handle_functions(
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
@@ -72,24 +61,24 @@ pub fn handle_functions(
     // method call data
     args: &[Expr],
     namespace: &[SmolStr],
-    markers: Span,
+    span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
     let src = ctx.src;
     let current_src_file = ctx.current_src_file;
     let len = namespace.len() - 1;
-    let name = namespace[len].as_str();
+    let fn_name = namespace[len].as_str();
     let namespace = &namespace[0..len];
     if namespace.is_empty() {
         builtin_functions(
-            name,
+            fn_name,
             output,
             v,
             ctx,
             state,
             tgt_id,
             args,
-            markers,
+            span,
             args_indexes,
         )
     } else if namespace == ["fs"] {
@@ -97,24 +86,24 @@ pub fn handle_functions(
         wasm_error("WASM does not support the file system library");
 
         fs_lib_functions(
-            name,
+            fn_name,
             output,
             v,
             ctx,
             state,
             tgt_id,
             args,
-            markers,
+            span,
             args_indexes,
         )
     } else if let Some((fn_args, returns_null, dyn_id)) = state
         .dyn_libs
         .iter()
         .find(|l| l.name == namespace[0])
-        .and_then(|lib| lib.fns.iter().find(|x| x.name == name))
+        .and_then(|lib| lib.fns.iter().find(|x| x.name == fn_name))
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
-        check_args(args, fn_args.len(), name, src, markers, state.sources);
+        check_args(args, fn_args.len(), fn_name, src, span, state.sources);
         for (i, a) in fn_args.iter().enumerate() {
             check_arg_type(v, ctx, state, args, args_indexes, i, slice::from_ref(a));
         }
@@ -137,7 +126,7 @@ pub fn handle_functions(
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
         state.instr_src.push((
             Instr::CallDynamicLibFunc(dyn_id, register_id),
-            markers,
+            span,
             current_src_file,
         ));
         if returns_null {
@@ -145,31 +134,29 @@ pub fn handle_functions(
         } else {
             Some(register_id)
         }
-    } else if let Some(fn_id) = walk_namespace_fn(state.namespace, namespace, name) {
+    } else if let Some(fn_id) = walk_namespace(state.namespace, namespace, fn_name, |namespace| {
+        &namespace.fns
+    }) {
         handle_user_function(
-            name,
-            fn_id as usize,
+            fn_name,
+            fn_id,
             output,
             v,
             ctx,
             state,
             tgt_id,
             args,
-            markers,
+            span,
             args_indexes,
         )
     } else {
-        throw_compiler_error(
+        error_unknown_function_in_namespace(
+            fn_name,
+            state.namespace,
+            namespace,
+            span,
             src,
-            markers,
-            ErrType::UnknownNamespace(
-                namespace
-                    .iter()
-                    .map(|x| (*x).to_string())
-                    .collect::<Vec<String>>()
-                    .join("::")
-                    .as_str(),
-            ),
+            state.sources,
         );
     }
 }

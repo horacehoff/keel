@@ -30,7 +30,6 @@ mod instr;
 mod map_gc;
 #[path = "./parser/parser.rs"]
 mod parser;
-#[path = "./repl.rs"]
 mod repl;
 #[path = "./vm/gc/string_gc.rs"]
 mod string_gc;

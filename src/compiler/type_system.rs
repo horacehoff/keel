@@ -6,10 +6,13 @@ use crate::compiler::compiler_data::FnSignature;
 use crate::compiler::compiler_data::Function;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
+use crate::compiler::error_op;
+use crate::compiler::error_unknown_function;
+use crate::compiler::error_unknown_function_in_namespace;
 use crate::compiler::error_unknown_struct;
+use crate::compiler::error_unknown_variable;
 use crate::compiler::find_struct;
 use crate::errors::ErrType;
-use crate::errors::dev_error;
 use crate::errors::throw_compiler_error;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
@@ -242,8 +245,8 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
             }
             Expr::VarDeclare(_, x)
             | Expr::VarAssign(_, x, _)
-            | Expr::Neg(x, _)
-            | Expr::BoolNeg(x, _) => expr_stack.push(x),
+            | Expr::Neg(x, _, _)
+            | Expr::BoolNeg(x, _, _) => expr_stack.push(x),
             Expr::ForLoop(_, _, code, _) => expr_stack.extend(code.iter()),
             Expr::IntForLoop(_, start, end, code, _, _) => {
                 expr_stack.push(start);
@@ -269,20 +272,20 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 expr_stack.extend(catch_code.iter());
             }
             Expr::ArrayGetIndex(x, y, _)
-            | Expr::Mul(x, y, _)
-            | Expr::Div(x, y, _)
-            | Expr::Add(x, y, _)
-            | Expr::Sub(x, y, _)
-            | Expr::Mod(x, y, _)
-            | Expr::Pow(x, y, _)
+            | Expr::Mul(x, y, _, _)
+            | Expr::Div(x, y, _, _)
+            | Expr::Add(x, y, _, _)
+            | Expr::Sub(x, y, _, _)
+            | Expr::Mod(x, y, _, _)
+            | Expr::Pow(x, y, _, _)
             | Expr::Eq(x, y)
             | Expr::NotEq(x, y)
-            | Expr::Sup(x, y, _)
-            | Expr::SupEq(x, y, _)
-            | Expr::Inf(x, y, _)
-            | Expr::InfEq(x, y, _)
-            | Expr::BoolAnd(x, y, _)
-            | Expr::BoolOr(x, y, _) => {
+            | Expr::Sup(x, y, _, _)
+            | Expr::SupEq(x, y, _, _)
+            | Expr::Inf(x, y, _, _)
+            | Expr::InfEq(x, y, _, _)
+            | Expr::BoolAnd(x, y, _, _)
+            | Expr::BoolOr(x, y, _, _) => {
                 expr_stack.push(x);
                 expr_stack.push(y);
             }
@@ -550,11 +553,11 @@ impl Expr {
         state: &mut State<'_>,
     ) -> DataType {
         match self {
-            Self::Var(name, markers) => v
+            Self::Var(name, span) => v
                 .iter()
                 .rfind(|x| &x.name == name)
                 .unwrap_or_else(|| {
-                    throw_compiler_error(ctx.src, *markers, ErrType::UnknownVariable(name));
+                    error_unknown_variable(name, *span, v, ctx.src, state.sources);
                 })
                 .var_type
                 .clone(),
@@ -598,7 +601,7 @@ impl Expr {
                     DataType::Map(Box::from(kv_type))
                 }
             }
-            Self::Add(x, y, markers) => {
+            Self::Add(x, y, span_l, span_r) => {
                 match (x.infer_type(v, ctx, state), y.infer_type(v, ctx, state)) {
                     (DataType::Unknown, t) | (t, DataType::Unknown) => t,
                     (DataType::Float, DataType::Float) => DataType::Float,
@@ -606,15 +609,15 @@ impl Expr {
                     (DataType::String, DataType::String) => DataType::String,
                     (DataType::Array(t1), DataType::Array(t2)) => DataType::Array(t1.or(t2)),
                     (l, r) => {
-                        throw_compiler_error(ctx.src, *markers, ErrType::OpError(&l, &r, "+"))
+                        error_op(&l, &r, "+", *span_l, *span_r, ctx.src, state.sources);
                     }
                 }
             }
-            Self::Mul(x, y, markers)
-            | Self::Div(x, y, markers)
-            | Self::Sub(x, y, markers)
-            | Self::Mod(x, y, markers)
-            | Self::Pow(x, y, markers) => {
+            Self::Mul(x, y, span_l, span_r)
+            | Self::Div(x, y, span_l, span_r)
+            | Self::Sub(x, y, span_l, span_r)
+            | Self::Mod(x, y, span_l, span_r)
+            | Self::Pow(x, y, span_l, span_r) => {
                 match (x.infer_type(v, ctx, state), y.infer_type(v, ctx, state)) {
                     (DataType::Unknown, t) | (t, DataType::Unknown)
                         if matches!(t, DataType::Float | DataType::Int | DataType::Unknown) =>
@@ -623,53 +626,79 @@ impl Expr {
                     }
                     (DataType::Float, DataType::Float) => DataType::Float,
                     (DataType::Int, DataType::Int) => DataType::Int,
-                    (l, r) => throw_compiler_error(
-                        ctx.src,
-                        *markers,
-                        ErrType::OpError(&l, &r, symbol_of_expr(self)),
-                    ),
+                    (l, r) => {
+                        error_op(
+                            &l,
+                            &r,
+                            symbol_of_expr(self),
+                            *span_l,
+                            *span_r,
+                            ctx.src,
+                            state.sources,
+                        );
+                    }
                 }
             }
-            Self::Sup(x, y, markers)
-            | Self::SupEq(x, y, markers)
-            | Self::Inf(x, y, markers)
-            | Self::InfEq(x, y, markers) => {
+            Self::Sup(x, y, span_l, span_r)
+            | Self::SupEq(x, y, span_l, span_r)
+            | Self::Inf(x, y, span_l, span_r)
+            | Self::InfEq(x, y, span_l, span_r) => {
                 match (x.infer_type(v, ctx, state), y.infer_type(v, ctx, state)) {
                     (DataType::Unknown, DataType::Float | DataType::Int)
                     | (DataType::Float | DataType::Int, DataType::Unknown)
                     | (DataType::Float, DataType::Float)
                     | (DataType::Int, DataType::Int) => DataType::Bool,
-                    (l, r) => throw_compiler_error(
+                    (l, r) => error_op(
+                        &l,
+                        &r,
+                        symbol_of_expr(self),
+                        *span_l,
+                        *span_r,
                         ctx.src,
-                        *markers,
-                        ErrType::OpError(&l, &r, symbol_of_expr(self)),
+                        state.sources,
                     ),
                 }
             }
-            Self::BoolAnd(x, y, markers) | Self::BoolOr(x, y, markers) => {
+            Self::BoolAnd(x, y, span_l, span_r) | Self::BoolOr(x, y, span_l, span_r) => {
                 match (x.infer_type(v, ctx, state), y.infer_type(v, ctx, state)) {
                     (DataType::Unknown | DataType::Bool, DataType::Bool)
                     | (DataType::Bool, DataType::Unknown) => DataType::Bool,
                     (l, r) => {
-                        throw_compiler_error(ctx.src, *markers, ErrType::OpError(&l, &r, "||"))
+                        error_op(&l, &r, "&&", *span_l, *span_r, ctx.src, state.sources);
                     }
                 }
             }
-            Self::Neg(e, _) => match e.infer_type(v, ctx, state) {
+            Self::Neg(e, span_l, span_r) => match e.infer_type(v, ctx, state) {
                 DataType::Float => DataType::Float,
                 DataType::Int => DataType::Int,
                 DataType::Unknown => DataType::Unknown,
-                _ => unreachable!(),
+                operand_type => error_op(
+                    &DataType::Null,
+                    &operand_type,
+                    "-",
+                    *span_l,
+                    *span_r,
+                    ctx.src,
+                    state.sources,
+                ),
             },
-            Self::BoolNeg(e, _) => match e.infer_type(v, ctx, state) {
+            Self::BoolNeg(e, span_l, span_r) => match e.infer_type(v, ctx, state) {
                 DataType::Bool => DataType::Bool,
-                _ => unreachable!(),
+                operand_type => error_op(
+                    &DataType::Null,
+                    &operand_type,
+                    "!",
+                    *span_l,
+                    *span_r,
+                    ctx.src,
+                    state.sources,
+                ),
             },
             Self::ArrayGetIndex(array, _, _) => match array.infer_type(v, ctx, state) {
                 DataType::Array(array_type) => array_type.map_or(DataType::Null, |t| *t),
                 DataType::String => DataType::String,
                 DataType::Unknown => DataType::Unknown,
-                _ => unreachable!(),
+                _ => unsafe { unreachable_unchecked() },
             },
             Self::GetStructField(s, field, struct_span, field_span) => {
                 let s = s.infer_type(v, ctx, state);
@@ -702,9 +731,9 @@ impl Expr {
                 DataType::Array(array_type) => DataType::Array(array_type),
                 DataType::String => DataType::String,
                 DataType::Unknown => DataType::Unknown,
-                _ => unreachable!(),
+                _ => unsafe { unreachable_unchecked() },
             },
-            Self::FunctionCall(args, namespace, markers, _) => {
+            Self::FunctionCall(args, namespace, span, _) => {
                 match namespace.last().unwrap().as_str() {
                     "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
                     "type" | "str" | "input" | "read" => DataType::String,
@@ -734,11 +763,24 @@ impl Expr {
                             .iter()
                             .rposition(|func| func.name == function_name)
                             .unwrap_or_else(|| {
-                                throw_compiler_error(
-                                    ctx.src,
-                                    *markers,
-                                    ErrType::UnknownFunction(function_name),
-                                );
+                                if namespace.len() == 1 {
+                                    error_unknown_function(
+                                        function_name,
+                                        *span,
+                                        state.namespace.fns.iter().map(|f| f.0.as_str()),
+                                        ctx.src,
+                                        state.sources,
+                                    );
+                                } else {
+                                    error_unknown_function_in_namespace(
+                                        function_name,
+                                        state.namespace,
+                                        &namespace[..namespace.len() - 1],
+                                        *span,
+                                        ctx.src,
+                                        state.sources,
+                                    );
+                                }
                             });
 
                         let func = &state.fns[fn_id];
@@ -831,7 +873,7 @@ impl Expr {
                         } else if let DataType::Array(array_type) = obj_type {
                             DataType::Array(array_type)
                         } else {
-                            unreachable!()
+                            unsafe { unreachable_unchecked() }
                         }
                     }
                     "push" | "sort" | "remove" | "insert" => DataType::Null,
@@ -843,7 +885,7 @@ impl Expr {
                         } else if obj_type == DataType::Int {
                             DataType::Int
                         } else {
-                            unreachable!()
+                            unsafe { unreachable_unchecked() }
                         }
                     }
                     "split" => DataType::Array(Some(Box::from(DataType::String))),
@@ -852,7 +894,7 @@ impl Expr {
                         if let DataType::Array(array_type) = obj_type {
                             DataType::Array(Some(Box::from(DataType::Array(array_type))))
                         } else {
-                            unreachable!()
+                            unsafe { unreachable_unchecked() }
                         }
                     }
                     "get" => {
@@ -860,10 +902,10 @@ impl Expr {
                         if let DataType::Map(m) = obj_type {
                             m.1.unwrap_or(DataType::Unknown)
                         } else {
-                            unreachable!()
+                            unsafe { unreachable_unchecked() }
                         }
                     }
-                    _ => unreachable!(),
+                    _ => unsafe { unreachable_unchecked() },
                 }
             }
             Self::InlineCondition(_, code, _) => {
@@ -948,18 +990,10 @@ impl DataType {
             } else if !elems.is_empty() {
                 Self::Unknown
             } else {
-                dev_error(
-                    "type_inference.rs",
-                    "check_poly",
-                    format_args!("DataType::Poly is empty"),
-                )
+                unsafe { unreachable_unchecked() }
             }
         } else {
-            dev_error(
-                "type_inference.rs",
-                "check_poly",
-                format_args!("Didn't receive DataType::Poly"),
-            )
+            unsafe { unreachable_unchecked() }
         }
     }
 }
@@ -991,6 +1025,6 @@ pub fn datatype_to_c_type(x: &DataType) -> Type {
         DataType::Float => libffi::middle::Type::f64(),
         DataType::String | DataType::Array(_) => libffi::middle::Type::pointer(),
         DataType::Null => libffi::middle::Type::void(),
-        _ => unreachable!(),
+        _ => unsafe { unreachable_unchecked() },
     }
 }

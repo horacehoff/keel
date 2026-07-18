@@ -1,5 +1,5 @@
+use crate::compiler::compiler_data::InstrSrc;
 use crate::compiler::compiler_data::Source;
-// use crate::compiler_data::*;
 use crate::data::NULL;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
@@ -1009,8 +1009,8 @@ fn compile_array_indexing(
     } else {
         Instr::GetIndexArray(id, index_id, dest_reg_id)
     };
-    state.instr_src.push((to_push, span, ctx.current_src_file));
     output.push(to_push);
+    state.add_to_src(ctx, output, span);
     dest_reg_id
 }
 
@@ -1058,8 +1058,8 @@ fn compile_array_slice(
     } else {
         Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
     };
-    state.instr_src.push((to_push, span, ctx.current_src_file));
     output.push(to_push);
+    state.add_to_src(ctx, output, span);
     dest_reg_id
 }
 
@@ -1280,11 +1280,7 @@ fn compile_div_op(
         output,
     );
     if matches!(output.last(), Some(Instr::DivInt(..))) {
-        state.instr_src.push((
-            *output.last().unwrap(),
-            span_l.extend(span_r),
-            ctx.current_src_file,
-        ));
+        state.add_to_src(ctx, output, span_l.extend(span_r));
     }
     id
 }
@@ -1436,11 +1432,7 @@ fn compile_mod_op(
         output,
     );
     if matches!(output.last(), Some(Instr::ModInt(..))) {
-        state.instr_src.push((
-            *output.last().unwrap(),
-            span_l.extend(span_r),
-            ctx.current_src_file,
-        ));
+        state.add_to_src(ctx, output, span_l.extend(span_r));
     }
     id
 }
@@ -1705,8 +1697,8 @@ fn compile_array_index_assignment(
     array: &Expr,
     index: &Expr,
     value: &Expr,
-    index_markers: Span,
-    elem_markers: Span,
+    index_span: Span,
+    elem_span: Span,
     v: &mut Vec<Variable>,
     ctx: Ctx<'_>,
     state: &mut State<'_>,
@@ -1714,7 +1706,7 @@ fn compile_array_index_assignment(
 ) {
     let array_type = array.infer_type(v, ctx, state);
     if !array_type.is_indexable() {
-        throw_compiler_error(ctx.src, index_markers, ErrType::NotIndexable(&array_type));
+        throw_compiler_error(ctx.src, index_span, ErrType::NotIndexable(&array_type));
     }
     // Get the id of the source array/string (may be a nested GetIndex)
     let id = array
@@ -1742,7 +1734,7 @@ fn compile_array_index_assignment(
     {
         throw_compiler_error(
             ctx.src,
-            elem_markers,
+            elem_span,
             ErrType::CannotPushTypeToArray(&elem_type, &array_type),
         );
     }
@@ -1752,10 +1744,8 @@ fn compile_array_index_assignment(
     } else {
         Instr::SetElementObj(id, elem_id, final_id)
     };
-    state
-        .instr_src
-        .push((to_push, index_markers, ctx.current_src_file));
     output.push(to_push);
+    state.add_to_src(ctx, output, index_span);
     state.free_reg(id, v);
 }
 
@@ -2645,7 +2635,7 @@ fn compile_return(
         let id = x
             .compile(v, ctx, state, output, None, false, true)
             .unwrap_id();
-        if ctx.is_parsing_recursive {
+        if ctx.is_compiling_recursive {
             output.push(Instr::RecursiveReturn(id));
         } else {
             output.push(Instr::Return(id));
@@ -3619,7 +3609,7 @@ pub fn compile(
     Vec<Instr>,
     Vec<Data>,
     Pools,
-    Vec<(Instr, Span, u16)>,
+    Vec<InstrSrc>,
     Vec<Vec<u16>>,
     Vec<DynamicLibFn>,
     usize,
@@ -3649,7 +3639,7 @@ pub fn compile(
         maps: Pool::with_capacity(2),
         strings: Pool::with_capacity(10),
     };
-    let mut instr_src: Vec<(Instr, Span, u16)> = Vec::new();
+    let mut instr_src: Vec<InstrSrc> = Vec::new();
     let mut fn_registers: Vec<Vec<u16>> = Vec::new();
     let mut functions: Vec<Function> = Vec::new();
     let mut structs: Vec<Struct> = Vec::new();
@@ -3705,7 +3695,7 @@ pub fn compile(
             filename,
             contents: &contents,
         },
-        is_parsing_recursive: false,
+        is_compiling_recursive: false,
         current_src_file: 0,
         single_run: true,
         offset: 0,

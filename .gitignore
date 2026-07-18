@@ -6,3 +6,5 @@ docs/benchmarks.py
 /lib_testing
 /testing
 *.dylib
+.DS_Store
+/.cargo

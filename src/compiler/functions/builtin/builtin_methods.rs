@@ -30,7 +30,6 @@ pub fn builtin_methods(
     args_indexes: &[Span],
 ) -> Option<u16> {
     let src = ctx.src;
-    let current_src_file = ctx.current_src_file;
 
     macro_rules! add_args {
         () => {
@@ -185,9 +184,7 @@ pub fn builtin_methods(
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Find, id, output_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), fn_span, current_src_file));
+            state.add_to_src(ctx, output, fn_span);
             Some(output_id)
         }
         "is_float" => {
@@ -361,9 +358,7 @@ pub fn builtin_methods(
                 .unwrap_id();
             state.free_reg(arg_id, v);
             output.push(Instr::Remove(id, arg_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), fn_span, current_src_file));
+            state.add_to_src(ctx, output, fn_span);
             None
         }
         "sort" => {
@@ -385,9 +380,7 @@ pub fn builtin_methods(
                 .unwrap_id();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::MapGet(id, arg_id, output_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), args_indexes[0], current_src_file));
+            state.add_to_src(ctx, output, args_indexes[0]);
             Some(output_id)
         }
         "insert" => {

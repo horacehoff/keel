@@ -3,10 +3,6 @@ icon: lucide/omega
 ---
 # Math library
 
-!!! note
-
-    This library will be included (and installed) with Keel in the 0.3.0 release that's coming soon.
-
 !!! warning
 
     This is highly subject to change.

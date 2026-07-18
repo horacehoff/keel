@@ -1,4 +1,4 @@
-use crate::compiler::compiler_data::Source;
+use crate::compiler::compiler_data::{InstrSrc, Source};
 use crate::compiler::expr::Span;
 use crate::{compiler::type_system::DataType, instr::Instr};
 use ariadne::FnCache;
@@ -26,7 +26,7 @@ pub fn green<F: std::fmt::Display>(t: F) -> String {
 pub const RESET: &str = "\x1B[0m\x1B[39m";
 
 pub struct ErrorCtx {
-    pub instr_src: Vec<(Instr, Span, u16)>,
+    pub instr_src: Vec<InstrSrc>,
     pub sources: Vec<(SmolStr, Rc<String>)>,
 }
 
@@ -286,12 +286,20 @@ impl ErrType<'_> {
 #[cold]
 #[inline(never)]
 pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
-    let (_, Span { start, end }, file_idx) = ctx
+    let InstrSrc {
+        instr: _,
+        span: Span { start, end },
+        file_id,
+    } = ctx
         .instr_src
         .iter()
-        .find(|(x, _, _)| x == &instr)
-        .unwrap_or(&(Instr::Halt(1), Span { start: 0, end: 0 }, 0));
-    let src = &ctx.sources[*file_idx as usize];
+        .find(|s| s.instr == instr)
+        .unwrap_or(&InstrSrc {
+            instr: Instr::Halt(1),
+            span: Span { start: 0, end: 0 },
+            file_id: 0,
+        });
+    let src = &ctx.sources[*file_id as usize];
     let err_message: SmolStr = t.into();
     eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(
@@ -313,7 +321,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (src.0.as_str(), Source::from(src.1.as_str())),
+            (src.0.as_str(), ariadne::Source::from(src.1.as_str())),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
@@ -359,7 +367,9 @@ pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::R
                 .with_sources(
                     sources
                         .iter()
-                        .map(|(name, contents)| (name.as_str(), Source::from(contents.as_str())))
+                        .map(|(name, contents)| {
+                            (name.as_str(), ariadne::Source::from(contents.as_str()))
+                        })
                         .collect(),
                 ),
             crate::captured_output::CapturedOutputWriter,
@@ -409,7 +419,7 @@ pub fn throw_compiler_error(src: Source, Span { start, end }: Span, t: ErrType) 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (src.filename, Source::from(src.1)),
+            (src.filename, ariadne::Source::from(src.contents)),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();

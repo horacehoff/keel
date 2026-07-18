@@ -9,7 +9,6 @@ pub enum Expr {
     Bool(bool),
     Null,
     String(SmolStr),
-    /// Var(name, start, end)
     Var(SmolStr, Span),
     /// Array(contents, [entire_array, elem_spans...])
     Array(Box<[Self]>, Box<[Span]>),
@@ -163,6 +162,8 @@ pub struct Span {
 }
 
 impl Span {
+    #[inline(always)]
+    #[must_use]
     pub const fn extend(self, span: Self) -> Self {
         Self {
             start: self.start,

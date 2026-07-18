@@ -20,11 +20,6 @@ fn main() {print(mylib::my_func(42));}
 
 ## Importing libraries
 
-!!! note
-
-    This feature will release with Keel 0.3.0, coming soon.
-
-
 Keel libraries are ordinary Keel files.
 The `libs/` folder located next to the Keel executable (currently in `/Library/Keel/` on macOS and `/usr/local/lib/keel/` on Linux) is checked by the `import` keyword if the file isn't found locally, making global Keel libraries possible. For example, the `math`, `time`, `random` libraries are located in `libs/std/`. As such, by placing `.kl` files in the `libs/` folder, you can make libraries available globally.
 ```rs

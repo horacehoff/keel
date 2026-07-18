@@ -77,12 +77,18 @@ if [ ! -f "$TMP/keel" ]; then
     printf "[ERROR] Archive downloaded but binary not found inside. Please file a bug report at https://github.com/horacehoff/keel/issues\n"
 fi
 
-if install "$TMP/keel" "$INSTALL_DIR/keel" 2>/dev/null; then
+if cp -R "$TMP/." "$INSTALL_DIR" 2>/dev/null; then
     :
 elif command -v sudo >/dev/null 2>&1; then
-    sudo install -m755 "$TMP/keel" "$INSTALL_DIR/keel"
+    sudo cp -R "$TMP/." "$INSTALL_DIR"
 else
     printf "[ERROR] Cannot write to $INSTALL_DIR and sudo is not available. Re-run as root or install sudo.\n"
+fi
+
+if chmod 755 "$INSTALL_DIR/keel" 2>/dev/null; then
+    :
+elif command -v sudo >/dev/null 2>&1; then
+    sudo chmod 755 "$INSTALL_DIR/keel"
 fi
 
 if ln -sf "$INSTALL_DIR/keel" /usr/local/bin/keel 2>/dev/null; then

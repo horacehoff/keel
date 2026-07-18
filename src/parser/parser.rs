@@ -259,7 +259,10 @@ impl<'a> Parser<'a> {
         #[cfg(any(target_arch = "wasm32", feature = "embed"))]
         report
             .write(
-                (src.filename, ariadne::Source::from(src.contents)),
+                (
+                    self.ctx.src.filename,
+                    ariadne::Source::from(self.ctx.src.contents),
+                ),
                 crate::captured_output::CapturedOutputWriter,
             )
             .unwrap();

@@ -65,7 +65,6 @@ pub fn handle_functions(
     args_indexes: &[Span],
 ) -> Option<u16> {
     let src = ctx.src;
-    let current_src_file = ctx.current_src_file;
     let len = namespace.len() - 1;
     let fn_name = namespace[len].as_str();
     let namespace = &namespace[0..len];
@@ -124,11 +123,7 @@ pub fn handle_functions(
             state.alloc_reg_tgt(tgt_id)
         };
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
-        state.instr_src.push((
-            Instr::CallDynamicLibFunc(dyn_id, register_id),
-            span,
-            current_src_file,
-        ));
+        state.add_to_src(ctx, output, span);
         if returns_null {
             None
         } else {

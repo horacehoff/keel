@@ -24,7 +24,6 @@ pub fn fs_lib_functions(
     args_indexes: &[Span],
 ) -> Option<u16> {
     let src = ctx.src;
-    let current_src_file = ctx.current_src_file;
     match name {
         "read" => {
             check_args(args, 1, name, src, span, state.sources);
@@ -35,9 +34,7 @@ pub fn fs_lib_functions(
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::FsRead, id, output_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
             return Some(output_id);
         }
         "exists" => {
@@ -49,9 +46,7 @@ pub fn fs_lib_functions(
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::FsExists, id, output_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
             return Some(output_id);
         }
         "write" => {
@@ -71,9 +66,7 @@ pub fn fs_lib_functions(
                 filepath,
                 contents,
             ));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
         }
         "append" => {
             check_args(args, 2, name, src, span, state.sources);
@@ -92,9 +85,7 @@ pub fn fs_lib_functions(
                 filepath,
                 contents,
             ));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
         }
         "delete" => {
             check_args(args, 1, name, src, span, state.sources);
@@ -104,9 +95,7 @@ pub fn fs_lib_functions(
                 .unwrap_id();
             state.free_reg(path, v);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, 0));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
         }
         "delete_dir" => {
             check_args(args, 1, name, src, span, state.sources);
@@ -116,9 +105,7 @@ pub fn fs_lib_functions(
                 .unwrap_id();
             state.free_reg(path, v);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, 0));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
         }
         fn_name => {
             error_unknown_function(fn_name, span, std::iter::empty(), src, state.sources);

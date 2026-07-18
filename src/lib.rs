@@ -53,7 +53,7 @@ pub fn run(code: String) {
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let (
         instructions,
-        mut registers,
+        registers,
         mut arrays,
         instr_src,
         fn_registers,
@@ -65,7 +65,7 @@ pub fn run(code: String) {
     ) = compile(code, "playground.kl", false);
     vm::execute(
         &instructions,
-        &mut registers,
+        &mut RegisterFile(registers),
         &mut arrays,
         &ErrorCtx { instr_src, sources },
         &fn_registers,
@@ -87,7 +87,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
     let _ = catch_unwind(|| {
         let (
             instructions,
-            mut registers,
+            registers,
             mut arrays,
             instr_src,
             fn_registers,

@@ -106,10 +106,15 @@ pub struct Source<'a> {
 #[derive(Clone, Copy)]
 pub struct Ctx<'a> {
     pub block_id: u16,
+    /// Source currently being compiled
     pub src: Source<'a>,
-    pub is_parsing_recursive: bool,
+    /// Whether the code being compiled is within a recursive function
+    pub is_compiling_recursive: bool,
+    /// Whether the code being compiled is guaranteed to run at most once
     pub single_run: bool,
+    /// Identifier of the current source in State's `sources`
     pub current_src_file: u16,
+    /// Instruction offset that's only used when compiling a function
     pub offset: u16,
 }
 
@@ -134,14 +139,20 @@ impl Ctx<'_> {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct InstrSrc {
+    pub instr: Instr,
+    pub span: Span,
+    pub file_id: u16,
+}
+
 pub struct State<'a> {
     pub registers: &'a mut Vec<Data>,
     pub fns: &'a mut Vec<Function>,
     pub structs: &'a mut Vec<Struct>,
     pub struct_fields: &'a mut Vec<(SmolStr, Vec<SmolStr>)>,
     pub pools: &'a mut Pools,
-    /// Vec<(instruction, markers, file_id)>
-    pub instr_src: &'a mut Vec<(Instr, Span, u16)>,
+    pub instr_src: &'a mut Vec<InstrSrc>,
     pub fn_registers: &'a mut Vec<Vec<u16>>,
     pub dyn_libs: &'a mut Vec<Dynamiclib>,
     pub allocated_arg_count: &'a mut usize,
@@ -154,6 +165,12 @@ pub struct State<'a> {
 }
 
 impl State<'_> {
+    /// Marks a register as free, allowing it to later be reused by `alloc_reg`.
+    /// The register is marked as free iff:
+    /// - the register isn't tied to any variable
+    /// - the register isn't a constant register
+    /// - the register isn't reserved in `reserved_registers`
+    /// - the register isn't already marked as free
     pub fn free_reg(&mut self, id: u16, v: &[Variable]) {
         if !v.iter().any(|var| var.register_id == id)
             && !self.const_registers.values().any(|&reg| reg == id)
@@ -163,23 +180,17 @@ impl State<'_> {
             self.free_registers.push(id);
         }
     }
+    /// Allocates a register. It `free_registers` isn't empty, it will reuse the latest one. Else, it will allocate a new one.
     pub fn alloc_reg(&mut self) -> u16 {
-        if self.reserved_registers.is_empty() {
-            self.free_registers.pop().unwrap_or_else(|| {
-                self.registers.push(NULL);
-                (self.registers.len() - 1) as u16
-            })
-        } else if let Some(pos) = self
-            .free_registers
-            .iter()
-            .rposition(|reg| !self.reserved_registers.contains(reg))
-        {
-            self.free_registers.swap_remove(pos)
+        if let Some(reg) = self.free_registers.pop() {
+            reg
         } else {
             self.registers.push(NULL);
             (self.registers.len() - 1) as u16
         }
     }
+    /// Allocates a register, reusing `tgt_id` if it holds some register id.
+    /// If `tgt_id == None`, it calls `alloc_reg()`.
     #[inline(always)]
     pub fn alloc_reg_tgt(&mut self, tgt_id: Option<u16>) -> u16 {
         if let Some(id) = tgt_id {
@@ -188,7 +199,7 @@ impl State<'_> {
             self.alloc_reg()
         }
     }
-    /// Frees registers that are written by instructions in scope_instrs & are not held by a variable & and are not in const_registers.
+    /// Frees registers that are written by instructions in scope_instrs.
     pub fn free_scope_registers(
         &mut self,
         regs_before: u16,
@@ -196,7 +207,7 @@ impl State<'_> {
         v: &[Variable],
     ) {
         for id in get_tgt_ids(scope_instrs) {
-            if id >= regs_before && !self.reserved_registers.contains(&id) {
+            if id >= regs_before {
                 self.free_reg(id, v);
             }
         }
@@ -214,16 +225,24 @@ impl State<'_> {
         for instr in scope_instrs {
             if let Instr::CloneArray(template_reg, _, _) = instr
                 && *template_reg >= regs_before
-                && !self.reserved_registers.contains(template_reg)
             {
                 self.free_reg(*template_reg, v);
             } else if let Instr::CloneStruct(template_reg, _) = instr
                 && *template_reg >= regs_before
-                && !self.reserved_registers.contains(template_reg)
             {
                 self.free_reg(*template_reg, v);
             }
         }
+    }
+    /// Associates the last instruction in `output` with `span` and adds the `InstrSrc` to `instr_src`.
+    /// This allows runtime errors to be traced back to `span` in the source code.
+    #[inline(always)]
+    pub fn add_to_src(&mut self, ctx: Ctx, output: &[Instr], span: Span) {
+        self.instr_src.push(InstrSrc {
+            instr: unsafe { *output.last().unwrap_unchecked() },
+            span,
+            file_id: ctx.current_src_file,
+        });
     }
 }
 

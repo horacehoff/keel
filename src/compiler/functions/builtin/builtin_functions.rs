@@ -26,7 +26,6 @@ pub fn builtin_functions(
     args_indexes: &[Span],
 ) -> Option<u16> {
     let src = ctx.src;
-    let current_src_file = ctx.current_src_file;
     match name {
         "print" => {
             for arg in args {
@@ -64,9 +63,7 @@ pub fn builtin_functions(
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Float, id, output_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
             Some(output_id)
         }
         "int" => {
@@ -86,9 +83,7 @@ pub fn builtin_functions(
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Int, id, output_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
             Some(output_id)
         }
         "str" => {
@@ -110,9 +105,7 @@ pub fn builtin_functions(
             state.free_reg(id, v);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Bool, id, output_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
             Some(output_id)
         }
         "input" => {
@@ -191,9 +184,7 @@ pub fn builtin_functions(
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
             output.push(Instr::ThrowError(err_reg_id));
-            state
-                .instr_src
-                .push((*output.last().unwrap(), span, current_src_file));
+            state.add_to_src(ctx, output, span);
             None
         }
         fn_name => {

@@ -46,7 +46,7 @@ pub enum TypeExpr {
 impl TypeExpr {
     pub fn to_datatype(&self, structs: &[Struct], span: Span, src: Source) -> DataType {
         match self {
-            TypeExpr::Identifier(s) => match s.as_str() {
+            Self::Identifier(s) => match s.as_str() {
                 "int" => DataType::Int,
                 "float" => DataType::Float,
                 "bool" => DataType::Bool,
@@ -61,14 +61,14 @@ impl TypeExpr {
                     }
                 }
             },
-            TypeExpr::Array(inner_t) => {
+            Self::Array(inner_t) => {
                 DataType::Array(Some(Box::new(inner_t.to_datatype(structs, span, src))))
             }
-            TypeExpr::Map(k_t, v_t) => DataType::Map(Box::from((
+            Self::Map(k_t, v_t) => DataType::Map(Box::from((
                 Some(k_t.to_datatype(structs, span, src)),
                 Some(v_t.to_datatype(structs, span, src)),
             ))),
-            TypeExpr::Union(poly) => DataType::Poly(
+            Self::Union(poly) => DataType::Poly(
                 poly.iter()
                     .map(|t| t.to_datatype(structs, span, src))
                     .collect(),

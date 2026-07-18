@@ -28,7 +28,7 @@ pub fn handle_user_function(
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     args: &[Expr],
-    markers: Span,
+    span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
     // Lazily resolve mutual recursion the first time this function is compiled
@@ -52,7 +52,7 @@ pub fn handle_user_function(
         args_len,
         fn_name,
         ctx.src,
-        markers,
+        span,
         (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
         state,
         args_indexes,
@@ -101,11 +101,7 @@ pub fn handle_user_function(
             state.alloc_reg_tgt(tgt_id)
         };
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
-        state.instr_src.push((
-            Instr::CallDynamicLibFunc(dyn_id, register_id),
-            markers,
-            ctx.current_src_file,
-        ));
+        state.add_to_src(ctx, output, span);
         return Some(register_id);
     }
 
@@ -322,7 +318,7 @@ fn compile_function(
         fn_code,
         &mut v_temp,
         Ctx {
-            is_parsing_recursive: is_recursive,
+            is_compiling_recursive: is_recursive,
             src: fn_src,
             current_src_file: fn_src_file,
             single_run: false,

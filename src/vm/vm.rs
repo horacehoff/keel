@@ -447,7 +447,7 @@ pub fn execute(
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            Instr::CallDynamicLibFunc(_, _) => unsafe { unreachable_unchecked() },
+            Instr::CallDynamicLibFunc(_, _) => unsafe { std::hint::unreachable_unchecked() },
             #[cfg(not(target_arch = "wasm32"))]
             Instr::CallDynamicLibFunc(fn_id, dest) => {
                 let func = unsafe { dyn_libs.get_unchecked(fn_id as usize) };

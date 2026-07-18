@@ -101,6 +101,27 @@ jobs:
           target/${{ matrix.target }}/release/${{ matrix.bin }} pgo/pgo-dynlib.kl
           target/${{ matrix.target }}/release/${{ matrix.bin }} pgo/pgo-import.kl
 
+      - name: Build stdlib dylibs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std_src/math/math.dylib libs/std_src/math/math.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std_src/time/time.dylib libs/std_src/time/time.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std_src/random/random.dylib libs/std_src/random/random.c libs/std_src/random/pcg_basic.c
+
+      - name: Build stdlib dylibs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std_src/math/math.so libs/std_src/math/math.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std_src/time/time.so libs/std_src/time/time.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std_src/random/random.so libs/std_src/random/random.c libs/std_src/random/pcg_basic.c
+
+      - name: Build stdlib dylibs (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/math/math.dll libs/std_src/math/math.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/time/time.dll libs/std_src/time/time.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/random/random.dll libs/std_src/random/random.c libs/std_src/random/pcg_basic.c
+
       - name: Build final binary
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
@@ -108,11 +129,22 @@ jobs:
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
-        run: tar -czf ${{ matrix.artifact }}.tar.gz -C target/${{ matrix.target }}/release keel
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/keel dist/
+          cp -R libs dist/
+          cp LICENSE THIRD-PARTY-LICENSE dist/
+          tar -czf ${{ matrix.artifact }}.tar.gz -C dist .
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path "target/${{ matrix.target }}/release/keel.exe" -DestinationPath "${{ matrix.artifact }}.zip"
+        run: |
+          New-Item -ItemType "Directory" -Force -Path "dist"
+          Copy-Item "target/${{ matrix.target }}/release/keel.exe" "dist/"
+          Copy-Item -Path "libs" -Destination "dist/" -Recurse
+          Copy-Item "LICENSE" "dist/"
+          Copy-Item "THIRD-PARTY-LICENSE" "dist/"
+          Compress-Archive -Path "dist/*" -DestinationPath "${{ matrix.artifact }}.zip"
 
       - name: Build final binary (LIB)
         env:
@@ -121,11 +153,20 @@ jobs:
 
       - name: Package (Unix) (LIB)
         if: runner.os != 'Windows'
-        run: tar -czf ${{ matrix.embed_artifact }}.tar.gz -C target/${{ matrix.target }}/embed ${{ matrix.lib }}
+        run: |
+          mkdir -p dist-lib
+          cp target/${{ matrix.target }}/embed/${{ matrix.lib }} dist-lib/
+          cp LICENSE THIRD-PARTY-LICENSE dist-lib/
+          tar -czf ${{ matrix.embed_artifact }}.tar.gz -C dist-lib .
 
       - name: Package (Windows) (LIB)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path "target/${{ matrix.target }}/embed/${{ matrix.lib }}" -DestinationPath "${{ matrix.embed_artifact }}.zip"
+        run: |
+          New-Item -ItemType "Directory" -Force -Path "dist-lib"
+          Copy-Item "target/${{ matrix.target }}/embed/${{ matrix.lib }}" "dist-lib/"
+          Copy-Item "LICENSE" "dist-lib/"
+          Copy-Item "THIRD-PARTY-LICENSE" "dist-lib/"
+          Compress-Archive -Path "dist-lib/*" -DestinationPath "${{ matrix.embed_artifact }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

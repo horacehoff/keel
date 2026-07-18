@@ -118,9 +118,9 @@ jobs:
       - name: Build stdlib dylibs (Windows)
         if: runner.os == 'Windows'
         run: |
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/math/math.dll libs/std_src/math/math.c
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/time/time.dll libs/std_src/time/time.c
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/random/random.dll libs/std_src/random/random.c libs/std_src/random/pcg_basic.c
+          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/math/math.dll libs/std_src/math/math.c
+          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/time/time.dll libs/std_src/time/time.c
+          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/random/random.dll libs/std_src/random/random.c libs/std_src/random/pcg_basic.c
 
       - name: Build final binary
         env:

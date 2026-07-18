@@ -4,7 +4,9 @@ use super::expr::symbol_of_expr;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::FnSignature;
 use crate::compiler::compiler_data::Function;
+use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
+use crate::compiler::compiler_data::Struct;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::error_op;
 use crate::compiler::error_unknown_function;
@@ -31,6 +33,49 @@ use libffi::middle::Type;
 thread_local! {
     static RETURN_TYPE_INFERRING: RefCell<FxHashSet<usize>> =
         RefCell::new(FxHashSet::default());
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum TypeExpr {
+    Identifier(SmolStr),
+    Array(Box<Self>),
+    Map(Box<Self>, Box<Self>),
+    Union(Box<[Self]>),
+}
+
+impl TypeExpr {
+    pub fn to_datatype(&self, structs: &[Struct], span: Span, src: Source) -> DataType {
+        match self {
+            TypeExpr::Identifier(s) => match s.as_str() {
+                "int" => DataType::Int,
+                "float" => DataType::Float,
+                "bool" => DataType::Bool,
+                "string" => DataType::String,
+                "null" => DataType::Null,
+                other => {
+                    if let Some(id) = structs.iter().rposition(|st| st.name == other) {
+                        DataType::Struct(id as u16)
+                    } else {
+                        cold_path();
+                        throw_compiler_error(src, span, ErrType::UnknownType(s))
+                    }
+                }
+            },
+            TypeExpr::Array(inner_t) => {
+                DataType::Array(Some(Box::new(inner_t.to_datatype(structs, span, src))))
+            }
+            TypeExpr::Map(k_t, v_t) => DataType::Map(Box::from((
+                Some(k_t.to_datatype(structs, span, src)),
+                Some(v_t.to_datatype(structs, span, src)),
+            ))),
+            TypeExpr::Union(poly) => DataType::Poly(
+                poly.iter()
+                    .map(|t| t.to_datatype(structs, span, src))
+                    .collect(),
+            )
+            .check_poly(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -142,7 +187,7 @@ impl DataType {
         matches!(self, Self::String | Self::Array(_) | Self::Unknown)
     }
     #[inline(always)]
-    pub fn expect(&self, expected: &Self, src: (&str, &str), span: Span) {
+    pub fn expect(&self, expected: &Self, src: Source, span: Span) {
         if self != expected {
             cold_path();
             throw_compiler_error(src, span, ErrType::InvalidType(expected, self));
@@ -819,7 +864,10 @@ impl Expr {
                         let (fn_src_name, fn_src_contents) =
                             state.sources[func.src_file as usize].clone();
                         let fn_ctx = Ctx {
-                            src: (fn_src_name.as_str(), fn_src_contents.as_str()),
+                            src: Source {
+                                filename: fn_src_name.as_str(),
+                                contents: fn_src_contents.as_str(),
+                            },
                             current_src_file: func.src_file,
                             ..ctx
                         };

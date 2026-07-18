@@ -9,6 +9,7 @@ use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::FunctionImpl;
+use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::data::NULL;
@@ -230,13 +231,13 @@ fn compile_function(
     // Errors inside of the function body are reported using the function's file
     let fn_src_file = state.fns[function_id].src_file;
 
-    let fn_src: (&str, &str) = if fn_src_file == current_src_file {
-        (src.0, src.1)
+    let fn_src = if fn_src_file == current_src_file {
+        src
     } else {
-        (
-            &state.sources[fn_src_file as usize].0.clone(),
-            &state.sources[fn_src_file as usize].1.clone(),
-        )
+        Source {
+            filename: &state.sources[fn_src_file as usize].0.clone(),
+            contents: &state.sources[fn_src_file as usize].1.clone(),
+        }
     };
 
     // Local vector vars and recorded_types to allow the inner body to type-check correctly

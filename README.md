@@ -80,8 +80,8 @@ keel -h/--help     # Print help
 ```
 
 ## Near-future roadmap
-
-- Better module system (in progress)
+- Better, more helpful errors
+- Better module system
 - Struct methods
-- Proper higher-order functions implementation (in progress)
+- Proper higher-order functions implementation
 - Better embedding API with limits

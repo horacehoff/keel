@@ -17,10 +17,7 @@ pub fn parse_condition_block(parser: &mut Parser<'_>, start: u32) -> Expr {
     let t = parser.next_token();
     debug_assert_eq!(t.0, Token::If);
     let condition = parse_expr_no_struct(parser);
-    parser.next_token_expect(Token::LBrace, "Blocks must begin with a '{'.");
-    let mut output_code: Vec<Expr> = Vec::with_capacity(4);
-    output_code.extend(parse_code(parser));
-    let mut end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+    let mut output_code = parse_block(parser);
     loop {
         let next_token = parser.peek_token_opt();
         if next_token != Some(Token::Else) {
@@ -34,17 +31,13 @@ pub fn parse_condition_block(parser: &mut Parser<'_>, start: u32) -> Expr {
         if next_token == Some(Token::If) {
             parser.next_token();
             let else_if_condition = parse_expr_no_struct(parser);
-            parser.next_token_expect(Token::LBrace, "Blocks must begin with a '{'.");
-            let else_if_code = parse_code(parser);
-            end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+            let else_if_code = parse_block(parser);
             output_code.push(Expr::ElseIfBlock(
                 Box::new(else_if_condition),
                 Box::from(else_if_code),
             ));
         } else if next_token == Some(Token::LBrace) {
-            parser.next_token();
-            let else_code = parse_code(parser);
-            end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+            let else_code = parse_block(parser);
             output_code.push(Expr::ElseBlock(Box::from(else_code)));
             break;
         } else {
@@ -54,16 +47,28 @@ pub fn parse_condition_block(parser: &mut Parser<'_>, start: u32) -> Expr {
     Expr::Condition(
         Box::new(condition),
         Box::from(output_code),
-        (start, end).into(),
+        (start, parser.last_token_end as u32).into(),
     )
 }
 
+/// LBrace Code RBrace
+#[inline(always)]
+pub fn parse_block(parser: &mut Parser<'_>) -> Vec<Expr> {
+    let opener_token_span =
+        parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
+    let code = parse_code(parser);
+    parser.next_token_expect_closer(Token::LBrace, opener_token_span, Token::RBrace);
+    code
+}
+
 /// LBrace Expr RBrace
-fn parse_block(input: &mut Parser<'_>) -> Vec<Expr> {
-    input.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
-    let while_code = parse_code(input);
-    input.next_token_expect_end(Token::RBrace, "Unmatched '}'");
-    while_code
+#[inline(always)]
+pub fn parse_block_expr(parser: &mut Parser<'_>) -> Expr {
+    let opener_token_span =
+        parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
+    let code = parse_expr(parser);
+    parser.next_token_expect_closer(Token::LBrace, opener_token_span, Token::RBrace);
+    code
 }
 
 pub fn parse_while_block(input: &mut Parser<'_>) -> Expr {
@@ -92,14 +97,14 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
         );
     };
     parser.next_token_expect(Token::In, "");
-    let start = parser.peek_token_start();
+    let start = parser.peek_token_span().start;
     let peek_token = parser.peek_token();
     if peek_token == Token::RangeDot {
         // shorthand IntForLoop
         parser.next_token();
-        let start2 = parser.peek_token_start();
+        let start2 = parser.peek_token_span().start;
         let upper_bound = parse_expr_no_struct(parser);
-        let end2 = parser.peek_token_end();
+        let end2 = parser.peek_token_span().end;
         let for_loop_code = parse_block(parser);
         Expr::IntForLoop(
             id,
@@ -111,13 +116,13 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
         )
     } else {
         let for_collection = parse_expr_no_struct(parser);
-        let end = parser.peek_token_end();
+        let end = parser.peek_token_span().end;
         let peek_token = parser.peek_token();
         if peek_token == Token::RangeDot {
             parser.next_token();
-            let start2 = parser.peek_token_start();
+            let start2 = parser.peek_token_span().start;
             let upper_bound = parse_expr_no_struct(parser);
-            let end2 = parser.peek_token_end();
+            let end2 = parser.peek_token_span().end;
             let for_loop_code = parse_block(parser);
             Expr::IntForLoop(
                 id,
@@ -205,7 +210,7 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
     loop {
         let token_peek = parser.peek_token();
         if token_peek != Token::Catch {
-            end = parser.peek_token_end();
+            end = parser.peek_token_span().end;
             break;
         }
         parser.next_token();
@@ -214,7 +219,7 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
             // catch-all
             catch_all_var = SmolStr::new(i);
             catch_all_code = Some(parse_block(parser));
-            end = parser.peek_token_start();
+            end = parser.peek_token_span().start;
             has_catch = true;
             break;
         } else if let Token::String(s) = next_token {
@@ -307,9 +312,9 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
             );
         };
         parser.next_token_expect(Token::Colon, "A colon must separate a field from its type.");
-        let field_type_start = parser.peek_token_start();
+        let field_type_start = parser.peek_token_span().start;
         let field_type = parse_type(parser);
-        let field_type_end = parser.peek_token_end();
+        let field_type_end = parser.peek_token_span().end;
         fields.push((
             field_name,
             field_type,
@@ -356,13 +361,13 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
         if peek_token == Token::Identifier("_") {
             if first_condition.is_none() {
                 cold_path();
-                let span = (start, parser.peek_token_end()).into();
+                let span = (start, parser.peek_token_span().end).into();
                 parser.error(span, ParserErr::MatchBlockNoNonWildcardArm);
             }
             parser.next_token();
             parser.next_token_expect(Token::FatArrow, "Expected '=>'");
             let code = parse_block(parser);
-            end = parser.peek_token_end();
+            end = parser.peek_token_span().end;
             parser.next_token_expect(
                 Token::RBrace,
                 "The wildcard must be the last statement in a match",
@@ -372,15 +377,15 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
         } else if peek_token == Token::RBrace {
             if first_condition.is_none() {
                 cold_path();
-                let span = (start, parser.peek_token_end()).into();
+                let span = (start, parser.peek_token_span().end).into();
                 parser.error(span, ParserErr::MatchBlockZeroArms);
             }
-            end = parser.peek_token_end();
+            end = parser.peek_token_span().end;
             parser.next_token();
             break;
         } else {
             let condition = parse_expr(parser);
-            let end = parser.peek_token_start();
+            let end = parser.peek_token_span().end;
             parser.next_token_expect(Token::FatArrow, "");
             let code = parse_block(parser);
             if first_condition.is_none() {

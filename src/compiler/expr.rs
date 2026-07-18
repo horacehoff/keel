@@ -1,4 +1,4 @@
-use crate::parser::TypeExpr;
+use super::type_system::TypeExpr;
 use smol_strc::SmolStr;
 use std::{hint::unreachable_unchecked, rc::Rc};
 

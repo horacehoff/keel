@@ -2,6 +2,8 @@ use crate::errors::BLUE;
 use crate::errors::RESET;
 use std::io::{Write, stdin, stdout};
 
+#[cold]
+#[inline(never)]
 pub fn repl() {
     println!(
         "{BLUE}KEEL {} -- REPL (read-eval-print-loop){RESET}",

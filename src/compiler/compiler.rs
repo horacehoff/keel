@@ -1,3 +1,4 @@
+use crate::compiler::compiler_data::Source;
 // use crate::compiler_data::*;
 use crate::data::NULL;
 use crate::errors::BLUE;
@@ -14,8 +15,6 @@ use crate::errors::throw_compiler_error_exp;
 use crate::errors::wasm_error;
 use crate::instr::LibFunc;
 use crate::parser;
-use crate::parser::TypeExpr;
-use crate::util::parse_keel_type;
 use crate::vm::Pool;
 use crate::vm::UncheckedVecOps;
 use crate::{data::Data, instr::Instr};
@@ -47,6 +46,7 @@ use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use type_system::DataType;
+use type_system::TypeExpr;
 use type_system::check_if_returns_void;
 use type_system::collect_direct_fn_calls;
 use type_system::struct_field_type_matches;
@@ -292,7 +292,7 @@ pub fn find_struct(
 #[inline(never)]
 #[cold]
 fn error_array_diff_types(
-    src: (&str, &str),
+    src: Source,
     sources: &[(SmolStr, Rc<String>)],
     array_span: Span,
     array_elem_type: &DataType,
@@ -301,26 +301,29 @@ fn error_array_diff_types(
 ) -> ! {
     throw_compiler_error_exp(
         || {
-            Report::build(ariadne::ReportKind::Error, (src.0, array_span.into()))
-                .with_message("Invalid array types")
-                .with_label(
-                    Label::new((src.0, array_span.into()))
-                        .with_message(format_args!(
-                            "This expression is of type {}",
-                            blue(array_elem_type)
-                        ))
-                        .with_color(ariadne::Color::Blue),
-                )
-                .with_label(
-                    Label::new((src.0, failing_elem_span.into()))
-                        .with_message(format_args!(
-                            "This expression is of type {}",
-                            red(failing_elem_type),
-                        ))
-                        .with_color(ariadne::Color::Red),
-                )
-                .with_note("Arrays are homogeneous and can only hold elements of a single type")
-                .finish()
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename, array_span.into()),
+            )
+            .with_message("Invalid array types")
+            .with_label(
+                Label::new((src.filename, array_span.into()))
+                    .with_message(format_args!(
+                        "This expression is of type {}",
+                        blue(array_elem_type)
+                    ))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.filename, failing_elem_span.into()))
+                    .with_message(format_args!(
+                        "This expression is of type {}",
+                        red(failing_elem_type),
+                    ))
+                    .with_color(ariadne::Color::Red),
+            )
+            .with_note("Arrays are homogeneous and can only hold elements of a single type")
+            .finish()
         },
         sources,
     );
@@ -445,25 +448,28 @@ pub fn error_unknown_struct(
     struct_name: &SmolStr,
     struct_span: Span,
     sources: &[(SmolStr, Rc<String>)],
-    src: (&str, &str),
+    src: Source,
 ) -> ! {
     throw_compiler_error_exp(
         || {
-            Report::build(ariadne::ReportKind::Error, (src.0, struct_span.into()))
-                .with_message("Unknown struct")
-                .with_label(
-                    Label::new((src.0, struct_span.into()))
-                        .with_message(format_args!("Unknown struct {}", red(struct_name)))
-                        .with_color(ariadne::Color::Red),
-                )
-                .finish()
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename, struct_span.into()),
+            )
+            .with_message("Unknown struct")
+            .with_label(
+                Label::new((src.filename, struct_span.into()))
+                    .with_message(format_args!("Unknown struct {}", red(struct_name)))
+                    .with_color(ariadne::Color::Red),
+            )
+            .finish()
         },
         sources,
     );
 }
 
 fn error_struct_no_such_field(
-    src: (&str, &str),
+    src: Source,
     struct_name: &SmolStr,
     struct_span: Span,
     struct_field_span: Span,
@@ -474,16 +480,16 @@ fn error_struct_no_such_field(
         || {
             let report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.0, struct_field_span.into()),
+                (src.filename, struct_field_span.into()),
             )
             .with_message("Unknown struct field")
             .with_label(
-                Label::new((src.0, struct_span.into()))
+                Label::new((src.filename, struct_span.into()))
                     .with_message(format_args!("Struct defined here"))
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.0, struct_field_span.into()))
+                Label::new((src.filename, struct_field_span.into()))
                     .with_message(format_args!(
                         "There is no field {} in {}",
                         red(struct_field_name),
@@ -499,7 +505,7 @@ fn error_struct_no_such_field(
 }
 
 fn error_struct_missing_fields(
-    src: (&str, &str),
+    src: Source,
     struct_span: Span,
     struct_literal_span: Span,
     sources: &[(SmolStr, Rc<String>)],
@@ -509,16 +515,16 @@ fn error_struct_missing_fields(
         || {
             let report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.0, struct_literal_span.into()),
+                (src.filename, struct_literal_span.into()),
             )
             .with_message("Missing struct fields")
             .with_label(
-                Label::new((src.0, struct_span.into()))
+                Label::new((src.filename, struct_span.into()))
                     .with_message(format_args!("Struct defined here"))
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.0, struct_literal_span.into()))
+                Label::new((src.filename, struct_literal_span.into()))
                     .with_message(format_args!(
                         "This is missing field{} {}",
                         if missing_fields.len() > 1 { "s" } else { "" },
@@ -864,7 +870,7 @@ fn compile_struct_field_access(
 #[inline(never)]
 #[cold]
 fn error_struct_unknown_field(
-    src: (&str, &str),
+    src: Source,
     field_span: Span,
     field: &SmolStr,
     struct_name: &SmolStr,
@@ -873,17 +879,20 @@ fn error_struct_unknown_field(
 ) -> ! {
     throw_compiler_error_exp(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.0, field_span.into()))
-                .with_message("Unknown field")
-                .with_label(
-                    Label::new((src.0, field_span.into()))
-                        .with_message(format_args!(
-                            "The field {} isn't defined in struct {}",
-                            red(field),
-                            blue(struct_name)
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename, field_span.into()),
+            )
+            .with_message("Unknown field")
+            .with_label(
+                Label::new((src.filename, field_span.into()))
+                    .with_message(format_args!(
+                        "The field {} isn't defined in struct {}",
+                        red(field),
+                        blue(struct_name)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
 
             let similar_field = find_closest_str(field, fields.iter().map(|(f, _, _)| f.as_str()));
             if let Some(similar_field) = similar_field {
@@ -910,7 +919,7 @@ fn error_struct_unknown_field(
 #[cold]
 #[inline(never)]
 fn error_struct_field_invalid_type(
-    src: (&str, &str),
+    src: Source,
     struct_name: &SmolStr,
     struct_field_span: Span,
     struct_field_name: &SmolStr,
@@ -923,11 +932,11 @@ fn error_struct_field_invalid_type(
         || {
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.0, struct_field_span.into()),
+                (src.filename, struct_field_span.into()),
             )
             .with_message("Incompatible types")
             .with_label(
-                Label::new((src.0, struct_field_span.into()))
+                Label::new((src.filename, struct_field_span.into()))
                     .with_message(format_args!(
                         "Field {} in struct {} expects type {}",
                         blue(struct_field_name),
@@ -937,7 +946,7 @@ fn error_struct_field_invalid_type(
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.0, value_span.into()))
+                Label::new((src.filename, value_span.into()))
                     .with_message(format_args!(
                         "This expression is of type {}",
                         red(value_type)
@@ -1062,14 +1071,14 @@ fn error_op(
     op: &str,
     span_l: Span,
     span_r: Span,
-    src: (&str, &str),
+    src: Source,
     sources: &[(SmolStr, Rc<String>)],
 ) -> ! {
     throw_compiler_error_exp(
         || {
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.0, span_l.extend(span_r).into()),
+                (src.filename, span_l.extend(span_r).into()),
             );
 
             if (op == "-" && l == &DataType::Null) || op == "!" {
@@ -1080,7 +1089,7 @@ fn error_op(
                         blue(r)
                     ))
                     .with_label(
-                        Label::new((src.0, span_r.into()))
+                        Label::new((src.filename, span_r.into()))
                             .with_message(format_args!("This expression is of type {}", blue(r)))
                             .with_color(ariadne::Color::Red),
                     );
@@ -1093,12 +1102,12 @@ fn error_op(
                         green(r)
                     ))
                     .with_label(
-                        Label::new((src.0, span_l.into()))
+                        Label::new((src.filename, span_l.into()))
                             .with_message(format_args!("This expression is of type {}", blue(l)))
                             .with_color(ariadne::Color::Red),
                     )
                     .with_label(
-                        Label::new((src.0, span_r.into()))
+                        Label::new((src.filename, span_r.into()))
                             .with_message(format_args!("This expression is of type {}", green(r)))
                             .with_color(ariadne::Color::Red),
                     );
@@ -2279,15 +2288,15 @@ pub fn error_unknown_variable(
     var_name: &SmolStr,
     span: Span,
     v: &[Variable],
-    src: (&str, &str),
+    src: Source,
     sources: &[(SmolStr, Rc<String>)],
 ) -> ! {
     throw_compiler_error_exp(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.0, span.into()))
+            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
                 .with_message("Unknown variable")
                 .with_label(
-                    Label::new((src.0, span.into()))
+                    Label::new((src.filename, span.into()))
                         .with_message(format_args!(
                             "Cannot find variable {} in this scope",
                             red(var_name),
@@ -2315,16 +2324,16 @@ pub fn error_unknown_function<'a>(
     fn_name: &'a str,
     span: Span,
     fns: impl Iterator<Item = &'a str>,
-    src: (&str, &str),
+    src: Source,
     sources: &[(SmolStr, Rc<String>)],
 ) -> ! {
     let similar_fn = find_closest_str(fn_name, fns);
     throw_compiler_error_exp(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.0, span.into()))
+            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
                 .with_message("Unknown function")
                 .with_label(
-                    Label::new((src.0, span.into()))
+                    Label::new((src.filename, span.into()))
                         .with_message(format_args!(
                             "Cannot find function {} in this scope",
                             red(fn_name),
@@ -2350,15 +2359,15 @@ pub fn error_unknown_function<'a>(
 pub fn error_unknown_namespace(
     namespace: &[SmolStr],
     span: Span,
-    src: (&str, &str),
+    src: Source,
     sources: &[(SmolStr, Rc<String>)],
 ) -> ! {
     throw_compiler_error_exp(
         || {
-            let report = Report::build(ariadne::ReportKind::Error, (src.0, span.into()))
+            let report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
                 .with_message("Unknown namespace")
                 .with_label(
-                    Label::new((src.0, span.into()))
+                    Label::new((src.filename, span.into()))
                         .with_message(format_args!(
                             "{} is not a valid namespace",
                             red(namespace.join("::")),
@@ -2379,7 +2388,7 @@ pub fn error_unknown_function_in_namespace(
     namespace_root: &Namespace,
     namespace: &[SmolStr],
     span: Span,
-    src: (&str, &str),
+    src: Source,
     sources: &[(SmolStr, Rc<String>)],
 ) -> ! {
     let mut current = namespace_root;
@@ -2395,10 +2404,10 @@ pub fn error_unknown_function_in_namespace(
     let similar_fn = find_closest_str(fn_name, current.fns.iter().map(|f| f.0.as_str()));
     throw_compiler_error_exp(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.0, span.into()))
+            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
                 .with_message("Unknown function in namespace")
                 .with_label(
-                    Label::new((src.0, span.into()))
+                    Label::new((src.filename, span.into()))
                         .with_message(format_args!(
                             "Cannot find function {} in namespace {}",
                             red(fn_name),
@@ -2535,7 +2544,7 @@ fn compile_struct_definition(
         .map(|(f, f_t, f_span)| {
             (
                 f.clone(),
-                parse_keel_type(f_t, state.structs, span, ctx.src),
+                f_t.to_datatype(state.structs, span, ctx.src),
                 *f_span,
             )
         })
@@ -2559,7 +2568,7 @@ fn compile_struct_definition(
 fn error_function_already_defined(
     func: &Function,
     redeclaration_span: Span,
-    src: (&str, &str),
+    src: Source,
     sources: &[(SmolStr, Rc<String>)],
 ) -> ! {
     throw_compiler_error_exp(
@@ -2567,7 +2576,7 @@ fn error_function_already_defined(
             let fn_src = &sources[func.src_file as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.0, redeclaration_span.into()),
+                (src.filename, redeclaration_span.into()),
             )
             .with_message(format_args!("Function already exists"))
             .with_label(
@@ -2576,7 +2585,7 @@ fn error_function_already_defined(
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.0, redeclaration_span.into()))
+                Label::new((src.filename, redeclaration_span.into()))
                     .with_message(format_args!(
                         "Function {} is already defined",
                         blue(&func.name)
@@ -3328,7 +3337,7 @@ fn parse_toplevel(
     code: Vec<Expr>,
     file_path: &Path,
     src_file_idx: u16,
-    use_line_markers: (&str, &str),
+    use_line_markers: Source,
     fns: &mut Vec<Function>,
     structs: &mut Vec<Struct>,
     struct_fields: &mut Vec<(SmolStr, Vec<SmolStr>)>,
@@ -3379,7 +3388,7 @@ fn parse_toplevel(
                     .map(|(f, f_t, f_span)| {
                         (
                             f.clone(),
-                            parse_keel_type(f_t, structs, span, use_line_markers),
+                            f_t.to_datatype(structs, span, use_line_markers),
                             *f_span,
                         )
                     })
@@ -3444,11 +3453,11 @@ fn parse_toplevel(
                     .map(|(fn_name, fn_args, fn_return_type)| {
                         let fn_args = fn_args
                             .iter()
-                            .map(|t| parse_keel_type(t, structs, markers, use_line_markers))
+                            .map(|t| t.to_datatype(structs, markers, use_line_markers))
                             .collect::<Vec<DataType>>()
                             .into_boxed_slice();
-                        let fn_return_type =
-                            parse_keel_type(fn_return_type, structs, markers, use_line_markers);
+                        let fn_return_type = fn_return_type.
+                            to_datatype(structs, markers, use_line_markers);
                         let return_val = FnSignature {
                             name: fn_name.clone(),
                             args: fn_args.clone(),
@@ -3510,7 +3519,10 @@ fn parse_toplevel(
                             |_| {
                                 let current_src = &sources[src_file_idx as usize];
                                 throw_compiler_error(
-                                    (current_src.0.as_str(), current_src.1.as_str()),
+                                    Source {
+                                        filename: current_src.0.as_str(),
+                                        contents: current_src.1.as_str(),
+                                    },
                                     markers,
                                     ErrType::CannotReadImportedFile(path.as_str()),
                                 );
@@ -3528,7 +3540,10 @@ fn parse_toplevel(
                 if visited_files.contains(&file_path) {
                     let current_src = &sources[src_file_idx as usize];
                     throw_compiler_error(
-                        (current_src.0.as_str(), current_src.1.as_str()),
+                        Source {
+                            filename: current_src.0.as_str(),
+                            contents: current_src.1.as_str(),
+                        },
                         markers,
                         ErrType::CircularImport(file_path.to_str().unwrap_or(path.as_str())),
                     );
@@ -3538,7 +3553,10 @@ fn parse_toplevel(
                     Rc::new(std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
                         let current_src = &sources[src_file_idx as usize];
                         throw_compiler_error(
-                            (current_src.0.as_str(), current_src.1.as_str()),
+                            Source {
+                                filename: current_src.0.as_str(),
+                                contents: current_src.1.as_str(),
+                            },
                             markers,
                             ErrType::CannotReadImportedFile(path.as_str()),
                         );
@@ -3552,7 +3570,10 @@ fn parse_toplevel(
                     (file_name.as_str(), file_contents.as_str()),
                 );
 
-                let import_src: (&str, &str) = (file_name.as_str(), file_contents.as_str());
+                let import_src = Source {
+                    filename: file_name.as_str(),
+                    contents: file_contents.as_str(),
+                };
                 let child_name = alias.unwrap_or_else(|| {
                     file_path
                         .file_prefix()
@@ -3655,7 +3676,10 @@ pub fn compile(
         fns: Vec::new(),
         structs: Vec::new(),
     };
-    let main_src: (&str, &str) = (filename, &contents);
+    let main_src = Source {
+        filename,
+        contents: &contents,
+    };
     parse_toplevel(
         code,
         &main_path,
@@ -3677,7 +3701,10 @@ pub fn compile(
 
     let ctx = Ctx {
         block_id: 0,
-        src: (filename, &contents),
+        src: Source {
+            filename,
+            contents: &contents,
+        },
         is_parsing_recursive: false,
         current_src_file: 0,
         single_run: true,

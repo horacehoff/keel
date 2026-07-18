@@ -1,7 +1,8 @@
+use crate::compiler::compiler_data::Source;
 use crate::compiler::expr::Span;
 use crate::{compiler::type_system::DataType, instr::Instr};
 use ariadne::FnCache;
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use ariadne::{Color, Label, Report, ReportKind};
 use smol_strc::{SmolStr, ToSmolStr};
 use std::hint::unreachable_unchecked;
 use std::rc::Rc;
@@ -306,7 +307,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     report
-        .eprint((src.0.as_str(), Source::from(src.1.as_str())))
+        .eprint((src.0.as_str(), ariadne::Source::from(src.1.as_str())))
         .unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
@@ -343,7 +344,9 @@ pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::R
                 .with_sources(
                     sources
                         .iter()
-                        .map(|(name, contents)| (name.as_str(), Source::from(contents.as_str())))
+                        .map(|(name, contents)| {
+                            (name.as_str(), ariadne::Source::from(contents.as_str()))
+                        })
                         .collect(),
                 ),
         )
@@ -384,24 +387,29 @@ pub fn crash() -> ! {
 
 #[cold]
 #[inline(never)]
-pub fn throw_compiler_error(src: (&str, &str), Span { start, end }: Span, t: ErrType) -> ! {
+pub fn throw_compiler_error(src: Source, Span { start, end }: Span, t: ErrType) -> ! {
     let err_message: SmolStr = t.into();
     eprintln!("{RED}KEEL ERROR{RESET}");
-    let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
-        .with_label(
-            Label::new((src.0, (start as usize)..(end as usize)))
-                .with_message(err_message)
-                .with_color(Color::Red),
-        )
-        .finish();
+    let report = Report::build(
+        ReportKind::Error,
+        (src.filename, (start as usize)..(end as usize)),
+    )
+    .with_label(
+        Label::new((src.filename, (start as usize)..(end as usize)))
+            .with_message(err_message)
+            .with_color(Color::Red),
+    )
+    .finish();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report.eprint((src.0, Source::from(src.1))).unwrap();
+    report
+        .eprint((src.filename, ariadne::Source::from(src.contents)))
+        .unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (src.0, Source::from(src.1)),
+            (src.filename, Source::from(src.1)),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();

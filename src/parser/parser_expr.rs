@@ -15,10 +15,12 @@ pub fn parse_expr_with_precedence(
     min_precedence: u8,
     allow_struct: bool,
 ) -> Expr {
-    let lhs_start = input.peek_token_start();
-    let mut end = input.peek_token_end();
+    let lhs_start = input.peek_token_span().start;
+    let mut end = input.peek_token_span().end;
     let mut lhs = parse_term(input, allow_struct);
-    end = input.peek_token_end_opt().unwrap_or(end);
+    if let Some(s) = input.peek_token_opt_span() {
+        end = s.end;
+    }
     lhs = parse_postfix_op(input, lhs, (lhs_start, end).into());
     let mut lhs_end = input.last_token_end as u32;
     while let Some(peek) = input.peek_token_opt() {
@@ -26,7 +28,7 @@ pub fn parse_expr_with_precedence(
             break;
         };
         input.next_token();
-        let rhs_start = input.peek_token_start();
+        let rhs_start = input.peek_token_span().start;
         let rhs = parse_expr_with_precedence(input, op_precedence, allow_struct);
         let rhs_end = input.last_token_end as u32;
         lhs = add_op(
@@ -163,8 +165,8 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                     // slice starting at 0
                     parser.next_token();
                     let upper_bound = parse_expr(parser);
-                    let end = parser
-                        .next_token_expect_end(Token::RBracket, "Unmatched ']'. Invalid slice.");
+                    parser.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
+                    let end = parser.last_token_end as u32;
                     base_span.end = end;
                     base = Expr::ArrayGetSlice(
                         Box::new(base),
@@ -182,10 +184,8 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                             Expr::ArrayGetIndex(Box::new(base), Box::new(lower_bound), base_span);
                     } else {
                         let upper_bound = parse_expr(parser);
-                        let end = parser.next_token_expect_end(
-                            Token::RBracket,
-                            "Unmatched ']'. Invalid slice.",
-                        );
+                        parser.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
+                        let end = parser.last_token_end as u32;
                         base_span.end = end;
                         base = Expr::ArrayGetSlice(
                             Box::new(base),

@@ -98,9 +98,15 @@ pub struct Pools {
 }
 
 #[derive(Clone, Copy)]
+pub struct Source<'a> {
+    pub filename: &'a str,
+    pub contents: &'a str,
+}
+
+#[derive(Clone, Copy)]
 pub struct Ctx<'a> {
     pub block_id: u16,
-    pub src: (&'a str, &'a str),
+    pub src: Source<'a>,
     pub is_parsing_recursive: bool,
     pub single_run: bool,
     pub current_src_file: u16,

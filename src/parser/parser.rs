@@ -1,7 +1,9 @@
 use crate::BOLD;
 use crate::RED;
 use crate::RESET;
+use crate::compiler::compiler_data::Source;
 use crate::compiler::expr::{Expr, Span, var_assign};
+use crate::compiler::type_system::TypeExpr;
 use crate::errors::BLUE;
 use crate::errors::blue;
 use crate::errors::crash;
@@ -9,7 +11,6 @@ use ariadne::Color;
 use ariadne::Label;
 use ariadne::Report;
 use ariadne::ReportKind;
-use ariadne::Source;
 use blocks::parse_condition_block;
 use blocks::parse_eval_block;
 use blocks::parse_for_loop;
@@ -38,8 +39,7 @@ mod term;
 type TokenIter<'a> = Peekable<SpannedIter<'a, Token<'a>>>;
 
 struct ParserCtx<'a> {
-    /// (filename, contents)
-    src: (&'a str, &'a str),
+    src: Source<'a>,
 }
 
 struct Parser<'a> {
@@ -69,7 +69,7 @@ enum ParserErr<'a> {
 
 #[cold]
 #[inline(never)]
-fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ParserErr) -> ! {
+fn throw_parser_error(src: Source, Span { start, end }: Span, t: ParserErr) -> ! {
     let err_message = match t {
         ParserErr::UnexpectedEOF => "Unexpected EOF",
         ParserErr::UnknownToken => "Unknown token",
@@ -98,21 +98,26 @@ fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ParserErr
         }
     };
     eprintln!("{RED}KEEL ERROR{RESET}");
-    let report = Report::build(ReportKind::Error, (src.0, (start as usize)..(end as usize)))
-        .with_label(
-            Label::new((src.0, (start as usize)..(end as usize)))
-                .with_message(err_message)
-                .with_color(Color::Red),
-        )
-        .finish();
+    let report = Report::build(
+        ReportKind::Error,
+        (src.filename, (start as usize)..(end as usize)),
+    )
+    .with_label(
+        Label::new((src.filename, (start as usize)..(end as usize)))
+            .with_message(err_message)
+            .with_color(Color::Red),
+    )
+    .finish();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report.eprint((src.0, Source::from(src.1))).unwrap();
+    report
+        .eprint((src.filename, ariadne::Source::from(src.contents)))
+        .unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (src.0, Source::from(src.1)),
+            (src.filename, ariadne::Source::from(src.contents)),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
@@ -133,7 +138,7 @@ fn throw_parser_error(src: (&str, &str), Span { start, end }: Span, t: ParserErr
 impl<'a> Parser<'a> {
     #[inline(always)]
     fn eof_span(&self) -> Span {
-        let end = self.ctx.src.1.len();
+        let end = self.ctx.src.contents.len();
         (end, end).into()
     }
     #[cold]
@@ -146,7 +151,6 @@ impl<'a> Parser<'a> {
         let t = self.input.next().unwrap_or_else(
             #[cold]
             || {
-                cold_path();
                 self.error(self.eof_span(), ParserErr::UnexpectedEOF);
             },
         );
@@ -154,10 +158,7 @@ impl<'a> Parser<'a> {
         (
             t.0.unwrap_or_else(
                 #[cold]
-                |()| {
-                    cold_path();
-                    self.error((t.1.start, t.1.end).into(), ParserErr::UnknownToken)
-                },
+                |()| self.error((t.1.start, t.1.end).into(), ParserErr::UnknownToken),
             ),
             (t.1.start, t.1.end).into(),
         )
@@ -169,15 +170,11 @@ impl<'a> Parser<'a> {
             .peek()
             .map(|(t, span)| (*t, span.start, span.end))
         else {
-            cold_path();
             self.error(self.eof_span(), ParserErr::UnexpectedEOF);
         };
         t.unwrap_or_else(
             #[cold]
-            |()| {
-                cold_path();
-                self.error((start, end).into(), ParserErr::UnknownToken)
-            },
+            |()| self.error((start, end).into(), ParserErr::UnknownToken),
         )
     }
     #[inline(always)]
@@ -187,33 +184,12 @@ impl<'a> Parser<'a> {
             .peek()
             .map(|(t, span)| (*t, span.start, span.end))
         else {
-            cold_path();
             self.error(self.eof_span(), ParserErr::UnexpectedEOF);
         };
         Span {
             start: start as u32,
             end: end as u32,
         }
-    }
-    #[inline(always)]
-    fn peek_token_start(&mut self) -> u32 {
-        let Some((_, span)) = self.input.peek() else {
-            cold_path();
-            self.error(self.eof_span(), ParserErr::UnexpectedEOF);
-        };
-        span.start as u32
-    }
-    #[inline(always)]
-    fn peek_token_end(&mut self) -> u32 {
-        let Some((_, span)) = self.input.peek() else {
-            cold_path();
-            self.error(self.eof_span(), ParserErr::UnexpectedEOF);
-        };
-        span.end as u32
-    }
-    #[inline(always)]
-    fn peek_token_end_opt(&mut self) -> Option<u32> {
-        self.input.peek().map(|t| t.1.end as u32)
     }
     #[inline(always)]
     fn peek_token_opt(&mut self) -> Option<Token<'a>> {
@@ -223,34 +199,46 @@ impl<'a> Parser<'a> {
             .map(|(t, span)| (*t, span.start, span.end))?;
         Some(t.unwrap_or_else(
             #[cold]
-            |()| {
-                cold_path();
-                self.error((start, end).into(), ParserErr::UnknownToken)
-            },
+            |()| self.error((start, end).into(), ParserErr::UnknownToken),
         ))
     }
     #[inline(always)]
-    fn peek_span_opt(&mut self) -> Option<Span> {
+    fn peek_token_opt_span(&mut self) -> Option<Span> {
         self.input
             .peek()
             .map(|x| (x.1.start as u32, x.1.end as u32).into())
     }
     #[inline(always)]
-    fn next_token_expect(&mut self, expected: Token, msg: &'static str) {
+    fn next_token_expect(&mut self, expected: Token, msg: &'static str) -> Span {
         let (next_token, span) = self.next_token();
         if next_token != expected {
-            cold_path();
             self.error(span, ParserErr::UnexpectedToken(expected, next_token, msg));
         }
+        span
     }
     #[inline(always)]
-    fn next_token_expect_end(&mut self, expected: Token, msg: &'static str) -> u32 {
-        let (next_token, span) = self.next_token();
-        if next_token != expected {
-            cold_path();
-            self.error(span, ParserErr::UnexpectedToken(expected, next_token, msg));
+    fn next_token_expect_closer(
+        &mut self,
+        opener: Token,
+        opener_span: Span,
+        expected_closer: Token,
+    ) -> u32 {
+        if let Some(t) = self.peek_token_opt() {
+            if t == expected_closer {
+                self.next_token().1.end
+            } else {
+                let span = self.peek_token_span();
+                error_unclosed_delimiter(
+                    self,
+                    opener,
+                    opener_span,
+                    expected_closer,
+                    Some((t, span)),
+                );
+            }
+        } else {
+            error_unclosed_delimiter(self, opener, opener_span, expected_closer, None);
         }
-        span.end
     }
     #[inline(never)]
     #[cold]
@@ -262,13 +250,16 @@ impl<'a> Parser<'a> {
 
         #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
         report
-            .eprint((self.ctx.src.0, Source::from(self.ctx.src.1)))
+            .eprint((
+                self.ctx.src.filename,
+                ariadne::Source::from(self.ctx.src.contents),
+            ))
             .unwrap();
 
         #[cfg(any(target_arch = "wasm32", feature = "embed"))]
         report
             .write(
-                (src.0, Source::from(src.1)),
+                (src.filename, ariadne::Source::from(src.contents)),
                 crate::captured_output::CapturedOutputWriter,
             )
             .unwrap();
@@ -316,9 +307,9 @@ fn parse_args(parser: &mut Parser<'_>) -> (Box<[Expr]>, Box<[Span]>, u32) {
             let end = parser.next_token().1.end;
             return (Box::from(args), Box::from(arg_markers), end);
         }
-        let arg_start: u32 = parser.peek_token_start();
+        let arg_start: u32 = parser.peek_token_span().start;
         args.push(parse_expr(parser));
-        arg_markers.push((arg_start, parser.peek_token_start()).into());
+        arg_markers.push((arg_start, parser.peek_token_span().start).into());
         if parser.peek_token() == Token::Comma {
             parser.next_token();
         } else if !(parser.peek_token() == Token::RParen) {
@@ -330,7 +321,7 @@ fn parse_args(parser: &mut Parser<'_>) -> (Box<[Expr]>, Box<[Span]>, u32) {
 }
 
 fn parse_statement(parser: &mut Parser<'_>) -> Option<Expr> {
-    let token = parser.peek_token();
+    let token = parser.peek_token_opt()?;
     let t_span = parser.peek_token_span();
     match token {
         Token::If => Some(parse_condition_block(parser, t_span.start)),
@@ -375,24 +366,19 @@ fn parse_var_declare(parser: &mut Parser<'_>) -> Expr {
 fn parse_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32) -> Expr {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Equals);
-    let e_end = input.peek_token_end_opt();
-    let v_start = input.peek_token_start();
+    let e_end = input.peek_token_span().end;
+    let v_start = input.peek_token_span().start;
     let v = parse_expr(input);
-    let v_end = input.peek_token_start();
-    var_assign(
-        e,
-        v,
-        (e_start, e_end.unwrap()).into(),
-        (v_start, v_end).into(),
-    )
+    let v_end = input.peek_token_span().start;
+    var_assign(e, v, (e_start, e_end).into(), (v_start, v_end).into())
 }
 
 fn parse_op_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32, op: Token<'_>) -> Expr {
     let operand_end = input.last_token_end as u32;
     let (t, _) = input.next_token();
     debug_assert_eq!(t, op);
-    let e_end = input.peek_token_end_opt();
-    let v_start = input.peek_token_start();
+    let e_end = input.peek_token_span().end;
+    let v_start = input.peek_token_span().start;
     let v = parse_expr(input);
     let v_end = input.last_token_end as u32;
     let op = match op {
@@ -414,7 +400,7 @@ fn parse_op_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32, op: Token<
             (e_start, operand_end).into(),
             (v_start, v_end).into(),
         ),
-        (e_start, e_end.unwrap()).into(),
+        (e_start, e_end).into(),
         (v_start, v_end).into(),
     )
 }
@@ -443,7 +429,7 @@ fn parse_line(input: &mut Parser<'_>, peek: Token<'_>) -> Expr {
             Expr::Continue
         }
         _ => {
-            let e_start = input.peek_token_start();
+            let e_start = input.peek_token_span().start;
             let e = parse_expr(input);
             let peek_token = input.peek_token_opt();
             match peek_token {
@@ -470,19 +456,67 @@ fn parse_line(input: &mut Parser<'_>, peek: Token<'_>) -> Expr {
 
 #[cold]
 #[inline(never)]
+fn error_unclosed_delimiter(
+    parser: &Parser<'_>,
+    opener_token: Token,
+    opener_span: Span,
+    expected_closer_token: Token,
+    end: Option<(Token, Span)>,
+) -> ! {
+    parser.throw_parser_err(|| {
+        let mut report = Report::build(
+            ariadne::ReportKind::Error,
+            (parser.ctx.src.filename, opener_span.into()),
+        )
+        .with_message("Unclosed delimiter")
+        .with_label(
+            Label::new((parser.ctx.src.filename, opener_span.into()))
+                .with_message(format_args!("This {opener_token} is never closed"))
+                .with_color(ariadne::Color::Red),
+        );
+
+        if let Some((actual_closer_token, actual_closer_token_span)) = end {
+            report = report.with_label(
+                Label::new((parser.ctx.src.filename, actual_closer_token_span.into()))
+                    .with_message(format_args!(
+                        "Expected {expected_closer_token} but found {actual_closer_token}"
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
+        } else {
+            report = report
+                .with_label(
+                    Label::new((parser.ctx.src.filename, parser.eof_span().into()))
+                        .with_message(format_args!(
+                            "Expected {expected_closer_token} but the file ends here"
+                        ))
+                        .with_color(ariadne::Color::Red),
+                )
+                .with_help(format_args!(
+                    "Add a {} here to close it",
+                    blue(expected_closer_token)
+                ));
+        }
+
+        report.finish()
+    })
+}
+
+#[cold]
+#[inline(never)]
 fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
     parser.throw_parser_err(|| {
         Report::build(
             ariadne::ReportKind::Error,
             (
-                parser.ctx.src.0,
+                parser.ctx.src.filename,
                 (parser.last_token_end..parser.last_token_end),
             ),
         )
         .with_message("Missing semicolon")
         .with_label(
             Label::new((
-                parser.ctx.src.0,
+                parser.ctx.src.filename,
                 (parser.last_token_end..parser.last_token_end),
             ))
             .with_message(format_args!("Add a {} here", blue(';')))
@@ -494,7 +528,7 @@ fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
 }
 
 fn parse_code(input: &mut Parser<'_>) -> Vec<Expr> {
-    let mut output: Vec<Expr> = Vec::with_capacity(2);
+    let mut output: Vec<Expr> = Vec::with_capacity(4);
     while let Some(e) = parse_statement(input) {
         output.push(e);
     }
@@ -544,14 +578,6 @@ fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
         );
         Expr::ImportFile(path, None, (start, end).into())
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum TypeExpr {
-    Identifier(SmolStr),
-    Array(Box<Self>),
-    Map(Box<Self>, Box<Self>),
-    Union(Box<[Self]>),
 }
 
 fn parse_type(parser: &mut Parser<'_>) -> TypeExpr {
@@ -706,7 +732,12 @@ fn parse_file(parser: &mut Parser<'_>) -> Vec<Expr> {
 pub fn parse(input: &str, src: (&str, &str)) -> Vec<Expr> {
     parse_file(&mut Parser {
         input: Token::lexer(input).spanned().peekable(),
-        ctx: ParserCtx { src },
+        ctx: ParserCtx {
+            src: Source {
+                filename: src.0,
+                contents: src.1,
+            },
+        },
         last_token_end: 0,
     })
 }

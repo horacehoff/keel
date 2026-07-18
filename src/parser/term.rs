@@ -9,8 +9,9 @@ use crate::cold_path;
 use crate::compiler::expr::Expr;
 use crate::compiler::expr::Span;
 use crate::parser::Parser;
+use crate::parser::blocks::parse_block;
+use crate::parser::blocks::parse_block_expr;
 use crate::parser::parse_args;
-use crate::parser::parse_code;
 use crate::parser::parse_namespace;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
@@ -46,13 +47,13 @@ fn parse_struct(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u32) 
             Token::Colon,
             "A colon must separate a field from its value.",
         );
-        let field_start: u32 = parser.peek_token_start();
+        let field_start: u32 = parser.peek_token_span().start;
         let field_value = parse_expr(parser);
         fields.push((
             field_name,
             field_value,
             field_name_span,
-            (field_start, parser.peek_token_start()).into(),
+            (field_start, parser.peek_token_span().start).into(),
         ));
         let (next_token, span) = parser.next_token();
         if next_token == Token::RBrace {
@@ -136,15 +137,15 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                     elem_spans[0].end = parser.next_token().1.end;
                     break;
                 }
-                let start = parser.peek_token_start();
+                let start = parser.peek_token_span().start;
                 elems.push(parse_expr(parser));
-                let end = parser.peek_token_end() - 1;
+                let end = parser.peek_token_span().end - 1;
                 elem_spans.push((start, end).into());
                 if parser.peek_token_opt() == Some(Token::Comma) {
                     parser.next_token();
                 } else if !(parser.peek_token_opt() == Some(Token::RBracket)) {
                     cold_path();
-                    let span = unsafe { parser.peek_span_opt().unwrap_unchecked() };
+                    let span = unsafe { parser.peek_token_opt_span().unwrap_unchecked() };
                     parser.error(span, ParserErr::ArrayElementsMissingComma);
                 }
             }
@@ -158,36 +159,34 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
         }
         // - Expr
         Token::OpSub => {
-            let expr_start = parser.peek_token_start();
+            let expr_start = parser.peek_token_span().start;
             match parse_expr_with_precedence(parser, 8, allow_struct) {
                 Expr::Int(i) => Expr::Int(i.wrapping_neg()),
                 Expr::Float(f) => Expr::Float(-f),
                 other => Expr::Neg(
                     Box::new(other),
-                    (t_span.start, parser.peek_token_start()).into(),
-                    (expr_start, parser.peek_token_start()).into(),
+                    (t_span.start, parser.peek_token_span().start).into(),
+                    (expr_start, parser.peek_token_span().start).into(),
                 ),
             }
         }
         // ! Expr
         Token::OpNot => {
-            let expr_start = parser.peek_token_start();
+            let expr_start = parser.peek_token_span().start;
             match parse_expr_with_precedence(parser, 8, allow_struct) {
                 Expr::Bool(b) => Expr::Bool(!b),
                 other => Expr::BoolNeg(
                     Box::new(other),
-                    (t_span.start, parser.peek_token_start()).into(),
-                    (expr_start, parser.peek_token_start()).into(),
+                    (t_span.start, parser.peek_token_span().start).into(),
+                    (expr_start, parser.peek_token_span().start).into(),
                 ),
             }
         }
         // Inline condition
         Token::If => {
             let condition = parse_expr_no_struct(parser);
-            parser.next_token_expect(Token::LBrace, "Expected '{'");
             let mut output_code: Vec<Expr> = Vec::with_capacity(2);
-            output_code.push(parse_expr(parser));
-            let mut end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+            output_code.push(parse_block_expr(parser));
             loop {
                 let next_token = parser.peek_token_opt();
                 if next_token != Some(Token::Else) {
@@ -203,7 +202,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                     let else_if_condition = parse_expr_no_struct(parser);
                     parser.next_token_expect(Token::LBrace, "Blocks must begin with a '{'.");
                     let else_if_value = parse_expr(parser);
-                    end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+                    parser.next_token_expect(Token::RBrace, "Unmatched '}'");
                     output_code.push(Expr::ElseIfBlock(
                         Box::new(else_if_condition),
                         Box::new([else_if_value]),
@@ -211,7 +210,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 } else if next_token == Some(Token::LBrace) {
                     parser.next_token();
                     let else_value = parse_expr(parser);
-                    end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
+                    parser.next_token_expect(Token::RBrace, "Unmatched '}'");
                     output_code.push(Expr::ElseBlock(Box::new([else_value])));
                     break;
                 } else {
@@ -221,15 +220,14 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
             if !matches!(output_code.last().unwrap(), Expr::ElseBlock(_)) {
                 cold_path();
                 parser.error(
-                    (t_span.start, end).into(),
+                    (t_span.start, parser.last_token_end as u32).into(),
                     ParserErr::InlineConditionNoElseBlock,
                 );
-                // panic!("Inline conditions need an else block");
             }
             Expr::InlineCondition(
                 Box::new(condition),
                 Box::from(output_code),
-                (t_span.start, end).into(),
+                (t_span.start, parser.last_token_end as u32).into(),
             )
         }
         // anonymous function
@@ -273,7 +271,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 Token::RParen,
                 "Function arguments must be delimited by parentheses",
             );
-            let (next_token, next_token_span) = parser.next_token();
+            let next_token = parser.peek_token_opt();
             // if next_token == Token::Arrow {
             //     // return type
             //     let return_type = parse_type(parser);
@@ -286,18 +284,21 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
             //         (start, end).into(),
             //     )
             // } else
-            if next_token == Token::LBrace {
+            if next_token == Some(Token::LBrace) {
                 // returns null
                 // let return_type = SmolStr::new_static("null");
-                let fn_code = parse_code(parser);
-                let end = parser.next_token_expect_end(Token::RBrace, "Unmatched '}'");
-                Expr::AnonymousFunction(Box::from(args), Box::from(fn_code), (start, end).into())
+                let fn_code = parse_block(parser);
+                Expr::AnonymousFunction(
+                    Box::from(args),
+                    Box::from(fn_code),
+                    (start, parser.last_token_end as u32).into(),
+                )
             } else {
                 parser.error(
-                    next_token_span,
+                    parser.peek_token_span(),
                     ParserErr::UnexpectedTokenStr(
                         "'->' (return type) OR '{' (function code block)",
-                        next_token,
+                        next_token.unwrap(),
                         "",
                     ),
                 );

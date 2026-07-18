@@ -99,5 +99,5 @@ else
     printf "[ERROR] Cannot write to /usr/local/bin and sudo is not available. Re-run as root or install sudo.\n"
 fi
 
-printf "[Keel] Installed $("$INSTALL_DIR/keel" --version) in $INSTALL_DIRkeel\n"
+printf "[Keel] Installed $("$INSTALL_DIR/keel" --version) in $INSTALL_DIR/keel\n"
 printf "[Keel] Run 'keel' to get started.\n"

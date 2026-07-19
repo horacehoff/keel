@@ -120,9 +120,9 @@ pub const fn symbol_of_expr(expr: &Expr) -> &'static str {
     }
 }
 
-pub fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
+pub fn code_modifies_variable(var_name: &SmolStr, code: &[Expr]) -> bool {
     code.iter().any(|expr| match expr {
-        Expr::VarAssign(n, _, _) => n == name,
+        Expr::VarAssign(n, _, _) => n == var_name,
         Expr::Condition(_, body, _)
         | Expr::WhileBlock(_, body)
         | Expr::EvalBlock(body)
@@ -131,7 +131,7 @@ pub fn contains_var_reassign(name: &SmolStr, code: &[Expr]) -> bool {
         | Expr::ElseIfBlock(_, body)
         | Expr::ElseBlock(body)
         | Expr::ForLoop(_, _, body, _)
-        | Expr::IntForLoop(_, _, _, body, _, _) => contains_var_reassign(name, body),
+        | Expr::IntForLoop(_, _, _, body, _, _) => code_modifies_variable(var_name, body),
         _ => false,
     })
 }

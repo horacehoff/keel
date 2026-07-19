@@ -4,9 +4,11 @@
 > [!WARNING]
 > Keel is under active development
 
-Keel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.
+**Keel** is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.
 
 Its goal is to provide a faster alternative to Python that sits closer to low-level languages while remaining accessible to a wide audience.
+
+**Contributions and issues are welcome!**
 
 [Website](https://keel-lang.com)
 [Documentation](https://docs.keel-lang.com)

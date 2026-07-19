@@ -31,7 +31,7 @@ use compiler_data::Struct;
 use compiler_data::Variable;
 use expr::Expr;
 use expr::Span;
-use expr::contains_var_reassign;
+use expr::code_modifies_variable;
 use functions::handle_functions;
 use methods::handle_method_calls;
 use registers::move_reg_to_reg;
@@ -2210,7 +2210,7 @@ fn compile_var_declaration(
         let src_id = value
             .compile(v, ctx, state, output, None, false, true)
             .unwrap_id();
-        if contains_var_reassign(name, remaining_code) {
+        if code_modifies_variable(name, remaining_code) {
             let mutable_id = state.alloc_reg();
             move_reg_to_reg(output, src_id, mutable_id, state.registers[src_id as usize]);
             mutable_id

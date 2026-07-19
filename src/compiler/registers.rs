@@ -8,9 +8,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()
         || matches!(
             x.last().unwrap(),
-            Instr::ObjElemMov(_, _, _) // | Instr::IoDelete(_)
-            | Instr::IncInt(_)
-            | Instr::DecInt(_)
+            Instr::ObjElemMov(_, _, _) | Instr::IncInt(_) | Instr::DecInt(_)
         )
     {
         return;

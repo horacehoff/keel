@@ -166,7 +166,7 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
         Token::LParen,
         "Function arguments must be delimited by parentheses",
     );
-    let mut args: Vec<SmolStr> = Vec::with_capacity(4);
+    let mut args: Vec<(SmolStr, Option<TypeExpr>)> = Vec::with_capacity(4);
     loop {
         if parser.peek_token() == Token::RParen {
             parser.next_token();
@@ -174,7 +174,15 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
         }
         let (arg, span) = parser.next_token();
         if let Token::Identifier(arg) = arg {
-            args.push(SmolStr::new(arg));
+            args.push((
+                SmolStr::new(arg),
+                if parser.peek_token() == Token::Colon {
+                    parser.next_token();
+                    Some(parse_type(parser))
+                } else {
+                    None
+                },
+            ));
         } else {
             cold_path();
             parser.error(

@@ -23,7 +23,6 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
-use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
@@ -178,7 +177,15 @@ impl DataType {
             .to_smolstr(),
             Self::Fn(id) => {
                 let f = &state.fns[*id as usize];
-                format_args!("fn ({})", f.args.join(", ")).to_smolstr()
+                format_args!(
+                    "fn ({})",
+                    f.args
+                        .iter()
+                        .map(|(a, _)| a.clone())
+                        .collect::<Vec<SmolStr>>()
+                        .join(", ")
+                )
+                .to_smolstr()
             }
         }
     }
@@ -844,7 +851,7 @@ impl Expr {
                         for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
                             // 0 => placeholder id, it's never used
                             v.push(Variable {
-                                name: fn_args[i].clone(),
+                                name: fn_args[i].0.clone(),
                                 register_id: 0,
                                 var_type: infered_type,
                             });
@@ -985,35 +992,36 @@ impl Expr {
                     ) as u16,
                 )
             }
-            Self::AnonymousFunction(args, code, span) => {
-                let fn_name =
-                    format_args!("{}{}{}", ctx.current_src_file, span.start, span.end).to_smolstr();
-                if let Some(id) = state
-                    .fns
-                    .iter()
-                    .rposition(|f| f.name == fn_name && &f.args == args)
-                {
-                    return DataType::Fn(id as u16);
-                }
-                let returns_null = check_if_returns_void(code);
-                let mut callees = Vec::new();
-                collect_direct_fn_calls(code, &mut callees);
-                let id = state.fns.len() as u16;
-                state.fns.push(Function {
-                    name: fn_name,
-                    args: args.clone(),
-                    code: Rc::from(code.clone()),
-                    impls: Vec::new(),
-                    is_recursive: None,
-                    returns_null,
-                    src_file: ctx.current_src_file,
-                    return_type_cache: Vec::new(),
-                    direct_calls: callees.into_boxed_slice(),
-                    name_span: *span,
-                });
-                state.fn_registers.push(Vec::new());
-                // state.namespace.fns.push((x.clone(), id));
-                DataType::Fn(id)
+            Self::AnonymousFunction(_, _, _) => {
+                todo!("Anonymous functions are WIP")
+                // let fn_name =
+                //     format_args!("{}{}{}", ctx.current_src_file, span.start, span.end).to_smolstr();
+                // if let Some(id) = state
+                //     .fns
+                //     .iter()
+                //     .rposition(|f| f.name == fn_name && &f.args == args)
+                // {
+                //     return DataType::Fn(id as u16);
+                // }
+                // let returns_null = check_if_returns_void(code);
+                // let mut callees = Vec::new();
+                // collect_direct_fn_calls(code, &mut callees);
+                // let id = state.fns.len() as u16;
+                // state.fns.push(Function {
+                //     name: fn_name,
+                //     args: args.clone(),
+                //     code: Rc::from(code.clone()),
+                //     impls: Vec::new(),
+                //     is_recursive: None,
+                //     returns_null,
+                //     src_file: ctx.current_src_file,
+                //     return_type_cache: Vec::new(),
+                //     direct_calls: callees.into_boxed_slice(),
+                //     name_span: *span,
+                // });
+                // state.fn_registers.push(Vec::new());
+                // // state.namespace.fns.push((x.clone(), id));
+                // DataType::Fn(id)
             }
             _ => unsafe { unreachable_unchecked() },
         }

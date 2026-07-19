@@ -51,8 +51,13 @@ pub enum Expr {
         Span,
         Box<[Span]>,
     ),
-    /// FunctionDecl(name+args, code, start, end)
-    FunctionDecl(SmolStr, Box<[SmolStr]>, Rc<[Self]>, Span),
+    /// FunctionDecl(name, args, code, span)
+    FunctionDecl(
+        SmolStr,
+        Box<[(SmolStr, Option<TypeExpr>)]>,
+        Rc<[Self]>,
+        Span,
+    ),
 
     ReturnVal(Box<Option<Self>>),
 

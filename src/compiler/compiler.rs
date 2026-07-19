@@ -2591,7 +2591,7 @@ fn error_function_already_defined(
 
 fn compile_function_definition(
     fn_name: &SmolStr,
-    fn_args: &[SmolStr],
+    fn_args: &[(SmolStr, Option<TypeExpr>)],
     fn_code: &Rc<[Expr]>,
     span: Span,
     _v: &mut Vec<Variable>,
@@ -2607,7 +2607,14 @@ fn compile_function_definition(
     collect_direct_fn_calls(fn_code, &mut callees);
     state.fns.push(Function {
         name: fn_name.clone(),
-        args: Box::from(fn_args),
+        args: Box::from(fn_args.iter().map(|(a, t)| {
+            (
+                a.clone(),
+                t.clone()
+                    .map(|t_e| t_e.to_datatype(state.structs, span, ctx.src)),
+            )
+        }))
+        .collect(),
         code: fn_code.clone(),
         impls: Vec::new(),
         is_recursive: None,
@@ -3327,7 +3334,7 @@ fn parse_toplevel(
     code: Vec<Expr>,
     file_path: &Path,
     src_file_idx: u16,
-    use_line_markers: Source,
+    src: Source,
     fns: &mut Vec<Function>,
     structs: &mut Vec<Struct>,
     struct_fields: &mut Vec<(SmolStr, Vec<SmolStr>)>,
@@ -3344,7 +3351,7 @@ fn parse_toplevel(
             Expr::FunctionDecl(fn_name, fn_args, fn_code, span) => {
                 if let Some((_, func_id)) = namespace.fns.iter().find(|(f, _)| f == &fn_name) {
                     let func = &fns[*func_id as usize];
-                    error_function_already_defined(func, span, use_line_markers, sources);
+                    error_function_already_defined(func, span, src, sources);
                 }
                 fn_registers.push(Vec::new());
                 let returns_void = check_if_returns_void(&fn_code);
@@ -3353,7 +3360,13 @@ fn parse_toplevel(
 
                 fns.push(Function {
                     name: fn_name.clone(),
-                    args: fn_args,
+                    args: Box::from(fn_args.iter().map(|(a, t)| {
+                        (
+                            a.clone(),
+                            t.clone().map(|t_e| t_e.to_datatype(structs, span, src)),
+                        )
+                    }))
+                    .collect(),
                     code: fn_code,
                     impls: Vec::new(),
                     is_recursive: None,
@@ -3376,11 +3389,7 @@ fn parse_toplevel(
                 let parsed_fields = fields
                     .iter()
                     .map(|(f, f_t, f_span)| {
-                        (
-                            f.clone(),
-                            f_t.to_datatype(structs, span, use_line_markers),
-                            *f_span,
-                        )
+                        (f.clone(), f_t.to_datatype(structs, span, src), *f_span)
                     })
                     .collect();
                 structs[struct_id as usize].fields = parsed_fields;
@@ -3429,7 +3438,7 @@ fn parse_toplevel(
                 let lib = Rc::new(unsafe {
                     libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
                         throw_compiler_error(
-                            use_line_markers,
+                            src,
                             markers,
                             ErrType::Custom(
                                 format_args!("Cannot load dynamic library \"{path}\": {e}")
@@ -3443,11 +3452,11 @@ fn parse_toplevel(
                     .map(|(fn_name, fn_args, fn_return_type)| {
                         let fn_args = fn_args
                             .iter()
-                            .map(|t| t.to_datatype(structs, markers, use_line_markers))
+                            .map(|t| t.to_datatype(structs, markers, src))
                             .collect::<Vec<DataType>>()
                             .into_boxed_slice();
                         let fn_return_type = fn_return_type.
-                            to_datatype(structs, markers, use_line_markers);
+                            to_datatype(structs, markers, src);
                         let return_val = FnSignature {
                             name: fn_name.clone(),
                             args: fn_args.clone(),
@@ -3462,7 +3471,7 @@ fn parse_toplevel(
                                 lib.get::<*const ()>(fn_name.as_bytes())
                                     .unwrap_or_else(|e| {
                                         throw_compiler_error(
-                                            use_line_markers,
+                                            src,
                                             markers,
                                             ErrType::Custom(
                                                 format_args!(

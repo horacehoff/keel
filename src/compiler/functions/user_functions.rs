@@ -68,7 +68,7 @@ pub fn handle_user_function(
         && call_args
             .iter()
             .zip(state.fns[fn_id].args.iter())
-            .all(|(e, p)| matches!(e, Expr::Var(n, _) if n == p))
+            .all(|(e, (p, _))| matches!(e, Expr::Var(n, _) if n == p))
         && let Some(fn_sig) = state
             .dyn_libs
             .iter()
@@ -111,6 +111,12 @@ pub fn handle_user_function(
         .map(|arg| arg.infer_type(v, ctx, state))
         .collect::<Vec<DataType>>();
 
+    for (i, (_, t)) in state.fns[fn_id].args.iter().enumerate() {
+        if let Some(t) = t {
+            infered_arg_types[i].expect(t, ctx.src, args_indexes[i]);
+        }
+    }
+
     // Try to check if function has already been compiled for these specific arg types
     let fn_impl_idx = state.fns[fn_id]
         .impls
@@ -121,7 +127,11 @@ pub fn handle_user_function(
         // If it hasn't, compile it (which adds it to the function's implementation list)
 
         // Clone only when actually compiling a new specialisation
-        let fn_args: Box<[SmolStr]> = state.fns[fn_id].args.clone();
+        let fn_args = state.fns[fn_id]
+            .args
+            .iter()
+            .map(|(a, _)| a.clone())
+            .collect::<Vec<SmolStr>>();
         let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[fn_id].code);
         compile_function(
             output,

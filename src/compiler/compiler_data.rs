@@ -27,7 +27,7 @@ pub struct ErrorCatch {
 #[derive(Debug)]
 pub struct Function {
     pub name: SmolStr,
-    pub args: Box<[SmolStr]>,
+    pub args: Box<[(SmolStr, Option<DataType>)]>,
     pub code: Rc<[Expr]>,
     pub impls: Vec<FunctionImpl>,
     pub is_recursive: Option<bool>,

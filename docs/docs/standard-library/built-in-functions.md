@@ -417,7 +417,7 @@ fn main() {
 
 ## Get
 
-`<[K: V]>.get(key: T) -> V`<br/>
+`<{K: V}>.get(key: T) -> V`<br/>
 Returns the value associated with the key in the given map. If the key doesn't exist, it raises the `unknown_map_key` error.
 
 ```
@@ -427,7 +427,7 @@ print(map.get("test2")); // prints 67
 
 ## Insert
 
-`<[K: V]>.insert(key: T, value: V)`<br/>
+`<{K: V}>.insert(key: T, value: V)`<br/>
 Inserts the given key-value pair in the map. It updates the value if the key already exists.
 
 ```

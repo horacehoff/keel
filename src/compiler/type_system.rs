@@ -121,7 +121,7 @@ impl std::fmt::Display for DataType {
             Self::Struct(_) => write!(f, "struct"),
             Self::Map(m) => write!(
                 f,
-                "[{}: {}]",
+                "{{{}: {}}}",
                 m.0.as_ref().unwrap_or(&Self::Unknown),
                 m.1.as_ref().unwrap_or(&Self::Unknown)
             ),
@@ -171,7 +171,7 @@ impl DataType {
                 .to_smolstr()
             }
             Self::Map(m) => format_args!(
-                "[{}: {}]",
+                "{{{}: {}}}",
                 m.0.as_ref().unwrap_or(&Self::Unknown),
                 m.1.as_ref().unwrap_or(&Self::Unknown)
             )

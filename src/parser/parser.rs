@@ -600,14 +600,14 @@ fn parse_type(parser: &mut Parser<'_>) -> TypeExpr {
 
 fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
     let (next_token, span) = parser.next_token();
-    let mut t = if next_token == Token::LBracket {
+    let mut t = if next_token == Token::LBrace {
         let key_t = parse_type(parser);
         parser.next_token_expect(
             Token::Colon,
             "A colon must separate key and value types in map types",
         );
         let value_t = parse_type(parser);
-        parser.next_token_expect(Token::RBracket, "Unmatched '['");
+        parser.next_token_expect(Token::RBrace, "Unmatched '{'");
         TypeExpr::Map(Box::new(key_t), Box::new(value_t))
     } else if let Token::Identifier(i) = next_token {
         TypeExpr::Identifier(SmolStr::new(i))

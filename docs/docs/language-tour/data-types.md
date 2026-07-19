@@ -146,8 +146,8 @@ fn main() {
 }
 ```
 
-## Map (`[K: V]`)
-A [map](https://wikipedia.org/wiki/Associative_array) is a collection of key-value pairs in which keys are unique. They allow for O(1) retrieval and insertion. Keel maps can only store one key-value type, and their type is written `[K: V]`, `K` representing the type of the keys, which can be any type, and `V` representing the type of the values, which can also be any type. Map keys must be literals.
+## Map (`{K: V}`)
+A [map](https://wikipedia.org/wiki/Associative_array) is a collection of key-value pairs in which keys are unique. They allow for O(1) retrieval and insertion. Keel maps can only store one key-value type, and their type is written `{K: V}`, `K` representing the type of the keys, which can be any type, and `V` representing the type of the values, which can also be any type. Map keys must be literals.
 
 ``` rust
 fn main() {

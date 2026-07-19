@@ -72,7 +72,7 @@ fn main() {
     let s2 = "Hello" + ", world!"; 
     // This indexes `s` and retrieves the first letter: "H".
     let s3 = s[0]; 
-    // This slices `s` and retrieves the first four letters: "Hello". 
+    // This slices `s` and retrieves the first five letters: "Hello". 
     let s4 = s[0..5];
     // "Hello
     // World!"

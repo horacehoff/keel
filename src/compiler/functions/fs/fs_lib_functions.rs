@@ -6,11 +6,11 @@ use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
-use crate::compiler::error_unknown_function;
+use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::error_unknown_function;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use crate::util::check_args;
 
 pub fn fs_lib_functions(
     name: &str,

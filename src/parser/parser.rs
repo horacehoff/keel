@@ -610,7 +610,13 @@ fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
         parser.next_token_expect(Token::RBrace, "Unmatched '{'");
         TypeExpr::Map(Box::new(key_t), Box::new(value_t))
     } else if let Token::Identifier(i) = next_token {
-        TypeExpr::Identifier(SmolStr::new(i))
+        if parser.peek_token() == Token::DoubleColon {
+            parser.next_token();
+            let (namespace, end) = parse_namespace(parser, SmolStr::new(i));
+            TypeExpr::NamespacedIdentifier(namespace, (span.start, end).into())
+        } else {
+            TypeExpr::Identifier(SmolStr::new(i), span)
+        }
     } else {
         cold_path();
         parser.error(
@@ -655,8 +661,11 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
         let type_start = parser.peek_token();
         let first = parse_type(parser);
         let (return_type, fn_name) = if parser.peek_token() == Token::LParen {
-            if let TypeExpr::Identifier(name) = first {
-                (TypeExpr::Identifier(SmolStr::new_static("null")), name)
+            if let TypeExpr::Identifier(name, span) = first {
+                (
+                    TypeExpr::Identifier(SmolStr::new_static("null"), span),
+                    name,
+                )
             } else {
                 parser.error(
                     span,

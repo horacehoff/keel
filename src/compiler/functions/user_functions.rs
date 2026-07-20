@@ -5,6 +5,7 @@ use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::super::type_system::can_reach;
 use super::super::type_system::track_returns;
+use crate::compiler::SymbolKind;
 use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
 use crate::compiler::compiler_data::Ctx;
@@ -12,9 +13,9 @@ use crate::compiler::compiler_data::FunctionImpl;
 use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
+use crate::compiler::compiler_errors::check_args_user_fn;
 use crate::data::NULL;
 use crate::instr::Instr;
-use crate::util::check_args_user_fn;
 use smol_strc::SmolStr;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -274,13 +275,18 @@ fn compile_function(
     let loc = fn_start as u16 + ctx.offset;
 
     let v_len_before_args = v.len();
-    let fn_len = state.namespace.fns.len();
+    // let fn_len = state.namespace.symbols.len();
+    let mut anon_fns: Vec<usize> = Vec::new();
     infered_arg_types
         .iter()
         .enumerate()
         .for_each(|(i, infered_type)| {
             if let DataType::Fn(fn_id) = infered_type {
-                state.namespace.fns.push((fn_args[i].clone(), *fn_id));
+                anon_fns.push(state.namespace.symbols.len());
+                state
+                    .namespace
+                    .symbols
+                    .push((fn_args[i].clone(), SymbolKind::Fn(*fn_id)));
                 v.push(Variable {
                     name: fn_args[i].clone(),
                     register_id: 0,
@@ -337,7 +343,9 @@ fn compile_function(
         },
         state,
     );
-    state.namespace.fns.truncate(fn_len);
+    for i in anon_fns.into_iter().rev() {
+        state.namespace.symbols.remove(i);
+    }
 
     let mut reserved_registers = get_tgt_ids(&parsed);
     reserved_registers.extend(args_loc);

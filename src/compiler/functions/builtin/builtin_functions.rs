@@ -3,16 +3,17 @@ use super::super::expr::Span;
 use super::super::type_system::DataType;
 use super::check_arg_type;
 use super::user_functions::handle_user_function;
+use crate::compiler::SymbolKind;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
-use crate::compiler::error_unknown_function;
+use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::check_args_range;
+use crate::compiler::compiler_errors::error_unknown_function;
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
-use crate::util::check_args;
-use crate::util::check_args_range;
 
 pub fn builtin_functions(
     name: &str,
@@ -188,10 +189,10 @@ pub fn builtin_functions(
             None
         }
         fn_name => {
-            if let Some((_, fn_id)) = state
+            if let Some((_, crate::compiler::SymbolKind::Fn(fn_id))) = state
                 .namespace
-                .fns
-                .iter_mut()
+                .symbols
+                .iter()
                 .find(|(func_name, _)| func_name == fn_name && func_name != "main")
             {
                 handle_user_function(
@@ -210,7 +211,13 @@ pub fn builtin_functions(
                 error_unknown_function(
                     fn_name,
                     span,
-                    state.namespace.fns.iter().map(|(n, _)| n.as_str()),
+                    state.namespace.symbols.iter().filter_map(|(name, kind)| {
+                        if matches!(kind, SymbolKind::Fn(_)) {
+                            Some(name.as_str())
+                        } else {
+                            None
+                        }
+                    }),
                     src,
                     state.sources,
                 );

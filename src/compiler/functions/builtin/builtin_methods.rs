@@ -5,14 +5,14 @@ use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
-use crate::compiler::error_unknown_function;
+use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::check_args_range;
+use crate::compiler::compiler_errors::error_unknown_function;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use crate::util::check_args;
-use crate::util::check_args_range;
 
 pub fn builtin_methods(
     name: &str,

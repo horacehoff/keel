@@ -6,20 +6,12 @@ use crate::errors::BOLD;
 use crate::errors::ErrType;
 use crate::errors::RED;
 use crate::errors::RESET;
-use crate::errors::blue;
-use crate::errors::green;
-use crate::errors::red;
 use crate::errors::throw_compiler_error;
-use crate::errors::throw_compiler_error_exp;
-#[cfg(target_arch = "wasm32")]
-use crate::errors::wasm_error;
 use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
 use crate::vm::UncheckedVecOps;
 use crate::{data::Data, instr::Instr};
-use ariadne::Label;
-use ariadne::Report;
 use compiler_data::Ctx;
 use compiler_data::DynamicLibFn;
 use compiler_data::Dynamiclib;
@@ -51,10 +43,14 @@ use type_system::check_if_returns_void;
 use type_system::collect_direct_fn_calls;
 use type_system::struct_field_type_matches;
 
+#[cfg(target_arch = "wasm32")]
+use crate::errors::wasm_error;
+
 #[cfg(not(target_arch = "wasm32"))]
 use type_system::datatype_to_c_type;
 
 pub mod compiler_data;
+mod compiler_errors;
 pub mod type_system;
 
 pub mod expr;
@@ -258,75 +254,26 @@ fn parse_loop_flow_control(
     });
 }
 
-pub fn walk_namespace(
-    root: &Namespace,
-    path: &[SmolStr],
-    symbol_name: &str,
-    select_symbol_type: fn(&Namespace) -> &[(SmolStr, u16)],
-) -> Option<usize> {
+pub fn walk_namespace(root: &Namespace, path: &[SmolStr], symbol_name: &str) -> Option<SymbolKind> {
     let mut current = root;
     for sub in path {
         current = current.children.iter().find(|n| n.name == *sub)?;
     }
-    select_symbol_type(current)
+    current
+        .symbols
         .iter()
         .find(|(n, _)| n.as_str() == symbol_name)
-        .map(|(_, id)| *id as usize)
+        .map(|(_, symbol)| *symbol)
 }
 
-pub fn find_struct(
-    root: &Namespace,
-    structs: &[Struct],
-    namespace: &[SmolStr],
-    name: &str,
-) -> Option<usize> {
-    if let Some(idx) = walk_namespace(root, namespace, name, |ns| &ns.structs) {
-        Some(idx)
-    } else if namespace.is_empty() {
-        structs.iter().rposition(|s| s.name == name)
+pub fn find_struct(root: &Namespace, namespace: &[SmolStr], name: &str) -> Option<usize> {
+    if let Some(struct_idx) = walk_namespace(root, namespace, name)
+        && let SymbolKind::Struct(idx) = struct_idx
+    {
+        Some(idx as usize)
     } else {
         None
     }
-}
-
-#[inline(never)]
-#[cold]
-fn error_array_diff_types(
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
-    array_span: Span,
-    array_elem_type: &DataType,
-    failing_elem_span: Span,
-    failing_elem_type: &DataType,
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, array_span.into()),
-            )
-            .with_message("Invalid array types")
-            .with_label(
-                Label::new((src.filename, array_span.into()))
-                    .with_message(format_args!(
-                        "This expression is of type {}",
-                        blue(array_elem_type)
-                    ))
-                    .with_color(ariadne::Color::Blue),
-            )
-            .with_label(
-                Label::new((src.filename, failing_elem_span.into()))
-                    .with_message(format_args!(
-                        "This expression is of type {}",
-                        red(failing_elem_type),
-                    ))
-                    .with_color(ariadne::Color::Red),
-            )
-            .with_note("Arrays are homogeneous and can only hold elements of a single type")
-            .finish()
-        },
-        sources,
-    );
 }
 
 #[inline(always)]
@@ -347,7 +294,7 @@ fn compile_array_literal(
         {
             let failing_elem_type = array_items[failing_elem_idx + 1].infer_type(v, ctx, state);
             let failing_elem_span = spans[failing_elem_idx + 2];
-            error_array_diff_types(
+            compiler_errors::error_array_diff_types(
                 ctx.src,
                 state.sources,
                 spans[1],
@@ -442,107 +389,6 @@ fn compile_array_literal(
     }
 }
 
-#[inline(never)]
-#[cold]
-pub fn error_unknown_struct(
-    struct_name: &SmolStr,
-    struct_span: Span,
-    sources: &[(SmolStr, Rc<String>)],
-    src: Source,
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, struct_span.into()),
-            )
-            .with_message("Unknown struct")
-            .with_label(
-                Label::new((src.filename, struct_span.into()))
-                    .with_message(format_args!("Unknown struct {}", red(struct_name)))
-                    .with_color(ariadne::Color::Red),
-            )
-            .finish()
-        },
-        sources,
-    );
-}
-
-fn error_struct_no_such_field(
-    src: Source,
-    struct_name: &SmolStr,
-    struct_span: Span,
-    struct_field_span: Span,
-    struct_field_name: &SmolStr,
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            let report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, struct_field_span.into()),
-            )
-            .with_message("Unknown struct field")
-            .with_label(
-                Label::new((src.filename, struct_span.into()))
-                    .with_message(format_args!("Struct defined here"))
-                    .with_color(ariadne::Color::Blue),
-            )
-            .with_label(
-                Label::new((src.filename, struct_field_span.into()))
-                    .with_message(format_args!(
-                        "There is no field {} in {}",
-                        red(struct_field_name),
-                        blue(struct_name)
-                    ))
-                    .with_color(ariadne::Color::Red),
-            );
-
-            report.finish()
-        },
-        sources,
-    );
-}
-
-fn error_struct_missing_fields(
-    src: Source,
-    struct_span: Span,
-    struct_literal_span: Span,
-    sources: &[(SmolStr, Rc<String>)],
-    missing_fields: &[&SmolStr],
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            let report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, struct_literal_span.into()),
-            )
-            .with_message("Missing struct fields")
-            .with_label(
-                Label::new((src.filename, struct_span.into()))
-                    .with_message(format_args!("Struct defined here"))
-                    .with_color(ariadne::Color::Blue),
-            )
-            .with_label(
-                Label::new((src.filename, struct_literal_span.into()))
-                    .with_message(format_args!(
-                        "This is missing field{} {}",
-                        if missing_fields.len() > 1 { "s" } else { "" },
-                        missing_fields
-                            .iter()
-                            .map(|f| blue(f).to_smolstr())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ))
-                    .with_color(ariadne::Color::Red),
-            );
-
-            report.finish()
-        },
-        sources,
-    );
-}
-
 fn compile_struct_literal(
     namespace: &[SmolStr],
     fields: &[(SmolStr, Expr, Span, Span)],
@@ -554,15 +400,14 @@ fn compile_struct_literal(
 ) -> u16 {
     let name = &namespace[namespace.len() - 1];
     let namespace = &namespace[..(namespace.len() - 1)];
-    let Some(expected_struct_idx) = find_struct(state.namespace, state.structs, namespace, name)
-    else {
-        error_unknown_struct(name, span, state.sources, ctx.src);
+    let Some(expected_struct_idx) = find_struct(state.namespace, namespace, name) else {
+        compiler_errors::error_unknown_struct(name, span, state.sources, ctx.src);
     };
     let type_id = state.structs[expected_struct_idx].id;
     let expected_fields_len = state.structs[expected_struct_idx].fields.len();
     if expected_fields_len < fields.len() {
         let unexpected_field = &fields[expected_fields_len];
-        error_struct_no_such_field(
+        compiler_errors::error_struct_no_such_field(
             ctx.src,
             name,
             state.structs[expected_struct_idx].name_span,
@@ -584,7 +429,7 @@ fn compile_struct_literal(
                 let field_type = field_expr.infer_type(v, ctx, state);
                 let field = &state.structs[expected_struct_idx].fields[field_idx];
                 if !struct_field_type_matches(&field.1, &field_type) {
-                    error_struct_field_invalid_type(
+                    compiler_errors::error_struct_field_invalid_type(
                         ctx.src,
                         name,
                         field.2,
@@ -622,7 +467,7 @@ fn compile_struct_literal(
                     })
                     .map(|i| &state.structs[struct_id].fields[i].0)
                     .collect::<Vec<&SmolStr>>();
-                error_struct_missing_fields(
+                compiler_errors::error_struct_missing_fields(
                     ctx.src,
                     state.structs[expected_struct_idx].name_span,
                     span,
@@ -646,7 +491,7 @@ fn compile_struct_literal(
                 let field_type = field_expr.infer_type(v, ctx, state);
                 let field = &state.structs[expected_struct_idx].fields[field_idx];
                 if !struct_field_type_matches(&field.1, &field_type) {
-                    error_struct_field_invalid_type(
+                    compiler_errors::error_struct_field_invalid_type(
                         ctx.src,
                         name,
                         field.2,
@@ -680,7 +525,7 @@ fn compile_struct_literal(
                     })
                     .map(|i| &state.structs[struct_id].fields[i].0)
                     .collect::<Vec<&SmolStr>>();
-                error_struct_missing_fields(
+                compiler_errors::error_struct_missing_fields(
                     ctx.src,
                     state.structs[expected_struct_idx].name_span,
                     span,
@@ -843,7 +688,7 @@ fn compile_struct_field_access(
             .iter()
             .position(|f| &f.0 == field)
             .unwrap_or_else(|| {
-                error_struct_unknown_field(
+                compiler_errors::error_struct_unknown_field(
                     ctx.src,
                     field_span,
                     field,
@@ -865,115 +710,6 @@ fn compile_struct_field_access(
             ErrType::InvalidType(&DataType::Struct(0), &t),
         );
     }
-}
-
-#[inline(never)]
-#[cold]
-fn error_struct_unknown_field(
-    src: Source,
-    field_span: Span,
-    field: &SmolStr,
-    struct_name: &SmolStr,
-    fields: &[(SmolStr, DataType, Span)],
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            let mut report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, field_span.into()),
-            )
-            .with_message("Unknown field")
-            .with_label(
-                Label::new((src.filename, field_span.into()))
-                    .with_message(format_args!(
-                        "The field {} isn't defined in struct {}",
-                        red(field),
-                        blue(struct_name)
-                    ))
-                    .with_color(ariadne::Color::Red),
-            );
-
-            let similar_field = find_closest_str(field, fields.iter().map(|(f, _, _)| f.as_str()));
-            if let Some(similar_field) = similar_field {
-                report = report.with_help(format_args!(
-                    "A field with a similar name exists: {}",
-                    blue(similar_field)
-                ));
-            } else {
-                report = report.with_help(format_args!(
-                    "The available fields are: {}",
-                    fields
-                        .iter()
-                        .map(|(field, _, _)| blue(field))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                ));
-            }
-            report.finish()
-        },
-        sources,
-    );
-}
-
-#[cold]
-#[inline(never)]
-fn error_struct_field_invalid_type(
-    src: Source,
-    struct_name: &SmolStr,
-    struct_field_span: Span,
-    struct_field_name: &SmolStr,
-    struct_field_type: &DataType,
-    value_span: Span,
-    value_type: &DataType,
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            let mut report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, struct_field_span.into()),
-            )
-            .with_message("Incompatible types")
-            .with_label(
-                Label::new((src.filename, struct_field_span.into()))
-                    .with_message(format_args!(
-                        "Field {} in struct {} expects type {}",
-                        blue(struct_field_name),
-                        blue(struct_name),
-                        blue(struct_field_type)
-                    ))
-                    .with_color(ariadne::Color::Blue),
-            )
-            .with_label(
-                Label::new((src.filename, value_span.into()))
-                    .with_message(format_args!(
-                        "This expression is of type {}",
-                        red(value_type)
-                    ))
-                    .with_color(ariadne::Color::Red),
-            );
-
-            if struct_field_type == &DataType::Int
-                && (value_type == &DataType::Float || value_type == &DataType::String)
-            {
-                report = report.with_help(format_args!("Try using the {} function", blue("int()")));
-            } else if struct_field_type == &DataType::Float
-                && (value_type == &DataType::Int || value_type == &DataType::String)
-            {
-                report =
-                    report.with_help(format_args!("Try using the {} function", blue("float()")));
-            } else if struct_field_type == &DataType::Bool && value_type == &DataType::String {
-                report =
-                    report.with_help(format_args!("Try using the {} function", blue("bool()")));
-            } else if struct_field_type == &DataType::String {
-                report = report.with_help(format_args!("Try using the {} function", blue("str()")));
-            }
-
-            report.finish()
-        },
-        sources,
-    );
 }
 
 fn compile_array_indexing(
@@ -1063,120 +799,6 @@ fn compile_array_slice(
     dest_reg_id
 }
 
-#[cold]
-#[inline(never)]
-fn error_op(
-    l: &DataType,
-    r: &DataType,
-    op: &str,
-    span_l: Span,
-    span_r: Span,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            let mut report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, span_l.extend(span_r).into()),
-            );
-
-            if (op == "-" && l == &DataType::Null) || op == "!" {
-                report = report
-                    .with_message(format_args!(
-                        "Cannot perform operation {} {}",
-                        red(op),
-                        blue(r)
-                    ))
-                    .with_label(
-                        Label::new((src.filename, span_r.into()))
-                            .with_message(format_args!("This expression is of type {}", blue(r)))
-                            .with_color(ariadne::Color::Red),
-                    );
-            } else {
-                report = report
-                    .with_message(format_args!(
-                        "Cannot perform operation {} {} {}",
-                        blue(l),
-                        red(op),
-                        green(r)
-                    ))
-                    .with_label(
-                        Label::new((src.filename, span_l.into()))
-                            .with_message(format_args!("This expression is of type {}", blue(l)))
-                            .with_color(ariadne::Color::Red),
-                    )
-                    .with_label(
-                        Label::new((src.filename, span_r.into()))
-                            .with_message(format_args!("This expression is of type {}", green(r)))
-                            .with_color(ariadne::Color::Red),
-                    );
-            }
-
-            if op == "+" {
-                report = report.with_note(format_args!(
-                    "The supported types are:\n- {} {} {}\n- {} {} {}\n- {} {} {}\n- {} {} {}",
-                    blue(DataType::Int),
-                    red(op),
-                    green(DataType::Int),
-                    blue(DataType::Float),
-                    red(op),
-                    green(DataType::Float),
-                    blue(DataType::String),
-                    red(op),
-                    green(DataType::String),
-                    blue("T[]"),
-                    red(op),
-                    green("T[]")
-                ));
-            } else if op == "-" && l == &DataType::Null {
-                report = report.with_note(format_args!(
-                    "The supported types are:\n- {} {}\n- {} {}",
-                    red(op),
-                    blue(DataType::Int),
-                    red(op),
-                    green(DataType::Float),
-                ));
-            } else if op == "*"
-                || op == "/"
-                || op == "-"
-                || op == "%"
-                || op == "^"
-                || op == ">"
-                || op == ">="
-                || op == "<"
-                || op == "<="
-            {
-                report = report.with_note(format_args!(
-                    "The supported types are:\n- {} {} {}\n- {} {} {}",
-                    blue(DataType::Int),
-                    red(op),
-                    green(DataType::Int),
-                    blue(DataType::Float),
-                    red(op),
-                    green(DataType::Float),
-                ));
-            } else if op == "&&" || op == "||" {
-                report = report.with_note(format_args!(
-                    "The supported types are:\n- {} {} {}",
-                    blue(DataType::Bool),
-                    red(op),
-                    green(DataType::Bool),
-                ));
-            } else if op == "!" {
-                report = report.with_note(format_args!(
-                    "The supported types are:\n- {} {}",
-                    red(op),
-                    blue(DataType::Bool),
-                ));
-            }
-
-            report.finish()
-        },
-        sources,
-    );
-}
-
 fn uniform_op(
     instr: fn(u16, u16, u16) -> Instr,
     symbol: &'static str,
@@ -1193,7 +815,7 @@ fn uniform_op(
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(v, ctx, state), r.infer_type(v, ctx, state));
     if &t_l != t || &t_r != t {
-        error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.src, state.sources);
+        compiler_errors::error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.src, state.sources);
     }
 
     let id_l = l
@@ -1228,7 +850,7 @@ fn uniform_op2(
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(v, ctx, state), r.infer_type(v, ctx, state));
     if !((&t_l == t_1 && &t_r == t_1) || (&t_l == t_2 && &t_r == t_2)) {
-        error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.src, state.sources);
+        compiler_errors::error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.src, state.sources);
     }
     let id_l = l
         .compile(v, ctx, state, output, None, false, true)
@@ -1304,7 +926,7 @@ fn compile_add_op(
             DataType::String | DataType::Array(_) | DataType::Float | DataType::Int
         )
     {
-        error_op(&t_l, &t_r, "+", span_l, span_r, ctx.src, state.sources);
+        compiler_errors::error_op(&t_l, &t_r, "+", span_l, span_r, ctx.src, state.sources);
     }
     // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
     if t_l == DataType::Int
@@ -1365,7 +987,7 @@ fn compile_sub_op(
     if !((t_l == DataType::Float && t_r == DataType::Float)
         || (t_l == DataType::Int && t_r == DataType::Int))
     {
-        error_op(&t_l, &t_r, "-", span_l, span_r, ctx.src, state.sources);
+        compiler_errors::error_op(&t_l, &t_r, "-", span_l, span_r, ctx.src, state.sources);
     }
     // var-1 uses the dedicated DecInt/DecIntTo instructions
     if t_l == DataType::Int
@@ -1524,7 +1146,7 @@ fn compile_neg_op(
     } else if operand_type == DataType::Int {
         output.push(Instr::NegInt(id_l, id));
     } else {
-        error_op(
+        compiler_errors::error_op(
             &DataType::Null,
             &operand_type,
             "-",
@@ -1554,7 +1176,7 @@ fn compile_bool_neg_op(
     state.free_reg(id_l, v);
     let id = state.alloc_reg_tgt(tgt_id);
     if operand_type != DataType::Bool {
-        error_op(
+        compiler_errors::error_op(
             &DataType::Null,
             &operand_type,
             "-",
@@ -1778,7 +1400,7 @@ fn compile_struct_field_assignment(
     {
         if expected_field_name == field {
             if !struct_field_type_matches(expected_field_type, &new_val_type) {
-                error_struct_field_invalid_type(
+                compiler_errors::error_struct_field_invalid_type(
                     ctx.src,
                     struct_name,
                     *expected_field_span,
@@ -1794,7 +1416,7 @@ fn compile_struct_field_assignment(
         }
     }
     let Some(field_index) = field_index else {
-        error_struct_unknown_field(
+        compiler_errors::error_struct_unknown_field(
             ctx.src,
             field_span,
             field,
@@ -2220,203 +1842,16 @@ fn compile_var_declaration(
     };
 
     if let DataType::Fn(fn_id) = &var_type {
-        state.namespace.fns.push((name.clone(), *fn_id));
+        state
+            .namespace
+            .symbols
+            .push((name.clone(), SymbolKind::Fn(*fn_id)));
     }
     v.push(Variable {
         name: name.clone(),
         register_id: var_id,
         var_type,
     });
-}
-
-fn find_closest_str<'a>(name: &'a str, list: impl Iterator<Item = &'a str>) -> Option<&'a str> {
-    let mut best: Option<(&str, usize)> = None;
-    for candidate in list {
-        let dist = levenshtein(name, candidate);
-        if dist <= (name.len().max(candidate.len()) / 3).max(1)
-            && best.is_none_or(|(_, d)| dist < d)
-        {
-            best = Some((candidate, dist));
-        }
-    }
-    best.map(|(s, _)| s)
-}
-
-fn levenshtein(a: &str, b: &str) -> usize {
-    let m = a.len();
-    let n = b.len();
-
-    let mut v0: Vec<usize> = (0..=n).collect();
-    let mut v1: Vec<usize> = vec![0; n + 1];
-
-    for i in 0..m {
-        v1[0] = i + 1;
-
-        for j in 0..n {
-            let deletion_cost = v0[j + 1] + 1;
-            let insertion_cost = v1[j] + 1;
-            let substitution_cost = if a.as_bytes()[i] == b.as_bytes()[j] {
-                v0[j]
-            } else {
-                v0[j] + 1
-            };
-            v1[j + 1] = std::cmp::min(
-                deletion_cost,
-                std::cmp::min(insertion_cost, substitution_cost),
-            );
-        }
-
-        std::mem::swap(&mut v0, &mut v1);
-    }
-
-    v0[n]
-}
-
-#[cold]
-#[inline(never)]
-pub fn error_unknown_variable(
-    var_name: &SmolStr,
-    span: Span,
-    v: &[Variable],
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message("Unknown variable")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "Cannot find variable {} in this scope",
-                            red(var_name),
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
-
-            let similar_var = find_closest_str(var_name, v.iter().map(|v| v.name.as_str()));
-            if let Some(similar_var) = similar_var {
-                report = report.with_help(format_args!(
-                    "A variable with a similar name exists: {}",
-                    blue(similar_var)
-                ));
-            }
-
-            report.finish()
-        },
-        sources,
-    )
-}
-
-#[cold]
-#[inline(never)]
-pub fn error_unknown_function<'a>(
-    fn_name: &'a str,
-    span: Span,
-    fns: impl Iterator<Item = &'a str>,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    let similar_fn = find_closest_str(fn_name, fns);
-    throw_compiler_error_exp(
-        || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message("Unknown function")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "Cannot find function {} in this scope",
-                            red(fn_name),
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
-
-            if let Some(similar_fn) = similar_fn {
-                report = report.with_help(format_args!(
-                    "A function with a similar name exists: {}",
-                    blue(similar_fn)
-                ));
-            }
-
-            report.finish()
-        },
-        sources,
-    )
-}
-
-#[cold]
-#[inline(never)]
-pub fn error_unknown_namespace(
-    namespace: &[SmolStr],
-    span: Span,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            let report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message("Unknown namespace")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "{} is not a valid namespace",
-                            red(namespace.join("::")),
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
-
-            report.finish()
-        },
-        sources,
-    )
-}
-
-#[cold]
-#[inline(never)]
-pub fn error_unknown_function_in_namespace(
-    fn_name: &str,
-    namespace_root: &Namespace,
-    namespace: &[SmolStr],
-    span: Span,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    let mut current = namespace_root;
-    for sub in namespace {
-        current = if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
-            c
-        } else {
-            error_unknown_namespace(namespace, span, src, sources);
-        };
-    }
-    let namespace_str = namespace.join("::");
-
-    let similar_fn = find_closest_str(fn_name, current.fns.iter().map(|f| f.0.as_str()));
-    throw_compiler_error_exp(
-        || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message("Unknown function in namespace")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "Cannot find function {} in namespace {}",
-                            red(fn_name),
-                            blue(&namespace_str)
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
-
-            if let Some(similar_fn) = similar_fn {
-                report = report.with_help(format_args!(
-                    "A function with a similar name exists: {}",
-                    blue(format_args!("{namespace_str}::{similar_fn}"))
-                ));
-            }
-
-            report.finish()
-        },
-        sources,
-    )
 }
 
 fn compile_var_assignment(
@@ -2430,7 +1865,7 @@ fn compile_var_assignment(
 ) {
     let var_type = value.infer_type(v, ctx, state);
     let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
-        error_unknown_variable(name, span, v, ctx.src, state.sources);
+        compiler_errors::error_unknown_variable(name, span, v, ctx.src, state.sources);
     });
     let id = v[var_pos].register_id;
 
@@ -2529,17 +1964,6 @@ fn compile_struct_definition(
         id: struct_id,
         name_span: span,
     });
-    let parsed_fields = fields
-        .iter()
-        .map(|(f, f_t, f_span)| {
-            (
-                f.clone(),
-                f_t.to_datatype(state.structs, span, ctx.src),
-                *f_span,
-            )
-        })
-        .collect();
-    state.structs[struct_id as usize].fields = parsed_fields;
     state.struct_fields.push((
         name.clone(),
         fields
@@ -2547,46 +1971,21 @@ fn compile_struct_definition(
             .map(|(n, _, _)| n.clone())
             .collect::<Vec<SmolStr>>(),
     ));
-    state
-        .namespace
-        .structs
-        .push((name.clone(), (state.structs.len() - 1) as u16));
-}
-
-#[cold]
-#[inline(never)]
-fn error_function_already_defined(
-    func: &Function,
-    redeclaration_span: Span,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
-) -> ! {
-    throw_compiler_error_exp(
-        || {
-            let fn_src = &sources[func.src_file as usize];
-            let report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, redeclaration_span.into()),
+    state.namespace.symbols.push((
+        name.clone(),
+        SymbolKind::Struct((state.structs.len() - 1) as u16),
+    ));
+    let parsed_fields = fields
+        .iter()
+        .map(|(f, f_t, f_span)| {
+            (
+                f.clone(),
+                f_t.to_datatype(state.structs, span, ctx.src, state.namespace, state.sources),
+                *f_span,
             )
-            .with_message(format_args!("Function already exists"))
-            .with_label(
-                Label::new((fn_src.0.as_str(), func.name_span.into()))
-                    .with_message(format_args!("Already defined here"))
-                    .with_color(ariadne::Color::Blue),
-            )
-            .with_label(
-                Label::new((src.filename, redeclaration_span.into()))
-                    .with_message(format_args!(
-                        "Function {} is already defined",
-                        blue(&func.name)
-                    ))
-                    .with_color(ariadne::Color::Red),
-            );
-
-            report.finish()
-        },
-        sources,
-    )
+        })
+        .collect();
+    state.structs[struct_id as usize].fields = parsed_fields;
 }
 
 fn compile_function_definition(
@@ -2600,18 +1999,22 @@ fn compile_function_definition(
     _output: &mut Vec<Instr>,
 ) {
     if let Some(func) = state.fns.iter().find(|func| &func.name == fn_name) {
-        error_function_already_defined(func, span, ctx.src, state.sources);
-        // throw_compiler_error(ctx.src, span, ErrType::FunctionAlreadyExists(fn_name));
+        compiler_errors::error_function_already_defined(func, span, ctx.src, state.sources);
     }
     let mut callees = Vec::new();
     collect_direct_fn_calls(fn_code, &mut callees);
+    state
+        .namespace
+        .symbols
+        .push((fn_name.clone(), SymbolKind::Fn(state.fns.len() as u16)));
     state.fns.push(Function {
         name: fn_name.clone(),
         args: Box::from(fn_args.iter().map(|(a, t)| {
             (
                 a.clone(),
-                t.clone()
-                    .map(|t_e| t_e.to_datatype(state.structs, span, ctx.src)),
+                t.clone().map(|t_e| {
+                    t_e.to_datatype(state.structs, span, ctx.src, state.namespace, state.sources)
+                }),
             )
         }))
         .collect(),
@@ -2625,10 +2028,6 @@ fn compile_function_definition(
         name_span: span,
     });
     state.fn_registers.push(Vec::new());
-    state
-        .namespace
-        .fns
-        .push((fn_name.clone(), (state.fns.len() - 1) as u16));
 }
 
 fn compile_return(
@@ -2827,7 +2226,7 @@ impl Expr {
                 {
                     Some(*register_id)
                 } else {
-                    error_unknown_variable(name, *span, v, ctx.src, state.sources);
+                    compiler_errors::error_unknown_variable(name, *span, v, ctx.src, state.sources);
                 }
             }
             Self::Array(array_items, spans) => {
@@ -3321,13 +2720,26 @@ const ARCH_SUFFIX: &str = "-x86_64";
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 const ARCH_SUFFIX: &str = "";
 
+#[derive(Debug, Copy, Clone)]
+pub enum SymbolKind {
+    Fn(u16),
+    Struct(u16),
+}
+
 #[derive(Debug)]
 pub struct Namespace {
-    pub fns: Vec<(SmolStr, u16)>,
-    pub structs: Vec<(SmolStr, u16)>,
+    pub symbols: Vec<(SmolStr, SymbolKind)>,
     pub name: SmolStr,
     pub children: Vec<Self>,
 }
+
+// impl Namespace {
+//     #[inline(always)]
+//     #[must_use]
+//     pub fn fns(&self) {
+//         self.symbols.iter().
+//     }
+// }
 
 /// Recursively collects functions, dyn libs, and imported files
 fn parse_toplevel(
@@ -3349,9 +2761,11 @@ fn parse_toplevel(
     for expr in code {
         match expr {
             Expr::FunctionDecl(fn_name, fn_args, fn_code, span) => {
-                if let Some((_, func_id)) = namespace.fns.iter().find(|(f, _)| f == &fn_name) {
+                if let Some((_, SymbolKind::Fn(func_id))) =
+                    namespace.symbols.iter().find(|(f, _)| f == &fn_name)
+                {
                     let func = &fns[*func_id as usize];
-                    error_function_already_defined(func, span, src, sources);
+                    compiler_errors::error_function_already_defined(func, span, src, sources);
                 }
                 fn_registers.push(Vec::new());
                 let returns_void = check_if_returns_void(&fn_code);
@@ -3363,7 +2777,8 @@ fn parse_toplevel(
                     args: Box::from(fn_args.iter().map(|(a, t)| {
                         (
                             a.clone(),
-                            t.clone().map(|t_e| t_e.to_datatype(structs, span, src)),
+                            t.clone()
+                                .map(|t_e| t_e.to_datatype(structs, span, src, namespace, sources)),
                         )
                     }))
                     .collect(),
@@ -3376,7 +2791,9 @@ fn parse_toplevel(
                     direct_calls: callees.into_boxed_slice(),
                     name_span: span,
                 });
-                namespace.fns.push((fn_name, (fns.len() - 1) as u16));
+                namespace
+                    .symbols
+                    .push((fn_name, SymbolKind::Fn((fns.len() - 1) as u16)));
             }
             Expr::StructDeclare(name, fields, span) => {
                 let struct_id = structs.len() as u16;
@@ -3389,7 +2806,11 @@ fn parse_toplevel(
                 let parsed_fields = fields
                     .iter()
                     .map(|(f, f_t, f_span)| {
-                        (f.clone(), f_t.to_datatype(structs, span, src), *f_span)
+                        (
+                            f.clone(),
+                            f_t.to_datatype(structs, span, src, namespace, sources),
+                            *f_span,
+                        )
                     })
                     .collect();
                 structs[struct_id as usize].fields = parsed_fields;
@@ -3400,7 +2821,9 @@ fn parse_toplevel(
                         .map(|(n, _, _)| n.clone())
                         .collect::<Vec<SmolStr>>(),
                 ));
-                namespace.structs.push((name, struct_id));
+                namespace
+                    .symbols
+                    .push((name, SymbolKind::Struct(struct_id)));
             }
             #[cfg(target_arch = "wasm32")]
             Expr::ImportDylib(_, _, _) => {
@@ -3452,11 +2875,11 @@ fn parse_toplevel(
                     .map(|(fn_name, fn_args, fn_return_type)| {
                         let fn_args = fn_args
                             .iter()
-                            .map(|t| t.to_datatype(structs, markers, src))
+                            .map(|t| t.to_datatype(structs, markers, src,namespace, sources))
                             .collect::<Vec<DataType>>()
                             .into_boxed_slice();
                         let fn_return_type = fn_return_type.
-                            to_datatype(structs, markers, src);
+                            to_datatype(structs, markers, src,namespace, sources);
                         let return_val = FnSignature {
                             name: fn_name.clone(),
                             args: fn_args.clone(),
@@ -3582,8 +3005,7 @@ fn parse_toplevel(
                 });
                 let mut child_namespace = Namespace {
                     name: child_name,
-                    fns: Vec::new(),
-                    structs: Vec::new(),
+                    symbols: Vec::new(),
                     children: Vec::new(),
                 };
                 parse_toplevel(
@@ -3629,11 +3051,6 @@ pub fn compile(
     #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
 
-    // let code: Vec<Expr> = grammar::FileParser::new()
-    //     .parse((filename, &contents), &contents)
-    //     .unwrap_or_else(|x| {
-    //         crate::errors::lalrpop_error::<lalrpop_util::lexer::Token<'_>>(x, &contents, filename)
-    //     });
     let code = parser::parse(&contents, (filename, &contents));
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -3672,13 +3089,18 @@ pub fn compile(
     let mut namespace = Namespace {
         name: SmolStr::new_static(""),
         children: Vec::new(),
-        fns: Vec::new(),
-        structs: Vec::new(),
+        symbols: Vec::new(),
     };
     let main_src = Source {
         filename,
         contents: &contents,
     };
+
+    // let discovered: FxHashMap<PathBuf, Namespace>;
+    // let namespace_by_file: FxHashMap<u16, Namespace>;
+
+    // let pending_structs : Vec<>
+
     parse_toplevel(
         code,
         &main_path,
@@ -3729,7 +3151,7 @@ pub fn compile(
     let mut instructions = compile_expr(
         &state.fns
             .iter()
-            .find(|func| func.name == "main")
+            .find(|func| func.name == "main" && func.src_file == 0)
             .unwrap_or_else(|| {
                 #[cfg(target_arch = "wasm32")]
                 wasm_error("Cannot find main function");

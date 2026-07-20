@@ -1,16 +1,17 @@
 use super::expr::Expr;
 use super::expr::Span;
 use super::type_system::DataType;
+use crate::compiler::SymbolKind;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
-use crate::compiler::error_unknown_function_in_namespace;
+use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
 use crate::compiler::walk_namespace;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 use crate::instr::Instr;
-use crate::util::check_args;
 use builtin_functions::builtin_functions;
 use fs_lib_functions::fs_lib_functions;
 use smol_strc::SmolStr;
@@ -129,12 +130,11 @@ pub fn handle_functions(
         } else {
             Some(register_id)
         }
-    } else if let Some(fn_id) = walk_namespace(state.namespace, namespace, fn_name, |namespace| {
-        &namespace.fns
-    }) {
+    } else if let Some(SymbolKind::Fn(fn_id)) = walk_namespace(state.namespace, namespace, fn_name)
+    {
         handle_user_function(
             fn_name,
-            fn_id,
+            fn_id as usize,
             output,
             v,
             ctx,

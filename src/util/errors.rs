@@ -107,12 +107,9 @@ pub enum ErrType<'a> {
     CArrayReturnTypeNotSupported,
 
     // PARSER ERRORS
-    UnknownType(&'a str),
     InvalidStructFieldCount(&'a str, u16, u16),
     /// StructMissingField(struct, field)
     StructMissingField(&'a str, &'a str),
-    /// StructUnknownField(struct, field)
-    StructUnknownField(&'a str, &'a str),
     /// When an array holds two or more different types
     ArrayWithDiffType,
     NotIndexable(&'a DataType),
@@ -174,11 +171,8 @@ impl From<ErrType<'_>> for SmolStr {
             }
             ErrType::FsStorageFull => "Storage is full".into(),
             ErrType::FsTimedOut => "This operation timed out".into(),
-            ErrType::UnknownType(t) => format_args!("Unknown type {RED}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::InvalidStructFieldCount(name, expected, received) => format_args!(
                 "Struct {BLUE}{BOLD}{name}{RESET} expects {expected} fields while this has {RED}{BOLD}{received}{RESET} fields").to_smolstr(),
-            ErrType::StructUnknownField(name, field) => format_args!(
-                "Unknown field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
             ErrType::StructMissingField(name, field) => format_args!(
                 "Missing field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
             ErrType::ArrayWithDiffType => "Arrays can only hold a single type".into(),
@@ -253,10 +247,8 @@ impl ErrType<'_> {
             ErrType::InvalidBool => "invalid_bool",
             ErrType::IndexOutOfBounds(_, _) => "index_out_of_bounds",
             ErrType::SliceOutOfBounds(_, _, _) => "slice_out_of_bounds",
-            ErrType::UnknownType(_) => "unknown_type",
             ErrType::InvalidStructFieldCount(_, _, _) => "invalid_struct_field_count",
             ErrType::StructMissingField(_, _) => "struct_missing_field",
-            ErrType::StructUnknownField(_, _) => "struct_unknown_field",
             ErrType::ArrayWithDiffType => "array_with_diff_type",
             ErrType::NotIndexable(_) => "not_indexable",
             ErrType::InvalidIndexType(_) => "invalid_index_type",

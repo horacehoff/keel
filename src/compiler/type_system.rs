@@ -1,6 +1,8 @@
 use super::expr::Expr;
 use super::expr::Span;
 use super::expr::symbol_of_expr;
+use crate::compiler::Namespace;
+use crate::compiler::SymbolKind;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::FnSignature;
 use crate::compiler::compiler_data::Function;
@@ -8,12 +10,16 @@ use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Struct;
 use crate::compiler::compiler_data::Variable;
-use crate::compiler::error_op;
-use crate::compiler::error_unknown_function;
-use crate::compiler::error_unknown_function_in_namespace;
-use crate::compiler::error_unknown_struct;
-use crate::compiler::error_unknown_variable;
+use crate::compiler::compiler_errors::error_op;
+use crate::compiler::compiler_errors::error_struct_unknown_field;
+use crate::compiler::compiler_errors::error_unknown_function;
+use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
+use crate::compiler::compiler_errors::error_unknown_struct;
+use crate::compiler::compiler_errors::error_unknown_type;
+use crate::compiler::compiler_errors::error_unknown_type_with_namespace;
+use crate::compiler::compiler_errors::error_unknown_variable;
 use crate::compiler::find_struct;
+use crate::compiler::walk_namespace;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 use rustc_hash::FxHashSet;
@@ -23,6 +29,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
+use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
@@ -36,40 +43,78 @@ thread_local! {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TypeExpr {
-    Identifier(SmolStr),
+    Identifier(SmolStr, Span),
+    NamespacedIdentifier(Box<[SmolStr]>, Span),
     Array(Box<Self>),
     Map(Box<Self>, Box<Self>),
     Union(Box<[Self]>),
 }
 
 impl TypeExpr {
-    pub fn to_datatype(&self, structs: &[Struct], span: Span, src: Source) -> DataType {
+    pub fn to_datatype(
+        &self,
+        structs: &[Struct],
+        span: Span,
+        src: Source,
+        namespace: &Namespace,
+        sources: &[(SmolStr, Rc<String>)],
+    ) -> DataType {
         match self {
-            Self::Identifier(s) => match s.as_str() {
+            Self::Identifier(s, span) => match s.as_str() {
                 "int" => DataType::Int,
                 "float" => DataType::Float,
                 "bool" => DataType::Bool,
                 "string" => DataType::String,
                 "null" => DataType::Null,
                 other => {
-                    if let Some(id) = structs.iter().rposition(|st| st.name == other) {
+                    if let Some(SymbolKind::Struct(id)) = walk_namespace(namespace, &[], other) {
                         DataType::Struct(id as u16)
                     } else {
-                        cold_path();
-                        throw_compiler_error(src, span, ErrType::UnknownType(s))
+                        error_unknown_type(
+                            *span,
+                            src,
+                            other,
+                            sources,
+                            namespace.symbols.iter().filter_map(|(name, kind)| {
+                                if matches!(kind, SymbolKind::Struct(_)) {
+                                    Some(name.as_str())
+                                } else {
+                                    None
+                                }
+                            }),
+                        );
                     }
                 }
             },
-            Self::Array(inner_t) => {
-                DataType::Array(Some(Box::new(inner_t.to_datatype(structs, span, src))))
+            Self::NamespacedIdentifier(s, span) => {
+                if let Some(SymbolKind::Struct(id)) =
+                    walk_namespace(namespace, &s[..s.len() - 1], unsafe {
+                        s.last().unwrap_unchecked()
+                    })
+                {
+                    DataType::Struct(id as u16)
+                } else {
+                    cold_path();
+                    error_unknown_type_with_namespace(
+                        *span,
+                        src,
+                        unsafe { s.last().unwrap_unchecked() },
+                        sources,
+                        namespace,
+                        &s[..s.len() - 1],
+                    )
+                }
             }
+            Self::Array(inner_t) => DataType::Array(Some(Box::new(
+                inner_t.to_datatype(structs, span, src, namespace, sources),
+            ))),
             Self::Map(k_t, v_t) => DataType::Map(Box::from((
-                Some(k_t.to_datatype(structs, span, src)),
-                Some(v_t.to_datatype(structs, span, src)),
+                Some(k_t.to_datatype(structs, span, src, namespace, sources)),
+                Some(v_t.to_datatype(structs, span, src, namespace, sources)),
             ))),
             Self::Union(poly) => DataType::Poly(
                 poly.iter()
-                    .map(|t| t.to_datatype(structs, span, src))
+                    .map(|t| t.to_datatype(structs, span, src, namespace, sources))
                     .collect(),
             )
             .check_poly(),
@@ -760,14 +805,15 @@ impl Expr {
                         .iter()
                         .find(|x| &x.0 == field)
                         .unwrap_or_else(|| {
-                            throw_compiler_error(
+                            let s = &state.structs[s_id as usize];
+                            error_struct_unknown_field(
                                 ctx.src,
                                 *field_span,
-                                ErrType::StructUnknownField(
-                                    &state.structs[s_id as usize].name,
-                                    field,
-                                ),
-                            );
+                                field,
+                                &s.name,
+                                &s.fields,
+                                state.sources,
+                            )
                         })
                         .1
                         .clone()
@@ -819,7 +865,15 @@ impl Expr {
                                     error_unknown_function(
                                         function_name,
                                         *span,
-                                        state.namespace.fns.iter().map(|f| f.0.as_str()),
+                                        state.namespace.symbols.iter().filter_map(
+                                            |(name, kind)| {
+                                                if matches!(kind, SymbolKind::Fn(_)) {
+                                                    Some(name.as_str())
+                                                } else {
+                                                    None
+                                                }
+                                            },
+                                        ),
                                         ctx.src,
                                         state.sources,
                                     );
@@ -985,11 +1039,9 @@ impl Expr {
                 let name = &namespace[namespace.len() - 1];
                 let namespace = &namespace[..(namespace.len() - 1)];
                 DataType::Struct(
-                    find_struct(state.namespace, state.structs, namespace, name).unwrap_or_else(
-                        || {
-                            error_unknown_struct(name, *span, state.sources, ctx.src);
-                        },
-                    ) as u16,
+                    find_struct(state.namespace, namespace, name).unwrap_or_else(|| {
+                        error_unknown_struct(name, *span, state.sources, ctx.src);
+                    }) as u16,
                 )
             }
             Self::AnonymousFunction(_, _, _) => {

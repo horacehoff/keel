@@ -2,6 +2,7 @@ use super::super::expr::Expr;
 use super::super::expr::Span;
 use super::super::type_system::DataType;
 use super::check_arg_type;
+use crate::compiler::Namespace;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
@@ -11,6 +12,7 @@ use crate::compiler::compiler_errors::error_unknown_function;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
+use smol_strc::SmolStr;
 
 pub fn fs_lib_functions(
     name: &str,
@@ -108,7 +110,17 @@ pub fn fs_lib_functions(
             state.add_to_src(ctx, output, span);
         }
         fn_name => {
-            error_unknown_function(fn_name, span, std::iter::empty(), src, state.sources);
+            error_unknown_function(
+                fn_name,
+                span,
+                &Namespace {
+                    name: SmolStr::new_static(""),
+                    children: Vec::new(),
+                    symbols: Vec::new(),
+                },
+                src,
+                state.sources,
+            );
         }
     }
     None

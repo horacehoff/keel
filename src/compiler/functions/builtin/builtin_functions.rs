@@ -3,7 +3,6 @@ use super::super::expr::Span;
 use super::super::type_system::DataType;
 use super::check_arg_type;
 use super::user_functions::handle_user_function;
-use crate::compiler::SymbolKind;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
@@ -189,15 +188,14 @@ pub fn builtin_functions(
             None
         }
         fn_name => {
-            if let Some((_, crate::compiler::SymbolKind::Fn(fn_id))) = state
-                .namespace
-                .symbols
-                .iter()
-                .find(|(func_name, _)| func_name == fn_name && func_name != "main")
+            if let Some(fn_id) =
+                state
+                    .namespace
+                    .find_function(&[], fn_name, span, ctx.src, state.sources)
             {
                 handle_user_function(
                     fn_name,
-                    *fn_id as usize,
+                    fn_id,
                     output,
                     v,
                     ctx,
@@ -208,19 +206,7 @@ pub fn builtin_functions(
                     args_indexes,
                 )
             } else {
-                error_unknown_function(
-                    fn_name,
-                    span,
-                    state.namespace.symbols.iter().filter_map(|(name, kind)| {
-                        if matches!(kind, SymbolKind::Fn(_)) {
-                            Some(name.as_str())
-                        } else {
-                            None
-                        }
-                    }),
-                    src,
-                    state.sources,
-                );
+                error_unknown_function(fn_name, span, state.namespace, src, state.sources);
             }
         }
     }

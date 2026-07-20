@@ -1,14 +1,12 @@
 use super::expr::Expr;
 use super::expr::Span;
 use super::type_system::DataType;
-use crate::compiler::SymbolKind;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
-use crate::compiler::walk_namespace;
 use crate::errors::ErrType;
 use crate::errors::throw_compiler_error;
 use crate::instr::Instr;
@@ -130,11 +128,14 @@ pub fn handle_functions(
         } else {
             Some(register_id)
         }
-    } else if let Some(SymbolKind::Fn(fn_id)) = walk_namespace(state.namespace, namespace, fn_name)
+    } else if let Some(fn_id) =
+        state
+            .namespace
+            .find_function(namespace, fn_name, span, ctx.src, state.sources)
     {
         handle_user_function(
             fn_name,
-            fn_id as usize,
+            fn_id,
             output,
             v,
             ctx,

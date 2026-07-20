@@ -1,6 +1,7 @@
 use super::super::expr::Expr;
 use super::super::expr::Span;
 use super::super::type_system::DataType;
+use crate::compiler::Namespace;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
@@ -13,6 +14,7 @@ use crate::errors::throw_compiler_error;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
+use smol_strc::SmolStr;
 
 pub fn builtin_methods(
     name: &str,
@@ -404,6 +406,16 @@ pub fn builtin_methods(
             output.push(Instr::MapInsertReg(id, key_id, val_id));
             None
         }
-        fn_name => error_unknown_function(fn_name, fn_span, std::iter::empty(), src, state.sources),
+        fn_name => error_unknown_function(
+            fn_name,
+            fn_span,
+            &Namespace {
+                name: SmolStr::new_static(""),
+                children: Vec::new(),
+                symbols: Vec::new(),
+            },
+            src,
+            state.sources,
+        ),
     }
 }

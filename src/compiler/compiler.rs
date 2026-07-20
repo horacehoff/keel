@@ -1,5 +1,6 @@
 use crate::compiler::compiler_data::InstrSrc;
 use crate::compiler::compiler_data::Source;
+use crate::compiler::compiler_errors::error_unknown_namespace;
 use crate::data::NULL;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
@@ -10,7 +11,6 @@ use crate::errors::throw_compiler_error;
 use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
-use crate::vm::UncheckedVecOps;
 use crate::{data::Data, instr::Instr};
 use compiler_data::Ctx;
 use compiler_data::DynamicLibFn;
@@ -254,28 +254,6 @@ fn parse_loop_flow_control(
     });
 }
 
-pub fn walk_namespace(root: &Namespace, path: &[SmolStr], symbol_name: &str) -> Option<SymbolKind> {
-    let mut current = root;
-    for sub in path {
-        current = current.children.iter().find(|n| n.name == *sub)?;
-    }
-    current
-        .symbols
-        .iter()
-        .find(|(n, _)| n.as_str() == symbol_name)
-        .map(|(_, symbol)| *symbol)
-}
-
-pub fn find_struct(root: &Namespace, namespace: &[SmolStr], name: &str) -> Option<usize> {
-    if let Some(struct_idx) = walk_namespace(root, namespace, name)
-        && let SymbolKind::Struct(idx) = struct_idx
-    {
-        Some(idx as usize)
-    } else {
-        None
-    }
-}
-
 #[inline(always)]
 fn compile_array_literal(
     array_items: &[Expr],
@@ -400,7 +378,11 @@ fn compile_struct_literal(
 ) -> u16 {
     let name = &namespace[namespace.len() - 1];
     let namespace = &namespace[..(namespace.len() - 1)];
-    let Some(expected_struct_idx) = find_struct(state.namespace, namespace, name) else {
+    let Some(expected_struct_idx) =
+        state
+            .namespace
+            .find_struct(namespace, name, span, ctx.src, state.sources)
+    else {
         compiler_errors::error_unknown_struct(name, span, state.sources, ctx.src);
     };
     let type_id = state.structs[expected_struct_idx].id;
@@ -1980,7 +1962,7 @@ fn compile_struct_definition(
         .map(|(f, f_t, f_span)| {
             (
                 f.clone(),
-                f_t.to_datatype(state.structs, span, ctx.src, state.namespace, state.sources),
+                f_t.to_datatype(ctx.src, state.namespace, state.sources),
                 *f_span,
             )
         })
@@ -2012,9 +1994,8 @@ fn compile_function_definition(
         args: Box::from(fn_args.iter().map(|(a, t)| {
             (
                 a.clone(),
-                t.clone().map(|t_e| {
-                    t_e.to_datatype(state.structs, span, ctx.src, state.namespace, state.sources)
-                }),
+                t.clone()
+                    .map(|t_e| t_e.to_datatype(ctx.src, state.namespace, state.sources)),
             )
         }))
         .collect(),
@@ -2726,20 +2707,79 @@ pub enum SymbolKind {
     Struct(u16),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Namespace {
     pub symbols: Vec<(SmolStr, SymbolKind)>,
     pub name: SmolStr,
     pub children: Vec<Self>,
 }
 
-// impl Namespace {
-//     #[inline(always)]
-//     #[must_use]
-//     pub fn fns(&self) {
-//         self.symbols.iter().
-//     }
-// }
+impl Namespace {
+    pub fn fns(&self) -> impl Iterator<Item = &(SmolStr, SymbolKind)> {
+        self.symbols
+            .iter()
+            .filter(|(_, kind)| matches!(kind, SymbolKind::Fn(_)))
+    }
+    pub fn structs(&self) -> impl Iterator<Item = &(SmolStr, SymbolKind)> {
+        self.symbols
+            .iter()
+            .filter(|(_, kind)| matches!(kind, SymbolKind::Struct(_)))
+    }
+    #[must_use]
+    pub fn find_function(
+        &self,
+        path: &[SmolStr],
+        function_name: &str,
+        span: Span,
+        src: Source,
+        sources: &[(SmolStr, Rc<String>)],
+    ) -> Option<usize> {
+        let mut current = self;
+        for sub in path {
+            if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
+                current = c;
+            } else {
+                error_unknown_namespace(path, span, src, sources);
+            }
+        }
+        current.symbols.iter().find_map(|(name, kind)| {
+            if name.as_str() == function_name
+                && let SymbolKind::Fn(fn_id) = kind
+            {
+                Some(*fn_id as usize)
+            } else {
+                None
+            }
+        })
+    }
+    #[must_use]
+    pub fn find_struct(
+        &self,
+        path: &[SmolStr],
+        struct_name: &str,
+        span: Span,
+        src: Source,
+        sources: &[(SmolStr, Rc<String>)],
+    ) -> Option<usize> {
+        let mut current = self;
+        for sub in path {
+            if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
+                current = c;
+            } else {
+                error_unknown_namespace(path, span, src, sources);
+            }
+        }
+        current.symbols.iter().find_map(|(name, kind)| {
+            if name.as_str() == struct_name
+                && let SymbolKind::Struct(struct_id) = kind
+            {
+                Some(*struct_id as usize)
+            } else {
+                None
+            }
+        })
+    }
+}
 
 /// Recursively collects functions, dyn libs, and imported files
 fn parse_toplevel(
@@ -2751,18 +2791,22 @@ fn parse_toplevel(
     structs: &mut Vec<Struct>,
     struct_fields: &mut Vec<(SmolStr, Vec<SmolStr>)>,
     fn_registers: &mut Vec<Vec<u16>>,
-    dyn_libs: &mut Vec<Dynamiclib>,
-    dyn_lib_fns: &mut Vec<DynamicLibFn>,
+    dynamic_libs: &mut Vec<Dynamiclib>,
+    dynamic_libs_fns: &mut Vec<DynamicLibFn>,
     sources: &mut Vec<(SmolStr, Rc<String>)>,
-    visited_files: &mut Vec<PathBuf>,
     dyn_fn_id: &mut u16,
     namespace: &mut Namespace,
+    files: &mut FxHashMap<PathBuf, Namespace>,
+    file_namespaces: &mut FxHashMap<u16, Namespace>,
+    pending_structs: &mut Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
+    pending_fns: &mut Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)>,
 ) {
+    let mut imports = Vec::new();
     for expr in code {
         match expr {
             Expr::FunctionDecl(fn_name, fn_args, fn_code, span) => {
                 if let Some((_, SymbolKind::Fn(func_id))) =
-                    namespace.symbols.iter().find(|(f, _)| f == &fn_name)
+                    namespace.symbols.iter().rfind(|(f, _)| f == &fn_name)
                 {
                     let func = &fns[*func_id as usize];
                     compiler_errors::error_function_already_defined(func, span, src, sources);
@@ -2772,16 +2816,10 @@ fn parse_toplevel(
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(&fn_code, &mut callees);
 
+                let fn_id = fns.len() as u16;
                 fns.push(Function {
                     name: fn_name.clone(),
-                    args: Box::from(fn_args.iter().map(|(a, t)| {
-                        (
-                            a.clone(),
-                            t.clone()
-                                .map(|t_e| t_e.to_datatype(structs, span, src, namespace, sources)),
-                        )
-                    }))
-                    .collect(),
+                    args: Box::new([]),
                     code: fn_code,
                     impls: Vec::new(),
                     is_recursive: None,
@@ -2791,9 +2829,8 @@ fn parse_toplevel(
                     direct_calls: callees.into_boxed_slice(),
                     name_span: span,
                 });
-                namespace
-                    .symbols
-                    .push((fn_name, SymbolKind::Fn((fns.len() - 1) as u16)));
+                pending_fns.push((fn_id, src_file_idx, fn_args));
+                namespace.symbols.push((fn_name, SymbolKind::Fn(fn_id)));
             }
             Expr::StructDeclare(name, fields, span) => {
                 let struct_id = structs.len() as u16;
@@ -2803,33 +2840,28 @@ fn parse_toplevel(
                     id: struct_id,
                     name_span: span,
                 });
-                let parsed_fields = fields
-                    .iter()
-                    .map(|(f, f_t, f_span)| {
-                        (
-                            f.clone(),
-                            f_t.to_datatype(structs, span, src, namespace, sources),
-                            *f_span,
-                        )
-                    })
-                    .collect();
-                structs[struct_id as usize].fields = parsed_fields;
                 struct_fields.push((
                     name.clone(),
-                    fields
-                        .iter()
-                        .map(|(n, _, _)| n.clone())
-                        .collect::<Vec<SmolStr>>(),
+                    fields.iter().map(|(n, _, _)| n.clone()).collect(),
                 ));
                 namespace
                     .symbols
                     .push((name, SymbolKind::Struct(struct_id)));
+                pending_structs.push((struct_id, src_file_idx, fields));
             }
             #[cfg(target_arch = "wasm32")]
-            Expr::ImportDylib(_, _, _) => {
-                wasm_error("WASM does not support loading dynamic libraries")
-            }
-            #[cfg(not(target_arch = "wasm32"))]
+            Expr::ImportDylib(..) => wasm_error("WASM does not support loading dynamic libraries"),
+            #[cfg(target_arch = "wasm32")]
+            Expr::ImportFile(..) => wasm_error("WASM does not support importing files"),
+            import @ (Expr::ImportFile(..) | Expr::ImportDylib(..)) => imports.push(import),
+            _ => {}
+        }
+    }
+
+    files.insert(file_path.to_path_buf(), namespace.clone());
+
+    for import in imports {
+        match import {
             Expr::ImportDylib(path, fn_signatures, markers) => {
                 let base_path = if Path::new(path.as_str()).is_relative() {
                     file_path
@@ -2875,11 +2907,11 @@ fn parse_toplevel(
                     .map(|(fn_name, fn_args, fn_return_type)| {
                         let fn_args = fn_args
                             .iter()
-                            .map(|t| t.to_datatype(structs, markers, src,namespace, sources))
+                            .map(|t| t.to_datatype(src,namespace, sources))
                             .collect::<Vec<DataType>>()
                             .into_boxed_slice();
                         let fn_return_type = fn_return_type.
-                            to_datatype(structs, markers, src,namespace, sources);
+                            to_datatype(src,namespace, sources);
                         let return_val = FnSignature {
                             name: fn_name.clone(),
                             args: fn_args.clone(),
@@ -2912,7 +2944,7 @@ fn parse_toplevel(
                         let mut types = vec![fn_return_type];
                         types.extend(fn_args);
 
-                        dyn_lib_fns.push(DynamicLibFn {
+                        dynamic_libs_fns.push(DynamicLibFn {
                             types: Box::from(types),
                             _lib: Rc::clone(&lib),
                             ptr,
@@ -2922,14 +2954,11 @@ fn parse_toplevel(
                         return_val
                     })
                     .collect();
-                dyn_libs.push(Dynamiclib {
+                dynamic_libs.push(Dynamiclib {
                     name: dylib_name,
                     fns,
                 });
             }
-            #[cfg(target_arch = "wasm32")]
-            Expr::ImportFile(_, _, _) => wasm_error("WASM does not support importing files"),
-            #[cfg(not(target_arch = "wasm32"))]
             Expr::ImportFile(path, alias, markers) => {
                 let file_path = file_path
                     .parent()
@@ -2959,18 +2988,23 @@ fn parse_toplevel(
                             },
                         )
                     });
-                if visited_files.contains(&file_path) {
-                    let current_src = &sources[src_file_idx as usize];
-                    throw_compiler_error(
-                        Source {
-                            filename: current_src.0.as_str(),
-                            contents: current_src.1.as_str(),
-                        },
-                        markers,
-                        ErrType::CircularImport(file_path.to_str().unwrap_or(path.as_str())),
-                    );
+
+                let child_name = alias.unwrap_or_else(|| {
+                    file_path
+                        .file_prefix()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(path.as_str())
+                        .to_smolstr()
+                });
+
+                if let Some(cached) = files.get(&file_path) {
+                    namespace.children.push(Namespace {
+                        name: child_name,
+                        ..cached.clone()
+                    });
+                    continue;
                 }
-                visited_files.push(file_path.clone());
+
                 let file_contents =
                     Rc::new(std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
                         let current_src = &sources[src_file_idx as usize];
@@ -2984,6 +3018,9 @@ fn parse_toplevel(
                         );
                     }));
                 let file_name: SmolStr = file_path.to_str().unwrap_or(path.as_str()).into();
+
+                let child_src_idx = sources.len() as u16;
+
                 sources.push((file_name.clone(), file_contents.clone()));
 
                 // Parse the imported file's contents
@@ -2996,39 +3033,90 @@ fn parse_toplevel(
                     filename: file_name.as_str(),
                     contents: file_contents.as_str(),
                 };
-                let child_name = alias.unwrap_or_else(|| {
-                    file_path
-                        .file_prefix()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(path.as_str())
-                        .to_smolstr()
-                });
                 let mut child_namespace = Namespace {
                     name: child_name,
                     symbols: Vec::new(),
                     children: Vec::new(),
                 };
+
                 parse_toplevel(
                     file_code,
                     &file_path,
-                    (sources.len() - 1) as u16,
+                    child_src_idx,
                     import_src,
                     fns,
                     structs,
                     struct_fields,
                     fn_registers,
-                    dyn_libs,
-                    dyn_lib_fns,
+                    dynamic_libs,
+                    dynamic_libs_fns,
                     sources,
-                    visited_files,
                     dyn_fn_id,
                     &mut child_namespace,
+                    files,
+                    file_namespaces,
+                    pending_structs,
+                    pending_fns,
                 );
-                visited_files.pop_unchecked();
+                files.insert(file_path, child_namespace.clone());
                 namespace.children.push(child_namespace);
             }
-            _ => {}
+            _ => unsafe { unreachable_unchecked() },
         }
+    }
+    file_namespaces.insert(src_file_idx, namespace.clone());
+}
+
+fn resolve_types(
+    structs: &mut [Struct],
+    fns: &mut [Function],
+    pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
+    pending_fns: Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)>,
+    file_namespaces: &FxHashMap<u16, Namespace>,
+    sources: &[(SmolStr, Rc<String>)],
+) {
+    for (struct_id, src_file_idx, fields) in pending_structs {
+        let (file_name, contents) = &sources[src_file_idx as usize];
+        let resolved_fields = fields
+            .iter()
+            .map(|(field_name, field_type, field_span)| {
+                (
+                    field_name.clone(),
+                    field_type.to_datatype(
+                        Source {
+                            filename: file_name.as_str(),
+                            contents: contents.as_str(),
+                        },
+                        &file_namespaces[&src_file_idx],
+                        sources,
+                    ),
+                    *field_span,
+                )
+            })
+            .collect();
+        structs[struct_id as usize].fields = resolved_fields;
+    }
+    for (fn_id, src_file_idx, args) in pending_fns {
+        let (file_name, contents) = &sources[src_file_idx as usize];
+        let resolved_args = args
+            .iter()
+            .map(|(arg_name, arg_type)| {
+                (
+                    arg_name.clone(),
+                    arg_type.clone().map(|t_e| {
+                        t_e.to_datatype(
+                            Source {
+                                filename: file_name.as_str(),
+                                contents: contents.as_str(),
+                            },
+                            &file_namespaces[&src_file_idx],
+                            sources,
+                        )
+                    }),
+                )
+            })
+            .collect();
+        fns[fn_id as usize].args = resolved_args;
     }
 }
 
@@ -3084,8 +3172,6 @@ pub fn compile(
     let main_path = PathBuf::from(filename)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(filename));
-    let mut visited: Vec<PathBuf> = Vec::with_capacity(1);
-    visited.push(main_path.clone());
     let mut namespace = Namespace {
         name: SmolStr::new_static(""),
         children: Vec::new(),
@@ -3096,10 +3182,11 @@ pub fn compile(
         contents: &contents,
     };
 
-    // let discovered: FxHashMap<PathBuf, Namespace>;
-    // let namespace_by_file: FxHashMap<u16, Namespace>;
-
-    // let pending_structs : Vec<>
+    let mut files: FxHashMap<PathBuf, Namespace> = FxHashMap::default();
+    let mut file_namespaces: FxHashMap<u16, Namespace> = FxHashMap::default();
+    let mut pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)> = Vec::new();
+    let mut pending_fns: Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)> =
+        Vec::with_capacity(2);
 
     parse_toplevel(
         code,
@@ -3113,12 +3200,21 @@ pub fn compile(
         &mut dyn_libs,
         &mut dyn_lib_fns,
         &mut sources,
-        &mut visited,
         &mut dyn_fn_id,
         &mut namespace,
+        &mut files,
+        &mut file_namespaces,
+        &mut pending_structs,
+        &mut pending_fns,
     );
-    // dbg!(&namespace);
-    // dbg!(&functions);
+    resolve_types(
+        &mut structs,
+        &mut functions,
+        pending_structs,
+        pending_fns,
+        &file_namespaces,
+        &sources,
+    );
 
     let ctx = Ctx {
         block_id: 0,

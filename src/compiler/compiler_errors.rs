@@ -6,7 +6,6 @@ use super::Source;
 use super::Span;
 use super::State;
 use super::Variable;
-use crate::compiler::SymbolKind;
 use crate::errors::ErrType;
 use crate::errors::blue;
 use crate::errors::bold;
@@ -474,14 +473,14 @@ pub fn error_unknown_variable(
 
 #[cold]
 #[inline(never)]
-pub fn error_unknown_function<'a>(
-    fn_name: &'a str,
+pub fn error_unknown_function(
+    fn_name: &str,
     span: Span,
-    fns: impl Iterator<Item = &'a str>,
+    namespace: &Namespace,
     src: Source,
     sources: &[(SmolStr, Rc<String>)],
 ) -> ! {
-    let similar_fn = find_closest_str(fn_name, fns);
+    let similar_fn = find_closest_str(fn_name, namespace.fns().map(|f| f.0.as_str()));
     throw_compiler_error_exp(
         || {
             let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
@@ -555,16 +554,7 @@ pub fn error_unknown_function_in_namespace(
     }
     let namespace_str = namespace.join("::");
 
-    let similar_fn = find_closest_str(
-        fn_name,
-        current.symbols.iter().filter_map(|(name, symbol_kind)| {
-            if matches!(symbol_kind, SymbolKind::Fn(_)) {
-                Some(name.as_str())
-            } else {
-                None
-            }
-        }),
-    );
+    let similar_fn = find_closest_str(fn_name, current.fns().map(|s| s.0.as_str()));
     throw_compiler_error_exp(
         || {
             let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
@@ -744,14 +734,14 @@ pub fn error_op(
 
 #[cold]
 #[inline(never)]
-pub fn error_unknown_type<'a>(
+pub fn error_unknown_type(
     span: Span,
     src: Source,
-    t: &'a str,
+    t: &str,
     sources: &[(SmolStr, Rc<String>)],
-    structs: impl Iterator<Item = &'a str>,
+    namespace: &Namespace,
 ) -> ! {
-    let closest_struct = find_closest_str(t, structs);
+    let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0.as_str()));
     throw_compiler_error_exp(
         || {
             let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
@@ -777,10 +767,10 @@ pub fn error_unknown_type<'a>(
 
 #[cold]
 #[inline(never)]
-pub fn error_unknown_type_with_namespace<'a>(
+pub fn error_unknown_type_with_namespace(
     span: Span,
     src: Source,
-    t: &'a str,
+    t: &str,
     sources: &[(SmolStr, Rc<String>)],
     namespace_root: &Namespace,
     namespace: &[SmolStr],
@@ -795,16 +785,7 @@ pub fn error_unknown_type_with_namespace<'a>(
     }
     let namespace_str = namespace.join("::");
 
-    let closest_struct = find_closest_str(
-        t,
-        current.symbols.iter().filter_map(|(name, symbol_kind)| {
-            if matches!(symbol_kind, SymbolKind::Struct(_)) {
-                Some(name.as_str())
-            } else {
-                None
-            }
-        }),
-    );
+    let closest_struct = find_closest_str(t, current.structs().map(|s| s.0.as_str()));
     throw_compiler_error_exp(
         || {
             let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))

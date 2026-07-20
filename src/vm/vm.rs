@@ -155,7 +155,7 @@ fn obj_eq(
 }
 
 struct CallFrame {
-    return_addr: u32,
+    return_addr: u16,
     return_reg: u16,
     callsite_id: u16,
 }
@@ -384,7 +384,7 @@ pub fn execute(
             Instr::SetBool(b, dest) => r[dest] = b.into(),
             Instr::CallFunc(new_loc, return_id) => {
                 call_frames.push(CallFrame {
-                    return_addr: i as u32,
+                    return_addr: i as u16,
                     return_reg: return_id,
                     callsite_id: 0,
                 });
@@ -401,7 +401,7 @@ pub fn execute(
             }
             Instr::SaveFrame(relative_func_loc, return_register, callsite_id) => {
                 call_frames.push(CallFrame {
-                    return_addr: (i + relative_func_loc as usize) as u32,
+                    return_addr: (i as u16) + relative_func_loc,
                     return_reg: return_register,
                     callsite_id,
                 });

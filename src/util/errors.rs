@@ -225,8 +225,8 @@ pub fn wasm_error(msg: &str) -> ! {
 
 #[cold]
 #[inline(never)]
-pub fn throw_compiler_error<'a, F: Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>>(
-    report: F,
+pub fn throw_compiler_error<'a>(
+    report: &dyn Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>,
     sources: &'a [Source],
 ) -> ! {
     let report = report();

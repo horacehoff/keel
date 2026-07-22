@@ -2832,23 +2832,18 @@ impl Namespace {
         file_idx: u16,
         sources: &[Source],
     ) -> Option<usize> {
-        let mut current = self;
-        for sub in path {
-            if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
-                current = c;
-            } else {
-                error_unknown_namespace(path, span, file_idx, sources);
-            }
-        }
-        current.symbols.iter().find_map(|(name, kind)| {
-            if name.as_str() == function_name
-                && let SymbolKind::Fn(fn_id) = kind
-            {
-                Some(*fn_id as usize)
-            } else {
-                None
-            }
-        })
+        self.walk_to_namespace(path, span, file_idx, sources)
+            .symbols
+            .iter()
+            .find_map(|(name, kind)| {
+                if name.as_str() == function_name
+                    && let SymbolKind::Fn(fn_id) = kind
+                {
+                    Some(*fn_id as usize)
+                } else {
+                    None
+                }
+            })
     }
     #[must_use]
     pub fn find_struct(
@@ -2859,23 +2854,36 @@ impl Namespace {
         file_idx: u16,
         sources: &[Source],
     ) -> Option<usize> {
+        self.walk_to_namespace(path, span, file_idx, sources)
+            .symbols
+            .iter()
+            .find_map(|(name, kind)| {
+                if name.as_str() == struct_name
+                    && let SymbolKind::Struct(struct_id) = kind
+                {
+                    Some(*struct_id as usize)
+                } else {
+                    None
+                }
+            })
+    }
+    #[must_use]
+    pub fn walk_to_namespace(
+        &self,
+        path: &[SmolStr],
+        span: Span,
+        file_idx: u16,
+        sources: &[Source],
+    ) -> &Self {
         let mut current = self;
         for sub in path {
-            if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
-                current = c;
+            current = if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
+                c
             } else {
                 error_unknown_namespace(path, span, file_idx, sources);
-            }
+            };
         }
-        current.symbols.iter().find_map(|(name, kind)| {
-            if name.as_str() == struct_name
-                && let SymbolKind::Struct(struct_id) = kind
-            {
-                Some(*struct_id as usize)
-            } else {
-                None
-            }
-        })
+        current
     }
 }
 

@@ -30,7 +30,7 @@ pub fn error_array_diff_types(
     failing_elem_type: &DataType,
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -72,7 +72,7 @@ pub fn error_invalid_type(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -123,7 +123,7 @@ pub fn error_invalid_index_type(t: &DataType, span: Span, file_idx: u16, sources
 #[cold]
 pub fn error_division_by_zero(modulo: bool, span: Span, file_idx: u16, sources: &[Source]) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -158,7 +158,7 @@ pub fn error_cannot_push_type_to_array(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -198,7 +198,7 @@ pub fn error_type_not_indexable(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let msg = if iterator_error {
                 "iterated on"
@@ -237,7 +237,7 @@ pub fn error_conditional_expression_without_else(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -259,7 +259,7 @@ pub fn error_conditional_expression_without_else(
 #[cold]
 pub fn error_cannot_read_file(span: Span, file_idx: u16, sources: &[Source]) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -281,7 +281,7 @@ pub fn error_cannot_read_file(span: Span, file_idx: u16, sources: &[Source]) -> 
 #[cold]
 pub fn error_cannot_load_dynlib(span: Span, file_idx: u16, sources: &[Source]) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -309,7 +309,7 @@ pub fn error_cannot_find_dynlib_symbol(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -346,7 +346,7 @@ pub fn error_map_diff_types(
     failing_elem_type: &DataType,
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -385,7 +385,7 @@ pub fn error_unknown_struct(
     file_idx: u16,
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -412,7 +412,7 @@ pub fn error_struct_no_such_field(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
@@ -448,7 +448,7 @@ pub fn error_struct_missing_fields(
     missing_fields: &[&SmolStr],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
@@ -490,7 +490,7 @@ pub fn check_args(
 ) {
     if args.len() != expected_args_len {
         throw_compiler_error(
-            || {
+            &|| {
                 let src = &sources[file_idx as usize];
                 let report = Report::build(
                     ariadne::ReportKind::Error,
@@ -526,7 +526,7 @@ pub fn error_invalid_obj_type(
     file_idx: u16,
 ) {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
@@ -563,7 +563,7 @@ pub fn check_args_user_fn(
     let args_len = args.len();
     if args_len != expected_args_len {
         throw_compiler_error(
-            || {
+            &|| {
                 let src = &state.sources[file_idx as usize];
                 let fn_src = &state.sources[fn_decl_span.1 as usize];
                 let mut report = Report::build(
@@ -631,7 +631,7 @@ pub fn check_args_range(
 ) {
     if args.len() < min_args_len || args.len() > max_args_len {
         throw_compiler_error(
-            || {
+            &|| {
                 let src = &sources[file_idx as usize];
                 let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -689,7 +689,7 @@ pub fn error_struct_unknown_field(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -741,7 +741,7 @@ pub fn error_struct_field_invalid_type(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -842,7 +842,7 @@ pub fn error_unknown_variable(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -883,7 +883,7 @@ pub fn error_unknown_function(
 ) -> ! {
     let similar_fn = find_closest_str(fn_name, namespace.fns().map(|f| f.0.as_str()));
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -921,7 +921,7 @@ pub fn error_unknown_namespace(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
@@ -947,25 +947,17 @@ pub fn error_unknown_namespace(
 #[inline(never)]
 pub fn error_unknown_function_in_namespace(
     fn_name: &str,
-    namespace_root: &Namespace,
-    namespace: &[SmolStr],
+    namespace: &Namespace,
+    path: &[SmolStr],
     span: Span,
     file_idx: u16,
     sources: &[Source],
 ) -> ! {
-    let mut current = namespace_root;
-    for sub in namespace {
-        current = if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
-            c
-        } else {
-            error_unknown_namespace(namespace, span, file_idx, sources);
-        };
-    }
-    let namespace_str = namespace.join("::");
-
-    let similar_fn = find_closest_str(fn_name, current.fns().map(|s| s.0.as_str()));
+    let namespace_str = path.join("::");
+    let namespace = namespace.walk_to_namespace(path, span, file_idx, sources);
+    let similar_fn = find_closest_str(fn_name, namespace.fns().map(|s| s.0.as_str()));
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -1004,7 +996,7 @@ pub fn error_function_already_defined(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let fn_src = &sources[func.src_file as usize];
             let report = Report::build(
@@ -1044,7 +1036,7 @@ pub fn error_op(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -1158,7 +1150,7 @@ pub fn error_unknown_type(
 ) -> ! {
     let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0.as_str()));
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -1191,22 +1183,14 @@ pub fn error_unknown_type_with_namespace(
     file_idx: u16,
     t: &str,
     sources: &[Source],
-    namespace_root: &Namespace,
-    namespace: &[SmolStr],
+    namespace: &Namespace,
+    path: &[SmolStr],
 ) -> ! {
-    let mut current = namespace_root;
-    for sub in namespace {
-        current = if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
-            c
-        } else {
-            error_unknown_namespace(namespace, span, file_idx, sources);
-        };
-    }
-    let namespace_str = namespace.join("::");
-
-    let closest_struct = find_closest_str(t, current.structs().map(|s| s.0.as_str()));
+    let namespace_str = path.join("::");
+    let namespace = namespace.walk_to_namespace(path, span, file_idx, sources);
+    let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0.as_str()));
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -1243,7 +1227,7 @@ pub fn error_duplicate_map_key(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -1275,7 +1259,7 @@ pub fn error_not_literal_map_key(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
@@ -1306,7 +1290,7 @@ pub fn error_function_arg_invalid_type(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -1347,7 +1331,7 @@ pub fn error_function_arg_invalid_type_multiple(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
@@ -1383,7 +1367,7 @@ pub fn error_range_invalid_type(
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
-        || {
+        &|| {
             let src = &sources[file_idx as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,

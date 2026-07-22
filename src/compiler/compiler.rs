@@ -36,7 +36,6 @@ use expr::Expr;
 use expr::Span;
 use expr::code_modifies_variable;
 use functions::handle_functions;
-use libloading::Library;
 use methods::handle_method_calls;
 use registers::move_reg_to_reg;
 use registers::move_to_id;
@@ -54,6 +53,9 @@ use type_system::TypeExpr;
 use type_system::check_if_returns_void;
 use type_system::collect_direct_fn_calls;
 use type_system::struct_field_type_matches;
+
+#[cfg(not(target_arch = "wasm32"))]
+use libloading::Library;
 
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
@@ -2893,7 +2895,7 @@ fn parse_toplevel(
     file_namespaces: &mut FxHashMap<u16, Namespace>,
     pending_structs: &mut Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
     pending_fns: &mut Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)>,
-    pending_dylibs: &mut Vec<(
+    #[cfg(not(target_arch = "wasm32"))] pending_dylibs: &mut Vec<(
         u16,
         u16,
         Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)]>,
@@ -2963,6 +2965,7 @@ fn parse_toplevel(
 
     for import in imports {
         match import {
+            #[cfg(not(target_arch = "wasm32"))]
             Expr::ImportDylib(path, fn_signatures, span) => {
                 let base_path = if Path::new(path.as_str()).is_relative() {
                     file_path
@@ -3078,6 +3081,7 @@ fn parse_toplevel(
                     file_namespaces,
                     pending_structs,
                     pending_fns,
+                    #[cfg(not(target_arch = "wasm32"))]
                     pending_dylibs,
                 );
                 files.insert(file_path, child_namespace.clone());
@@ -3094,7 +3098,7 @@ fn resolve_types(
     fns: &mut [Function],
     pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
     pending_fns: Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)>,
-    pending_dylibs: Vec<(
+    #[cfg(not(target_arch = "wasm32"))] pending_dylibs: Vec<(
         u16,
         u16,
         Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)]>,
@@ -3133,6 +3137,7 @@ fn resolve_types(
             .collect();
         fns[fn_id as usize].args = resolved_args;
     }
+    #[cfg(not(target_arch = "wasm32"))]
     for (src_file_idx, dynlib_id, fn_signatures, lib, span) in pending_dylibs {
         let namespace = &file_namespaces[&src_file_idx];
         let fns = fn_signatures
@@ -3246,6 +3251,7 @@ pub fn compile(
     let mut pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)> = Vec::new();
     let mut pending_fns: Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)> =
         Vec::with_capacity(2);
+    #[cfg(not(target_arch = "wasm32"))]
     let mut pending_dylibs: Vec<(
         u16,
         u16,
@@ -3268,6 +3274,7 @@ pub fn compile(
         &mut file_namespaces,
         &mut pending_structs,
         &mut pending_fns,
+        #[cfg(not(target_arch = "wasm32"))]
         &mut pending_dylibs,
     );
     resolve_types(
@@ -3275,6 +3282,7 @@ pub fn compile(
         &mut functions,
         pending_structs,
         pending_fns,
+        #[cfg(not(target_arch = "wasm32"))]
         pending_dylibs,
         &file_namespaces,
         &mut dyn_lib_fns,

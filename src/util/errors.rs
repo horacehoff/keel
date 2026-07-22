@@ -5,7 +5,6 @@ use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use smol_strc::{SmolStr, ToSmolStr};
 use std::hint::unreachable_unchecked;
-use std::rc::Rc;
 
 pub const BLUE: &str = "\x1B[94m";
 pub fn blue<F: std::fmt::Display>(t: F) -> String {
@@ -27,7 +26,7 @@ pub const RESET: &str = "\x1B[0m\x1B[39m";
 
 pub struct ErrorCtx {
     pub instr_src: Vec<InstrSrc>,
-    pub sources: Vec<(SmolStr, Rc<String>)>,
+    pub sources: Vec<Source>,
 }
 
 impl From<std::io::ErrorKind> for ErrType<'_> {
@@ -47,7 +46,7 @@ impl From<std::io::ErrorKind> for ErrType<'_> {
             std::io::ErrorKind::ReadOnlyFilesystem => ErrType::FsReadOnlyFilesystem,
             std::io::ErrorKind::StorageFull => ErrType::FsStorageFull,
             std::io::ErrorKind::TimedOut => ErrType::FsTimedOut,
-            other => ErrType::Custom(other.to_smolstr()),
+            _ => unsafe { unreachable_unchecked() },
         }
     }
 }
@@ -66,8 +65,7 @@ impl From<std::num::IntErrorKind> for ErrType<'_> {
 
 /// Error types, largely borrowed from Rust
 pub enum ErrType<'a> {
-    Custom(SmolStr),
-
+    Custom(&'a str),
     // FS ERRORS
     FsAlreadyExists,
     FsDeadlock,
@@ -85,51 +83,18 @@ pub enum ErrType<'a> {
     FsReadOnlyFilesystem,
     FsStorageFull,
     FsTimedOut,
-
     // NUMBER PARSING ERRORS
     InvalidInt,
     InvalidFloat,
-
     // BOOL PARSING ERRORS
     InvalidBool,
-
     /// IndexOutOfBounds(length, index)
     IndexOutOfBounds(usize, i32),
-
     /// SliceOutOfBounds(length, idx_start, idx_end)
     SliceOutOfBounds(usize, i32, i32),
-
     UnknownMapKey(&'a str),
-    DuplicateMapKey,
-    NotLiteralMapKey,
-
     NullByteInString,
     CArrayReturnTypeNotSupported,
-
-    // PARSER ERRORS
-    InvalidStructFieldCount(&'a str, u16, u16),
-    /// StructMissingField(struct, field)
-    StructMissingField(&'a str, &'a str),
-    /// When an array holds two or more different types
-    ArrayWithDiffType,
-    NotIndexable(&'a DataType),
-    InvalidIndexType(&'a DataType),
-    /// CannotPushTypeToArray(elem_type, array_type)
-    CannotPushTypeToArray(&'a DataType, &'a DataType),
-    CannotInferType(&'a str),
-    IncorrectArgCountVariable(&'a str, u16, u16, u16),
-    /// InvalidType(expected_type, received_type)
-    InvalidType(&'a DataType, &'a DataType),
-    InvalidConditionalExpression,
-    FunctionAlreadyExists(&'a str),
-    CannotReadImportedFile(&'a str),
-    /// CircularImport(path)
-    CircularImport(&'a str),
-    IsNotAnIterator(&'a DataType),
-    /// InvalidArgType(expected_types, received_type)
-    InvalidArgType(&'a [DataType], DataType),
-    /// InvalidObjType(expected_description, received_type)
-    InvalidObjType(&'a str, &'a DataType),
     InvalidReturnType(&'a DataType),
     DivisionByZero,
     ModuloByZero,
@@ -138,8 +103,7 @@ pub enum ErrType<'a> {
 impl From<ErrType<'_>> for SmolStr {
     fn from(value: ErrType) -> Self {
         match value {
-            ErrType::Custom(m) => m,
-            ErrType::CannotReadImportedFile(filename) => format_args!("Cannot read imported file {RED}{BOLD}{filename}{RESET}").to_smolstr(),
+            ErrType::Custom(m) => m.to_smolstr(),
             ErrType::InvalidFloat => "Invalid float".into(),
             ErrType::IndexOutOfBounds(length, index) => format_args!("Tried to get index {RED}{BOLD}{index}{RESET} but the length is {BLUE}{BOLD}{length}{RESET}").to_smolstr(),
             ErrType::SliceOutOfBounds(length, idx_start, idx_end) => format_args!("Invalid range {RED}{BOLD}{idx_start}{RESET}..{RED}{BOLD}{idx_end}{RESET} for collection with length {BLUE}{BOLD}{length}{RESET}").to_smolstr(),
@@ -151,83 +115,28 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::FsInterrupted => "This operation was interrupted".into(),
             ErrType::FsInvalidData => "Malformed or invalid data were encountered".into(),
             ErrType::FsInvalidFilename => "The filename is invalid or too long".into(),
-            ErrType::FsIsADirectory => {
-                "This operation encountered a directory, when a non-directory was expected".into()
-            }
-            ErrType::FsNotADirectory => {
-                "This operation encountered a non-directory, when a directory was expected".into()
-            }
+            ErrType::FsIsADirectory => "This operation encountered a directory, when a non-directory was expected".into(),
+            ErrType::FsNotADirectory => "This operation encountered a non-directory, when a directory was expected".into(),
             ErrType::FsNotFound => "The entity (directory, file, ...) was not found".into(),
-            ErrType::FsPermissionDenied => {
-                "This operation lacked the necessary privileges to complete".into()
-            }
-            ErrType::FsOutOfMemory => {
-                "This operation could not be completed, because it failed to allocate enough memory"
-                    .into()
-            }
-            ErrType::FsReadOnlyFilesystem => {
-                "The filesystem or storage medium is read-only, but a write operation was attempted"
-                    .into()
-            }
+            ErrType::FsPermissionDenied => "This operation lacked the necessary privileges to complete".into(),
+            ErrType::FsOutOfMemory => "This operation could not be completed, because it failed to allocate enough memory".into(),
+            ErrType::FsReadOnlyFilesystem => "The filesystem or storage medium is read-only, but a write operation was attempted".into(),
             ErrType::FsStorageFull => "Storage is full".into(),
             ErrType::FsTimedOut => "This operation timed out".into(),
-            ErrType::InvalidStructFieldCount(name, expected, received) => format_args!(
-                "Struct {BLUE}{BOLD}{name}{RESET} expects {expected} fields while this has {RED}{BOLD}{received}{RESET} fields").to_smolstr(),
-            ErrType::StructMissingField(name, field) => format_args!(
-                "Missing field {RED}{BOLD}{field}{RESET} in struct {BLUE}{BOLD}{name}{RESET}").to_smolstr(),
-            ErrType::ArrayWithDiffType => "Arrays can only hold a single type".into(),
-            ErrType::NotIndexable(t) => format_args!(
-                "The type {BLUE}{BOLD}{t}{RESET} cannot be indexed"
-            )
-            .to_smolstr(),
-            ErrType::InvalidIndexType(t) => format_args!(
-                "The type {BLUE}{BOLD}{t}{RESET} is not a valid index"
-            )
-            .to_smolstr(),
-            ErrType::CannotPushTypeToArray(elem_t, array_t) => format_args!("Cannot insert {BLUE}{BOLD}{elem_t}{RESET} in {array_t}").to_smolstr(),
-            ErrType::CannotInferType(t) => format_args!(
-                "Cannot infer the type of {BLUE}{BOLD}{t}{RESET}"
-            )
-            .to_smolstr(),
-            ErrType::IncorrectArgCountVariable(fn_name, expected_min, expected_max, received) => format_args!("Function {BLUE}{BOLD}{fn_name}{RESET} expects between {expected_min} and {expected_max} arguments but received {received}").to_smolstr(),
-            ErrType::InvalidType(expected, received) => format_args!("Expected type {expected}, found {BLUE}{BOLD}{received}{RESET}").to_smolstr(),
-            ErrType::InvalidConditionalExpression => "Conditional expressions must have an else clause".into(),
-            ErrType::FunctionAlreadyExists(fn_name) => format_args!(
-                "Function {RED}{BOLD}{fn_name}{RESET} is already defined",
-            ).to_smolstr(),
-            ErrType::CircularImport(path) => format_args!(
-                "Circular import detected: {RED}{BOLD}{path}{RESET} is already being imported"
-            ).to_smolstr(),
-            ErrType::IsNotAnIterator(t) => format_args!("The type {RED}{BOLD}{t}{RESET} is not a collection").to_smolstr(),
-            ErrType::InvalidArgType(expected, received) => {
-                let expected_str = expected
-                    .iter()
-                    .map(|t| format!("{BLUE}{BOLD}{t}{RESET}"))
-                    .collect::<Vec<String>>()
-                    .join(" or ");
-                format_args!(
-                    "Expected {expected_str}, found {RED}{BOLD}{received}{RESET}",
-                ).to_smolstr()
-            }
-            ErrType::InvalidObjType(expected, received) => format_args!(
-                "Expected {BLUE}{BOLD}{expected}{RESET}, found {RED}{BOLD}{received}{RESET}",
-            ).to_smolstr(),
             ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
             ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::CArrayReturnTypeNotSupported => "Array return types are not supported: C does not convey the length of a returned array".into(),
             ErrType::UnknownMapKey(key) => format_args!("Unknown key {RED}{BOLD}{key}{RESET}").to_smolstr(),
-            ErrType::DuplicateMapKey => format_args!("Duplicate key in map").to_smolstr(),
-            ErrType::NotLiteralMapKey => format_args!("Map keys must be literals").to_smolstr(),
         }
     }
 }
 
 impl ErrType<'_> {
-    pub fn kind(&self) -> &str {
+    pub const fn kind(&self) -> &str {
         match self {
-            ErrType::Custom(e) => e.as_str(),
+            ErrType::Custom(e) => e,
             ErrType::FsAlreadyExists => "fs_already_exists",
             ErrType::FsDeadlock => "fs_deadlock",
             ErrType::FsFileTooLarge => "fs_file_too_large",
@@ -247,30 +156,12 @@ impl ErrType<'_> {
             ErrType::InvalidBool => "invalid_bool",
             ErrType::IndexOutOfBounds(_, _) => "index_out_of_bounds",
             ErrType::SliceOutOfBounds(_, _, _) => "slice_out_of_bounds",
-            ErrType::InvalidStructFieldCount(_, _, _) => "invalid_struct_field_count",
-            ErrType::StructMissingField(_, _) => "struct_missing_field",
-            ErrType::ArrayWithDiffType => "array_with_diff_type",
-            ErrType::NotIndexable(_) => "not_indexable",
-            ErrType::InvalidIndexType(_) => "invalid_index_type",
-            ErrType::CannotPushTypeToArray(_, _) => "cannot_push_type_to_array",
-            ErrType::CannotInferType(_) => "cannot_infer_type",
-            ErrType::IncorrectArgCountVariable(_, _, _, _) => "incorrect_arg_count",
-            ErrType::InvalidType(_, _) => "invalid_type",
-            ErrType::InvalidConditionalExpression => "invalid_conditional_expression",
-            ErrType::FunctionAlreadyExists(_) => "function_already_exists",
-            ErrType::CannotReadImportedFile(_) => "cannot_read_imported_file",
-            ErrType::CircularImport(_) => "circular_import",
-            ErrType::IsNotAnIterator(_) => "is_not_an_iterator",
-            ErrType::InvalidArgType(_, _) => "invalid_arg_type",
-            ErrType::InvalidObjType(_, _) => "invalid_obj_type",
             ErrType::DivisionByZero => "division_by_zero",
             ErrType::ModuloByZero => "modulo_by_zero",
             ErrType::NullByteInString => "null_byte_in_string",
             ErrType::CArrayReturnTypeNotSupported => "c_array_return_type_not_supported",
             ErrType::InvalidReturnType(_) => "invalid_return_type",
             ErrType::UnknownMapKey(_) => "unknown_map_key",
-            ErrType::DuplicateMapKey => "duplicate_map_key",
-            ErrType::NotLiteralMapKey => "not_literal_map_key",
         }
     }
 }
@@ -296,18 +187,21 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
     eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(
         ReportKind::Error,
-        (src.0.as_str(), (*start as usize)..(*end as usize)),
+        (src.filename.as_str(), (*start as usize)..(*end as usize)),
     )
     .with_label(
-        Label::new((src.0.as_str(), (*start as usize)..(*end as usize)))
-            .with_message(err_message)
+        Label::new((src.filename.as_str(), (*start as usize)..(*end as usize)))
+            .with_message(err_message.as_str())
             .with_color(Color::Red),
     )
     .finish();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     report
-        .eprint((src.0.as_str(), ariadne::Source::from(src.1.as_str())))
+        .eprint((
+            src.filename.as_str(),
+            ariadne::Source::from(src.contents.as_str()),
+        ))
         .unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
@@ -331,9 +225,9 @@ pub fn wasm_error(msg: &str) -> ! {
 
 #[cold]
 #[inline(never)]
-pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>>(
+pub fn throw_compiler_error<'a, F: Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>>(
     report: F,
-    sources: &'a [(SmolStr, Rc<String>)],
+    sources: &'a [Source],
 ) -> ! {
     let report = report();
 
@@ -344,8 +238,8 @@ pub fn throw_compiler_error_exp<'a, F: Fn() -> Report<'a, (&'a str, core::ops::R
                 .with_sources(
                     sources
                         .iter()
-                        .map(|(name, contents)| {
-                            (name.as_str(), ariadne::Source::from(contents.as_str()))
+                        .map(|Source { filename, contents }| {
+                            (filename.as_str(), ariadne::Source::from(contents.as_str()))
                         })
                         .collect(),
                 ),
@@ -385,36 +279,4 @@ pub fn crash() -> ! {
 
     #[cfg(all(feature = "embed", not(debug_assertions)))]
     panic!();
-}
-
-#[cold]
-#[inline(never)]
-pub fn throw_compiler_error(src: Source, Span { start, end }: Span, t: ErrType) -> ! {
-    let err_message: SmolStr = t.into();
-    eprintln!("{RED}KEEL ERROR{RESET}");
-    let report = Report::build(
-        ReportKind::Error,
-        (src.filename, (start as usize)..(end as usize)),
-    )
-    .with_label(
-        Label::new((src.filename, (start as usize)..(end as usize)))
-            .with_message(err_message)
-            .with_color(Color::Red),
-    )
-    .finish();
-
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report
-        .eprint((src.filename, ariadne::Source::from(src.contents)))
-        .unwrap();
-
-    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    report
-        .write(
-            (src.filename, ariadne::Source::from(src.contents)),
-            crate::captured_output::CapturedOutputWriter,
-        )
-        .unwrap();
-
-    crash();
 }

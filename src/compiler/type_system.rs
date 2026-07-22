@@ -8,6 +8,7 @@ use crate::compiler::compiler_data::Function;
 use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
+use crate::compiler::compiler_errors::error_invalid_type;
 use crate::compiler::compiler_errors::error_op;
 use crate::compiler::compiler_errors::error_struct_unknown_field;
 use crate::compiler::compiler_errors::error_unknown_function;
@@ -16,8 +17,6 @@ use crate::compiler::compiler_errors::error_unknown_struct;
 use crate::compiler::compiler_errors::error_unknown_type;
 use crate::compiler::compiler_errors::error_unknown_type_with_namespace;
 use crate::compiler::compiler_errors::error_unknown_variable;
-use crate::errors::ErrType;
-use crate::errors::throw_compiler_error;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
@@ -25,7 +24,6 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
-use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
@@ -49,9 +47,9 @@ pub enum TypeExpr {
 impl TypeExpr {
     pub fn to_datatype(
         &self,
-        src: Source,
+        file_idx: u16,
         namespace: &Namespace,
-        sources: &[(SmolStr, Rc<String>)],
+        sources: &[Source],
     ) -> DataType {
         match self {
             Self::Identifier(s, span) => match s.as_str() {
@@ -62,11 +60,11 @@ impl TypeExpr {
                 "null" => DataType::Null,
                 struct_name => {
                     if let Some(struct_id) =
-                        namespace.find_struct(&[], struct_name, *span, src, sources)
+                        namespace.find_struct(&[], struct_name, *span, file_idx, sources)
                     {
                         DataType::Struct(struct_id as u16)
                     } else {
-                        error_unknown_type(*span, src, struct_name, sources, namespace);
+                        error_unknown_type(*span, file_idx, struct_name, sources, namespace);
                     }
                 }
             },
@@ -75,7 +73,7 @@ impl TypeExpr {
                     &s[..s.len() - 1],
                     unsafe { s.last().unwrap_unchecked() },
                     *span,
-                    src,
+                    file_idx,
                     sources,
                 ) {
                     DataType::Struct(struct_id as u16)
@@ -83,7 +81,7 @@ impl TypeExpr {
                     cold_path();
                     error_unknown_type_with_namespace(
                         *span,
-                        src,
+                        file_idx,
                         unsafe { s.last().unwrap_unchecked() },
                         sources,
                         namespace,
@@ -91,16 +89,16 @@ impl TypeExpr {
                     )
                 }
             }
-            Self::Array(inner_t) => {
-                DataType::Array(Some(Box::new(inner_t.to_datatype(src, namespace, sources))))
-            }
+            Self::Array(inner_t) => DataType::Array(Some(Box::new(
+                inner_t.to_datatype(file_idx, namespace, sources),
+            ))),
             Self::Map(k_t, v_t) => DataType::Map(Box::from((
-                Some(k_t.to_datatype(src, namespace, sources)),
-                Some(v_t.to_datatype(src, namespace, sources)),
+                Some(k_t.to_datatype(file_idx, namespace, sources)),
+                Some(v_t.to_datatype(file_idx, namespace, sources)),
             ))),
             Self::Union(poly) => DataType::Poly(
                 poly.iter()
-                    .map(|t| t.to_datatype(src, namespace, sources))
+                    .map(|t| t.to_datatype(file_idx, namespace, sources))
                     .collect(),
             )
             .check_poly(),
@@ -223,13 +221,6 @@ impl DataType {
     #[inline(always)]
     pub const fn is_indexable(&self) -> bool {
         matches!(self, Self::String | Self::Array(_) | Self::Unknown)
-    }
-    #[inline(always)]
-    pub fn expect(&self, expected: &Self, src: Source, span: Span) {
-        if self != expected {
-            cold_path();
-            throw_compiler_error(src, span, ErrType::InvalidType(expected, self));
-        }
     }
 }
 
@@ -441,7 +432,7 @@ macro_rules! extend_return_types {
 pub fn track_returns(
     content: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     fn_name: &str,
 ) -> Vec<DataType> {
@@ -460,7 +451,7 @@ struct FnReturnFlow {
 fn track_scoped_returns(
     code: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     fn_name: &str,
 ) -> FnReturnFlow {
@@ -473,7 +464,7 @@ fn track_scoped_returns(
 fn track_condition_returns(
     code: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     fn_name: &str,
 ) -> FnReturnFlow {
@@ -514,7 +505,7 @@ fn track_condition_returns(
 fn track_return_flow(
     content: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     fn_name: &str,
 ) -> FnReturnFlow {
@@ -629,18 +620,13 @@ fn track_return_flow(
 }
 
 impl Expr {
-    pub fn infer_type(
-        &self,
-        v: &mut Vec<Variable>,
-        ctx: Ctx<'_>,
-        state: &mut State<'_>,
-    ) -> DataType {
+    pub fn infer_type(&self, v: &mut Vec<Variable>, ctx: Ctx, state: &mut State<'_>) -> DataType {
         match self {
             Self::Var(name, span) => v
                 .iter()
                 .rfind(|x| &x.name == name)
                 .unwrap_or_else(|| {
-                    error_unknown_variable(name, *span, v, ctx.src, state.sources);
+                    error_unknown_variable(name, *span, v, ctx.file_idx, state.sources);
                 })
                 .var_type
                 .clone(),
@@ -668,7 +654,7 @@ impl Expr {
                 } else {
                     let kv_type = kv_pairs
                         .iter()
-                        .map(|(key, value)| {
+                        .map(|(key, _, value, _)| {
                             (
                                 key.infer_type(v, ctx, state),
                                 value.infer_type(v, ctx, state),
@@ -692,7 +678,7 @@ impl Expr {
                     (DataType::String, DataType::String) => DataType::String,
                     (DataType::Array(t1), DataType::Array(t2)) => DataType::Array(t1.or(t2)),
                     (l, r) => {
-                        error_op(&l, &r, "+", *span_l, *span_r, ctx.src, state.sources);
+                        error_op(&l, &r, "+", *span_l, *span_r, ctx.file_idx, state.sources);
                     }
                 }
             }
@@ -716,7 +702,7 @@ impl Expr {
                             symbol_of_expr(self),
                             *span_l,
                             *span_r,
-                            ctx.src,
+                            ctx.file_idx,
                             state.sources,
                         );
                     }
@@ -737,7 +723,7 @@ impl Expr {
                         symbol_of_expr(self),
                         *span_l,
                         *span_r,
-                        ctx.src,
+                        ctx.file_idx,
                         state.sources,
                     ),
                 }
@@ -747,7 +733,7 @@ impl Expr {
                     (DataType::Unknown | DataType::Bool, DataType::Bool)
                     | (DataType::Bool, DataType::Unknown) => DataType::Bool,
                     (l, r) => {
-                        error_op(&l, &r, "&&", *span_l, *span_r, ctx.src, state.sources);
+                        error_op(&l, &r, "&&", *span_l, *span_r, ctx.file_idx, state.sources);
                     }
                 }
             }
@@ -761,7 +747,7 @@ impl Expr {
                     "-",
                     *span_l,
                     *span_r,
-                    ctx.src,
+                    ctx.file_idx,
                     state.sources,
                 ),
             },
@@ -773,7 +759,7 @@ impl Expr {
                     "!",
                     *span_l,
                     *span_r,
-                    ctx.src,
+                    ctx.file_idx,
                     state.sources,
                 ),
             },
@@ -793,7 +779,7 @@ impl Expr {
                         .unwrap_or_else(|| {
                             let s = &state.structs[s_id as usize];
                             error_struct_unknown_field(
-                                ctx.src,
+                                ctx.file_idx,
                                 *field_span,
                                 field,
                                 &s.name,
@@ -804,10 +790,14 @@ impl Expr {
                         .1
                         .clone()
                 } else {
-                    throw_compiler_error(
-                        ctx.src,
+                    error_invalid_type(
+                        &DataType::Struct(0),
+                        &s,
                         *struct_span,
-                        ErrType::InvalidType(&DataType::Struct(0), &s),
+                        None,
+                        None,
+                        ctx.file_idx,
+                        state.sources,
                     );
                 }
             }
@@ -852,7 +842,7 @@ impl Expr {
                                         function_name,
                                         *span,
                                         state.namespace,
-                                        ctx.src,
+                                        ctx.file_idx,
                                         state.sources,
                                     );
                                 } else {
@@ -861,7 +851,7 @@ impl Expr {
                                         state.namespace,
                                         &namespace[..namespace.len() - 1],
                                         *span,
-                                        ctx.src,
+                                        ctx.file_idx,
                                         state.sources,
                                     );
                                 }
@@ -900,14 +890,8 @@ impl Expr {
 
                         RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().insert(fn_id));
 
-                        let (fn_src_name, fn_src_contents) =
-                            state.sources[func.src_file as usize].clone();
                         let fn_ctx = Ctx {
-                            src: Source {
-                                filename: fn_src_name.as_str(),
-                                contents: fn_src_contents.as_str(),
-                            },
-                            current_src_file: func.src_file,
+                            file_idx: func.src_file,
                             ..ctx
                         };
                         let fn_type = track_returns(&fn_code, v, fn_ctx, state, function_name);
@@ -1019,9 +1003,9 @@ impl Expr {
                 DataType::Struct(
                     state
                         .namespace
-                        .find_struct(namespace, struct_name, *span, ctx.src, state.sources)
+                        .find_struct(namespace, struct_name, *span, ctx.file_idx, state.sources)
                         .unwrap_or_else(|| {
-                            error_unknown_struct(struct_name, *span, state.sources, ctx.src);
+                            error_unknown_struct(struct_name, *span, state.sources, ctx.file_idx);
                         }) as u16,
                 )
             }

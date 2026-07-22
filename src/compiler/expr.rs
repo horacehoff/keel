@@ -13,7 +13,7 @@ pub enum Expr {
     /// Array(contents, [entire_array, elem_spans...])
     Array(Box<[Self]>, Box<[Span]>),
     /// Map(key-value pairs, span)
-    Map(Box<[(Self, Self)]>, Span),
+    Map(Box<[(Self, Span, Self, Span)]>, Span),
     /// Struct(name, fields, span)
     Struct(Box<[SmolStr]>, Box<[(SmolStr, Self, Span, Span)]>, Span),
     /// StructDeclare(name, fields, span)
@@ -70,8 +70,12 @@ pub enum Expr {
     ForLoop(SmolStr, Box<Self>, Box<[Self]>, Span),
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
     IntForLoop(SmolStr, Box<Self>, Box<Self>, Box<[Self]>, Span, Span),
-    /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type)], (start, end))
-    ImportDylib(SmolStr, Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr)]>, Span),
+    /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type, fn_name_span)], (start, end))
+    ImportDylib(
+        SmolStr,
+        Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)]>,
+        Span,
+    ),
 
     /// ImportFile(path,alias ,(start, end))
     ImportFile(SmolStr, Option<SmolStr>, Span),

@@ -39,7 +39,7 @@ mod term;
 type TokenIter<'a> = Peekable<SpannedIter<'a, Token<'a>>>;
 
 struct ParserCtx<'a> {
-    src: Source<'a>,
+    src: &'a Source,
 }
 
 struct Parser<'a> {
@@ -69,7 +69,7 @@ enum ParserErr<'a> {
 
 #[cold]
 #[inline(never)]
-fn throw_parser_error(src: Source, Span { start, end }: Span, t: ParserErr) -> ! {
+fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> ! {
     let err_message = match t {
         ParserErr::UnexpectedEOF => "Unexpected EOF",
         ParserErr::UnknownToken => "Unknown token",
@@ -100,10 +100,10 @@ fn throw_parser_error(src: Source, Span { start, end }: Span, t: ParserErr) -> !
     eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(
         ReportKind::Error,
-        (src.filename, (start as usize)..(end as usize)),
+        (src.filename.as_str(), (start as usize)..(end as usize)),
     )
     .with_label(
-        Label::new((src.filename, (start as usize)..(end as usize)))
+        Label::new((src.filename.as_str(), (start as usize)..(end as usize)))
             .with_message(err_message)
             .with_color(Color::Red),
     )
@@ -111,7 +111,10 @@ fn throw_parser_error(src: Source, Span { start, end }: Span, t: ParserErr) -> !
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     report
-        .eprint((src.filename, ariadne::Source::from(src.contents)))
+        .eprint((
+            src.filename.as_str(),
+            ariadne::Source::from(src.contents.as_str()),
+        ))
         .unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
@@ -251,8 +254,8 @@ impl<'a> Parser<'a> {
         #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
         report
             .eprint((
-                self.ctx.src.filename,
-                ariadne::Source::from(self.ctx.src.contents),
+                self.ctx.src.filename.as_str(),
+                ariadne::Source::from(self.ctx.src.contents.as_str()),
             ))
             .unwrap();
 
@@ -469,27 +472,30 @@ fn error_unclosed_delimiter(
     parser.throw_parser_err(|| {
         let mut report = Report::build(
             ariadne::ReportKind::Error,
-            (parser.ctx.src.filename, opener_span.into()),
+            (parser.ctx.src.filename.as_str(), opener_span.into()),
         )
         .with_message("Unclosed delimiter")
         .with_label(
-            Label::new((parser.ctx.src.filename, opener_span.into()))
+            Label::new((parser.ctx.src.filename.as_str(), opener_span.into()))
                 .with_message(format_args!("This {opener_token} is never closed"))
                 .with_color(ariadne::Color::Red),
         );
 
         if let Some((actual_closer_token, actual_closer_token_span)) = end {
             report = report.with_label(
-                Label::new((parser.ctx.src.filename, actual_closer_token_span.into()))
-                    .with_message(format_args!(
-                        "Expected {expected_closer_token} but found {actual_closer_token}"
-                    ))
-                    .with_color(ariadne::Color::Red),
+                Label::new((
+                    parser.ctx.src.filename.as_str(),
+                    actual_closer_token_span.into(),
+                ))
+                .with_message(format_args!(
+                    "Expected {expected_closer_token} but found {actual_closer_token}"
+                ))
+                .with_color(ariadne::Color::Red),
             );
         } else {
             report = report
                 .with_label(
-                    Label::new((parser.ctx.src.filename, parser.eof_span().into()))
+                    Label::new((parser.ctx.src.filename.as_str(), parser.eof_span().into()))
                         .with_message(format_args!(
                             "Expected {expected_closer_token} but the file ends here"
                         ))
@@ -512,14 +518,14 @@ fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
         Report::build(
             ariadne::ReportKind::Error,
             (
-                parser.ctx.src.filename,
+                parser.ctx.src.filename.as_str(),
                 (parser.last_token_end..parser.last_token_end),
             ),
         )
         .with_message("Missing semicolon")
         .with_label(
             Label::new((
-                parser.ctx.src.filename,
+                parser.ctx.src.filename.as_str(),
                 (parser.last_token_end..parser.last_token_end),
             ))
             .with_message(format_args!("Add a {} here", blue(';')))
@@ -650,7 +656,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
         );
     };
     parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'.");
-    let mut fn_signatures: Vec<(SmolStr, Box<[TypeExpr]>, TypeExpr)> = Vec::new();
+    let mut fn_signatures: Vec<(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)> = Vec::new();
     let end: u32;
     loop {
         if parser.peek_token() == Token::RBrace {
@@ -660,8 +666,10 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
 
         let type_start = parser.peek_token();
         let first = parse_type(parser);
+        let fn_name_span: Span;
         let (return_type, fn_name) = if parser.peek_token() == Token::LParen {
             if let TypeExpr::Identifier(name, span) = first {
+                fn_name_span = span;
                 (
                     TypeExpr::Identifier(SmolStr::new_static("null"), span),
                     name,
@@ -678,6 +686,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
             }
         } else {
             let (next_token, span) = parser.next_token();
+            fn_name_span = span;
             let fn_name = if let Token::Identifier(name) = next_token {
                 SmolStr::new(name)
             } else {
@@ -716,7 +725,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
             Token::SemiColon,
             "Function definitions must end with a semicolon",
         );
-        fn_signatures.push((fn_name, Box::from(args), return_type));
+        fn_signatures.push((fn_name, Box::from(args), return_type, fn_name_span));
     }
     Expr::ImportDylib(path, Box::from(fn_signatures), (start, end).into())
 }
@@ -741,15 +750,10 @@ fn parse_file(parser: &mut Parser<'_>) -> Vec<Expr> {
     output
 }
 
-pub fn parse(input: &str, src: (&str, &str)) -> Vec<Expr> {
+pub fn parse(input: &str, src: &Source) -> Vec<Expr> {
     parse_file(&mut Parser {
         input: Token::lexer(input).spanned().peekable(),
-        ctx: ParserCtx {
-            src: Source {
-                filename: src.0,
-                contents: src.1,
-            },
-        },
+        ctx: ParserCtx { src },
         last_token_end: 0,
     })
 }

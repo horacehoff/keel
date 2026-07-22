@@ -199,6 +199,7 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
             // Struct field access or ObjfunctionCall
             Some(Token::Dot) => {
                 parser.next_token();
+
                 let (id_token, id_span) = parser.next_token();
                 let Token::Identifier(id) = id_token else {
                     cold_path();
@@ -216,8 +217,8 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                         Box::new(base),
                         args,
                         Box::new([SmolStr::new(id)]),
-                        (id_span.start, end).into(),
                         base_span,
+                        (id_span.start, end).into(),
                         arg_markers,
                     );
                     base_span.end = end;
@@ -258,8 +259,8 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                         Box::new(base),
                         args,
                         Box::from(namespace),
-                        (id_span.start, end).into(),
                         base_span,
+                        (id_span.start, end).into(),
                         arg_markers,
                     );
                     base_span.end = end;

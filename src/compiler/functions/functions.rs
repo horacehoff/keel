@@ -6,9 +6,8 @@ use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::error_function_arg_invalid_type_multiple;
 use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
-use crate::errors::ErrType;
-use crate::errors::throw_compiler_error;
 use crate::instr::Instr;
 use builtin_functions::builtin_functions;
 use fs_lib_functions::fs_lib_functions;
@@ -28,8 +27,9 @@ mod fs_lib_functions;
 use crate::errors::wasm_error;
 
 pub fn check_arg_type(
+    fn_name: &str,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     args: &[Expr],
     args_indexes: &[Span],
@@ -43,18 +43,22 @@ pub fn check_arg_type(
         expected.contains(&inferred)
     };
     if !matches {
-        throw_compiler_error(
-            ctx.src,
+        error_function_arg_invalid_type_multiple(
+            &inferred,
+            expected,
             args_indexes[arg_idx],
-            ErrType::InvalidArgType(expected, inferred),
-        );
+            fn_name,
+            None,
+            ctx.file_idx,
+            state.sources,
+        )
     }
 }
 
 pub fn handle_functions(
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     // method call data
@@ -63,7 +67,6 @@ pub fn handle_functions(
     span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
-    let src = ctx.src;
     let len = namespace.len() - 1;
     let fn_name = namespace[len].as_str();
     let namespace = &namespace[0..len];
@@ -101,9 +104,25 @@ pub fn handle_functions(
         .and_then(|lib| lib.fns.iter().find(|x| x.name == fn_name))
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
-        check_args(args, fn_args.len(), fn_name, src, span, state.sources);
+        check_args(
+            args,
+            fn_args.len(),
+            fn_name,
+            span,
+            state.sources,
+            ctx.file_idx,
+        );
         for (i, a) in fn_args.iter().enumerate() {
-            check_arg_type(v, ctx, state, args, args_indexes, i, slice::from_ref(a));
+            check_arg_type(
+                fn_name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                i,
+                slice::from_ref(a),
+            );
         }
 
         for arg in args {
@@ -131,7 +150,7 @@ pub fn handle_functions(
     } else if let Some(fn_id) =
         state
             .namespace
-            .find_function(namespace, fn_name, span, ctx.src, state.sources)
+            .find_function(namespace, fn_name, span, ctx.file_idx, state.sources)
     {
         handle_user_function(
             fn_name,
@@ -151,7 +170,7 @@ pub fn handle_functions(
             state.namespace,
             namespace,
             span,
-            src,
+            ctx.file_idx,
             state.sources,
         );
     }

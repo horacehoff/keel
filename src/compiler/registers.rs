@@ -1,8 +1,7 @@
-use std::hint::unreachable_unchecked;
-
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
+use std::hint::unreachable_unchecked;
 
 pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()
@@ -83,6 +82,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
 
 impl Instr {
     /// Returns the ID of the register that will be modified by the given instruction
+    #[must_use]
     pub const fn get_tgt_id(self) -> Option<u16> {
         match self {
             // ↓ INSTRUCTIONS THAT DON'T MODIFY ANY REGISTER ↓
@@ -302,6 +302,7 @@ impl Instr {
 }
 
 /// Returns the IDs of all the registers which are modified by the given instructions
+#[must_use]
 pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
     let mut ids: Vec<u16> = x.iter().filter_map(|i| i.get_tgt_id()).collect();
     ids.sort_unstable();

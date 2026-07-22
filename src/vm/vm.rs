@@ -1553,9 +1553,7 @@ pub fn execute(
                 error_handles.pop_unchecked();
             },
             Instr::ThrowError(error_reg_id) => {
-                error_with_catch!(ErrType::Custom(
-                    r[error_reg_id].as_str(string_pool).to_smolstr()
-                ));
+                error_with_catch!(ErrType::Custom(r[error_reg_id].as_str(string_pool)));
             }
             Instr::Halt(code) => {
                 cold_path();

@@ -6,39 +6,39 @@ use super::Source;
 use super::Span;
 use super::State;
 use super::Variable;
-use crate::errors::ErrType;
+use crate::errors::BLUE;
+use crate::errors::GREEN;
+use crate::errors::RESET;
 use crate::errors::blue;
 use crate::errors::bold;
 use crate::errors::green;
 use crate::errors::red;
 use crate::errors::throw_compiler_error;
-use crate::errors::throw_compiler_error_exp;
 use ariadne::Label;
 use ariadne::Report;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
-use std::hint::cold_path;
-use std::rc::Rc;
 
 #[inline(never)]
 #[cold]
 pub fn error_array_diff_types(
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
+    file_idx: u16,
+    sources: &[Source],
     array_span: Span,
     array_elem_type: &DataType,
     failing_elem_span: Span,
     failing_elem_type: &DataType,
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
+            let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
-                (src.filename, array_span.into()),
+                (src.filename.as_str(), array_span.into()),
             )
             .with_message("Invalid array types")
             .with_label(
-                Label::new((src.filename, array_span.into()))
+                Label::new((src.filename.as_str(), array_span.into()))
                     .with_message(format_args!(
                         "This expression is of type {}",
                         blue(array_elem_type)
@@ -46,7 +46,7 @@ pub fn error_array_diff_types(
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.filename, failing_elem_span.into()))
+                Label::new((src.filename.as_str(), failing_elem_span.into()))
                     .with_message(format_args!(
                         "This expression is of type {}",
                         red(failing_elem_type),
@@ -62,21 +62,338 @@ pub fn error_array_diff_types(
 
 #[inline(never)]
 #[cold]
+pub fn error_invalid_type(
+    expected_type: &DataType,
+    perceived_type: &DataType,
+    span: Span,
+    help: Option<std::fmt::Arguments>,
+    note: Option<std::fmt::Arguments>,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Invalid type")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "Expected {}, but this expression's type is {}",
+                        blue(expected_type),
+                        red(perceived_type)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            if let Some(note_msg) = note {
+                report = report.with_note(note_msg);
+            }
+            if let Some(help_msg) = help {
+                report = report.with_help(help_msg);
+            }
+
+            report.finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
+pub fn error_invalid_index_type(t: &DataType, span: Span, file_idx: u16, sources: &[Source]) {
+    error_invalid_type(
+        &DataType::Int,
+        t,
+        span,
+        Some(format_args!("Try using the {} function", blue("int()"))),
+        Some(format_args!(
+            "The {} type is the only valid index type",
+            blue(DataType::Int)
+        )),
+        file_idx,
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
+pub fn error_division_by_zero(modulo: bool, span: Span, file_idx: u16, sources: &[Source]) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message(format_args!(
+                "{} by zero",
+                if modulo { "Modulo" } else { "Division" }
+            ))
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "This performs {} by zero!",
+                        if modulo { "modulo" } else { "division" }
+                    ))
+                    .with_color(ariadne::Color::Red),
+            )
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
+pub fn error_cannot_push_type_to_array(
+    array_type: &DataType,
+    elem_type: &DataType,
+    array_span: Span,
+    span: Span,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message(format_args!(
+                "Cannot insert {} in {}",
+                red(elem_type),
+                red(array_type)
+            ))
+            .with_label(
+                Label::new((src.filename.as_str(), array_span.into()))
+                    .with_message(format_args!("This array's type is {}", blue(array_type)))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "But this expression's type is {}",
+                        red(elem_type)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            )
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
+pub fn error_type_not_indexable(
+    t: &DataType,
+    span: Span,
+    iterator_error: bool,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            let msg = if iterator_error {
+                "iterated on"
+            } else {
+                "indexed"
+            };
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Invalid type")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "This expression's type is {}. This type cannot be {msg}.",
+                        red(t),
+                    ))
+                    .with_color(ariadne::Color::Red),
+            )
+            .with_note(format_args!(
+                "The following types can be {msg}:\n- {}\n- {}",
+                blue(DataType::Array(None)),
+                blue(DataType::String)
+            ))
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_conditional_expression_without_else(
+    span: Span,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Invalid inline conditional expression")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!("Inline if blocks must have an else branch."))
+                    .with_color(ariadne::Color::Red),
+            )
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
+pub fn error_cannot_read_file(span: Span, file_idx: u16, sources: &[Source]) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Cannot read file")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!("This file cannot be found."))
+                    .with_color(ariadne::Color::Red),
+            )
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
+pub fn error_cannot_load_dynlib(span: Span, file_idx: u16, sources: &[Source]) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Cannot load dynamic library")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!("This dynamic library cannot be found/loaded."))
+                    .with_color(ariadne::Color::Red),
+            )
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
+pub fn error_cannot_find_dynlib_symbol(
+    symbol: &str,
+    symbol_span: Span,
+    dynlib_span: Span,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), dynlib_span.into()),
+            )
+            .with_message("Cannot find symbol in dynamic library")
+            .with_label(
+                Label::new((src.filename.as_str(), dynlib_span.into()))
+                    .with_message(format_args!("This dynamic library is loaded here."))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.filename.as_str(), symbol_span.into()))
+                    .with_message(format_args!(
+                        "Cannot find symbol {} in this dynamic library",
+                        red(symbol)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            )
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
+pub fn error_map_diff_types(
+    file_idx: u16,
+    sources: &[Source],
+    map_span: Span,
+    map_elem_type: &DataType,
+    failing_elem_span: Span,
+    failing_elem_type: &DataType,
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), map_span.into()),
+            )
+            .with_message("Invalid map types")
+            .with_label(
+                Label::new((src.filename.as_str(), map_span.into()))
+                    .with_message(format_args!(
+                        "This expression is of type {}",
+                        blue(map_elem_type)
+                    ))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.filename.as_str(), failing_elem_span.into()))
+                    .with_message(format_args!(
+                        "This expression is of type {}",
+                        red(failing_elem_type),
+                    ))
+                    .with_color(ariadne::Color::Red),
+            )
+            .with_note("Maps are homogeneous and can only hold one key-value type")
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
 pub fn error_unknown_struct(
     struct_name: &SmolStr,
     struct_span: Span,
-    sources: &[(SmolStr, Rc<String>)],
-    src: Source,
+    sources: &[Source],
+    file_idx: u16,
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
+            let src = &sources[file_idx as usize];
             Report::build(
                 ariadne::ReportKind::Error,
-                (src.filename, struct_span.into()),
+                (src.filename.as_str(), struct_span.into()),
             )
             .with_message("Unknown struct")
             .with_label(
-                Label::new((src.filename, struct_span.into()))
+                Label::new((src.filename.as_str(), struct_span.into()))
                     .with_message(format_args!("Unknown struct {}", red(struct_name)))
                     .with_color(ariadne::Color::Red),
             )
@@ -87,27 +404,28 @@ pub fn error_unknown_struct(
 }
 
 pub fn error_struct_no_such_field(
-    src: Source,
+    file_idx: u16,
     struct_name: &SmolStr,
     struct_span: Span,
     struct_field_span: Span,
     struct_field_name: &SmolStr,
-    sources: &[(SmolStr, Rc<String>)],
+    sources: &[Source],
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
+            let src = &sources[file_idx as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.filename, struct_field_span.into()),
+                (src.filename.as_str(), struct_field_span.into()),
             )
             .with_message("Unknown struct field")
             .with_label(
-                Label::new((src.filename, struct_span.into()))
+                Label::new((src.filename.as_str(), struct_span.into()))
                     .with_message(format_args!("Struct defined here"))
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.filename, struct_field_span.into()))
+                Label::new((src.filename.as_str(), struct_field_span.into()))
                     .with_message(format_args!(
                         "There is no field {} in {}",
                         red(struct_field_name),
@@ -123,26 +441,27 @@ pub fn error_struct_no_such_field(
 }
 
 pub fn error_struct_missing_fields(
-    src: Source,
+    file_idx: u16,
     struct_span: Span,
     struct_literal_span: Span,
-    sources: &[(SmolStr, Rc<String>)],
+    sources: &[Source],
     missing_fields: &[&SmolStr],
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
+            let src = &sources[file_idx as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.filename, struct_literal_span.into()),
+                (src.filename.as_str(), struct_literal_span.into()),
             )
             .with_message("Missing struct fields")
             .with_label(
-                Label::new((src.filename, struct_span.into()))
+                Label::new((src.filename.as_str(), struct_span.into()))
                     .with_message(format_args!("Struct defined here"))
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.filename, struct_literal_span.into()))
+                Label::new((src.filename.as_str(), struct_literal_span.into()))
                     .with_message(format_args!(
                         "This is missing field{} {}",
                         if missing_fields.len() > 1 { "s" } else { "" },
@@ -165,25 +484,29 @@ pub fn check_args(
     args: &[Expr],
     expected_args_len: usize,
     fn_name: &str,
-    src: Source,
     span: Span,
-    sources: &[(SmolStr, Rc<String>)],
+    sources: &[Source],
+    file_idx: u16,
 ) {
     if args.len() != expected_args_len {
-        throw_compiler_error_exp(
+        throw_compiler_error(
             || {
-                let report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                    .with_message("Invalid argument count")
-                    .with_label(
-                        Label::new((src.filename, span.into()))
-                            .with_message(format_args!(
-                                "Function {} expects {} arguments but {} arguments were supplied",
-                                blue(fn_name),
-                                bold(expected_args_len),
-                                bold(args.len())
-                            ))
-                            .with_color(ariadne::Color::Red),
-                    );
+                let src = &sources[file_idx as usize];
+                let report = Report::build(
+                    ariadne::ReportKind::Error,
+                    (src.filename.as_str(), span.into()),
+                )
+                .with_message("Invalid argument count")
+                .with_label(
+                    Label::new((src.filename.as_str(), span.into()))
+                        .with_message(format_args!(
+                            "Function {} expects {} arguments but {} arguments were supplied",
+                            blue(fn_name),
+                            bold(expected_args_len),
+                            bold(args.len())
+                        ))
+                        .with_color(ariadne::Color::Red),
+                );
 
                 report.finish()
             },
@@ -192,28 +515,64 @@ pub fn check_args(
     }
 }
 
+#[cold]
+#[inline(never)]
+pub fn error_invalid_obj_type(
+    expected_type: &[DataType],
+    perceived_type: &DataType,
+    fn_name: &str,
+    span: Span,
+    sources: &[Source],
+    file_idx: u16,
+) {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            let report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Invalid type")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "Function {} expects this expression's type to be {BLUE}{}{RESET} but here its type is {}",
+                        blue(fn_name),
+                        expected_type.iter().map(|s| s.to_smolstr()).collect::<Vec<SmolStr>>().join("{RESET} or {BLUE}"),
+                        red(perceived_type)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            report.finish()
+        },
+        sources,
+    );
+}
+
 pub fn check_args_user_fn(
     args: &[Expr],
     expected_args_len: usize,
     fn_name: &str,
-    src: Source,
+    file_idx: u16,
     span: Span,
     fn_decl_span: (Span, u16),
-    compiler_state: &State,
+    state: &State,
     args_indexes: &[Span],
 ) {
     let args_len = args.len();
     if args_len != expected_args_len {
-        throw_compiler_error_exp(
+        throw_compiler_error(
             || {
-                let fn_src = &compiler_state.sources[fn_decl_span.1 as usize];
+                let src = &state.sources[file_idx as usize];
+                let fn_src = &state.sources[fn_decl_span.1 as usize];
                 let mut report = Report::build(
                     ariadne::ReportKind::Error,
-                    (src.filename, span.into()),
+                    (src.filename.as_str(), span.into()),
                 )
                 .with_message("Invalid argument count")
                 .with_label(
-                    Label::new((fn_src.0.as_str(), fn_decl_span.0.into()))
+                    Label::new((fn_src.filename.as_str(), fn_decl_span.0.into()))
                         .with_message(format_args!(
                             "The function {} is defined here",
                             blue(fn_name)
@@ -221,7 +580,7 @@ pub fn check_args_user_fn(
                         .with_color(ariadne::Color::Blue),
                 )
                 .with_label(
-                    Label::new((src.filename, span.into()))
+                    Label::new((src.filename.as_str(), span.into()))
                         .with_message(format_args!(
                             "Function {} expects {} arguments but {} arguments were supplied",
                             blue(fn_name),
@@ -238,7 +597,7 @@ pub fn check_args_user_fn(
                     )
                         .into();
                     report = report.with_label(
-                        Label::new((src.filename, span.into()))
+                        Label::new((src.filename.as_str(), span.into()))
                             .with_message(format_args!(
                                 "{}: Remove {}",
                                 blue("Help"),
@@ -255,7 +614,7 @@ pub fn check_args_user_fn(
 
                 report.finish()
             },
-            compiler_state.sources,
+            state.sources,
         );
     }
 }
@@ -265,43 +624,80 @@ pub fn check_args_range(
     min_args_len: usize,
     max_args_len: usize,
     fn_name: &str,
-    src: Source,
+    args_indexes: &[Span],
+    file_idx: u16,
+    sources: &[Source],
     span: Span,
 ) {
     if args.len() < min_args_len || args.len() > max_args_len {
-        cold_path();
         throw_compiler_error(
-            src,
-            span,
-            ErrType::IncorrectArgCountVariable(
-                fn_name,
-                min_args_len as u16,
-                max_args_len as u16,
-                args.len() as u16,
-            ),
-        )
+            || {
+                let src = &sources[file_idx as usize];
+                let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()))
+            .with_message("Invalid argument count")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "Function {} expects at least {} and at most {} arguments but {} were supplied",
+                        blue(fn_name),
+                        blue(min_args_len),
+                        blue(max_args_len),
+                        red(args.len())
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
+
+                if args.len() > max_args_len {
+                    let span: Span = (
+                        args_indexes[max_args_len].start,
+                        args_indexes[args_indexes.len() - 1].end,
+                    )
+                        .into();
+                    report = report.with_label(
+                        Label::new((src.filename.as_str(), span.into()))
+                            .with_message(format_args!(
+                                "{}: Remove {}",
+                                blue("Help"),
+                                if args.len() - max_args_len == 1 {
+                                    "this argument"
+                                } else {
+                                    "those arguments"
+                                }
+                            ))
+                            .with_color(ariadne::Color::Blue)
+                            .with_priority(-1),
+                    );
+                }
+
+                report.finish()
+            },
+            sources,
+        );
     }
 }
 
 #[inline(never)]
 #[cold]
 pub fn error_struct_unknown_field(
-    src: Source,
+    file_idx: u16,
     field_span: Span,
     field: &SmolStr,
     struct_name: &SmolStr,
     fields: &[(SmolStr, DataType, Span)],
-    sources: &[(SmolStr, Rc<String>)],
+    sources: &[Source],
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
+            let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.filename, field_span.into()),
+                (src.filename.as_str(), field_span.into()),
             )
             .with_message("Unknown field")
             .with_label(
-                Label::new((src.filename, field_span.into()))
+                Label::new((src.filename.as_str(), field_span.into()))
                     .with_message(format_args!(
                         "The field {} isn't defined in struct {}",
                         red(field),
@@ -335,24 +731,25 @@ pub fn error_struct_unknown_field(
 #[cold]
 #[inline(never)]
 pub fn error_struct_field_invalid_type(
-    src: Source,
+    file_idx: u16,
     struct_name: &SmolStr,
     struct_field_span: Span,
     struct_field_name: &SmolStr,
     struct_field_type: &DataType,
     value_span: Span,
     value_type: &DataType,
-    sources: &[(SmolStr, Rc<String>)],
+    sources: &[Source],
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
+            let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.filename, struct_field_span.into()),
+                (src.filename.as_str(), struct_field_span.into()),
             )
             .with_message("Incompatible types")
             .with_label(
-                Label::new((src.filename, struct_field_span.into()))
+                Label::new((src.filename.as_str(), struct_field_span.into()))
                     .with_message(format_args!(
                         "Field {} in struct {} expects type {}",
                         blue(struct_field_name),
@@ -362,7 +759,7 @@ pub fn error_struct_field_invalid_type(
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.filename, value_span.into()))
+                Label::new((src.filename.as_str(), value_span.into()))
                     .with_message(format_args!(
                         "This expression is of type {}",
                         red(value_type)
@@ -441,21 +838,25 @@ pub fn error_unknown_variable(
     var_name: &SmolStr,
     span: Span,
     v: &[Variable],
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
+    file_idx: u16,
+    sources: &[Source],
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message("Unknown variable")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "Cannot find variable {} in this scope",
-                            red(var_name),
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Unknown variable")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "Cannot find variable {} in this scope",
+                        red(var_name),
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
 
             let similar_var = find_closest_str(var_name, v.iter().map(|v| v.name.as_str()));
             if let Some(similar_var) = similar_var {
@@ -477,22 +878,26 @@ pub fn error_unknown_function(
     fn_name: &str,
     span: Span,
     namespace: &Namespace,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
+    file_idx: u16,
+    sources: &[Source],
 ) -> ! {
     let similar_fn = find_closest_str(fn_name, namespace.fns().map(|f| f.0.as_str()));
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message("Unknown function")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "Cannot find function {} in this scope",
-                            red(fn_name),
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Unknown function")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "Cannot find function {} in this scope",
+                        red(fn_name),
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
 
             if let Some(similar_fn) = similar_fn {
                 report = report.with_help(format_args!(
@@ -512,21 +917,25 @@ pub fn error_unknown_function(
 pub fn error_unknown_namespace(
     namespace: &[SmolStr],
     span: Span,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
+    file_idx: u16,
+    sources: &[Source],
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
-            let report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message("Unknown namespace")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "{} is not a valid namespace",
-                            red(namespace.join("::")),
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
+            let src = &sources[file_idx as usize];
+            let report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Unknown namespace")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "{} is not a valid namespace",
+                        red(namespace.join("::")),
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
 
             report.finish()
         },
@@ -541,33 +950,37 @@ pub fn error_unknown_function_in_namespace(
     namespace_root: &Namespace,
     namespace: &[SmolStr],
     span: Span,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
+    file_idx: u16,
+    sources: &[Source],
 ) -> ! {
     let mut current = namespace_root;
     for sub in namespace {
         current = if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
             c
         } else {
-            error_unknown_namespace(namespace, span, src, sources);
+            error_unknown_namespace(namespace, span, file_idx, sources);
         };
     }
     let namespace_str = namespace.join("::");
 
     let similar_fn = find_closest_str(fn_name, current.fns().map(|s| s.0.as_str()));
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message("Unknown function in namespace")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "Cannot find function {} in namespace {}",
-                            red(fn_name),
-                            blue(&namespace_str)
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Unknown function in namespace")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "Cannot find function {} in namespace {}",
+                        red(fn_name),
+                        blue(&namespace_str)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            );
 
             if let Some(similar_fn) = similar_fn {
                 report = report.with_help(format_args!(
@@ -587,24 +1000,25 @@ pub fn error_unknown_function_in_namespace(
 pub fn error_function_already_defined(
     func: &Function,
     redeclaration_span: Span,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
+    file_idx: u16,
+    sources: &[Source],
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
+            let src = &sources[file_idx as usize];
             let fn_src = &sources[func.src_file as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.filename, redeclaration_span.into()),
+                (src.filename.as_str(), redeclaration_span.into()),
             )
             .with_message(format_args!("Function already exists"))
             .with_label(
-                Label::new((fn_src.0.as_str(), func.name_span.into()))
+                Label::new((fn_src.filename.as_str(), func.name_span.into()))
                     .with_message(format_args!("Already defined here"))
                     .with_color(ariadne::Color::Blue),
             )
             .with_label(
-                Label::new((src.filename, redeclaration_span.into()))
+                Label::new((src.filename.as_str(), redeclaration_span.into()))
                     .with_message(format_args!(
                         "Function {} is already defined",
                         blue(&func.name)
@@ -626,14 +1040,15 @@ pub fn error_op(
     op: &str,
     span_l: Span,
     span_r: Span,
-    src: Source,
-    sources: &[(SmolStr, Rc<String>)],
+    file_idx: u16,
+    sources: &[Source],
 ) -> ! {
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
+            let src = &sources[file_idx as usize];
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
-                (src.filename, span_l.extend(span_r).into()),
+                (src.filename.as_str(), span_l.extend(span_r).into()),
             );
 
             if (op == "-" && l == &DataType::Null) || op == "!" {
@@ -644,7 +1059,7 @@ pub fn error_op(
                         blue(r)
                     ))
                     .with_label(
-                        Label::new((src.filename, span_r.into()))
+                        Label::new((src.filename.as_str(), span_r.into()))
                             .with_message(format_args!("This expression is of type {}", blue(r)))
                             .with_color(ariadne::Color::Red),
                     );
@@ -657,12 +1072,12 @@ pub fn error_op(
                         green(r)
                     ))
                     .with_label(
-                        Label::new((src.filename, span_l.into()))
+                        Label::new((src.filename.as_str(), span_l.into()))
                             .with_message(format_args!("This expression is of type {}", blue(l)))
                             .with_color(ariadne::Color::Red),
                     )
                     .with_label(
-                        Label::new((src.filename, span_r.into()))
+                        Label::new((src.filename.as_str(), span_r.into()))
                             .with_message(format_args!("This expression is of type {}", green(r)))
                             .with_color(ariadne::Color::Red),
                     );
@@ -736,21 +1151,25 @@ pub fn error_op(
 #[inline(never)]
 pub fn error_unknown_type(
     span: Span,
-    src: Source,
+    file_idx: u16,
     t: &str,
-    sources: &[(SmolStr, Rc<String>)],
+    sources: &[Source],
     namespace: &Namespace,
 ) -> ! {
     let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0.as_str()));
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message(format_args!("Unknown type {}", red(t)))
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!("This isn't a valid type"))
-                        .with_color(ariadne::Color::Red),
-                );
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message(format_args!("Unknown type {}", red(t)))
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!("This isn't a valid type"))
+                    .with_color(ariadne::Color::Red),
+            );
 
             if let Some(s) = closest_struct {
                 report = report.with_help(format_args!(
@@ -769,9 +1188,9 @@ pub fn error_unknown_type(
 #[inline(never)]
 pub fn error_unknown_type_with_namespace(
     span: Span,
-    src: Source,
+    file_idx: u16,
     t: &str,
-    sources: &[(SmolStr, Rc<String>)],
+    sources: &[Source],
     namespace_root: &Namespace,
     namespace: &[SmolStr],
 ) -> ! {
@@ -780,21 +1199,25 @@ pub fn error_unknown_type_with_namespace(
         current = if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
             c
         } else {
-            error_unknown_namespace(namespace, span, src, sources);
+            error_unknown_namespace(namespace, span, file_idx, sources);
         };
     }
     let namespace_str = namespace.join("::");
 
     let closest_struct = find_closest_str(t, current.structs().map(|s| s.0.as_str()));
-    throw_compiler_error_exp(
+    throw_compiler_error(
         || {
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
-                .with_message(format_args!("Unknown type {}", red(t)))
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!("This isn't a valid type"))
-                        .with_color(ariadne::Color::Red),
-                );
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message(format_args!("Unknown type {}", red(t)))
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!("This isn't a valid type"))
+                    .with_color(ariadne::Color::Red),
+            );
 
             if let Some(s) = closest_struct {
                 report = report.with_help(format_args!(
@@ -808,4 +1231,186 @@ pub fn error_unknown_type_with_namespace(
         },
         sources,
     )
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_duplicate_map_key(
+    key_first_span: Span,
+    key_repeat_span: Span,
+    span: Span,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message(format_args!("Key is defined more than once in map"))
+            .with_label(
+                Label::new((src.filename.as_str(), key_first_span.into()))
+                    .with_message(format_args!("This key is first defined here"))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.filename.as_str(), key_repeat_span.into()))
+                    .with_message(format_args!("It's then redefined here"))
+                    .with_color(ariadne::Color::Red),
+            )
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_not_literal_map_key(
+    key_span: Span,
+    map_span: Span,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), map_span.into()),
+            )
+            .with_message(format_args!("Non-literal map key"))
+            .with_label(
+                Label::new((src.filename.as_str(), key_span.into()))
+                    .with_message(format_args!("This map key is not a literal."))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_note("Map keys must be literals. However, fret not, this requirement™ will soon be removed!")
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_function_arg_invalid_type(
+    perceived_type: &DataType,
+    expected_type: &DataType,
+    arg_span: Span,
+    fn_name: &str,
+    fn_decl_span: Option<(Span, u16)>,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), arg_span.into()),
+            )
+            .with_message(format_args!("Invalid argument type"));
+
+            if let Some((fn_span, fn_file_idx)) = fn_decl_span {
+                let fn_src = &sources[fn_file_idx as usize];
+                report = report.with_label(
+                    Label::new((fn_src.filename.as_str(), fn_span.into()))
+                        .with_message("Function is defined here")
+                        .with_color(ariadne::Color::Blue),
+                );
+            }
+
+            report = report.with_label(
+                Label::new((src.filename.as_str(), arg_span.into()))
+                    .with_message(format_args!("Function {} expects this argument's type to be {}, but this expression's type is {}", blue(fn_name), green(expected_type), red(perceived_type)))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            report.finish()
+        },
+        sources,
+    );
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_function_arg_invalid_type_multiple(
+    perceived_type: &DataType,
+    expected_type: &[DataType],
+    arg_span: Span,
+    fn_name: &str,
+    fn_decl_span: Option<(Span, u16)>,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), arg_span.into()),
+            )
+            .with_message(format_args!("Invalid argument type"));
+
+            if let Some((fn_span, fn_file_idx)) = fn_decl_span {
+                let fn_src = &sources[fn_file_idx as usize];
+                report = report.with_label(
+                    Label::new((fn_src.filename.as_str(), fn_span.into()))
+                        .with_message("Function is defined here")
+                        .with_color(ariadne::Color::Blue),
+                );
+            }
+
+            report = report.with_label(
+                Label::new((src.filename.as_str(), arg_span.into()))
+                    .with_message(format_args!("Function {} expects this argument to be of type {GREEN}{}{RESET}, but this expression's type is {}", blue(fn_name), expected_type.iter().map(|s| s.to_smolstr()).collect::<Vec<SmolStr>>().join("{RESET} or {GREEN}"), red(perceived_type)))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            report.finish()
+        },
+        sources,
+    );
+}
+
+pub fn error_range_invalid_type(
+    span: Span,
+    perceived_type: &DataType,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        || {
+            let src = &sources[file_idx as usize];
+            let report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message(format_args!("Invalid type in range"))
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!(
+                        "Expected {}, but this expression's type is {}",
+                        blue(DataType::Int),
+                        red(perceived_type)
+                    ))
+                    .with_color(ariadne::Color::Red),
+            )
+            .with_note(format_args!(
+                "A range has the following syntax: {}..{},\nwhere both {} and {} are of type {}",
+                blue("start"),
+                blue("end"),
+                blue("start"),
+                blue("end"),
+                blue(DataType::Int)
+            ))
+            .with_help(format_args!("Try using the {} function.", blue("int()")));
+
+            report.finish()
+        },
+        sources,
+    );
 }

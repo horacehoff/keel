@@ -12,24 +12,31 @@ use crate::compiler::compiler_errors::error_unknown_function;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use smol_strc::SmolStr;
 
 pub fn fs_lib_functions(
     name: &str,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     args: &[Expr],
     span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
-    let src = ctx.src;
     match name {
         "read" => {
-            check_args(args, 1, name, src, span, state.sources);
-            check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
+            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -40,8 +47,17 @@ pub fn fs_lib_functions(
             return Some(output_id);
         }
         "exists" => {
-            check_args(args, 1, name, src, span, state.sources);
-            check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
+            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -52,9 +68,27 @@ pub fn fs_lib_functions(
             return Some(output_id);
         }
         "write" => {
-            check_args(args, 2, name, src, span, state.sources);
-            check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-            check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
+            check_args(args, 2, name, span, state.sources, ctx.file_idx);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                1,
+                &[DataType::String],
+            );
             let filepath = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -71,9 +105,27 @@ pub fn fs_lib_functions(
             state.add_to_src(ctx, output, span);
         }
         "append" => {
-            check_args(args, 2, name, src, span, state.sources);
-            check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
-            check_arg_type(v, ctx, state, args, args_indexes, 1, &[DataType::String]);
+            check_args(args, 2, name, span, state.sources, ctx.file_idx);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                1,
+                &[DataType::String],
+            );
             let filepath = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -90,8 +142,17 @@ pub fn fs_lib_functions(
             state.add_to_src(ctx, output, span);
         }
         "delete" => {
-            check_args(args, 1, name, src, span, state.sources);
-            check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
+            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
             let path = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -100,8 +161,17 @@ pub fn fs_lib_functions(
             state.add_to_src(ctx, output, span);
         }
         "delete_dir" => {
-            check_args(args, 1, name, src, span, state.sources);
-            check_arg_type(v, ctx, state, args, args_indexes, 0, &[DataType::String]);
+            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
             let path = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -113,12 +183,8 @@ pub fn fs_lib_functions(
             error_unknown_function(
                 fn_name,
                 span,
-                &Namespace {
-                    name: SmolStr::new_static(""),
-                    children: Vec::new(),
-                    symbols: Vec::new(),
-                },
-                src,
+                &Namespace::default(),
+                ctx.file_idx,
                 state.sources,
             );
         }

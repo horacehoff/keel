@@ -306,16 +306,25 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
         }
         // map
         Token::LBrace => {
-            let mut kv_pairs: Vec<(Expr, Expr)> = Vec::with_capacity(2);
+            let mut kv_pairs: Vec<(Expr, Span, Expr, Span)> = Vec::with_capacity(2);
             let end: u32;
             loop {
+                let key_start = parser.peek_token_span().start;
                 let key = parse_term(parser, allow_struct);
+                let key_end = parser.last_token_end as u32;
                 parser.next_token_expect(
                     Token::Colon,
                     "Key-value pairs must be separated by a colon",
                 );
+                let value_start = parser.peek_token_span().start;
                 let value = parser_expr::parse_expr(parser);
-                kv_pairs.push((key, value));
+                let value_end = parser.last_token_end as u32;
+                kv_pairs.push((
+                    key,
+                    (key_start, key_end).into(),
+                    value,
+                    (value_start, value_end).into(),
+                ));
                 let peek_token = parser.peek_token();
                 if peek_token == Token::Comma {
                     parser.next_token();

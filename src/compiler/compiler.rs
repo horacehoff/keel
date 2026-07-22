@@ -1,13 +1,24 @@
 use crate::compiler::compiler_data::InstrSrc;
 use crate::compiler::compiler_data::Source;
+use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
+use crate::compiler::compiler_errors::error_cannot_load_dynlib;
+use crate::compiler::compiler_errors::error_cannot_push_type_to_array;
+use crate::compiler::compiler_errors::error_cannot_read_file;
+use crate::compiler::compiler_errors::error_conditional_expression_without_else;
+use crate::compiler::compiler_errors::error_division_by_zero;
+use crate::compiler::compiler_errors::error_duplicate_map_key;
+use crate::compiler::compiler_errors::error_invalid_index_type;
+use crate::compiler::compiler_errors::error_invalid_type;
+use crate::compiler::compiler_errors::error_map_diff_types;
+use crate::compiler::compiler_errors::error_not_literal_map_key;
+use crate::compiler::compiler_errors::error_range_invalid_type;
+use crate::compiler::compiler_errors::error_type_not_indexable;
 use crate::compiler::compiler_errors::error_unknown_namespace;
 use crate::data::NULL;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
-use crate::errors::ErrType;
 use crate::errors::RED;
 use crate::errors::RESET;
-use crate::errors::throw_compiler_error;
 use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
@@ -167,7 +178,7 @@ const fn set_jmp_size(instr: &mut Instr, size: u16) {
 fn compile_short_circuit_condition(
     expr: &Expr,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
     bool_or_mode: bool,
@@ -259,7 +270,7 @@ fn compile_array_literal(
     array_items: &[Expr],
     spans: &[Span],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -273,7 +284,7 @@ fn compile_array_literal(
             let failing_elem_type = array_items[failing_elem_idx + 1].infer_type(v, ctx, state);
             let failing_elem_span = spans[failing_elem_idx + 2];
             compiler_errors::error_array_diff_types(
-                ctx.src,
+                ctx.file_idx,
                 state.sources,
                 spans[1],
                 &first_type,
@@ -372,7 +383,7 @@ fn compile_struct_literal(
     fields: &[(SmolStr, Expr, Span, Span)],
     span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -381,16 +392,16 @@ fn compile_struct_literal(
     let Some(expected_struct_idx) =
         state
             .namespace
-            .find_struct(namespace, name, span, ctx.src, state.sources)
+            .find_struct(namespace, name, span, ctx.file_idx, state.sources)
     else {
-        compiler_errors::error_unknown_struct(name, span, state.sources, ctx.src);
+        compiler_errors::error_unknown_struct(name, span, state.sources, ctx.file_idx);
     };
     let type_id = state.structs[expected_struct_idx].id;
     let expected_fields_len = state.structs[expected_struct_idx].fields.len();
     if expected_fields_len < fields.len() {
         let unexpected_field = &fields[expected_fields_len];
         compiler_errors::error_struct_no_such_field(
-            ctx.src,
+            ctx.file_idx,
             name,
             state.structs[expected_struct_idx].name_span,
             unexpected_field.2,
@@ -412,7 +423,7 @@ fn compile_struct_literal(
                 let field = &state.structs[expected_struct_idx].fields[field_idx];
                 if !struct_field_type_matches(&field.1, &field_type) {
                     compiler_errors::error_struct_field_invalid_type(
-                        ctx.src,
+                        ctx.file_idx,
                         name,
                         field.2,
                         &field.0,
@@ -450,7 +461,7 @@ fn compile_struct_literal(
                     .map(|i| &state.structs[struct_id].fields[i].0)
                     .collect::<Vec<&SmolStr>>();
                 compiler_errors::error_struct_missing_fields(
-                    ctx.src,
+                    ctx.file_idx,
                     state.structs[expected_struct_idx].name_span,
                     span,
                     state.sources,
@@ -474,7 +485,7 @@ fn compile_struct_literal(
                 let field = &state.structs[expected_struct_idx].fields[field_idx];
                 if !struct_field_type_matches(&field.1, &field_type) {
                     compiler_errors::error_struct_field_invalid_type(
-                        ctx.src,
+                        ctx.file_idx,
                         name,
                         field.2,
                         &field.0,
@@ -508,7 +519,7 @@ fn compile_struct_literal(
                     .map(|i| &state.structs[struct_id].fields[i].0)
                     .collect::<Vec<&SmolStr>>();
                 compiler_errors::error_struct_missing_fields(
-                    ctx.src,
+                    ctx.file_idx,
                     state.structs[expected_struct_idx].name_span,
                     span,
                     state.sources,
@@ -536,10 +547,10 @@ fn compile_struct_literal(
 }
 
 fn compile_map_literal(
-    kv_pairs: &[(Expr, Expr)],
-    span: Span,
+    kv_pairs: &[(Expr, Span, Expr, Span)],
+    map_span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -551,9 +562,17 @@ fn compile_map_literal(
         BuildHasherDefault::default(),
     ));
     if ctx.single_run {
-        for (i, (key, val)) in kv_pairs.iter().enumerate() {
-            if kv_pairs.iter().skip(i + 1).any(|(k, _)| k == key) {
-                throw_compiler_error(ctx.src, span, ErrType::DuplicateMapKey);
+        for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
+            if let Some((_, repeat_key_span, _, _)) =
+                kv_pairs.iter().skip(i + 1).find(|(k, _, _, _)| k == key)
+            {
+                error_duplicate_map_key(
+                    *key_span,
+                    *repeat_key_span,
+                    map_span,
+                    ctx.file_idx,
+                    state.sources,
+                );
             }
             let key_t = key.infer_type(v, ctx, state);
             let val_t = val.infer_type(v, ctx, state);
@@ -561,8 +580,26 @@ fn compile_map_literal(
                 global_key_type = key_t;
                 global_val_type = val_t;
             } else {
-                key_t.expect(&global_key_type, ctx.src, span);
-                val_t.expect(&global_val_type, ctx.src, span);
+                if key_t != global_key_type {
+                    error_map_diff_types(
+                        ctx.file_idx,
+                        state.sources,
+                        map_span,
+                        &global_key_type,
+                        *key_span,
+                        &key_t,
+                    )
+                }
+                if val_t != global_val_type {
+                    error_map_diff_types(
+                        ctx.file_idx,
+                        state.sources,
+                        map_span,
+                        &global_val_type,
+                        *val_span,
+                        &val_t,
+                    )
+                }
             }
             let output_len = output.len();
             let key_val_id = key
@@ -571,7 +608,7 @@ fn compile_map_literal(
             if !(key.is_constant_literal()
                 || matches!(key, Expr::Array(_, _)) && output_len == output.len())
             {
-                throw_compiler_error(ctx.src, span, ErrType::NotLiteralMapKey);
+                error_not_literal_map_key(*key_span, map_span, ctx.file_idx, state.sources);
             }
             let key_val = state.registers[key_val_id as usize];
             let id = val
@@ -594,9 +631,17 @@ fn compile_map_literal(
         dest_id as u16
     } else {
         let mut dynamic: Vec<(Data, u16)> = Vec::with_capacity(kv_pairs.len());
-        for (i, (key, val)) in kv_pairs.iter().enumerate() {
-            if kv_pairs.iter().skip(i + 1).any(|(k, _)| k == key) {
-                throw_compiler_error(ctx.src, span, ErrType::DuplicateMapKey);
+        for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
+            if let Some((_, repeat_key_span, _, _)) =
+                kv_pairs.iter().skip(i + 1).find(|(k, _, _, _)| k == key)
+            {
+                error_duplicate_map_key(
+                    *key_span,
+                    *repeat_key_span,
+                    map_span,
+                    ctx.file_idx,
+                    state.sources,
+                );
             }
             let key_t = key.infer_type(v, ctx, state);
             let val_t = val.infer_type(v, ctx, state);
@@ -604,8 +649,26 @@ fn compile_map_literal(
                 global_key_type = key_t;
                 global_val_type = val_t;
             } else {
-                key_t.expect(&global_key_type, ctx.src, span);
-                val_t.expect(&global_val_type, ctx.src, span);
+                if key_t != global_key_type {
+                    error_map_diff_types(
+                        ctx.file_idx,
+                        state.sources,
+                        map_span,
+                        &global_key_type,
+                        *key_span,
+                        &key_t,
+                    )
+                }
+                if val_t != global_val_type {
+                    error_map_diff_types(
+                        ctx.file_idx,
+                        state.sources,
+                        map_span,
+                        &global_val_type,
+                        *val_span,
+                        &val_t,
+                    )
+                }
             }
             let output_len = output.len();
             let key_val_id = key
@@ -614,7 +677,7 @@ fn compile_map_literal(
             if !(key.is_constant_literal()
                 || matches!(key, Expr::Array(_, _)) && output_len == output.len())
             {
-                throw_compiler_error(ctx.src, span, ErrType::NotLiteralMapKey);
+                error_not_literal_map_key(*key_span, map_span, ctx.file_idx, state.sources);
             }
             let key_val = state.registers[key_val_id as usize];
             let val_id = val
@@ -658,7 +721,7 @@ fn compile_struct_field_access(
     struct_span: Span,
     field_span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -671,7 +734,7 @@ fn compile_struct_field_access(
             .position(|f| &f.0 == field)
             .unwrap_or_else(|| {
                 compiler_errors::error_struct_unknown_field(
-                    ctx.src,
+                    ctx.file_idx,
                     field_span,
                     field,
                     &s.name,
@@ -686,10 +749,14 @@ fn compile_struct_field_access(
         output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
         dest_reg_id
     } else {
-        throw_compiler_error(
-            ctx.src,
+        error_invalid_type(
+            &DataType::Struct(0),
+            &t,
             struct_span,
-            ErrType::InvalidType(&DataType::Struct(0), &t),
+            None,
+            None,
+            ctx.file_idx,
+            state.sources,
         );
     }
 }
@@ -699,13 +766,13 @@ fn compile_array_indexing(
     index: &Expr,
     span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
-    let infered = array.infer_type(v, ctx, state);
-    if !infered.is_indexable() {
-        throw_compiler_error(ctx.src, span, ErrType::NotIndexable(&infered));
+    let inferred = array.infer_type(v, ctx, state);
+    if !inferred.is_indexable() {
+        error_type_not_indexable(&inferred, span, false, ctx.file_idx, state.sources);
     }
 
     let id = array
@@ -714,7 +781,7 @@ fn compile_array_indexing(
 
     let index_inferred = index.infer_type(v, ctx, state);
     if index_inferred != DataType::Int {
-        throw_compiler_error(ctx.src, span, ErrType::InvalidIndexType(&index_inferred));
+        error_invalid_index_type(&index_inferred, span, ctx.file_idx, state.sources);
     }
     let index_id = index
         .compile(v, ctx, state, output, None, false, true)
@@ -722,7 +789,7 @@ fn compile_array_indexing(
     state.free_reg(index_id, v);
     let dest_reg_id = state.alloc_reg();
 
-    let to_push = if infered == DataType::String {
+    let to_push = if inferred == DataType::String {
         Instr::GetIndexString(id, index_id, dest_reg_id)
     } else {
         Instr::GetIndexArray(id, index_id, dest_reg_id)
@@ -738,31 +805,27 @@ fn compile_array_slice(
     idx_end: &Expr,
     span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
-    let infered = array.infer_type(v, ctx, state);
-    if !infered.is_indexable() {
-        throw_compiler_error(ctx.src, span, ErrType::NotIndexable(&infered));
+    let inferred = array.infer_type(v, ctx, state);
+    if !inferred.is_indexable() {
+        error_type_not_indexable(&inferred, span, false, ctx.file_idx, state.sources);
     }
     let id = array
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
     let idx_start_inferred = idx_start.infer_type(v, ctx, state);
     if idx_start_inferred != DataType::Int {
-        throw_compiler_error(
-            ctx.src,
-            span,
-            ErrType::InvalidIndexType(&idx_start_inferred),
-        );
+        error_invalid_index_type(&idx_start_inferred, span, ctx.file_idx, state.sources);
     }
     let idx_start_id = idx_start
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
     let idx_end_inferred = idx_end.infer_type(v, ctx, state);
     if idx_end_inferred != DataType::Int {
-        throw_compiler_error(ctx.src, span, ErrType::InvalidIndexType(&idx_end_inferred));
+        error_invalid_index_type(&idx_end_inferred, span, ctx.file_idx, state.sources);
     }
     let idx_end_id = idx_end
         .compile(v, ctx, state, output, None, false, true)
@@ -771,7 +834,7 @@ fn compile_array_slice(
     state.free_reg(idx_start_id, v);
     state.free_reg(idx_end_id, v);
     let dest_reg_id = state.alloc_reg();
-    let to_push = if infered == DataType::String {
+    let to_push = if inferred == DataType::String {
         Instr::GetSliceString(id, idx_start_id, dest_reg_id)
     } else {
         Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
@@ -791,13 +854,21 @@ fn uniform_op(
     t: &DataType,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(v, ctx, state), r.infer_type(v, ctx, state));
     if &t_l != t || &t_r != t {
-        compiler_errors::error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.src, state.sources);
+        compiler_errors::error_op(
+            &t_l,
+            &t_r,
+            symbol,
+            span_l,
+            span_r,
+            ctx.file_idx,
+            state.sources,
+        );
     }
 
     let id_l = l
@@ -826,13 +897,21 @@ fn uniform_op2(
     span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(v, ctx, state), r.infer_type(v, ctx, state));
     if !((&t_l == t_1 && &t_r == t_1) || (&t_l == t_2 && &t_r == t_2)) {
-        compiler_errors::error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.src, state.sources);
+        compiler_errors::error_op(
+            &t_l,
+            &t_r,
+            symbol,
+            span_l,
+            span_r,
+            ctx.file_idx,
+            state.sources,
+        );
     }
     let id_l = l
         .compile(v, ctx, state, output, None, false, true)
@@ -858,14 +937,14 @@ fn compile_div_op(
     span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     if let Expr::Int(n) = r
         && *n == 0
     {
-        throw_compiler_error(ctx.src, span_l.extend(span_r), ErrType::DivisionByZero);
+        error_division_by_zero(false, span_l.extend(span_r), ctx.file_idx, state.sources);
     }
     let id = uniform_op2(
         Instr::DivFloat,
@@ -896,7 +975,7 @@ fn compile_add_op(
     span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -908,7 +987,7 @@ fn compile_add_op(
             DataType::String | DataType::Array(_) | DataType::Float | DataType::Int
         )
     {
-        compiler_errors::error_op(&t_l, &t_r, "+", span_l, span_r, ctx.src, state.sources);
+        compiler_errors::error_op(&t_l, &t_r, "+", span_l, span_r, ctx.file_idx, state.sources);
     }
     // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
     if t_l == DataType::Int
@@ -960,7 +1039,7 @@ fn compile_sub_op(
     span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -969,7 +1048,7 @@ fn compile_sub_op(
     if !((t_l == DataType::Float && t_r == DataType::Float)
         || (t_l == DataType::Int && t_r == DataType::Int))
     {
-        compiler_errors::error_op(&t_l, &t_r, "-", span_l, span_r, ctx.src, state.sources);
+        compiler_errors::error_op(&t_l, &t_r, "-", span_l, span_r, ctx.file_idx, state.sources);
     }
     // var-1 uses the dedicated DecInt/DecIntTo instructions
     if t_l == DataType::Int
@@ -1010,14 +1089,14 @@ fn compile_mod_op(
     span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     if let Expr::Int(n) = r
         && *n == 0
     {
-        throw_compiler_error(ctx.src, span_l.extend(span_r), ErrType::ModuloByZero);
+        error_division_by_zero(true, span_l.extend(span_r), ctx.file_idx, state.sources);
     }
     let id = uniform_op2(
         Instr::ModFloat,
@@ -1046,7 +1125,7 @@ fn compile_eq_op(
     r: &Expr,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -1079,7 +1158,7 @@ fn compile_neq_op(
     r: &Expr,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -1113,7 +1192,7 @@ fn compile_neg_op(
     span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -1134,7 +1213,7 @@ fn compile_neg_op(
             "-",
             span_l,
             span_r,
-            ctx.src,
+            ctx.file_idx,
             state.sources,
         );
     }
@@ -1147,7 +1226,7 @@ fn compile_bool_neg_op(
     span_r: Span,
     tgt_id: Option<u16>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
@@ -1164,7 +1243,7 @@ fn compile_bool_neg_op(
             "-",
             span_l,
             span_r,
-            ctx.src,
+            ctx.file_idx,
             state.sources,
         );
     }
@@ -1175,7 +1254,7 @@ fn compile_bool_neg_op(
 fn compile_inline_condition_branch(
     branch: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
     tgt_id: u16,
@@ -1210,7 +1289,7 @@ fn compile_inline_condition(
     code: &[Expr],
     span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
     tgt_id: Option<u16>,
@@ -1261,7 +1340,7 @@ fn compile_inline_condition(
         }
     }
     if !else_exists {
-        throw_compiler_error(ctx.src, span, ErrType::InvalidConditionalExpression);
+        error_conditional_expression_without_else(span, ctx.file_idx, state.sources);
     }
 
     for y in jmp_markers {
@@ -1304,13 +1383,13 @@ fn compile_array_index_assignment(
     index_span: Span,
     elem_span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
     let array_type = array.infer_type(v, ctx, state);
     if !array_type.is_indexable() {
-        throw_compiler_error(ctx.src, index_span, ErrType::NotIndexable(&array_type));
+        error_type_not_indexable(&array_type, index_span, false, ctx.file_idx, state.sources);
     }
     // Get the id of the source array/string (may be a nested GetIndex)
     let id = array
@@ -1336,10 +1415,13 @@ fn compile_array_index_assignment(
         }
     } || (array_type == DataType::String && elem_type != DataType::String)
     {
-        throw_compiler_error(
-            ctx.src,
+        error_cannot_push_type_to_array(
+            &array_type,
+            &elem_type,
+            index_span,
             elem_span,
-            ErrType::CannotPushTypeToArray(&elem_type, &array_type),
+            ctx.file_idx,
+            state.sources,
         );
     }
 
@@ -1361,17 +1443,21 @@ fn compile_struct_field_assignment(
     field_span: Span,
     value_span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
     let t = struct_expr.infer_type(v, ctx, state);
     let new_val_type = new_val.infer_type(v, ctx, state);
     let DataType::Struct(struct_id) = t else {
-        throw_compiler_error(
-            ctx.src,
+        error_invalid_type(
+            &DataType::Struct(0),
+            &t,
             struct_span,
-            ErrType::InvalidType(&DataType::Struct(0), &t),
+            None,
+            None,
+            ctx.file_idx,
+            state.sources,
         );
     };
     let mut field_index: Option<u16> = None;
@@ -1383,7 +1469,7 @@ fn compile_struct_field_assignment(
         if expected_field_name == field {
             if !struct_field_type_matches(expected_field_type, &new_val_type) {
                 compiler_errors::error_struct_field_invalid_type(
-                    ctx.src,
+                    ctx.file_idx,
                     struct_name,
                     *expected_field_span,
                     expected_field_name,
@@ -1399,7 +1485,7 @@ fn compile_struct_field_assignment(
     }
     let Some(field_index) = field_index else {
         compiler_errors::error_struct_unknown_field(
-            ctx.src,
+            ctx.file_idx,
             field_span,
             field,
             struct_name,
@@ -1420,7 +1506,7 @@ fn compile_condition(
     main_condition: &Expr,
     code: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -1502,7 +1588,7 @@ fn compile_while_loop(
     condition: &Expr,
     code: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -1546,7 +1632,7 @@ fn compile_for_loop(
     code: &[Expr],
     span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -1591,7 +1677,9 @@ fn compile_for_loop(
             var_type: match array_type {
                 DataType::String => DataType::String,
                 DataType::Array(a_type) => a_type.map_or(DataType::Null, |t| *t),
-                t => throw_compiler_error(ctx.src, span, ErrType::IsNotAnIterator(&t)),
+                t => {
+                    error_type_not_indexable(&t, span, true, ctx.file_idx, state.sources);
+                }
             },
         });
     }
@@ -1651,7 +1739,7 @@ fn compile_int_for_loop(
     span1: Span,
     span2: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -1667,8 +1755,12 @@ fn compile_int_for_loop(
     // Check start and elem type
     let t1 = start_elem.infer_type(v, ctx, state);
     let t2 = end_elem.infer_type(v, ctx, state);
-    t1.expect(&DataType::Int, ctx.src, span1);
-    t2.expect(&DataType::Int, ctx.src, span2);
+    if t1 != DataType::Int {
+        error_range_invalid_type(span1, &t1, ctx.file_idx, state.sources);
+    }
+    if t2 != DataType::Int {
+        error_range_invalid_type(span2, &t2, ctx.file_idx, state.sources);
+    }
     let elem_id = if ctx.single_run {
         start_elem
             .compile(v, ctx, state, output, None, false, true)
@@ -1743,7 +1835,7 @@ fn compile_int_for_loop(
 fn compile_loop_block(
     code: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -1767,7 +1859,7 @@ fn compile_try_catch_block(
     err_var: &SmolStr,
     catch_code: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -1800,7 +1892,7 @@ fn compile_var_declaration(
     value: &Expr,
     remaining_code: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -1841,13 +1933,13 @@ fn compile_var_assignment(
     value: &Expr,
     span: Span,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
     let var_type = value.infer_type(v, ctx, state);
     let var_pos = v.iter().rposition(|x| x.name == *name).unwrap_or_else(|| {
-        compiler_errors::error_unknown_variable(name, span, v, ctx.src, state.sources);
+        compiler_errors::error_unknown_variable(name, span, v, ctx.file_idx, state.sources);
     });
     let id = v[var_pos].register_id;
 
@@ -1934,7 +2026,7 @@ fn compile_struct_definition(
     name: &SmolStr,
     fields: &[(SmolStr, TypeExpr, Span)],
     span: Span,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     _output: &mut Vec<Instr>,
 ) {
@@ -1962,7 +2054,7 @@ fn compile_struct_definition(
         .map(|(f, f_t, f_span)| {
             (
                 f.clone(),
-                f_t.to_datatype(ctx.src, state.namespace, state.sources),
+                f_t.to_datatype(ctx.file_idx, state.namespace, state.sources),
                 *f_span,
             )
         })
@@ -1976,12 +2068,12 @@ fn compile_function_definition(
     fn_code: &Rc<[Expr]>,
     span: Span,
     _v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     _output: &mut Vec<Instr>,
 ) {
     if let Some(func) = state.fns.iter().find(|func| &func.name == fn_name) {
-        compiler_errors::error_function_already_defined(func, span, ctx.src, state.sources);
+        compiler_errors::error_function_already_defined(func, span, ctx.file_idx, state.sources);
     }
     let mut callees = Vec::new();
     collect_direct_fn_calls(fn_code, &mut callees);
@@ -1995,7 +2087,7 @@ fn compile_function_definition(
             (
                 a.clone(),
                 t.clone()
-                    .map(|t_e| t_e.to_datatype(ctx.src, state.namespace, state.sources)),
+                    .map(|t_e| t_e.to_datatype(ctx.file_idx, state.namespace, state.sources)),
             )
         }))
         .collect(),
@@ -2003,7 +2095,7 @@ fn compile_function_definition(
         impls: Vec::new(),
         is_recursive: None,
         returns_null: check_if_returns_void(fn_code),
-        src_file: ctx.current_src_file,
+        src_file: ctx.file_idx,
         return_type_cache: Vec::new(),
         direct_calls: callees.into_boxed_slice(),
         name_span: span,
@@ -2014,7 +2106,7 @@ fn compile_function_definition(
 fn compile_return(
     return_value: Option<&Expr>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -2031,12 +2123,12 @@ fn compile_return(
 }
 
 #[inline]
-fn compile_loop_break(ctx: Ctx<'_>, output: &mut Vec<Instr>) {
+fn compile_loop_break(ctx: Ctx, output: &mut Vec<Instr>) {
     output.push(Instr::NotEqJmp(ctx.block_id + 1, 0, 0));
 }
 
 #[inline]
-fn compile_loop_continue(ctx: Ctx<'_>, output: &mut Vec<Instr>) {
+fn compile_loop_continue(ctx: Ctx, output: &mut Vec<Instr>) {
     output.push(Instr::EqJmp(ctx.block_id + 1, 0, 0));
 }
 
@@ -2044,7 +2136,7 @@ fn compile_loop_continue(ctx: Ctx<'_>, output: &mut Vec<Instr>) {
 fn compile_eval_block(
     code: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
@@ -2059,7 +2151,7 @@ fn compile_eval_block(
 pub fn compile_expr(
     input: &[Expr],
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
 ) -> Vec<Instr> {
     let v_len = v.len();
@@ -2095,7 +2187,7 @@ impl Expr {
     pub fn compile(
         &self,
         v: &mut Vec<Variable>,
-        ctx: Ctx<'_>,
+        ctx: Ctx,
         state: &mut State<'_>,
         output: &mut Vec<Instr>,
         tgt_id: Option<u16>,
@@ -2107,7 +2199,7 @@ impl Expr {
     pub fn compile_with_code_context(
         &self,
         v: &mut Vec<Variable>,
-        ctx: Ctx<'_>,
+        ctx: Ctx,
         state: &mut State<'_>,
         output: &mut Vec<Instr>,
         tgt_id: Option<u16>,
@@ -2207,7 +2299,13 @@ impl Expr {
                 {
                     Some(*register_id)
                 } else {
-                    compiler_errors::error_unknown_variable(name, *span, v, ctx.src, state.sources);
+                    compiler_errors::error_unknown_variable(
+                        name,
+                        *span,
+                        v,
+                        ctx.file_idx,
+                        state.sources,
+                    );
                 }
             }
             Self::Array(array_items, spans) => {
@@ -2605,7 +2703,7 @@ impl Expr {
                 }
                 None
             }
-            Self::ObjFunctionCall(obj, args, namespace, obj_markers, fn_markers, args_indexes)
+            Self::ObjFunctionCall(obj, args, namespace, obj_span, fn_span, args_indexes)
                 if !uses_id =>
             {
                 let output_id = handle_method_calls(
@@ -2617,8 +2715,8 @@ impl Expr {
                     obj,
                     args,
                     namespace,
-                    *obj_markers,
-                    *fn_markers,
+                    *obj_span,
+                    *fn_span,
                     args_indexes,
                 );
                 if let Some(id) = output_id {
@@ -2626,7 +2724,7 @@ impl Expr {
                 }
                 None
             }
-            Self::ObjFunctionCall(obj, args, namespace, obj_markers, fn_markers, args_indexes)
+            Self::ObjFunctionCall(obj, args, namespace, obj_span, fn_span, args_indexes)
                 if uses_id =>
             {
                 Some(
@@ -2639,8 +2737,8 @@ impl Expr {
                         obj,
                         args,
                         namespace,
-                        *obj_markers,
-                        *fn_markers,
+                        *obj_span,
+                        *fn_span,
                         args_indexes,
                     )
                     .unwrap_or_else(|| {
@@ -2707,7 +2805,7 @@ pub enum SymbolKind {
     Struct(u16),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Namespace {
     pub symbols: Vec<(SmolStr, SymbolKind)>,
     pub name: SmolStr,
@@ -2731,15 +2829,15 @@ impl Namespace {
         path: &[SmolStr],
         function_name: &str,
         span: Span,
-        src: Source,
-        sources: &[(SmolStr, Rc<String>)],
+        file_idx: u16,
+        sources: &[Source],
     ) -> Option<usize> {
         let mut current = self;
         for sub in path {
             if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
                 current = c;
             } else {
-                error_unknown_namespace(path, span, src, sources);
+                error_unknown_namespace(path, span, file_idx, sources);
             }
         }
         current.symbols.iter().find_map(|(name, kind)| {
@@ -2758,15 +2856,15 @@ impl Namespace {
         path: &[SmolStr],
         struct_name: &str,
         span: Span,
-        src: Source,
-        sources: &[(SmolStr, Rc<String>)],
+        file_idx: u16,
+        sources: &[Source],
     ) -> Option<usize> {
         let mut current = self;
         for sub in path {
             if let Some(c) = current.children.iter().find(|n| n.name == *sub) {
                 current = c;
             } else {
-                error_unknown_namespace(path, span, src, sources);
+                error_unknown_namespace(path, span, file_idx, sources);
             }
         }
         current.symbols.iter().find_map(|(name, kind)| {
@@ -2786,14 +2884,13 @@ fn parse_toplevel(
     code: Vec<Expr>,
     file_path: &Path,
     src_file_idx: u16,
-    src: Source,
     fns: &mut Vec<Function>,
     structs: &mut Vec<Struct>,
     struct_fields: &mut Vec<(SmolStr, Vec<SmolStr>)>,
     fn_registers: &mut Vec<Vec<u16>>,
     dynamic_libs: &mut Vec<Dynamiclib>,
     dynamic_libs_fns: &mut Vec<DynamicLibFn>,
-    sources: &mut Vec<(SmolStr, Rc<String>)>,
+    sources: &mut Vec<Source>,
     dyn_fn_id: &mut u16,
     namespace: &mut Namespace,
     files: &mut FxHashMap<PathBuf, Namespace>,
@@ -2809,7 +2906,12 @@ fn parse_toplevel(
                     namespace.symbols.iter().rfind(|(f, _)| f == &fn_name)
                 {
                     let func = &fns[*func_id as usize];
-                    compiler_errors::error_function_already_defined(func, span, src, sources);
+                    compiler_errors::error_function_already_defined(
+                        func,
+                        span,
+                        src_file_idx,
+                        sources,
+                    );
                 }
                 fn_registers.push(Vec::new());
                 let returns_void = check_if_returns_void(&fn_code);
@@ -2862,7 +2964,7 @@ fn parse_toplevel(
 
     for import in imports {
         match import {
-            Expr::ImportDylib(path, fn_signatures, markers) => {
+            Expr::ImportDylib(path, fn_signatures, span) => {
                 let base_path = if Path::new(path.as_str()).is_relative() {
                     file_path
                         .parent()
@@ -2891,27 +2993,20 @@ fn parse_toplevel(
                     base_path
                 };
                 let lib = Rc::new(unsafe {
-                    libloading::Library::new(path.as_str()).unwrap_or_else(|e| {
-                        throw_compiler_error(
-                            src,
-                            markers,
-                            ErrType::Custom(
-                                format_args!("Cannot load dynamic library \"{path}\": {e}")
-                                    .to_smolstr(),
-                            ),
-                        )
+                    libloading::Library::new(path.as_str()).unwrap_or_else(|_| {
+                        error_cannot_load_dynlib(span, src_file_idx, sources);
                     })
                 });
                 let fns = fn_signatures
                     .iter()
-                    .map(|(fn_name, fn_args, fn_return_type)| {
+                    .map(|(fn_name, fn_args, fn_return_type, fn_name_span)| {
                         let fn_args = fn_args
                             .iter()
-                            .map(|t| t.to_datatype(src,namespace, sources))
+                            .map(|t| t.to_datatype(src_file_idx, namespace, sources))
                             .collect::<Vec<DataType>>()
                             .into_boxed_slice();
-                        let fn_return_type = fn_return_type.
-                            to_datatype(src,namespace, sources);
+                        let fn_return_type =
+                            fn_return_type.to_datatype(src_file_idx, namespace, sources);
                         let return_val = FnSignature {
                             name: fn_name.clone(),
                             args: fn_args.clone(),
@@ -2924,17 +3019,14 @@ fn parse_toplevel(
                         let ptr = unsafe {
                             libffi::middle::CodePtr(
                                 lib.get::<*const ()>(fn_name.as_bytes())
-                                    .unwrap_or_else(|e| {
-                                        throw_compiler_error(
-                                            src,
-                                            markers,
-                                            ErrType::Custom(
-                                                format_args!(
-                                                    "Cannot find symbol \"{fn_name}\" in \"{path}\": {e}"
-                                                )
-                                                .to_smolstr(),
-                                            ),
-                                        )
+                                    .unwrap_or_else(|_| {
+                                        error_cannot_find_dynlib_symbol(
+                                            fn_name,
+                                            *fn_name_span,
+                                            span,
+                                            src_file_idx,
+                                            sources,
+                                        );
                                     })
                                     .try_as_raw_ptr()
                                     .unwrap_unchecked(),
@@ -2959,7 +3051,7 @@ fn parse_toplevel(
                     fns,
                 });
             }
-            Expr::ImportFile(path, alias, markers) => {
+            Expr::ImportFile(path, alias, span) => {
                 let file_path = file_path
                     .parent()
                     .unwrap_or_else(|| Path::new("."))
@@ -2968,15 +3060,7 @@ fn parse_toplevel(
                     .unwrap_or_else(|_| {
                         std::env::current_exe().map_or_else(
                             |_| {
-                                let current_src = &sources[src_file_idx as usize];
-                                throw_compiler_error(
-                                    Source {
-                                        filename: current_src.0.as_str(),
-                                        contents: current_src.1.as_str(),
-                                    },
-                                    markers,
-                                    ErrType::CannotReadImportedFile(path.as_str()),
-                                );
+                                error_cannot_read_file(span, src_file_idx, sources);
                             },
                             |p| {
                                 p.canonicalize()
@@ -3005,34 +3089,22 @@ fn parse_toplevel(
                     continue;
                 }
 
-                let file_contents =
-                    Rc::new(std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
-                        let current_src = &sources[src_file_idx as usize];
-                        throw_compiler_error(
-                            Source {
-                                filename: current_src.0.as_str(),
-                                contents: current_src.1.as_str(),
-                            },
-                            markers,
-                            ErrType::CannotReadImportedFile(path.as_str()),
-                        );
-                    }));
+                let file_contents = std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
+                    error_cannot_read_file(span, src_file_idx, sources);
+                });
                 let file_name: SmolStr = file_path.to_str().unwrap_or(path.as_str()).into();
 
                 let child_src_idx = sources.len() as u16;
 
-                sources.push((file_name.clone(), file_contents.clone()));
+                sources.push(Source {
+                    filename: file_name.clone(),
+                    contents: file_contents,
+                });
 
                 // Parse the imported file's contents
-                let file_code = parser::parse(
-                    file_contents.as_str(),
-                    (file_name.as_str(), file_contents.as_str()),
-                );
+                let file_code =
+                    parser::parse(&sources.last().unwrap().contents, sources.last().unwrap());
 
-                let import_src = Source {
-                    filename: file_name.as_str(),
-                    contents: file_contents.as_str(),
-                };
                 let mut child_namespace = Namespace {
                     name: child_name,
                     symbols: Vec::new(),
@@ -3043,7 +3115,6 @@ fn parse_toplevel(
                     file_code,
                     &file_path,
                     child_src_idx,
-                    import_src,
                     fns,
                     structs,
                     struct_fields,
@@ -3073,23 +3144,15 @@ fn resolve_types(
     pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
     pending_fns: Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)>,
     file_namespaces: &FxHashMap<u16, Namespace>,
-    sources: &[(SmolStr, Rc<String>)],
+    sources: &[Source],
 ) {
     for (struct_id, src_file_idx, fields) in pending_structs {
-        let (file_name, contents) = &sources[src_file_idx as usize];
         let resolved_fields = fields
             .iter()
             .map(|(field_name, field_type, field_span)| {
                 (
                     field_name.clone(),
-                    field_type.to_datatype(
-                        Source {
-                            filename: file_name.as_str(),
-                            contents: contents.as_str(),
-                        },
-                        &file_namespaces[&src_file_idx],
-                        sources,
-                    ),
+                    field_type.to_datatype(src_file_idx, &file_namespaces[&src_file_idx], sources),
                     *field_span,
                 )
             })
@@ -3097,21 +3160,13 @@ fn resolve_types(
         structs[struct_id as usize].fields = resolved_fields;
     }
     for (fn_id, src_file_idx, args) in pending_fns {
-        let (file_name, contents) = &sources[src_file_idx as usize];
         let resolved_args = args
             .iter()
             .map(|(arg_name, arg_type)| {
                 (
                     arg_name.clone(),
                     arg_type.clone().map(|t_e| {
-                        t_e.to_datatype(
-                            Source {
-                                filename: file_name.as_str(),
-                                contents: contents.as_str(),
-                            },
-                            &file_namespaces[&src_file_idx],
-                            sources,
-                        )
+                        t_e.to_datatype(src_file_idx, &file_namespaces[&src_file_idx], sources)
                     }),
                 )
             })
@@ -3133,13 +3188,18 @@ pub fn compile(
     Vec<DynamicLibFn>,
     usize,
     usize,
-    Vec<(SmolStr, Rc<String>)>,
+    Vec<Source>,
     Vec<(SmolStr, Vec<SmolStr>)>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
 
-    let code = parser::parse(&contents, (filename, &contents));
+    let main_src = Source {
+        filename: SmolStr::from(filename),
+        contents,
+    };
+
+    let code = parser::parse(&main_src.contents, &main_src);
 
     #[cfg(not(target_arch = "wasm32"))]
     if debug {
@@ -3167,20 +3227,11 @@ pub fn compile(
     let mut free_registers = Vec::new();
 
     // sources[0] = main file
-    let contents = Rc::new(contents);
-    let mut sources: Vec<(SmolStr, Rc<String>)> = vec![(SmolStr::from(filename), contents.clone())];
+    let mut sources: Vec<Source> = vec![main_src];
     let main_path = PathBuf::from(filename)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(filename));
-    let mut namespace = Namespace {
-        name: SmolStr::new_static(""),
-        children: Vec::new(),
-        symbols: Vec::new(),
-    };
-    let main_src = Source {
-        filename,
-        contents: &contents,
-    };
+    let mut namespace = Namespace::default();
 
     let mut files: FxHashMap<PathBuf, Namespace> = FxHashMap::default();
     let mut file_namespaces: FxHashMap<u16, Namespace> = FxHashMap::default();
@@ -3192,7 +3243,6 @@ pub fn compile(
         code,
         &main_path,
         0,
-        main_src,
         &mut functions,
         &mut structs,
         &mut struct_fields,
@@ -3218,12 +3268,8 @@ pub fn compile(
 
     let ctx = Ctx {
         block_id: 0,
-        src: Source {
-            filename,
-            contents: &contents,
-        },
         is_compiling_recursive: false,
-        current_src_file: 0,
+        file_idx: 0,
         single_run: true,
         offset: 0,
     };

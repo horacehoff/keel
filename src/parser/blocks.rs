@@ -104,7 +104,7 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
         parser.next_token();
         let start2 = parser.peek_token_span().start;
         let upper_bound = parse_expr_no_struct(parser);
-        let end2 = parser.peek_token_span().end;
+        let end2 = parser.last_token_end as u32;
         let for_loop_code = parse_block(parser);
         Expr::IntForLoop(
             id,
@@ -116,13 +116,13 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
         )
     } else {
         let for_collection = parse_expr_no_struct(parser);
-        let end = parser.peek_token_span().end;
+        let end = parser.last_token_end as u32;
         let peek_token = parser.peek_token();
         if peek_token == Token::RangeDot {
             parser.next_token();
             let start2 = parser.peek_token_span().start;
             let upper_bound = parse_expr_no_struct(parser);
-            let end2 = parser.peek_token_span().end;
+            let end2 = parser.last_token_end as u32;
             let for_loop_code = parse_block(parser);
             Expr::IntForLoop(
                 id,

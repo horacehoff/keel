@@ -10,10 +10,10 @@ use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::FunctionImpl;
-use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args_user_fn;
+use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::data::NULL;
 use crate::instr::Instr;
 use smol_strc::SmolStr;
@@ -25,7 +25,7 @@ pub fn handle_user_function(
     fn_id: usize,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     args: &[Expr],
@@ -52,7 +52,7 @@ pub fn handle_user_function(
         args,
         args_len,
         fn_name,
-        ctx.src,
+        ctx.file_idx,
         span,
         (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
         state,
@@ -85,7 +85,17 @@ pub fn handle_user_function(
         let expected_arg_types = fn_sig.args.clone();
         for (i, arg) in args.iter().enumerate() {
             let inferred = arg.infer_type(v, ctx, state);
-            inferred.expect(&expected_arg_types[i], ctx.src, args_indexes[i]);
+            if inferred != expected_arg_types[i] {
+                error_function_arg_invalid_type(
+                    &inferred,
+                    &expected_arg_types[i],
+                    args_indexes[i],
+                    fn_name,
+                    Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
+                    ctx.file_idx,
+                    state.sources,
+                )
+            }
         }
         for arg in args {
             let arg_id = arg
@@ -114,7 +124,15 @@ pub fn handle_user_function(
 
     for (i, (_, t)) in state.fns[fn_id].args.iter().enumerate() {
         if let Some(t) = t {
-            infered_arg_types[i].expect(t, ctx.src, args_indexes[i]);
+            error_function_arg_invalid_type(
+                &infered_arg_types[i],
+                t,
+                args_indexes[i],
+                fn_name,
+                Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
+                ctx.file_idx,
+                state.sources,
+            );
         }
     }
 
@@ -147,6 +165,7 @@ pub fn handle_user_function(
             &fn_code,
             fn_id as u16,
             is_recursive,
+            state.fns[fn_id].src_file,
         );
     }
     // Re-derive index after possible mutation
@@ -221,7 +240,7 @@ pub fn handle_user_function(
 fn compile_function(
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     function_id: usize,
     fn_args: &[SmolStr],
@@ -231,22 +250,8 @@ fn compile_function(
     fn_code: &[Expr],
     fn_id: u16,
     is_recursive: bool,
+    fn_file_idx: u16,
 ) {
-    let src = ctx.src;
-    let current_src_file = ctx.current_src_file;
-
-    // Errors inside of the function body are reported using the function's file
-    let fn_src_file = state.fns[function_id].src_file;
-
-    let fn_src = if fn_src_file == current_src_file {
-        src
-    } else {
-        Source {
-            filename: &state.sources[fn_src_file as usize].0.clone(),
-            contents: &state.sources[fn_src_file as usize].1.clone(),
-        }
-    };
-
     // Local vector vars and recorded_types to allow the inner body to type-check correctly
     let mut v_temp: Vec<Variable> = fn_args
         .iter()
@@ -335,8 +340,7 @@ fn compile_function(
         &mut v_temp,
         Ctx {
             is_compiling_recursive: is_recursive,
-            src: fn_src,
-            current_src_file: fn_src_file,
+            file_idx: fn_file_idx,
             single_run: false,
             offset: ctx.offset + output.len() as u16,
             ..ctx

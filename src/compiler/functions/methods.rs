@@ -12,14 +12,14 @@ mod builtin_methods;
 pub fn handle_method_calls(
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     obj: &Expr,
     args: &[Expr],
     namespace: &[SmolStr],
-    obj_markers: Span,
-    fn_markers: Span,
+    obj_span: Span,
+    fn_span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
     let name = namespace[namespace.len() - 1].as_str();
@@ -41,8 +41,8 @@ pub fn handle_method_calls(
         tgt_id,
         obj,
         args,
-        obj_markers,
-        fn_markers,
+        obj_span,
+        fn_span,
         args_indexes,
     )
 }

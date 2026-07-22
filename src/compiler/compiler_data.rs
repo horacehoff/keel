@@ -97,45 +97,42 @@ pub struct Pools {
     pub strings: StringPool,
 }
 
-#[derive(Clone, Copy)]
-pub struct Source<'a> {
-    pub filename: &'a str,
-    pub contents: &'a str,
+pub struct Source {
+    pub filename: SmolStr,
+    pub contents: String,
 }
 
 #[derive(Clone, Copy)]
-pub struct Ctx<'a> {
+pub struct Ctx {
     pub block_id: u16,
-    /// Source currently being compiled
-    pub src: Source<'a>,
     /// Whether the code being compiled is within a recursive function
     pub is_compiling_recursive: bool,
     /// Whether the code being compiled is guaranteed to run at most once
     pub single_run: bool,
-    /// Identifier of the current source in State's `sources`
-    pub current_src_file: u16,
+    /// Index of the current file in State's `sources`
+    pub file_idx: u16,
     /// Instruction offset that's only used when compiling a function
     pub offset: u16,
 }
 
-impl Ctx<'_> {
+impl Ctx {
     #[inline(always)]
     pub const fn no_single_run(self) -> Self {
-        Ctx {
+        Self {
             single_run: false,
             ..self
         }
     }
     #[inline(always)]
     pub const fn advance_offset(self, output_len: u16) -> Self {
-        Ctx {
+        Self {
             offset: self.offset + output_len,
             ..self
         }
     }
     #[inline(always)]
     pub const fn set_offset(self, offset: u16) -> Self {
-        Ctx { offset, ..self }
+        Self { offset, ..self }
     }
 }
 
@@ -159,7 +156,7 @@ pub struct State<'a> {
     pub allocated_call_depth: &'a mut usize,
     pub const_registers: &'a mut FxHashMap<Data, u16>,
     pub free_registers: &'a mut Vec<u16>,
-    pub sources: &'a mut Vec<(SmolStr, Rc<String>)>,
+    pub sources: &'a mut Vec<Source>,
     pub reserved_registers: FxHashSet<u16>,
     pub namespace: &'a mut Namespace,
 }
@@ -241,7 +238,7 @@ impl State<'_> {
         self.instr_src.push(InstrSrc {
             instr: unsafe { *output.last().unwrap_unchecked() },
             span,
-            file_id: ctx.current_src_file,
+            file_id: ctx.file_idx,
         });
     }
 }

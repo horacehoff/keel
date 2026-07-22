@@ -1,5 +1,6 @@
 use crate::RegisterFile;
 use crate::compile;
+use crate::compiler::compiler_data::Source;
 use crate::data::Data;
 use crate::instr::Instr;
 
@@ -25,7 +26,10 @@ macro_rules! run_and_check_registers {
             &mut arrays,
             &crate::errors::ErrorCtx {
                 instr_src,
-                sources: vec![(filename.into(), std::rc::Rc::new(String::from($contents)))],
+                sources: vec![Source {
+                    filename: filename.into(),
+                    contents: String::from($contents),
+                }],
             },
             &fn_registers,
             &[],
@@ -64,7 +68,10 @@ macro_rules! run {
             &mut arrays,
             &crate::errors::ErrorCtx {
                 instr_src,
-                sources: vec![(filename.into(), std::rc::Rc::new(String::from($contents)))],
+                sources: vec![Source {
+                    filename: filename.into(),
+                    contents: String::from($contents),
+                }],
             },
             &fn_registers,
             &[],

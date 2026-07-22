@@ -8,13 +8,12 @@ use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::check_args_range;
+use crate::compiler::compiler_errors::error_invalid_obj_type;
 use crate::compiler::compiler_errors::error_unknown_function;
-use crate::errors::ErrType;
-use crate::errors::throw_compiler_error;
+use crate::compiler::functions::check_arg_type;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use smol_strc::SmolStr;
 
 pub fn builtin_methods(
     name: &str,
@@ -22,17 +21,15 @@ pub fn builtin_methods(
     obj_type: DataType,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
-    ctx: Ctx<'_>,
+    ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     obj: &Expr,
     args: &[Expr],
-    obj_markers: Span,
+    obj_span: Span,
     fn_span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
-    let src = ctx.src;
-
     macro_rules! add_args {
         () => {
             for arg in args.iter().rev() {
@@ -47,7 +44,7 @@ pub fn builtin_methods(
     }
 
     macro_rules! check_type {
-        ($expected:pat,$expected_str:expr) => {
+        ($expected:pat,$expected_list:expr,$name:expr) => {
             if !{
                 if let DataType::Poly(polytype) = &obj_type {
                     polytype.iter().all(|x| matches!(x, $expected))
@@ -55,23 +52,25 @@ pub fn builtin_methods(
                     matches!(obj_type, $expected)
                 }
             } {
-                throw_compiler_error(
-                    src,
-                    obj_markers,
-                    ErrType::InvalidObjType($expected_str, &obj_type),
+                error_invalid_obj_type(
+                    $expected_list,
+                    &obj_type,
+                    $name,
+                    obj_span,
+                    state.sources,
+                    ctx.file_idx,
                 );
             }
         };
     }
 
     macro_rules! check {
-        ($expected:pat,$expected_str:expr, $args:expr) => {
-            check_type!($expected, $expected_str);
+        ($expected:pat,$expected_str:expr,$name:expr,$args:expr) => {
+            check_type!($expected, $expected_str, $name);
             check_args(
                 args,
                 $args,
                 name,
-                src,
                 if args_indexes.is_empty() {
                     fn_span
                 } else {
@@ -81,75 +80,87 @@ pub fn builtin_methods(
                     }
                 },
                 state.sources,
+                ctx.file_idx,
             )
         };
-        ($expected:pat,$expected_str:expr, $args_min:expr,$args_max:expr) => {
-            check_type!($expected, $expected_str);
-            check_args_range!(
+        ($expected:pat,$expected_str:expr,$name:expr, $args_min:expr,$args_max:expr) => {
+            check_type!($expected, $expected_str, $name);
+            check_args_range(
                 args,
                 $args_min,
                 $args_max,
                 name,
-                src,
-                if args_indexes.is_empty() {
-                    fn_markers.start
-                } else {
-                    args_indexes[0].start
-                },
-                if args_indexes.is_empty() {
-                    fn_markers.end
-                } else {
-                    args_indexes.last().unwrap().end
-                }
+                args_indexes,
+                ctx.file_idx,
+                state.sources,
+                fn_span,
             )
         };
     }
     match name {
         "uppercase" => {
-            check!(DataType::String, "String", 0);
+            check!(DataType::String, &[DataType::String], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Uppercase, id, output_id));
             Some(output_id)
         }
         "lowercase" => {
-            check!(DataType::String, "String", 0);
+            check!(DataType::String, &[DataType::String], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Lowercase, id, output_id));
             Some(output_id)
         }
         "starts_with" => {
-            check!(DataType::String, "String", 1);
+            check!(DataType::String, &[DataType::String], name, 1);
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::StartsWith, id, output_id));
             Some(output_id)
         }
         "ends_with" => {
-            check!(DataType::String, "String", 1);
+            check!(DataType::String, &[DataType::String], name, 1);
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::EndsWith, id, output_id));
             Some(output_id)
         }
         "replace" => {
-            check!(DataType::String, "String", 2);
+            check!(DataType::String, &[DataType::String], name, 2);
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Replace, id, output_id));
             Some(output_id)
         }
         "len" => {
-            check!(DataType::Array(_) | DataType::String, "Array or String", 0);
+            check!(
+                DataType::Array(_) | DataType::String,
+                &[DataType::String, DataType::Array(None)],
+                name,
+                0
+            );
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Len, id, output_id));
             Some(output_id)
         }
         "contains" => {
-            check!(DataType::Array(_) | DataType::String, "Array or String", 1);
+            check!(
+                DataType::Array(_) | DataType::String,
+                &[DataType::String, DataType::Array(None)],
+                name,
+                1
+            );
 
-            let arg_type = args[0].infer_type(v, ctx, state);
             if obj_type == DataType::String {
-                arg_type.expect(&DataType::String, src, args_indexes[0]);
+                check_arg_type(
+                    name,
+                    v,
+                    ctx,
+                    state,
+                    args,
+                    args_indexes,
+                    0,
+                    &[DataType::String],
+                );
             }
 
             add_args!();
@@ -158,29 +169,59 @@ pub fn builtin_methods(
             Some(output_id)
         }
         "trim" => {
-            check!(DataType::String, "String", 0);
+            check!(DataType::String, &[DataType::String], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Trim, id, output_id));
             Some(output_id)
         }
         "trim_sequence" => {
-            check!(DataType::String, "String", 1);
+            check!(DataType::String, &[DataType::String], name, 1);
 
-            let arg_type = args[0].infer_type(v, ctx, state);
-            arg_type.expect(&DataType::String, src, args_indexes[0]);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimSequence, id, output_id));
             Some(output_id)
         }
         "find" => {
-            check!(DataType::String | DataType::Array(_), "Array or String", 1);
+            check!(
+                DataType::String | DataType::Array(_),
+                &[DataType::String, DataType::Array(None)],
+                name,
+                1
+            );
 
-            let arg_type = args[0].infer_type(v, ctx, state);
             if let DataType::Array(Some(array_elem_type)) = &obj_type {
-                arg_type.expect(array_elem_type, src, args_indexes[0]);
+                check_arg_type(
+                    name,
+                    v,
+                    ctx,
+                    state,
+                    args,
+                    args_indexes,
+                    0,
+                    std::slice::from_ref(array_elem_type),
+                );
             } else if obj_type == DataType::String {
-                arg_type.expect(&DataType::String, src, args_indexes[0]);
+                check_arg_type(
+                    name,
+                    v,
+                    ctx,
+                    state,
+                    args,
+                    args_indexes,
+                    0,
+                    &[DataType::String],
+                );
             }
 
             add_args!();
@@ -190,34 +231,42 @@ pub fn builtin_methods(
             Some(output_id)
         }
         "is_float" => {
-            check!(DataType::String, "String", 0);
+            check!(DataType::String, &[DataType::String], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::IsFloat, id, output_id));
             Some(output_id)
         }
         "is_int" => {
-            check!(DataType::String, "String", 0);
+            check!(DataType::String, &[DataType::String], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::IsInt, id, output_id));
             Some(output_id)
         }
         "trim_left" => {
-            check!(DataType::String, "String", 0);
+            check!(DataType::String, &[DataType::String], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimLeft, id, output_id));
             Some(output_id)
         }
         "trim_right" => {
-            check!(DataType::String, "String", 0);
+            check!(DataType::String, &[DataType::String], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimRight, id, output_id));
             Some(output_id)
         }
         "trim_sequence_left" => {
-            check!(DataType::String, "String", 1);
+            check!(DataType::String, &[DataType::String], name, 1);
 
-            let arg_type = args[0].infer_type(v, ctx, state);
-            arg_type.expect(&DataType::String, src, args_indexes[0]);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
 
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -225,10 +274,18 @@ pub fn builtin_methods(
             Some(output_id)
         }
         "trim_sequence_right" => {
-            check!(DataType::String, "String", 1);
+            check!(DataType::String, &[DataType::String], name, 1);
 
-            let arg_type = args[0].infer_type(v, ctx, state);
-            arg_type.expect(&DataType::String, src, args_indexes[0]);
+            check_arg_type(
+                name,
+                v,
+                ctx,
+                state,
+                args,
+                args_indexes,
+                0,
+                &[DataType::String],
+            );
 
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -240,10 +297,14 @@ pub fn builtin_methods(
             Some(output_id)
         }
         "repeat" => {
-            check!(DataType::String | DataType::Array(_), "Array or String", 1);
+            check!(
+                DataType::String | DataType::Array(_),
+                &[DataType::String, DataType::Array(None)],
+                name,
+                1
+            );
 
-            let arg_type = args[0].infer_type(v, ctx, state);
-            arg_type.expect(&DataType::Int, src, args_indexes[0]);
+            check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
 
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -251,11 +312,20 @@ pub fn builtin_methods(
             Some(output_id)
         }
         "push" => {
-            check!(DataType::Array(_), "Array", 1);
+            check!(DataType::Array(_), &[DataType::Array(None)], name, 1);
 
             let arg_type = args[0].infer_type(v, ctx, state);
             if let DataType::Array(Some(array_elem_type)) = &obj_type {
-                arg_type.expect(array_elem_type, src, args_indexes[0]);
+                check_arg_type(
+                    name,
+                    v,
+                    ctx,
+                    state,
+                    args,
+                    args_indexes,
+                    0,
+                    std::slice::from_ref(array_elem_type),
+                );
             }
 
             // If the array was declared as empty, upgrade its type so downstream indexing resolves correctly
@@ -274,31 +344,41 @@ pub fn builtin_methods(
             None
         }
         "sqrt" => {
-            check!(DataType::Float, "Float", 0);
+            check!(DataType::Float, &[DataType::Float], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::SqrtFloat, id, output_id));
             Some(output_id)
         }
         "round" => {
-            check!(DataType::Float, "Float", 0);
+            check!(DataType::Float, &[DataType::Float], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Round, id, output_id));
             Some(output_id)
         }
         "floor" => {
-            check!(DataType::Float, "Float", 0);
+            check!(DataType::Float, &[DataType::Float], name, 0);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Floor, id, output_id));
             Some(output_id)
         }
         "abs" => {
-            check!(DataType::Float | DataType::Int, "Int or Float", 0);
+            check!(
+                DataType::Float | DataType::Int,
+                &[DataType::Int, DataType::Float],
+                name,
+                0
+            );
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Abs, id, output_id));
             Some(output_id)
         }
         "reverse" => {
-            check!(DataType::Array(_) | DataType::String, "Array or String", 0);
+            check!(
+                DataType::Array(_) | DataType::String,
+                &[DataType::String, DataType::Array(None)],
+                name,
+                0
+            );
             if obj_type == DataType::String {
                 let output_id = state.alloc_reg_tgt(tgt_id);
                 output.push(Instr::CallLibFunc(LibFunc::Reverse, id, output_id));
@@ -309,20 +389,27 @@ pub fn builtin_methods(
             }
         }
         "split" => {
-            check!(DataType::String, "String", 1);
-            let arg_type = args[0].infer_type(v, ctx, state);
-            arg_type.expect(&obj_type, src, args_indexes[0]);
+            check!(DataType::String, &[DataType::String], name, 1);
+            check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[obj_type]);
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Split, id, output_id));
             Some(output_id)
         }
         "partition" => {
-            check!(DataType::Array(_), "Array", 1);
+            check!(DataType::Array(_), &[DataType::Array(None)], name, 1);
 
-            let arg_type = args[0].infer_type(v, ctx, state);
             if let DataType::Array(Some(array_elem_type)) = obj_type {
-                arg_type.expect(&array_elem_type, src, args_indexes[0]);
+                check_arg_type(
+                    name,
+                    v,
+                    ctx,
+                    state,
+                    args,
+                    args_indexes,
+                    0,
+                    std::slice::from_ref(&array_elem_type),
+                );
             }
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -338,12 +425,36 @@ pub fn builtin_methods(
                     obj_type == expected
                 }
             } {
-                throw_compiler_error(src, fn_span, ErrType::InvalidType(&expected, &obj_type));
+                error_invalid_obj_type(
+                    &[expected],
+                    &obj_type,
+                    name,
+                    obj_span,
+                    state.sources,
+                    ctx.file_idx,
+                );
             }
-            check_args_range(args, 0, 1, "join", src, fn_span);
+            check_args_range(
+                args,
+                0,
+                1,
+                "join",
+                args_indexes,
+                ctx.file_idx,
+                state.sources,
+                fn_span,
+            );
             if !args.is_empty() {
-                let arg_type = args[0].infer_type(v, ctx, state);
-                arg_type.expect(&DataType::String, src, args_indexes[0]);
+                check_arg_type(
+                    name,
+                    v,
+                    ctx,
+                    state,
+                    args,
+                    args_indexes,
+                    0,
+                    &[DataType::String],
+                );
                 add_args!();
             }
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -351,10 +462,8 @@ pub fn builtin_methods(
             Some(output_id)
         }
         "remove" => {
-            check!(DataType::Array(_), "Array", 1);
-
-            let arg_type = args[0].infer_type(v, ctx, state);
-            arg_type.expect(&DataType::Int, src, args_indexes[0]);
+            check!(DataType::Array(_), &[DataType::Array(None)], name, 1);
+            check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
             let arg_id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -364,18 +473,22 @@ pub fn builtin_methods(
             None
         }
         "sort" => {
-            check!(DataType::Array(_), "Array", 0);
+            check!(DataType::Array(_), &[DataType::Array(None)], name, 0);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::Sort, id, 0));
             None
         }
         "get" => {
-            check!(DataType::Map(_), "Map", 1);
+            check!(
+                DataType::Map(_),
+                &[DataType::Map(Box::from((None, None)))],
+                name,
+                1
+            );
 
-            let arg_type = args[0].infer_type(v, ctx, state);
             if let DataType::Map(t) = obj_type
                 && let Some(key_type) = t.0
             {
-                arg_type.expect(&key_type, src, args_indexes[0]);
+                check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[key_type]);
             }
             let arg_id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
@@ -386,15 +499,18 @@ pub fn builtin_methods(
             Some(output_id)
         }
         "insert" => {
-            check!(DataType::Map(_), "Map", 2);
-            let key_type = args[0].infer_type(v, ctx, state);
-            let val_type = args[1].infer_type(v, ctx, state);
+            check!(
+                DataType::Map(_),
+                &[DataType::Map(Box::from((None, None)))],
+                name,
+                2
+            );
             if let DataType::Map(m) = obj_type {
                 if let Some(t) = m.0 {
-                    key_type.expect(&t, src, args_indexes[0]);
+                    check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[t]);
                 }
                 if let Some(t) = m.1 {
-                    val_type.expect(&t, src, args_indexes[1]);
+                    check_arg_type(name, v, ctx, state, args, args_indexes, 1, &[t]);
                 }
             }
             let key_id = args[0]
@@ -409,12 +525,8 @@ pub fn builtin_methods(
         fn_name => error_unknown_function(
             fn_name,
             fn_span,
-            &Namespace {
-                name: SmolStr::new_static(""),
-                children: Vec::new(),
-                symbols: Vec::new(),
-            },
-            src,
+            &Namespace::default(),
+            ctx.file_idx,
             state.sources,
         ),
     }

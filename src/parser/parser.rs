@@ -120,7 +120,10 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (src.filename, ariadne::Source::from(src.contents)),
+            (
+                src.filename.as_str(),
+                ariadne::Source::from(src.contents.as_str()),
+            ),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
@@ -263,8 +266,8 @@ impl<'a> Parser<'a> {
         report
             .write(
                 (
-                    self.ctx.src.filename,
-                    ariadne::Source::from(self.ctx.src.contents),
+                    self.ctx.src.filename.as_str(),
+                    ariadne::Source::from(self.ctx.src.contents.as_str()),
                 ),
                 crate::captured_output::CapturedOutputWriter,
             )

@@ -80,6 +80,7 @@ pub fn run(code: String) {
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)] // WIP
 pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
+    std::panic::set_hook(Box::new(|_| {}));
     let code = unsafe { CStr::from_ptr(code) }
         .to_string_lossy()
         .to_string();

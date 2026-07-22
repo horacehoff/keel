@@ -2,6 +2,7 @@ use crate::array_gc::alloc_array;
 use crate::compiler::compiler_data::DynamicLibFn;
 use crate::compiler::compiler_data::ErrorCatch;
 use crate::compiler::compiler_data::Pools;
+use crate::compiler::compiler_data::Struct;
 use crate::compiler::type_system::DataType;
 use crate::data::Data;
 use crate::data::DataHash;
@@ -19,7 +20,6 @@ use crate::map_gc::alloc_map;
 use crate::string_gc::raise_string_gc_threshold;
 use lexical_core::FormattedSize;
 use memchr::memmem;
-use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
@@ -277,7 +277,7 @@ pub fn execute(
     err_ctx: &ErrorCtx,
     fn_registers: &[Vec<u16>],
     dyn_libs: &[DynamicLibFn],
-    struct_fields: &[(SmolStr, Vec<SmolStr>)],
+    structs: &[Struct],
     allocated_arg_count: usize,
     allocated_call_depth: usize,
 ) {
@@ -458,7 +458,7 @@ pub fn execute(
                 for idx in 0..args.len() {
                     let data = r[unsafe { *args.get_unchecked(idx) }];
                     dyn_lib_args.push({
-                        match func.get_nth_arg_type(idx) {
+                        match func.get_arg(idx) {
                             DataType::Int => data.as_int() as u64,
                             DataType::Float => data.as_float().to_bits(),
                             DataType::String => {
@@ -833,25 +833,25 @@ pub fn execute(
                         write!(
                             handle,
                             "{}",
-                            item.format(obj_pool, string_pool, map_pool, struct_fields, false)
+                            item.format(obj_pool, string_pool, map_pool, structs, false)
                         )
                         .unwrap();
                     }
                     writeln!(handle, "]").unwrap();
                 } else if tgt.is_struct() {
-                    let s = &obj_pool[tgt.as_struct()];
-                    let (s_name, s_fields) =
-                        unsafe { struct_fields.get_unchecked(tgt.struct_type_id() as usize) };
+                    let s = unsafe { structs.get_unchecked(tgt.struct_type_id() as usize) };
+                    let s_name = &s.name;
+                    let s_fields = &s.fields;
                     write!(handle, "{s_name} {{").unwrap();
-                    for (idx, item) in s.iter().enumerate() {
+                    for (idx, item) in obj_pool[tgt.as_struct()].iter().enumerate() {
                         if idx != 0 {
                             write!(handle, ",").unwrap();
                         }
                         write!(
                             handle,
                             "{}:{}",
-                            unsafe { s_fields.get_unchecked(idx) },
-                            item.format(obj_pool, string_pool, map_pool, struct_fields, false)
+                            unsafe { &s_fields.get_unchecked(idx).0 },
+                            item.format(obj_pool, string_pool, map_pool, structs, false)
                         )
                         .unwrap();
                     }
@@ -866,8 +866,8 @@ pub fn execute(
                         write!(
                             handle,
                             "{}:{}",
-                            key.format(obj_pool, string_pool, map_pool, struct_fields, false),
-                            val.format(obj_pool, string_pool, map_pool, struct_fields, false),
+                            key.format(obj_pool, string_pool, map_pool, structs, false),
+                            val.format(obj_pool, string_pool, map_pool, structs, false),
                         )
                         .unwrap();
                     }
@@ -1008,7 +1008,7 @@ pub fn execute(
                     cold_path();
                     error_with_catch!(ErrType::UnknownMapKey(
                         r[key_reg_id]
-                            .format(obj_pool, string_pool, map_pool, struct_fields, false)
+                            .format(obj_pool, string_pool, map_pool, structs, false)
                             .as_str()
                     ));
                 };
@@ -1209,7 +1209,7 @@ pub fn execute(
                 } else {
                     str!(
                         value
-                            .format(obj_pool, string_pool, map_pool, struct_fields, false)
+                            .format(obj_pool, string_pool, map_pool, structs, false)
                             .as_str()
                     )
                 };

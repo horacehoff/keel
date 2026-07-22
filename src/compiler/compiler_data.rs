@@ -78,7 +78,7 @@ impl DynamicLibFn {
         unsafe { self.types.get_unchecked(0) }
     }
     #[inline(always)]
-    pub fn get_nth_arg_type(&self, idx: usize) -> &DataType {
+    pub fn get_arg(&self, idx: usize) -> &DataType {
         unsafe { self.types.get_unchecked(1 + idx) }
     }
 }
@@ -147,7 +147,6 @@ pub struct State<'a> {
     pub registers: &'a mut Vec<Data>,
     pub fns: &'a mut Vec<Function>,
     pub structs: &'a mut Vec<Struct>,
-    pub struct_fields: &'a mut Vec<(SmolStr, Vec<SmolStr>)>,
     pub pools: &'a mut Pools,
     pub instr_src: &'a mut Vec<InstrSrc>,
     pub fn_registers: &'a mut Vec<Vec<u16>>,

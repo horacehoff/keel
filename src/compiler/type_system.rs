@@ -7,6 +7,7 @@ use crate::compiler::compiler_data::FnSignature;
 use crate::compiler::compiler_data::Function;
 use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
+
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::error_invalid_type;
 use crate::compiler::compiler_errors::error_op;
@@ -24,6 +25,9 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::compiler::compiler_data::Struct;
 
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;
@@ -221,6 +225,23 @@ impl DataType {
     #[inline(always)]
     pub const fn is_indexable(&self) -> bool {
         matches!(self, Self::String | Self::Array(_) | Self::Unknown)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn to_c_type(&self, structs: &[Struct]) -> Type {
+        match self {
+            Self::Int => libffi::middle::Type::i32(),
+            Self::Float => libffi::middle::Type::f64(),
+            Self::String | Self::Array(_) => libffi::middle::Type::pointer(),
+            Self::Null => libffi::middle::Type::void(),
+            Self::Struct(id) => libffi::middle::Type::structure(
+                structs[*id as usize]
+                    .fields
+                    .iter()
+                    .map(|(_, field_type, _)| field_type.to_c_type(structs)),
+            ),
+            _ => unsafe { unreachable_unchecked() },
+        }
     }
 }
 
@@ -1089,15 +1110,4 @@ fn reduce_null_struct(types: &[DataType]) -> Option<DataType> {
         }
     }
     struct_type
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn datatype_to_c_type(x: &DataType) -> Type {
-    match x {
-        DataType::Int => libffi::middle::Type::i32(),
-        DataType::Float => libffi::middle::Type::f64(),
-        DataType::String | DataType::Array(_) => libffi::middle::Type::pointer(),
-        DataType::Null => libffi::middle::Type::void(),
-        _ => unsafe { unreachable_unchecked() },
-    }
 }

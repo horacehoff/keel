@@ -21,7 +21,7 @@ THIS SOFTWARE.
 --------
 MIT License
 Used by:
-- cc 1.2.66 - https://github.com/rust-lang/cc-rs
+- cc 1.3.0 - https://github.com/rust-lang/cc-rs
 - cfg-if 1.0.4 - https://github.com/rust-lang/cfg-if
 - find-msvc-tools 0.1.9 - https://github.com/rust-lang/cc-rs
 - js-sys 0.3.103 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys
@@ -59,7 +59,7 @@ DEALINGS IN THE SOFTWARE.
 --------
 MIT License
 Used by:
-- regex-automata 0.4.15 - https://github.com/rust-lang/regex
+- regex-automata 0.4.16 - https://github.com/rust-lang/regex
 - regex-syntax 0.8.11 - https://github.com/rust-lang/regex
 
 Copyright (c) 2014 The Rust Project Developers
@@ -245,7 +245,7 @@ DEALINGS IN THE SOFTWARE.
 --------
 MIT License
 Used by:
-- libc 0.2.186 - https://github.com/rust-lang/libc
+- libc 0.2.189 - https://github.com/rust-lang/libc
 
 Copyright (c) The Rust Project Developers
 
@@ -337,7 +337,7 @@ Used by:
 
 MIT License
 
-Copyright (c) 2021-2022 Joshua Barretto
+Copyright (c) 2021-2022 Joshua Barretto 
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -421,15 +421,15 @@ Used by:
 - lexical-write-float 1.0.6 - https://github.com/Alexhuszagh/rust-lexical
 - lexical-write-integer 1.0.6 - https://github.com/Alexhuszagh/rust-lexical
 - once_cell 1.21.4 - https://github.com/matklad/once_cell
-- proc-macro2 1.0.106 - https://github.com/dtolnay/proc-macro2
-- quote 1.0.46 - https://github.com/dtolnay/quote
+- proc-macro2 1.0.107 - https://github.com/dtolnay/proc-macro2
+- quote 1.0.47 - https://github.com/dtolnay/quote
 - rustversion 1.0.23 - https://github.com/dtolnay/rustversion
 - smol_strc 0.3.6 - https://github.com/A4-Tacks/smol_strc
-- syn 2.0.118 - https://github.com/dtolnay/syn
+- syn 2.0.119 - https://github.com/dtolnay/syn
 - unicode-ident 1.0.24 - https://github.com/dtolnay/unicode-ident
 - wasip2 1.0.4+wasi-0.2.12 - https://github.com/bytecodealliance/wasi-rs
 - wit-bindgen 0.57.1 - https://github.com/bytecodealliance/wit-bindgen
-- zmij 1.0.21 - https://github.com/dtolnay/zmij
+- zmij 1.0.23 - https://github.com/dtolnay/zmij
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated

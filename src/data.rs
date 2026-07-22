@@ -1,3 +1,4 @@
+use crate::compiler::compiler_data::Struct;
 use crate::vm::{MapPool, RegisterFile, StringPool};
 use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ObjectPool};
 use smol_strc::SmolStr;
@@ -287,33 +288,12 @@ impl Data {
     pub const fn is_map(self) -> bool {
         (self.0 & !PAYLOAD_MASK) == NAN_STRUCT && (self.0 & (1 << 47)) != 0
     }
-    pub const fn type_name(self) -> &'static str {
-        if self.is_array() {
-            "Array"
-        } else if self.is_bool() {
-            "Boolean"
-        } else if self.is_str() {
-            "String"
-        } else if self.is_float() {
-            "Float"
-        } else if self.is_int() {
-            "Integer"
-        } else if self.is_null() {
-            "Null"
-        } else if self.is_struct() {
-            "Struct"
-        } else if self.is_map() {
-            "Map"
-        } else {
-            unsafe { unreachable_unchecked() }
-        }
-    }
     pub fn format(
         self,
         obj_pool: &ObjectPool,
         string_pool: &StringPool,
         map_pool: &MapPool,
-        struct_fields: &[(SmolStr, Vec<SmolStr>)],
+        structs: &[Struct],
         show_str: bool,
     ) -> SmolStr {
         if self.is_float() {
@@ -333,7 +313,7 @@ impl Data {
                 "[{}]",
                 obj_pool[self.as_array()]
                     .iter()
-                    .map(|x| x.format(obj_pool, string_pool, map_pool, struct_fields, false))
+                    .map(|x| x.format(obj_pool, string_pool, map_pool, structs, false))
                     .collect::<Vec<SmolStr>>()
                     .join(",")
             )
@@ -341,11 +321,7 @@ impl Data {
         } else if self.is_null() {
             SmolStr::new_static("null")
         } else if self.is_struct() {
-            let s_name = unsafe {
-                &struct_fields
-                    .get_unchecked(self.struct_type_id() as usize)
-                    .0
-            };
+            let s_name = unsafe { &structs.get_unchecked(self.struct_type_id() as usize).name };
             format_args!(
                 "{} {{{}}}",
                 s_name,
@@ -354,8 +330,7 @@ impl Data {
                     .map(|x| {
                         format_args!(
                             "{}",
-                            // s_fields.get_unchecked(i),
-                            x.format(obj_pool, string_pool, map_pool, struct_fields, false)
+                            x.format(obj_pool, string_pool, map_pool, structs, false)
                         )
                         .to_smolstr()
                     })
@@ -371,8 +346,8 @@ impl Data {
                     .map(|(key, val)| {
                         format_args!(
                             "{}:{}",
-                            key.format(obj_pool, string_pool, map_pool, struct_fields, false),
-                            val.format(obj_pool, string_pool, map_pool, struct_fields, false),
+                            key.format(obj_pool, string_pool, map_pool, structs, false),
+                            val.format(obj_pool, string_pool, map_pool, structs, false),
                         )
                         .to_smolstr()
                     })

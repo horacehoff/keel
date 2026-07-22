@@ -4,7 +4,142 @@ use crate::{compiler::type_system::DataType, instr::Instr};
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use smol_strc::{SmolStr, ToSmolStr};
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::hint::unreachable_unchecked;
+use std::ops::Range;
+
+/// A structured compile/runtime error, produced instead of printing + exiting
+/// whenever a diagnostic sink is installed (see `collect_diagnostic`).
+///
+/// `span` is a byte range into the source named by `filename`.
+/// `code` is a stable, machine-readable error identifier, e.g.
+/// `index_out_of_bounds`, `unexpected_eof`, or `compile_error`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub filename: String,
+    pub span: Range<usize>,
+    pub message: String,
+    pub code: String,
+}
+
+/// Panic payload used to unwind out of compilation/execution once a
+/// diagnostic has been recorded in the active sink.
+struct FatalError;
+
+thread_local! {
+    static DIAGNOSTIC_SINK: RefCell<Option<Diagnostic>> = const { RefCell::new(None) };
+    static SINK_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    static SUPPRESS_PANIC_HOOK: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether errors should be recorded as a `Diagnostic` instead of being
+/// printed and aborting the process. This is what keeps the CLI behavior
+/// byte-for-byte identical: without an active sink, every error path behaves
+/// exactly as before.
+#[inline]
+pub fn diagnostics_enabled() -> bool {
+    SINK_ACTIVE.with(Cell::get)
+}
+
+/// Records `Diagnostic` data in the active sink and unwinds to the enclosing
+/// `collect_diagnostic` call. Must only be called when `diagnostics_enabled()`.
+///
+/// The three error funnels are fatal-on-first-error (they return `!`), so a
+/// single slot is enough: the first error to fire is the one reported.
+#[cold]
+#[inline(never)]
+pub fn emit_diagnostic(filename: &str, span: Range<usize>, message: String, code: &str) -> ! {
+    DIAGNOSTIC_SINK.with(|sink| {
+        *sink.borrow_mut() = Some(Diagnostic {
+            filename: filename.to_owned(),
+            span,
+            message,
+            code: code.to_owned(),
+        });
+    });
+    std::panic::panic_any(FatalError);
+}
+
+/// Installs a panic hook (once) that stays silent only for the internal
+/// `FatalError` unwind used to carry a diagnostic out of a `collect_diagnostic`
+/// call. Every other panic — including genuine bugs that fire while a sink is
+/// active — is forwarded to the previous hook so it stays observable.
+fn install_silencing_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let suppress =
+                SUPPRESS_PANIC_HOOK.with(Cell::get) && info.payload().is::<FatalError>();
+            if !suppress {
+                previous(info);
+            }
+        }));
+    });
+}
+
+/// Runs `f` with a diagnostic sink installed.
+///
+/// An error that would normally print a report and exit/panic instead records a
+/// [`Diagnostic`] and unwinds back here. Nested calls are supported (the
+/// previous state is restored).
+///
+/// Requires an unwinding panic strategy; under `panic = "abort"` the unwind
+/// cannot be caught (the CLI never calls this, so its behavior is unchanged).
+///
+/// # Errors
+///
+/// Returns the [`Diagnostic`] recorded by the first error funnel that fired
+/// while `f` was running (parser, compiler or runtime).
+pub fn collect_diagnostic<R>(f: impl FnOnce() -> R) -> Result<R, Diagnostic> {
+    install_silencing_panic_hook();
+    let previous_active = SINK_ACTIVE.replace(true);
+    let previous_sink = DIAGNOSTIC_SINK.with(|sink| sink.borrow_mut().take());
+    let previous_suppress = SUPPRESS_PANIC_HOOK.replace(true);
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    let recorded = DIAGNOSTIC_SINK.with(|sink| sink.borrow_mut().take());
+    DIAGNOSTIC_SINK.with(|sink| *sink.borrow_mut() = previous_sink);
+    SINK_ACTIVE.set(previous_active);
+    SUPPRESS_PANIC_HOOK.set(previous_suppress);
+    match outcome {
+        Ok(value) => Ok(value),
+        Err(payload) => {
+            if payload.is::<FatalError>() {
+                Err(recorded.unwrap_or_else(|| Diagnostic {
+                    filename: String::new(),
+                    span: 0..0,
+                    message: String::from("unknown error"),
+                    code: String::from("unknown"),
+                }))
+            } else {
+                std::panic::resume_unwind(payload);
+            }
+        }
+    }
+}
+
+/// Removes ANSI escape sequences (colors/bold) from an error message so that
+/// structured diagnostics carry plain text.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1B' {
+            // Skip a CSI sequence: ESC '[' ... final byte in '@'..='~'
+            if chars.next() == Some('[') {
+                for f in chars.by_ref() {
+                    if ('@'..='~').contains(&f) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
 
 pub const BLUE: &str = "\x1B[94m";
 pub fn blue<F: std::fmt::Display>(t: F) -> String {
@@ -183,6 +318,16 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
             file_id: 0,
         });
     let src = &ctx.sources[*file_id as usize];
+    if diagnostics_enabled() {
+        let code = t.kind().to_owned();
+        let err_message: SmolStr = t.into();
+        emit_diagnostic(
+            src.filename.as_str(),
+            (*start as usize)..(*end as usize),
+            strip_ansi(err_message.as_str()),
+            &code,
+        );
+    }
     let err_message: SmolStr = t.into();
     eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(
@@ -231,7 +376,18 @@ pub fn wasm_error(msg: &str) -> ! {
 pub fn throw_compiler_error<'a>(
     report: &dyn Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>,
     sources: &'a [Source],
+    file_idx: u16,
+    span: Span,
+    message: &str,
 ) -> ! {
+    if diagnostics_enabled() {
+        emit_diagnostic(
+            sources[file_idx as usize].filename.as_str(),
+            (span.start as usize)..(span.end as usize),
+            strip_ansi(message),
+            "compile_error",
+        );
+    }
     let report = report();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]

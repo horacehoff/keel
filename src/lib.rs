@@ -41,6 +41,9 @@ mod util;
 #[path = "./vm/vm.rs"]
 mod vm;
 
+pub use errors::Diagnostic;
+pub use errors::collect_diagnostic;
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn get_output() -> String {

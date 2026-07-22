@@ -3569,3 +3569,319 @@ pub fn map_loop() {
         500.into()
     );
 }
+
+// ---------------------------------------------------------------------------
+// STRUCTURED DIAGNOSTICS
+//
+// The three error funnels (throw_parser_error, throw_compiler_error,
+// throw_error) record a structured `Diagnostic` and unwind instead of printing
+// + exiting whenever `collect_diagnostic` has installed a sink on the thread.
+// Without a sink the CLI path is byte-for-byte unchanged.
+// ---------------------------------------------------------------------------
+
+use crate::Diagnostic;
+use crate::errors::collect_diagnostic;
+
+/// Compiles `src` under a diagnostic sink, returning the first structured error
+/// (parser or compiler) instead of printing + exiting. This is exactly what an
+/// embedder would write against the public `collect_diagnostic` surface.
+fn compile_diag(src: &str, filename: &str) -> Result<(), Diagnostic> {
+    collect_diagnostic(|| {
+        let _ = compile(String::from(src), filename, false);
+    })
+}
+
+/// Compiles then executes `src` under a diagnostic sink, surfacing parser,
+/// compiler and runtime errors as structured `Diagnostic`s.
+fn run_diag(src: &str, filename: &str) -> Result<(), Diagnostic> {
+    collect_diagnostic(|| {
+        let (
+            instructions,
+            registers,
+            mut arrays,
+            instr_src,
+            fn_registers,
+            _,
+            allocated_arg_count,
+            allocated_call_depth,
+            _,
+            structs,
+        ) = compile(String::from(src), filename, false);
+        crate::vm::execute(
+            &instructions,
+            &mut RegisterFile(registers),
+            &mut arrays,
+            &crate::errors::ErrorCtx {
+                instr_src,
+                sources: vec![Source {
+                    filename: filename.into(),
+                    contents: String::from(src),
+                }],
+            },
+            &fn_registers,
+            &[],
+            &structs,
+            allocated_arg_count,
+            allocated_call_depth,
+        );
+    })
+}
+
+/// Every diagnostic must carry a plain-text (ANSI-free) message, a non-empty
+/// machine-readable code, and a well-formed byte span into the source.
+fn assert_wellformed(d: &Diagnostic, src: &str) {
+    assert!(!d.message.is_empty(), "empty message: {d:?}");
+    assert!(!d.message.contains('\x1B'), "ANSI leaked into: {d:?}");
+    assert!(!d.code.is_empty(), "empty code: {d:?}");
+    assert!(d.span.start <= d.span.end, "inverted span: {d:?}");
+    assert!(
+        d.span.end <= src.len(),
+        "span {:?} exceeds source len {} ({d:?})",
+        d.span,
+        src.len()
+    );
+}
+
+#[test]
+pub fn diagnostics_parser_error_span() {
+    let src = "fn main() { let x = 1 }";
+    let d = compile_diag(src, "diag.kl").unwrap_err();
+    assert_eq!(d.filename, "diag.kl");
+    assert_eq!(d.message, "Missing semicolon");
+    assert_eq!(d.code, "missing_semicolon");
+    // The span points right after the last token before the missing ';'
+    assert_eq!(d.span, 21..21);
+}
+
+#[test]
+pub fn diagnostics_compile_error_span() {
+    let src = "fn main() { let x = 1 + \"a\"; }";
+    let d = compile_diag(src, "diag.kl").unwrap_err();
+    assert_eq!(d.filename, "diag.kl");
+    assert_eq!(d.message, "Cannot perform operation int + string");
+    assert_eq!(d.code, "compile_error");
+    // The span covers the whole offending operation
+    assert_eq!(&src[d.span.clone()], "1 + \"a\"");
+}
+
+#[test]
+pub fn diagnostics_unknown_variable_is_plain_text() {
+    let src = "fn main() { print(cuont); }";
+    let d = compile_diag(src, "diag.kl").unwrap_err();
+    assert_wellformed(&d, src);
+    assert_eq!(d.message, "Cannot find variable cuont in this scope");
+    assert_eq!(&src[d.span.clone()], "cuont");
+}
+
+#[test]
+pub fn diagnostics_missing_main() {
+    let d = compile_diag("fn foo() { return 1; }", "diag.kl").unwrap_err();
+    assert_eq!(d.message, "Cannot find main function");
+    assert_eq!(d.code, "no_main_function");
+}
+
+#[test]
+pub fn diagnostics_runtime_error_code_and_span() {
+    let src = "fn main() { let a = [1]; print(a[5]); }";
+    let d = run_diag(src, "diag.kl").unwrap_err();
+    assert_eq!(d.filename, "diag.kl");
+    assert_eq!(d.code, "index_out_of_bounds");
+    assert_wellformed(&d, src);
+    assert!(
+        d.message.contains('5') && d.message.contains('1'),
+        "message: {:?}",
+        d.message
+    );
+    assert!(src[d.span.clone()].contains("a[5]"), "span: {:?}", d.span);
+}
+
+#[test]
+pub fn diagnostics_sink_is_scoped() {
+    // A failed collection must not poison later compilations (or the CLI path)
+    assert!(compile_diag("fn main() { print(1); }", "ok.kl").is_ok());
+    assert!(compile_diag("fn main() { print(nope); }", "bad.kl").is_err());
+    assert!(compile_diag("fn main() { print(2); }", "ok2.kl").is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// STRESS TESTS
+//
+// Drive thousands of malformed / garbage inputs through each error funnel and
+// assert none of them panic with a Rust backtrace or exit the process: every
+// failure must come back as a well-formed structured `Diagnostic`.
+// ---------------------------------------------------------------------------
+
+/// Tiny deterministic xorshift PRNG so the corpus is reproducible without
+/// pulling in an `rand` dependency.
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+#[test]
+pub fn stress_parser_random_garbage() {
+    // Random printable ASCII, random keyword/punctuation soup, unbalanced
+    // brackets and quotes, and truncated valid programs.
+    // NOTE: deliberately no i32-overflowing integer literal in this corpus.
+    // Such a literal panics in the lexer (lexer.rs `panic!("Invalid float")`)
+    // rather than routing through throw_parser_error — a pre-existing keel bug,
+    // out of scope for this change. See the crate notes / PR description.
+    let tokens = [
+        "fn", "main", "let", "if", "else", "while", "for", "return", "match", "try", "catch",
+        "struct", "(", ")", "{", "}", "[", "]", ",", ";", ":", "+", "-", "*", "/", "%", "=", "==",
+        "\"", "\"abc", "1", "42", "x", "::", ".", "->", "true", "print",
+    ];
+    let mut rng = Rng(0x1234_5678_9abc_def0);
+    let mut errors = 0usize;
+    let mut ok = 0usize;
+    for _ in 0..4000 {
+        let kind = rng.below(3);
+        let src = match kind {
+            0 => {
+                // random printable-ASCII byte soup
+                let len = rng.below(40);
+                (0..len)
+                    .map(|_| char::from(32 + rng.below(95) as u8))
+                    .collect::<String>()
+            }
+            1 => {
+                // random token soup (unbalanced by construction)
+                let len = rng.below(30);
+                let mut s = String::new();
+                for _ in 0..len {
+                    s.push_str(tokens[rng.below(tokens.len())]);
+                    s.push(' ');
+                }
+                s
+            }
+            _ => {
+                // truncate a valid program at a random byte
+                let base = "fn main() { let x = [1, 2, 3]; if x[0] == 1 { print(x); } }";
+                let cut = rng.below(base.len() + 1);
+                String::from(&base[..cut])
+            }
+        };
+        match compile_diag(&src, "fuzz.kl") {
+            Ok(()) => ok += 1,
+            Err(d) => {
+                assert_wellformed(&d, &src);
+                errors += 1;
+            }
+        }
+    }
+    // The corpus is overwhelmingly invalid; make sure we actually exercised the
+    // error path (and that at least some inputs still compiled cleanly).
+    assert!(errors > 3000, "only {errors} errors from 4000 inputs");
+    assert!(ok > 0, "no inputs compiled");
+}
+
+#[test]
+pub fn stress_parser_unbalanced_and_huge() {
+    let mut cases: Vec<String> = Vec::new();
+    // Deeply nested but unclosed / closed delimiters.
+    for depth in [1usize, 8, 64, 256, 1024] {
+        cases.push(format!("fn main() {{ let x = {}1{}", "(".repeat(depth), ")".repeat(depth)));
+        cases.push(format!("fn main() {{ let x = {}1;", "[".repeat(depth)));
+        cases.push(format!("fn main() {{ {}", "{".repeat(depth)));
+    }
+    // Huge identifier and a huge (but valid, within-i32) numeric literal.
+    // NOTE: an i32-overflowing literal is intentionally omitted here — it hits a
+    // pre-existing lexer panic rather than a structured error (see the corpus
+    // note in stress_parser_random_garbage).
+    cases.push(format!("fn main() {{ let {} = 1; }}", "a".repeat(50_000)));
+    cases.push(format!("fn main() {{ let x = {}00000000; }}", "0".repeat(50_000)));
+    // Unterminated string of growing size.
+    for n in [1usize, 100, 10_000] {
+        cases.push(format!("fn main() {{ let s = \"{}", "z".repeat(n)));
+    }
+    // Empty and whitespace-only inputs.
+    cases.push(String::new());
+    cases.push(String::from("   \n\t  "));
+    cases.push(String::from(";;;;;;"));
+
+    for src in &cases {
+        // Must return a value (Ok or a well-formed Err) — never panic/abort.
+        if let Err(d) = compile_diag(src, "fuzz.kl") {
+            assert_wellformed(&d, src);
+        }
+    }
+}
+
+#[test]
+pub fn stress_compiler_semantic_errors() {
+    // Each of these parses but fails during type/name/arity checking. Every one
+    // must yield a well-formed compiler diagnostic rather than exiting.
+    let cases = [
+        "fn main() { let x = 1 + \"a\"; }",              // type mismatch
+        "fn main() { print(undefined_var); }",          // undefined symbol
+        "fn main() { undefined_fn(); }",                 // undefined function
+        "fn main() { let x = 1; x(); }",                 // call a non-function
+        "fn main() { let x = true - false; }",           // bad operator operands
+        "fn main() { let x = [1, \"a\"]; }",             // heterogeneous array
+        "fn foo(a: int) { return a; } fn main() { foo(); }", // arity mismatch
+        "fn foo(a: int) { return a; } fn main() { foo(1, 2); }", // arity mismatch
+        "fn main() { return 1; } fn main() { return 2; }",   // redefined function
+        "fn main() { let x: notatype = 1; }",            // unknown type
+        "fn main() { let x = 1 / true; }",               // bad division operands
+    ];
+    for src in cases {
+        let d = compile_diag(src, "sem.kl")
+            .err()
+            .unwrap_or_else(|| panic!("expected a diagnostic for: {src}"));
+        assert_wellformed(&d, src);
+    }
+}
+
+#[test]
+pub fn stress_compiler_large_and_recursive() {
+    // Large generated program (many statements + many functions).
+    let mut big = String::from("fn main() {\n");
+    for i in 0..5000 {
+        big.push_str(&format!("    let v{i} = {i};\n"));
+    }
+    big.push_str("    print(1);\n}\n");
+    for i in 0..500 {
+        big.push_str(&format!("fn helper{i}(a: int) {{ return a + {i}; }}\n"));
+    }
+    assert!(run_diag(&big, "big.kl").is_ok(), "large valid program should run");
+
+    // Mutually recursive type inference must terminate (not loop / overflow).
+    let mutual = "fn a() { return b(); } fn b() { return a(); } fn main() { print(1); }";
+    let _ = compile_diag(mutual, "mutual.kl"); // Ok or Err, must not hang/abort.
+
+    // Self-recursive function (keel's tested idiom uses unannotated params).
+    let selfrec = "fn f(n) { if n == 0 { return 0; } return f(n - 1); } fn main() { print(f(10)); }";
+    assert!(run_diag(selfrec, "rec.kl").is_ok());
+}
+
+#[test]
+pub fn stress_runtime_errors() {
+    // Each triggers a runtime fault that must surface as a structured diagnostic
+    // with the expected stable code.
+    let cases = [
+        ("fn main() { let x = 1 / (1 - 1); print(x); }", "division_by_zero"),
+        ("fn main() { let x = 1 % (1 - 1); print(x); }", "modulo_by_zero"),
+        ("fn main() { let a = [1, 2, 3]; print(a[10]); }", "index_out_of_bounds"),
+        (
+            "fn main() { let a = [1, 2, 3]; let i = 0 - 1; print(a[i]); }",
+            "index_out_of_bounds",
+        ),
+    ];
+    for (src, code) in cases {
+        let d = run_diag(src, "rt.kl")
+            .err()
+            .unwrap_or_else(|| panic!("expected a runtime diagnostic for: {src}"));
+        assert_wellformed(&d, src);
+        assert_eq!(d.code, code, "for source: {src}");
+    }
+}

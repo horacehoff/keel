@@ -3205,6 +3205,10 @@ pub fn compile(
     #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
 
+    // A previous compilation on this thread may have been aborted mid-inference
+    // by an error unwind; make sure its bookkeeping doesn't leak into this one.
+    type_system::reset_inference_state();
+
     let main_src = Source {
         filename: SmolStr::from(filename),
         contents,
@@ -3313,6 +3317,14 @@ pub fn compile(
                 #[cfg(target_arch = "wasm32")]
                 wasm_error("Cannot find main function");
 
+                if crate::errors::diagnostics_enabled() {
+                    crate::errors::emit_diagnostic(
+                        state.sources[0].filename.as_str(),
+                        0..0,
+                        String::from("Cannot find main function"),
+                        "no_main_function",
+                    );
+                }
                 eprintln!(
                     "--------------\n{RED}KEEL RUNTIME ERROR:{RESET}\nCannot find {BLUE}{BOLD}main{RESET} function\n--------------",
                 );

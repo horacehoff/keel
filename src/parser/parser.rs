@@ -67,6 +67,27 @@ enum ParserErr<'a> {
     MatchBlockZeroArms,
 }
 
+impl ParserErr<'_> {
+    /// Stable, machine-readable identifier for this parser error, mirroring
+    /// `ErrType::kind` on the runtime side.
+    const fn kind(&self) -> &'static str {
+        match self {
+            ParserErr::UnexpectedEOF => "unexpected_eof",
+            ParserErr::UnknownToken => "unknown_token",
+            ParserErr::UnexpectedToken(..) | ParserErr::UnexpectedTokenStr(..) => "unexpected_token",
+            ParserErr::ArrayElementsMissingComma => "array_elements_missing_comma",
+            ParserErr::InlineConditionNoElseBlock => "inline_condition_no_else_block",
+            ParserErr::DivisionByZero => "division_by_zero",
+            ParserErr::ModuloByZero => "modulo_by_zero",
+            ParserErr::IntegerNegativeExponent => "integer_negative_exponent",
+            ParserErr::ArgumentsMissingCommaSeparator => "arguments_missing_comma_separator",
+            ParserErr::TryBlockNoCatch => "try_block_no_catch",
+            ParserErr::MatchBlockNoNonWildcardArm => "match_block_no_non_wildcard_arm",
+            ParserErr::MatchBlockZeroArms => "match_block_zero_arms",
+        }
+    }
+}
+
 #[cold]
 #[inline(never)]
 fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> ! {
@@ -97,6 +118,14 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
             "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}"
         }
     };
+    if crate::errors::diagnostics_enabled() {
+        crate::errors::emit_diagnostic(
+            src.filename.as_str(),
+            (start as usize)..(end as usize),
+            crate::errors::strip_ansi(err_message),
+            t.kind(),
+        );
+    }
     eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(
         ReportKind::Error,
@@ -251,7 +280,18 @@ impl<'a> Parser<'a> {
     pub fn throw_parser_err<'b, F: Fn() -> Report<'b, (&'b str, core::ops::Range<usize>)>>(
         &self,
         report: F,
+        span: Span,
+        message: &str,
+        code: &str,
     ) -> ! {
+        if crate::errors::diagnostics_enabled() {
+            crate::errors::emit_diagnostic(
+                self.ctx.src.filename.as_str(),
+                (span.start as usize)..(span.end as usize),
+                crate::errors::strip_ansi(message),
+                code,
+            );
+        }
         let report = report();
 
         #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
@@ -472,6 +512,13 @@ fn error_unclosed_delimiter(
     expected_closer_token: Token,
     end: Option<(Token, Span)>,
 ) -> ! {
+    let message = if let Some((actual_closer_token, _)) = end {
+        format!(
+            "This {opener_token} is never closed: expected {expected_closer_token} but found {actual_closer_token}"
+        )
+    } else {
+        format!("This {opener_token} is never closed: expected {expected_closer_token} but the file ends here")
+    };
     parser.throw_parser_err(|| {
         let mut report = Report::build(
             ariadne::ReportKind::Error,
@@ -511,12 +558,13 @@ fn error_unclosed_delimiter(
         }
 
         report.finish()
-    })
+    }, opener_span, &message, "unclosed_delimiter")
 }
 
 #[cold]
 #[inline(never)]
 fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
+    let span: Span = (parser.last_token_end as u32, parser.last_token_end as u32).into();
     parser.throw_parser_err(|| {
         Report::build(
             ariadne::ReportKind::Error,
@@ -536,7 +584,7 @@ fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
         )
         .with_help("All statements end with a ';'")
         .finish()
-    })
+    }, span, "Missing semicolon", "missing_semicolon")
 }
 
 fn parse_code(input: &mut Parser<'_>) -> Vec<Expr> {

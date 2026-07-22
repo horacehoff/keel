@@ -39,6 +39,12 @@ thread_local! {
         RefCell::new(FxHashSet::default());
 }
 
+/// Clears inference bookkeeping left behind when a previous compilation on
+/// this thread was aborted by an error unwind (see `errors::collect_diagnostics`).
+pub fn reset_inference_state() {
+    RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().clear());
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TypeExpr {
     Identifier(SmolStr, Span),

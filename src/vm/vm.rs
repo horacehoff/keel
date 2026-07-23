@@ -3,6 +3,7 @@ use crate::compiler::compiler_data::DynamicLibFn;
 use crate::compiler::compiler_data::ErrorCatch;
 use crate::compiler::compiler_data::Pools;
 use crate::compiler::compiler_data::Struct;
+use crate::compiler::expr::Span;
 use crate::compiler::type_system::DataType;
 use crate::data::Data;
 use crate::data::DataHash;
@@ -20,10 +21,12 @@ use crate::map_gc::alloc_map;
 use crate::string_gc::raise_string_gc_threshold;
 use lexical_core::FormattedSize;
 use memchr::memmem;
+use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::hint::cold_path;
+use std::hint::unreachable_unchecked;
 use std::io::Write;
 use std::ops::Index;
 use std::ops::IndexMut;
@@ -98,6 +101,239 @@ fn array_to_c_ptr(
         // Any other element type has no C equivalent
         t => unreachable!("Unsupported array element type for C FFI: {t:?}"),
     }
+}
+
+/// Computes a Keel struct's size, alignment, and per-field offsets
+/// Returns (size, alignment, field_offsets)
+fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usize, Vec<usize>) {
+    let mut offset: usize = 0;
+    let mut max_alignment: usize = 0;
+    let mut field_offsets: Vec<usize> = Vec::new();
+    field_offsets.reserve_exact(struct_fields.len());
+    for field in struct_fields {
+        let elem_size: usize;
+        let elem_alignment: usize;
+        if field.is_int() {
+            elem_size = 4;
+            elem_alignment = 4;
+        } else if field.is_float() || field.is_array() || field.is_str() {
+            elem_size = 8;
+            elem_alignment = 8;
+        } else if field.is_struct() {
+            (elem_size, elem_alignment, _) =
+                get_struct_size(&obj_pool[field.as_struct()], obj_pool);
+        } else {
+            unsafe { unreachable_unchecked() }
+        }
+        let field_offset = offset.next_multiple_of(elem_alignment);
+        offset = field_offset + elem_size;
+        field_offsets.push(field_offset);
+        max_alignment = max_alignment.max(elem_alignment);
+    }
+    (
+        offset.next_multiple_of(max_alignment),
+        max_alignment,
+        field_offsets,
+    )
+}
+
+/// (Uses DataType)
+/// Computes a Keel struct's size, alignment, and per-field offsets
+/// Returns (size, alignment, field_offsets)
+fn get_struct_size_datatype(
+    struct_fields: &[(SmolStr, DataType, Span)],
+    structs: &[Struct],
+) -> (usize, usize, Vec<usize>) {
+    let mut offset: usize = 0;
+    let mut max_alignment: usize = 0;
+    let mut field_offsets: Vec<usize> = Vec::new();
+    for (_, field, _) in struct_fields {
+        let elem_size: usize;
+        let elem_alignment: usize;
+        match field {
+            DataType::Int => {
+                elem_size = 4;
+                elem_alignment = 4;
+            }
+            DataType::Float | DataType::Array(_) | DataType::String => {
+                elem_size = 8;
+                elem_alignment = 8;
+            }
+            DataType::Struct(struct_id) => {
+                (elem_size, elem_alignment, _) = get_struct_size_datatype(
+                    unsafe { &structs.get_unchecked(*struct_id as usize).fields },
+                    structs,
+                );
+            }
+            _ => unsafe { unreachable_unchecked() },
+        }
+        let field_offset = offset.next_multiple_of(elem_alignment);
+        offset = field_offset + elem_size;
+        field_offsets.push(field_offset);
+        max_alignment = max_alignment.max(elem_alignment);
+    }
+    (
+        offset.next_multiple_of(max_alignment),
+        max_alignment,
+        field_offsets,
+    )
+}
+
+fn data_to_datatype(elem: Data, obj_pool: &ObjectPool) -> DataType {
+    if elem.is_int() {
+        DataType::Int
+    } else if elem.is_float() {
+        DataType::Float
+    } else if elem.is_str() {
+        DataType::String
+    } else if elem.is_bool() {
+        DataType::Bool
+    } else if elem.is_null() {
+        DataType::Null
+    } else if elem.is_array() {
+        DataType::Array(Some(Box::from(data_to_datatype(
+            obj_pool[elem.as_array()][0],
+            obj_pool,
+        ))))
+    } else {
+        unsafe { unreachable_unchecked() }
+    }
+}
+
+fn keel_struct_to_c_struct(
+    struct_index: usize,
+    obj_pool: &ObjectPool,
+    string_pool: &StringPool,
+    keep_alive: &mut Vec<Box<[u8]>>,
+) -> Vec<u8> {
+    let struct_fields = &obj_pool[struct_index];
+    let (struct_size, _, field_offsets) = get_struct_size(struct_fields, obj_pool);
+    let mut buf: Vec<u8> = vec![0u8; struct_size];
+    for (i, field) in struct_fields.iter().enumerate() {
+        unsafe {
+            let offset = *field_offsets.get_unchecked(i);
+            if field.is_int() {
+                let bytes = field.as_int().to_ne_bytes();
+                for (i, b) in bytes.into_iter().enumerate() {
+                    *buf.get_unchecked_mut(offset + i) = b;
+                }
+            } else if field.is_float() {
+                let bytes = field.as_float().to_ne_bytes();
+                for (i, b) in bytes.into_iter().enumerate() {
+                    *buf.get_unchecked_mut(offset + i) = b;
+                }
+            } else if field.is_str() {
+                let bytes = std::ffi::CString::new(field.as_str(string_pool))
+                    .expect("interior null byte in string passed to C")
+                    .into_bytes_with_nul()
+                    .into_boxed_slice();
+                let ptr = (bytes.as_ptr() as u64).to_ne_bytes();
+                keep_alive.push(bytes);
+                for (i, ptr_val) in ptr.into_iter().enumerate() {
+                    *buf.get_unchecked_mut(offset + i) = ptr_val;
+                }
+            } else if field.is_array() {
+                let fst_elem = obj_pool[field.as_array()][0];
+                let ptr = array_to_c_ptr(
+                    *field,
+                    &data_to_datatype(fst_elem, obj_pool),
+                    obj_pool,
+                    string_pool,
+                    keep_alive,
+                )
+                .to_ne_bytes();
+                for (i, ptr_val) in ptr.into_iter().enumerate() {
+                    *buf.get_unchecked_mut(offset + i) = ptr_val;
+                }
+            } else if field.is_struct() {
+                let b =
+                    keel_struct_to_c_struct(field.as_struct(), obj_pool, string_pool, keep_alive);
+                for i in 0..b.len() {
+                    *buf.get_unchecked_mut(offset + i) = *b.get_unchecked(i);
+                }
+            } else {
+                unreachable_unchecked()
+            }
+        }
+    }
+    buf
+}
+
+fn c_struct_to_keel_struct(
+    c_struct: &[u8],
+    field_offsets: &[usize],
+    obj_pool: &mut ObjectPool,
+    string_pool: &mut StringPool,
+    struct_fields: &[(SmolStr, DataType, Span)],
+    r: &mut RegisterFile,
+    recursion_stack: &RegisterFile,
+    free_strings: &mut Vec<u16>,
+    gc_string_threshold: &mut u32,
+    string_live: &mut Vec<bool>,
+    structs: &[Struct],
+) -> Vec<Data> {
+    let mut buf: Vec<Data> = Vec::with_capacity(4);
+    for (i, (_, field_type, _)) in struct_fields.iter().enumerate() {
+        let field_offset = *unsafe { field_offsets.get_unchecked(i) };
+        match field_type {
+            DataType::Int => {
+                let mut bytes: [u8; 4] = [0; 4];
+                bytes.copy_from_slice(&c_struct[field_offset..(field_offset + 4)]);
+                buf.push(Data::int(i32::from_ne_bytes(bytes)));
+            }
+            DataType::Float => {
+                let mut bytes: [u8; 8] = [0; 8];
+                bytes.copy_from_slice(&c_struct[field_offset..(field_offset + 8)]);
+                buf.push(Data::float(f64::from_ne_bytes(bytes)));
+            }
+            DataType::String => {
+                let mut bytes: [u8; 8] = [0; 8];
+                bytes.copy_from_slice(&c_struct[field_offset..(field_offset + 8)]);
+                let ptr = usize::from_ne_bytes(bytes) as *const std::ffi::c_char;
+                buf.push(if ptr.is_null() {
+                    NULL
+                } else {
+                    Data::string(
+                        unsafe { std::ffi::CStr::from_ptr(ptr) }
+                            .to_string_lossy()
+                            .into_owned(),
+                        obj_pool,
+                        string_pool,
+                        r,
+                        recursion_stack,
+                        free_strings,
+                        gc_string_threshold,
+                        string_live,
+                    )
+                });
+            }
+            DataType::Struct(nested_struct_id) => {
+                let s = unsafe { structs.get_unchecked(*nested_struct_id as usize) };
+                let (_, _, inner_offsets) = get_struct_size_datatype(&s.fields, structs);
+                let nested_data_fields = c_struct_to_keel_struct(
+                    &c_struct[field_offset..],
+                    &inner_offsets,
+                    obj_pool,
+                    string_pool,
+                    &s.fields,
+                    r,
+                    recursion_stack,
+                    free_strings,
+                    gc_string_threshold,
+                    string_live,
+                    structs,
+                );
+                let new_struct_id = obj_pool.len();
+                obj_pool.push(nested_data_fields);
+                buf.push(Data::struct_instance(
+                    *nested_struct_id,
+                    new_struct_id as u32,
+                ));
+            }
+            _ => unsafe { unreachable_unchecked() },
+        }
+    }
+    buf
 }
 
 fn obj_eq(
@@ -300,6 +536,7 @@ pub fn execute(
     let mut string_live: Vec<bool> = Vec::new();
 
     let mut dyn_lib_args: Vec<u64> = Vec::new();
+    let mut dyn_lib_args_structs: Vec<Option<usize>> = Vec::new();
     let mut keep_alive: Vec<Box<[u8]>> = Vec::new();
     let mut obj_gc_stack: Vec<Data> = Vec::with_capacity(obj_pool.len());
 
@@ -453,6 +690,7 @@ pub fn execute(
                 let func = unsafe { dyn_libs.get_unchecked(fn_id as usize) };
                 let args_len = args.len();
                 dyn_lib_args.clear();
+                dyn_lib_args_structs.clear();
                 keep_alive.clear();
 
                 for idx in 0..args.len() {
@@ -476,16 +714,37 @@ pub fn execute(
                             DataType::Array(Some(inner)) => {
                                 array_to_c_ptr(data, inner, obj_pool, string_pool, &mut keep_alive)
                             }
+                            DataType::Struct(_) => {
+                                let b = keel_struct_to_c_struct(
+                                    data.as_struct(),
+                                    obj_pool,
+                                    string_pool,
+                                    &mut keep_alive,
+                                );
+                                keep_alive.push(Box::from(b));
+                                0
+                            }
                             _ => unreachable!(),
                         }
                     });
+                    if data.is_struct() {
+                        dyn_lib_args_structs.push(Some(keep_alive.len() - 1));
+                    } else {
+                        dyn_lib_args_structs.push(None);
+                    }
                 }
                 args.clear();
 
                 // Args converted from Data to libffi args are stored here
                 let mut ffi_args: Vec<libffi::middle::Arg> = Vec::with_capacity(args_len);
-                for x in &dyn_lib_args {
-                    ffi_args.push(libffi::middle::Arg::new(x));
+                for (i, x) in dyn_lib_args.iter().enumerate() {
+                    if let Some(idx) = unsafe { dyn_lib_args_structs.get_unchecked(i) } {
+                        ffi_args.push(libffi::middle::Arg::new(unsafe {
+                            keep_alive.get_unchecked(*idx).as_ref()
+                        }));
+                    } else {
+                        ffi_args.push(libffi::middle::Arg::new(x));
+                    }
                 }
 
                 // Call the function, and convert the result back into Data
@@ -508,6 +767,35 @@ pub fn execute(
                         DataType::Null => NULL,
                         DataType::Array(_) => {
                             error_with_catch!(ErrType::CArrayReturnTypeNotSupported);
+                        }
+                        DataType::Struct(struct_idx) => {
+                            let struct_fields =
+                                unsafe { &structs.get_unchecked(*struct_idx as usize).fields };
+                            let (struct_size, _, field_offsets) =
+                                get_struct_size_datatype(struct_fields, structs);
+                            let mut return_buf: Vec<u8> = vec![0; struct_size];
+                            func.cif.call_return_into(
+                                func.ptr,
+                                &ffi_args,
+                                libffi::middle::ret(&mut return_buf[..]),
+                            );
+
+                            let data_fields = c_struct_to_keel_struct(
+                                &return_buf,
+                                &field_offsets,
+                                obj_pool,
+                                string_pool,
+                                struct_fields,
+                                r,
+                                &recursion_stack,
+                                &mut free_strings,
+                                &mut gc_string_threshold,
+                                &mut string_live,
+                                structs,
+                            );
+                            let new_id = obj_pool.len();
+                            obj_pool.push(data_fields);
+                            Data::struct_instance(*struct_idx, new_id as u32)
                         }
                         t => {
                             error_with_catch!(ErrType::InvalidReturnType(t));
@@ -1255,6 +1543,10 @@ pub fn execute(
                     r[dest] = (obj_pool[reg.as_array()].len() as i32).into();
                 } else if reg.is_str() {
                     r[dest] = (reg.as_str(string_pool).len() as i32).into();
+                } else if reg.is_map() {
+                    r[dest] = (map_pool[reg.as_map()].len() as i32).into();
+                } else {
+                    unsafe { unreachable_unchecked() }
                 }
             }
             Instr::CallLibFunc(LibFunc::StartsWith, source_register, dest_register) => {

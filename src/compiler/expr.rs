@@ -164,6 +164,7 @@ pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) 
     }
 }
 
+/// A span of code in a `Source`'s `contents`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Span {
     pub start: u32,

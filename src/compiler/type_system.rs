@@ -40,7 +40,7 @@ thread_local! {
 }
 
 /// Clears inference bookkeeping left behind when a previous compilation on
-/// this thread was aborted by an error unwind (see `errors::collect_diagnostics`).
+/// this thread was aborted by an error unwind (see `errors::collect_diagnostic`).
 pub fn reset_inference_state() {
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().clear());
 }

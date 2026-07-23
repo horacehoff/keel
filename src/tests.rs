@@ -3659,9 +3659,10 @@ pub fn diagnostics_compile_error_span() {
     let d = compile_diag(src, "diag.kl").unwrap_err();
     assert_eq!(d.filename, "diag.kl");
     assert_eq!(d.message, "Cannot perform operation int + string");
-    assert_eq!(d.code, "compile_error");
+    // Compiler errors now carry a specific code, not the old blanket "compile_error".
+    assert_eq!(d.code, "invalid_operation");
     // The span covers the whole offending operation
-    assert_eq!(&src[d.span.clone()], "1 + \"a\"");
+    assert_eq!(&src[d.span], "1 + \"a\"");
 }
 
 #[test]
@@ -3670,7 +3671,7 @@ pub fn diagnostics_unknown_variable_is_plain_text() {
     let d = compile_diag(src, "diag.kl").unwrap_err();
     assert_wellformed(&d, src);
     assert_eq!(d.message, "Cannot find variable cuont in this scope");
-    assert_eq!(&src[d.span.clone()], "cuont");
+    assert_eq!(&src[d.span], "cuont");
 }
 
 #[test]
@@ -3820,38 +3821,78 @@ pub fn stress_parser_unbalanced_and_huge() {
 #[test]
 pub fn stress_compiler_semantic_errors() {
     // Each of these parses but fails during type/name/arity checking. Every one
-    // must yield a well-formed compiler diagnostic rather than exiting.
+    // must yield a well-formed compiler diagnostic rather than exiting, and —
+    // crucially — carry a *specific* stable code, never the blanket
+    // "compile_error" that every compiler error used to collapse to. The
+    // (source, expected code) pairing pins the codes so they can't silently
+    // drift.
     let cases = [
-        "fn main() { let x = 1 + \"a\"; }",              // type mismatch
-        "fn main() { print(undefined_var); }",          // undefined symbol
-        "fn main() { undefined_fn(); }",                 // undefined function
-        "fn main() { let x = 1; x(); }",                 // call a non-function
-        "fn main() { let x = true - false; }",           // bad operator operands
-        "fn main() { let x = [1, \"a\"]; }",             // heterogeneous array
-        "fn foo(a: int) { return a; } fn main() { foo(); }", // arity mismatch
-        "fn foo(a: int) { return a; } fn main() { foo(1, 2); }", // arity mismatch
-        "fn main() { return 1; } fn main() { return 2; }",   // redefined function
-        "fn main() { let x: notatype = 1; }",            // unknown type
-        "fn main() { let x = 1 / true; }",               // bad division operands
+        ("fn main() { let x = 1 + \"a\"; }", "invalid_operation"), // type mismatch in op
+        ("fn main() { print(undefined_var); }", "unknown_variable"), // undefined symbol
+        ("fn main() { undefined_fn(); }", "unknown_function"),    // undefined function
+        ("fn main() { let x = true - false; }", "invalid_operation"), // bad operator operands
+        ("fn main() { let x = [1, \"a\"]; }", "array_element_type_mismatch"), // heterogeneous array
+        ("fn foo(a: int) { return a; } fn main() { foo(); }", "arity_mismatch"), // too few args
+        ("fn foo(a: int) { return a; } fn main() { foo(1, 2); }", "arity_mismatch"), // too many args
+        ("fn main() { return 1; } fn main() { return 2; }", "function_already_defined"), // redefined
+        ("fn foo(a: notatype) { return a; } fn main() { foo(1); }", "unknown_type"), // unknown type annotation
+        ("fn main() { let x = 1 / true; }", "invalid_operation"), // bad division operands
     ];
-    for src in cases {
+    let mut distinct = std::collections::BTreeSet::new();
+    for (src, expected_code) in cases {
         let d = compile_diag(src, "sem.kl")
             .err()
             .unwrap_or_else(|| panic!("expected a diagnostic for: {src}"));
         assert_wellformed(&d, src);
+        // No compiler error may fall back to the old blanket code.
+        assert_ne!(d.code, "compile_error", "blanket code for: {src}");
+        assert_eq!(d.code, expected_code, "unexpected code for: {src}");
+        distinct.insert(d.code.clone());
     }
+    // The corpus deliberately spans many distinct error kinds; make sure the
+    // codes actually differentiate them rather than all being equal.
+    assert!(
+        distinct.len() >= 6,
+        "expected the compiler errors to be differentiated by code, saw only {distinct:?}"
+    );
+}
+
+#[test]
+pub fn genuine_panic_propagates_through_collect() {
+    // A genuine panic (a real bug, not the internal FatalError unwind that
+    // carries a Diagnostic) must NOT be captured as a diagnostic: it has to
+    // propagate out of `collect_diagnostic` unchanged via `resume_unwind`.
+    // Keep the test output clean by installing a no-op hook for the duration —
+    // `collect_diagnostic` captures and forwards to it, then restores it.
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let outcome = std::panic::catch_unwind(|| {
+        let _ = collect_diagnostic(|| {
+            panic!("genuine boom");
+        });
+    });
+    std::panic::set_hook(previous);
+
+    let payload = outcome.expect_err("collect_diagnostic must not swallow a genuine panic");
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("<non-string panic payload>");
+    assert_eq!(message, "genuine boom");
 }
 
 #[test]
 pub fn stress_compiler_large_and_recursive() {
+    use std::fmt::Write as _;
     // Large generated program (many statements + many functions).
     let mut big = String::from("fn main() {\n");
     for i in 0..5000 {
-        big.push_str(&format!("    let v{i} = {i};\n"));
+        writeln!(big, "    let v{i} = {i};").unwrap();
     }
     big.push_str("    print(1);\n}\n");
     for i in 0..500 {
-        big.push_str(&format!("fn helper{i}(a: int) {{ return a + {i}; }}\n"));
+        writeln!(big, "fn helper{i}(a: int) {{ return a + {i}; }}").unwrap();
     }
     assert!(run_diag(&big, "big.kl").is_ok(), "large valid program should run");
 

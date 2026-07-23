@@ -33,6 +33,61 @@ thread_local! {
     static SUPPRESS_PANIC_HOOK: Cell<bool> = const { Cell::new(false) };
 }
 
+type BoxedHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+
+/// Process-global bookkeeping for the scoped, silencing panic hook installed by
+/// [`collect_diagnostic`]. `depth` counts how many `collect_diagnostic` calls
+/// are currently active across all threads; `previous` holds the host's own
+/// panic hook, captured when the first collection begins and restored when the
+/// last one ends — so the host's hook is never *permanently* clobbered.
+struct HookState {
+    depth: usize,
+    previous: Option<BoxedHook>,
+}
+
+static HOOK_STATE: std::sync::Mutex<HookState> =
+    std::sync::Mutex::new(HookState { depth: 0, previous: None });
+
+/// Recover the guarded state even if a previous panic-hook invocation poisoned
+/// the mutex (a chained host hook is allowed to panic without wedging us).
+fn lock_hook_state() -> std::sync::MutexGuard<'static, HookState> {
+    HOOK_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Installs the silencing hook for the duration of a `collect_diagnostic` scope,
+/// capturing the host's current hook the first time collection becomes active.
+///
+/// The hook is shared by nested/concurrent collections via `depth`; it forwards
+/// every panic to the host's saved hook *except* the internal `FatalError`
+/// unwind on a thread that is actively collecting (which it silences).
+fn enter_silencing_hook() {
+    let mut state = lock_hook_state();
+    if state.depth == 0 {
+        state.previous = Some(std::panic::take_hook());
+        std::panic::set_hook(Box::new(|info| {
+            if SUPPRESS_PANIC_HOOK.with(Cell::get) && info.payload().is::<FatalError>() {
+                return;
+            }
+            let state = lock_hook_state();
+            if let Some(previous) = state.previous.as_ref() {
+                previous(info);
+            }
+        }));
+    }
+    state.depth += 1;
+}
+
+/// Undoes one `enter_silencing_hook`; when the last active collection ends, the
+/// host's original hook is put back so the process is left exactly as we found
+/// it.
+fn leave_silencing_hook() {
+    let mut state = lock_hook_state();
+    state.depth -= 1;
+    if state.depth == 0 && let Some(previous) = state.previous.take() {
+        std::panic::set_hook(previous);
+    }
+}
+
 /// Whether errors should be recorded as a `Diagnostic` instead of being
 /// printed and aborting the process. This is what keeps the CLI behavior
 /// byte-for-byte identical: without an active sink, every error path behaves
@@ -61,39 +116,35 @@ pub fn emit_diagnostic(filename: &str, span: Range<usize>, message: String, code
     std::panic::panic_any(FatalError);
 }
 
-/// Installs a panic hook (once) that stays silent only for the internal
-/// `FatalError` unwind used to carry a diagnostic out of a `collect_diagnostic`
-/// call. Every other panic — including genuine bugs that fire while a sink is
-/// active — is forwarded to the previous hook so it stays observable.
-fn install_silencing_panic_hook() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            let suppress =
-                SUPPRESS_PANIC_HOOK.with(Cell::get) && info.payload().is::<FatalError>();
-            if !suppress {
-                previous(info);
-            }
-        }));
-    });
-}
-
 /// Runs `f` with a diagnostic sink installed.
 ///
 /// An error that would normally print a report and exit/panic instead records a
 /// [`Diagnostic`] and unwinds back here. Nested calls are supported (the
-/// previous state is restored).
+/// previous state is restored), and genuine panics (real bugs) are *not*
+/// swallowed — they propagate through unchanged.
 ///
-/// Requires an unwinding panic strategy; under `panic = "abort"` the unwind
-/// cannot be caught (the CLI never calls this, so its behavior is unchanged).
+/// # Requires
+///
+/// **An unwinding panic strategy (`panic = "unwind"`).** This function catches
+/// the internal unwind used to carry a diagnostic out of the error funnels via
+/// [`std::panic::catch_unwind`]. Under `panic = "abort"` — which is keel's own
+/// `[profile.release]` default — that unwind cannot be caught: the process
+/// aborts on the first error instead of this returning `Err`. Embedders that
+/// rely on `collect_diagnostic` therefore **must** build with `panic = "unwind"`
+/// (see the `embed` profile in keel's `Cargo.toml`). The CLI never calls this,
+/// so its behavior is unaffected either way.
+///
+/// While a collection is active this installs a process-global panic hook that
+/// silences only the internal diagnostic unwind and forwards every other panic
+/// to the host's own hook. The host's hook is captured on entry and restored
+/// once the outermost collection finishes, so it is never permanently replaced.
 ///
 /// # Errors
 ///
 /// Returns the [`Diagnostic`] recorded by the first error funnel that fired
 /// while `f` was running (parser, compiler or runtime).
 pub fn collect_diagnostic<R>(f: impl FnOnce() -> R) -> Result<R, Diagnostic> {
-    install_silencing_panic_hook();
+    enter_silencing_hook();
     let previous_active = SINK_ACTIVE.replace(true);
     let previous_sink = DIAGNOSTIC_SINK.with(|sink| sink.borrow_mut().take());
     let previous_suppress = SUPPRESS_PANIC_HOOK.replace(true);
@@ -102,6 +153,7 @@ pub fn collect_diagnostic<R>(f: impl FnOnce() -> R) -> Result<R, Diagnostic> {
     DIAGNOSTIC_SINK.with(|sink| *sink.borrow_mut() = previous_sink);
     SINK_ACTIVE.set(previous_active);
     SUPPRESS_PANIC_HOOK.set(previous_suppress);
+    leave_silencing_hook();
     match outcome {
         Ok(value) => Ok(value),
         Err(payload) => {
@@ -379,13 +431,14 @@ pub fn throw_compiler_error<'a>(
     file_idx: u16,
     span: Span,
     message: &str,
+    code: &'static str,
 ) -> ! {
     if diagnostics_enabled() {
         emit_diagnostic(
             sources[file_idx as usize].filename.as_str(),
             (span.start as usize)..(span.end as usize),
             strip_ansi(message),
-            "compile_error",
+            code,
         );
     }
     let report = report();

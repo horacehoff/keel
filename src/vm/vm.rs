@@ -105,6 +105,7 @@ fn array_to_c_ptr(
 
 /// Computes a Keel struct's size, alignment, and per-field offsets
 /// Returns (size, alignment, field_offsets)
+#[cfg(not(target_arch = "wasm32"))]
 fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usize, Vec<usize>) {
     let mut offset: usize = 0;
     let mut max_alignment: usize = 0;
@@ -140,6 +141,7 @@ fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usi
 /// (Uses DataType)
 /// Computes a Keel struct's size, alignment, and per-field offsets
 /// Returns (size, alignment, field_offsets)
+#[cfg(not(target_arch = "wasm32"))]
 fn get_struct_size_datatype(
     struct_fields: &[(SmolStr, DataType, Span)],
     structs: &[Struct],
@@ -200,6 +202,7 @@ fn data_to_datatype(elem: Data, obj_pool: &ObjectPool) -> DataType {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn keel_struct_to_c_struct(
     struct_index: usize,
     obj_pool: &ObjectPool,
@@ -259,6 +262,7 @@ fn keel_struct_to_c_struct(
     buf
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn c_struct_to_keel_struct(
     c_struct: &[u8],
     field_offsets: &[usize],

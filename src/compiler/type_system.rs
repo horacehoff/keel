@@ -7,7 +7,6 @@ use crate::compiler::compiler_data::FnSignature;
 use crate::compiler::compiler_data::Function;
 use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
-
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::error_invalid_type;
 use crate::compiler::compiler_errors::error_op;

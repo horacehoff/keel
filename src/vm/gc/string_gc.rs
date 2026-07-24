@@ -34,7 +34,7 @@ pub fn string_gc(
 
 fn track_strings(array_pool: &ObjectPool, array: &Vec<Data>, live: &mut [bool]) {
     if let Some(first) = array.first() {
-        if first.is_str() {
+        if first.is_string() {
             for x in array {
                 if x.is_large_str() {
                     live[x.get_str_pool_id()] = true;

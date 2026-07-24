@@ -77,10 +77,6 @@ impl DynamicLibFn {
     pub fn get_return_type(&self) -> &DataType {
         unsafe { self.types.get_unchecked(0) }
     }
-    #[inline(always)]
-    pub fn get_arg(&self, idx: usize) -> &DataType {
-        unsafe { self.types.get_unchecked(1 + idx) }
-    }
 }
 
 #[derive(Debug)]

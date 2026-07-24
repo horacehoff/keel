@@ -38,68 +38,83 @@ pub type ObjectPool = Pool<Vec<Data>>;
 pub type MapPool = Pool<HashMap<Data, Data, BuildHasherDefault<DataHash>>>;
 pub type StringPool = Pool<String>;
 
+/// Writes `bytes` into `dst` at `index`
+unsafe fn write_bytes_at_offset(dst: &mut [std::mem::MaybeUninit<u8>], index: usize, bytes: &[u8]) {
+    debug_assert!((index + bytes.len()) <= dst.len());
+    unsafe {
+        // u8 and MaybeUninit<u8> have the exact same layout, so this pointer cast is safe
+        dst.get_unchecked_mut(index..(index + bytes.len()))
+            .copy_from_slice(&*(bytes as *const [u8] as *const [std::mem::MaybeUninit<u8>]));
+    }
+}
+
+/// Puts `buf` in `keep_alive` and returns a pointer to its now stable address
+fn keep_buffer_alive(
+    buf: Box<[std::mem::MaybeUninit<u8>]>,
+    keep_alive: &mut Vec<Box<[u8]>>,
+) -> usize {
+    let ptr = buf.as_ptr() as usize;
+    keep_alive.push(unsafe { buf.assume_init() });
+    ptr
+}
+
 /// Converts a Keel array to a C pointer for libffi
 #[cfg(not(target_arch = "wasm32"))]
 fn array_to_c_ptr(
     data: Data,
-    elem_type: &DataType,
     obj_pool: &ObjectPool,
     string_pool: &StringPool,
-    // boxed so the address doesn't move
+    // Boxed so the address doesn't move
     keep_alive: &mut Vec<Box<[u8]>>,
-) -> u64 {
+) -> usize {
     let elems = &obj_pool[data.as_array()];
-
-    match elem_type {
-        DataType::Int => {
-            // C expects [u8; 4] for ints
-            let bytes: Box<[u8]> = elems
-                .iter()
-                .flat_map(|e| e.as_int().to_ne_bytes())
-                .collect();
-            let ptr = bytes.as_ptr() as u64;
-            keep_alive.push(bytes);
-            ptr
+    let first_array_element = unsafe { elems.get_unchecked(0) };
+    if first_array_element.is_int() {
+        // C expects [u8; 4] for ints
+        let mut bytes = Box::new_uninit_slice(elems.len() * 4);
+        for (i, e) in elems.iter().enumerate() {
+            unsafe {
+                write_bytes_at_offset(&mut bytes, i * 4, &e.as_int().to_ne_bytes());
+            }
         }
-
+        keep_buffer_alive(bytes, keep_alive)
+    } else if first_array_element.is_float() {
         // C expects [u8; 8] for doubles
-        DataType::Float => {
-            let bytes: Box<[u8]> = elems
-                .iter()
-                .flat_map(|e| e.as_float().to_ne_bytes())
-                .collect();
-            let ptr = bytes.as_ptr() as u64;
-            keep_alive.push(bytes);
-            ptr
+        let mut bytes = Box::new_uninit_slice(elems.len() * 8);
+        for (i, e) in elems.iter().enumerate() {
+            unsafe {
+                write_bytes_at_offset(&mut bytes, i * 8, &e.as_float().to_ne_bytes());
+            }
         }
+        keep_buffer_alive(bytes, keep_alive)
+    } else if first_array_element.is_string() {
         // builds a char** from null-terminated strings
-        DataType::String => {
-            let mut ptrs: Vec<usize> = Vec::with_capacity(elems.len());
-            for e in elems {
-                let bytes = std::ffi::CString::new(e.as_str(string_pool))
-                    .expect("interior null byte in string passed to C")
-                    .into_bytes_with_nul()
-                    .into_boxed_slice();
-                ptrs.push(bytes.as_ptr() as usize);
-                keep_alive.push(bytes);
+        let mut ptr_bytes = Box::new_uninit_slice(elems.len() * 8);
+        for (i, e) in elems.iter().enumerate() {
+            let bytes = std::ffi::CString::new(e.as_str(string_pool))
+                .expect("interior null byte in string passed to C")
+                .into_bytes_with_nul()
+                .into_boxed_slice();
+            let p = bytes.as_ptr() as usize;
+            keep_alive.push(bytes);
+            unsafe {
+                write_bytes_at_offset(&mut ptr_bytes, i * 8, &p.to_ne_bytes());
             }
-            let ptr_bytes: Box<[u8]> = ptrs.iter().flat_map(|p| p.to_ne_bytes()).collect();
-            let ptr = ptr_bytes.as_ptr() as u64;
-            keep_alive.push(ptr_bytes);
-            ptr
         }
-        DataType::Array(Some(inner)) => {
-            let mut ptrs: Vec<usize> = Vec::with_capacity(elems.len());
-            for e in elems {
-                ptrs.push(array_to_c_ptr(*e, inner, obj_pool, string_pool, keep_alive) as usize);
+        keep_buffer_alive(ptr_bytes, keep_alive)
+    } else if first_array_element.is_array() {
+        let mut ptr_bytes = Box::new_uninit_slice(elems.len() * 8);
+        for (i, e) in elems.iter().enumerate() {
+            let ptr = array_to_c_ptr(*e, obj_pool, string_pool, keep_alive);
+            unsafe {
+                write_bytes_at_offset(&mut ptr_bytes, i * 8, &ptr.to_ne_bytes());
             }
-            let ptr_bytes: Box<[u8]> = ptrs.iter().flat_map(|p| p.to_ne_bytes()).collect();
-            let ptr = ptr_bytes.as_ptr() as u64;
-            keep_alive.push(ptr_bytes);
-            ptr
         }
-        // Any other element type has no C equivalent
-        t => unreachable!("Unsupported array element type for C FFI: {t:?}"),
+        keep_buffer_alive(ptr_bytes, keep_alive)
+    }
+    // Any other element type has no C equivalent
+    else {
+        unsafe { unreachable_unchecked() }
     }
 }
 
@@ -117,7 +132,7 @@ fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usi
         if field.is_int() {
             elem_size = 4;
             elem_alignment = 4;
-        } else if field.is_float() || field.is_array() || field.is_str() {
+        } else if field.is_float() || field.is_array() || field.is_string() {
             elem_size = 8;
             elem_alignment = 8;
         } else if field.is_struct() {
@@ -181,27 +196,6 @@ fn get_struct_size_datatype(
     )
 }
 
-fn data_to_datatype(elem: Data, obj_pool: &ObjectPool) -> DataType {
-    if elem.is_int() {
-        DataType::Int
-    } else if elem.is_float() {
-        DataType::Float
-    } else if elem.is_str() {
-        DataType::String
-    } else if elem.is_bool() {
-        DataType::Bool
-    } else if elem.is_null() {
-        DataType::Null
-    } else if elem.is_array() {
-        DataType::Array(Some(Box::from(data_to_datatype(
-            obj_pool[elem.as_array()][0],
-            obj_pool,
-        ))))
-    } else {
-        unsafe { unreachable_unchecked() }
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 fn keel_struct_to_c_struct(
     struct_index: usize,
@@ -217,43 +211,30 @@ fn keel_struct_to_c_struct(
             let offset = *field_offsets.get_unchecked(i);
             if field.is_int() {
                 let bytes = field.as_int().to_ne_bytes();
-                for (i, b) in bytes.into_iter().enumerate() {
-                    *buf.get_unchecked_mut(offset + i) = b;
-                }
+                buf.get_unchecked_mut(offset..offset + 4)
+                    .copy_from_slice_unchecked(&bytes);
             } else if field.is_float() {
                 let bytes = field.as_float().to_ne_bytes();
-                for (i, b) in bytes.into_iter().enumerate() {
-                    *buf.get_unchecked_mut(offset + i) = b;
-                }
-            } else if field.is_str() {
+                buf.get_unchecked_mut(offset..offset + 8)
+                    .copy_from_slice_unchecked(&bytes);
+            } else if field.is_string() {
                 let bytes = std::ffi::CString::new(field.as_str(string_pool))
                     .expect("interior null byte in string passed to C")
                     .into_bytes_with_nul()
                     .into_boxed_slice();
                 let ptr = (bytes.as_ptr() as u64).to_ne_bytes();
                 keep_alive.push(bytes);
-                for (i, ptr_val) in ptr.into_iter().enumerate() {
-                    *buf.get_unchecked_mut(offset + i) = ptr_val;
-                }
+                buf.get_unchecked_mut(offset..offset + 8)
+                    .copy_from_slice_unchecked(&ptr);
             } else if field.is_array() {
-                let fst_elem = obj_pool[field.as_array()][0];
-                let ptr = array_to_c_ptr(
-                    *field,
-                    &data_to_datatype(fst_elem, obj_pool),
-                    obj_pool,
-                    string_pool,
-                    keep_alive,
-                )
-                .to_ne_bytes();
-                for (i, ptr_val) in ptr.into_iter().enumerate() {
-                    *buf.get_unchecked_mut(offset + i) = ptr_val;
-                }
+                let ptr = array_to_c_ptr(*field, obj_pool, string_pool, keep_alive).to_ne_bytes();
+                buf.get_unchecked_mut(offset..offset + 8)
+                    .copy_from_slice_unchecked(&ptr);
             } else if field.is_struct() {
                 let b =
                     keel_struct_to_c_struct(field.as_struct(), obj_pool, string_pool, keep_alive);
-                for i in 0..b.len() {
-                    *buf.get_unchecked_mut(offset + i) = *b.get_unchecked(i);
-                }
+                buf.get_unchecked_mut(offset..offset + b.len())
+                    .copy_from_slice_unchecked(&b);
             } else {
                 unreachable_unchecked()
             }
@@ -276,23 +257,30 @@ fn c_struct_to_keel_struct(
     string_live: &mut Vec<bool>,
     structs: &[Struct],
 ) -> Vec<Data> {
-    let mut buf: Vec<Data> = Vec::with_capacity(4);
+    let mut buf: Vec<Data> = Vec::new();
+    buf.reserve_exact(struct_fields.len());
     for (i, (_, field_type, _)) in struct_fields.iter().enumerate() {
         let field_offset = *unsafe { field_offsets.get_unchecked(i) };
         match field_type {
             DataType::Int => {
                 let mut bytes: [u8; 4] = [0; 4];
-                bytes.copy_from_slice(&c_struct[field_offset..(field_offset + 4)]);
+                unsafe {
+                    bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 4)]);
+                }
                 buf.push(Data::int(i32::from_ne_bytes(bytes)));
             }
             DataType::Float => {
                 let mut bytes: [u8; 8] = [0; 8];
-                bytes.copy_from_slice(&c_struct[field_offset..(field_offset + 8)]);
+                unsafe {
+                    bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 8)]);
+                }
                 buf.push(Data::float(f64::from_ne_bytes(bytes)));
             }
             DataType::String => {
                 let mut bytes: [u8; 8] = [0; 8];
-                bytes.copy_from_slice(&c_struct[field_offset..(field_offset + 8)]);
+                unsafe {
+                    bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 8)]);
+                }
                 let ptr = usize::from_ne_bytes(bytes) as *const std::ffi::c_char;
                 buf.push(if ptr.is_null() {
                     NULL
@@ -353,7 +341,7 @@ fn obj_eq(
     if x.tag() != y.tag() {
         return false;
     }
-    if x.is_str() && y.is_str() {
+    if x.is_string() && y.is_string() {
         return x.as_str(string_pool) == y.as_str(string_pool);
     }
     if (x.is_array() || x.is_struct()) && (y.is_array() || y.is_struct()) {
@@ -403,6 +391,9 @@ struct CallFrame {
 pub trait UncheckedVecOps<T> {
     fn pop_unchecked(&mut self) -> T;
 }
+pub trait UncheckedSliceOps<T: Copy> {
+    unsafe fn copy_from_slice_unchecked(&mut self, src: &[T]);
+}
 
 impl<T> UncheckedVecOps<T> for Vec<T> {
     #[inline(always)]
@@ -413,6 +404,14 @@ impl<T> UncheckedVecOps<T> for Vec<T> {
             self.set_len(new_len);
             self.as_mut_ptr().add(new_len).read()
         }
+    }
+}
+
+impl<T: Copy> UncheckedSliceOps<T> for [T] {
+    #[inline(always)]
+    unsafe fn copy_from_slice_unchecked(&mut self, src: &[T]) {
+        debug_assert_eq!(self.len(), src.len());
+        unsafe { core::ptr::copy_nonoverlapping(src.as_ptr(), self.as_mut_ptr(), self.len()) };
     }
 }
 
@@ -512,7 +511,7 @@ pub fn execute(
     Pools {
         objs: obj_pool,
         maps: map_pool,
-        strings: string_pool,
+        strings: str_pool,
     }: &mut Pools,
     err_ctx: &ErrorCtx,
     fn_registers: &[Vec<u16>],
@@ -534,13 +533,17 @@ pub fn execute(
 
     let mut free_arrays: Vec<u32> = Vec::with_capacity(obj_pool.len());
     let mut free_maps: Vec<u32> = Vec::with_capacity(map_pool.len());
-    let mut free_strings: Vec<u16> = Vec::with_capacity(string_pool.len());
+    let mut free_strings: Vec<u16> = Vec::with_capacity(str_pool.len());
     let mut array_live: Vec<bool> = Vec::new();
     let mut map_live: Vec<bool> = Vec::new();
     let mut string_live: Vec<bool> = Vec::new();
 
-    let mut dyn_lib_args: Vec<u64> = Vec::new();
-    let mut dyn_lib_args_structs: Vec<Option<usize>> = Vec::new();
+    enum FFIArg {
+        Value(u64),
+        KeepAliveIndex(usize),
+    }
+
+    let mut dyn_lib_args: Vec<FFIArg> = Vec::new();
     let mut keep_alive: Vec<Box<[u8]>> = Vec::new();
     let mut obj_gc_stack: Vec<Data> = Vec::with_capacity(obj_pool.len());
 
@@ -555,7 +558,7 @@ pub fn execute(
             Data::str(
                 $e,
                 obj_pool,
-                string_pool,
+                str_pool,
                 r,
                 &recursion_stack,
                 &mut free_strings,
@@ -569,7 +572,7 @@ pub fn execute(
             Data::string(
                 $e,
                 obj_pool,
-                string_pool,
+                str_pool,
                 r,
                 &recursion_stack,
                 &mut free_strings,
@@ -694,61 +697,53 @@ pub fn execute(
                 let func = unsafe { dyn_libs.get_unchecked(fn_id as usize) };
                 let args_len = args.len();
                 dyn_lib_args.clear();
-                dyn_lib_args_structs.clear();
+                dyn_lib_args.reserve_exact(args_len);
                 keep_alive.clear();
 
-                for idx in 0..args.len() {
+                for idx in 0..args_len {
                     let data = r[unsafe { *args.get_unchecked(idx) }];
-                    dyn_lib_args.push({
-                        match func.get_arg(idx) {
-                            DataType::Int => data.as_int() as u64,
-                            DataType::Float => data.as_float().to_bits(),
-                            DataType::String => {
-                                let bytes = if let Ok(b) =
-                                    std::ffi::CString::new(data.as_str(string_pool))
-                                {
-                                    b.into_bytes_with_nul().into_boxed_slice()
-                                } else {
-                                    error_with_catch!(ErrType::NullByteInString, 'main);
-                                };
-                                let ptr = bytes.as_ptr() as u64;
-                                keep_alive.push(bytes);
-                                ptr
-                            }
-                            DataType::Array(Some(inner)) => {
-                                array_to_c_ptr(data, inner, obj_pool, string_pool, &mut keep_alive)
-                            }
-                            DataType::Struct(_) => {
-                                let b = keel_struct_to_c_struct(
-                                    data.as_struct(),
-                                    obj_pool,
-                                    string_pool,
-                                    &mut keep_alive,
-                                );
-                                keep_alive.push(Box::from(b));
-                                0
-                            }
-                            _ => unreachable!(),
-                        }
-                    });
-                    if data.is_struct() {
-                        dyn_lib_args_structs.push(Some(keep_alive.len() - 1));
+                    dyn_lib_args.push(if data.is_int() {
+                        FFIArg::Value(data.as_int() as u64)
+                    } else if data.is_float() {
+                        FFIArg::Value(data.as_float().to_bits())
+                    } else if data.is_string() {
+                        let bytes = if let Ok(b) = std::ffi::CString::new(data.as_str(str_pool)) {
+                            b.into_bytes_with_nul().into_boxed_slice()
+                        } else {
+                            error_with_catch!(ErrType::NullByteInString, 'main);
+                        };
+                        let ptr = bytes.as_ptr() as u64;
+                        keep_alive.push(bytes);
+                        FFIArg::Value(ptr)
+                    } else if data.is_array() {
+                        FFIArg::Value(
+                            array_to_c_ptr(data, obj_pool, str_pool, &mut keep_alive) as u64
+                        )
+                    } else if data.is_struct() {
+                        let b = keel_struct_to_c_struct(
+                            data.as_struct(),
+                            obj_pool,
+                            str_pool,
+                            &mut keep_alive,
+                        );
+                        keep_alive.push(Box::from(b));
+                        FFIArg::KeepAliveIndex(keep_alive.len() - 1)
                     } else {
-                        dyn_lib_args_structs.push(None);
-                    }
+                        unsafe { unreachable_unchecked() }
+                    });
                 }
                 args.clear();
 
                 // Args converted from Data to libffi args are stored here
-                let mut ffi_args: Vec<libffi::middle::Arg> = Vec::with_capacity(args_len);
-                for (i, x) in dyn_lib_args.iter().enumerate() {
-                    if let Some(idx) = unsafe { dyn_lib_args_structs.get_unchecked(i) } {
-                        ffi_args.push(libffi::middle::Arg::new(unsafe {
-                            keep_alive.get_unchecked(*idx).as_ref()
-                        }));
-                    } else {
-                        ffi_args.push(libffi::middle::Arg::new(x));
-                    }
+                let mut ffi_args: Vec<libffi::middle::Arg> = Vec::new();
+                ffi_args.reserve_exact(args_len);
+                for arg in &dyn_lib_args {
+                    ffi_args.push(match arg {
+                        FFIArg::Value(arg_value) => libffi::middle::Arg::new(arg_value),
+                        FFIArg::KeepAliveIndex(index) => libffi::middle::Arg::new(unsafe {
+                            keep_alive.get_unchecked(*index).as_ref()
+                        }),
+                    });
                 }
 
                 // Call the function, and convert the result back into Data
@@ -788,7 +783,7 @@ pub fn execute(
                                 &return_buf,
                                 &field_offsets,
                                 obj_pool,
-                                string_pool,
+                                str_pool,
                                 struct_fields,
                                 r,
                                 &recursion_stack,
@@ -816,8 +811,8 @@ pub fn execute(
             Instr::AddStr(o1, o2, dest) => {
                 let d1 = r[o1];
                 let d2 = r[o2];
-                let left = d1.as_str(string_pool);
-                let right = d2.as_str(string_pool);
+                let left = d1.as_str(str_pool);
+                let right = d2.as_str(str_pool);
                 let mut s = String::with_capacity(left.len() + right.len());
                 s.push_str(left);
                 s.push_str(right);
@@ -962,7 +957,7 @@ pub fn execute(
                 r[dest] = (r[o1] == r[o2]).into();
             }
             Instr::ObjEq(o1, o2, dest) => {
-                r[dest] = obj_eq(r[o1], r[o2], obj_pool, map_pool, string_pool).into();
+                r[dest] = obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool).into();
             }
             Instr::NotEqJmp(o1, o2, jump_size) => {
                 if r[o1] != r[o2] {
@@ -971,13 +966,13 @@ pub fn execute(
                 }
             }
             Instr::ObjNotEqJmp(o1, o2, jump_size) => {
-                if !obj_eq(r[o1], r[o2], obj_pool, map_pool, string_pool) {
+                if !obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
                     i += jump_size as usize;
                     continue;
                 }
             }
             Instr::StrNotEqJmp(o1, o2, jump_size) => {
-                if r[o1].as_str(string_pool) != r[o2].as_str(string_pool) {
+                if r[o1].as_str(str_pool) != r[o2].as_str(str_pool) {
                     i += jump_size as usize;
                     continue;
                 }
@@ -986,13 +981,13 @@ pub fn execute(
                 r[dest] = (r[o1] != r[o2]).into();
             }
             Instr::ObjNotEq(o1, o2, dest) => {
-                r[dest] = (!obj_eq(r[o1], r[o2], obj_pool, map_pool, string_pool)).into();
+                r[dest] = (!obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool)).into();
             }
             Instr::StrEq(o1, o2, dest) => {
-                r[dest] = (r[o1].as_str(string_pool) == r[o2].as_str(string_pool)).into();
+                r[dest] = (r[o1].as_str(str_pool) == r[o2].as_str(str_pool)).into();
             }
             Instr::StrNotEq(o1, o2, dest) => {
-                r[dest] = (r[o1].as_str(string_pool) != r[o2].as_str(string_pool)).into();
+                r[dest] = (r[o1].as_str(str_pool) != r[o2].as_str(str_pool)).into();
             }
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r[o1] == r[o2] {
@@ -1001,13 +996,13 @@ pub fn execute(
                 }
             }
             Instr::ObjEqJmp(o1, o2, jump_size) => {
-                if obj_eq(r[o1], r[o2], obj_pool, map_pool, string_pool) {
+                if obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
                     i += jump_size as usize;
                     continue;
                 }
             }
             Instr::StrEqJmp(o1, o2, jump_size) => {
-                if r[o1].as_str(string_pool) == r[o2].as_str(string_pool) {
+                if r[o1].as_str(str_pool) == r[o2].as_str(str_pool) {
                     i += jump_size as usize;
                     continue;
                 }
@@ -1107,8 +1102,8 @@ pub fn execute(
             }
             Instr::Print(tgt) => {
                 let tgt = r[tgt];
-                if tgt.is_str() {
-                    writeln!(handle, "{}", tgt.as_str(string_pool)).unwrap();
+                if tgt.is_string() {
+                    writeln!(handle, "{}", tgt.as_str(str_pool)).unwrap();
                 } else if tgt.is_int() {
                     writeln!(handle, "{}", tgt.as_int()).unwrap();
                 } else if tgt.is_float() {
@@ -1125,7 +1120,7 @@ pub fn execute(
                         write!(
                             handle,
                             "{}",
-                            item.format(obj_pool, string_pool, map_pool, structs, false)
+                            item.format(obj_pool, str_pool, map_pool, structs, false)
                         )
                         .unwrap();
                     }
@@ -1143,7 +1138,7 @@ pub fn execute(
                             handle,
                             "{}:{}",
                             unsafe { &s_fields.get_unchecked(idx).0 },
-                            item.format(obj_pool, string_pool, map_pool, structs, false)
+                            item.format(obj_pool, str_pool, map_pool, structs, false)
                         )
                         .unwrap();
                     }
@@ -1158,8 +1153,8 @@ pub fn execute(
                         write!(
                             handle,
                             "{}:{}",
-                            key.format(obj_pool, string_pool, map_pool, structs, false),
-                            val.format(obj_pool, string_pool, map_pool, structs, false),
+                            key.format(obj_pool, str_pool, map_pool, structs, false),
+                            val.format(obj_pool, str_pool, map_pool, structs, false),
                         )
                         .unwrap();
                     }
@@ -1184,13 +1179,13 @@ pub fn execute(
             Instr::SetElementString(string_reg_id, new_str_reg_id, idx) => {
                 let index = r[idx].as_int();
                 let temp_str_reg_id = r[string_reg_id];
-                let source_string = temp_str_reg_id.as_str(string_pool);
+                let source_string = temp_str_reg_id.as_str(str_pool);
                 if (index as usize) >= source_string.len() || index < 0 {
                     error_with_catch!(ErrType::IndexOutOfBounds(source_string.len(), index));
                 }
                 let mut temp = source_string.to_owned();
                 temp.remove(index as usize);
-                temp.insert_str(index as usize, r[new_str_reg_id].as_str(string_pool));
+                temp.insert_str(index as usize, r[new_str_reg_id].as_str(str_pool));
                 r[string_reg_id] = string!(temp);
             }
             Instr::SetFieldStruct(struct_reg_id, new_elem_reg_id, idx) => {
@@ -1258,7 +1253,7 @@ pub fn execute(
             Instr::GetIndexString(tgt, index, dest) => {
                 let idx = r[index].as_int();
                 let tgt_data = r[tgt];
-                let bytes = tgt_data.as_str(string_pool).as_bytes();
+                let bytes = tgt_data.as_str(str_pool).as_bytes();
                 if (idx as usize) >= bytes.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(bytes.len(), idx));
                 }
@@ -1271,7 +1266,7 @@ pub fn execute(
             Instr::GetSliceString(str_reg_id, idx_start, dest_reg_id) => {
                 let idx_start = r[idx_start].as_int();
                 let idx_end = r[args.pop_unchecked()].as_int();
-                let s = r[str_reg_id].as_str(string_pool).to_smolstr();
+                let s = r[str_reg_id].as_str(str_pool).to_smolstr();
                 if (idx_end as usize) > s.len()
                     || (idx_start as usize) >= s.len()
                     || idx_start > idx_end
@@ -1300,7 +1295,7 @@ pub fn execute(
                     cold_path();
                     error_with_catch!(ErrType::UnknownMapKey(
                         r[key_reg_id]
-                            .format(obj_pool, string_pool, map_pool, structs, false)
+                            .format(obj_pool, str_pool, map_pool, structs, false)
                             .as_str()
                     ));
                 };
@@ -1330,19 +1325,17 @@ pub fn execute(
                 r[dest_reg] = Data::map(new_id);
             }
             Instr::CallLibFunc(LibFunc::Uppercase, source_string_reg_id, dest_reg_id) => {
-                r[dest_reg_id] =
-                    string!(r[source_string_reg_id].as_str(string_pool).to_uppercase());
+                r[dest_reg_id] = string!(r[source_string_reg_id].as_str(str_pool).to_uppercase());
             }
             Instr::CallLibFunc(LibFunc::Lowercase, source_string_reg_id, dest_reg_id) => {
-                r[dest_reg_id] =
-                    string!(r[source_string_reg_id].as_str(string_pool).to_lowercase());
+                r[dest_reg_id] = string!(r[source_string_reg_id].as_str(str_pool).to_lowercase());
             }
             Instr::CallLibFunc(LibFunc::Contains, tgt, dest) => {
                 let reg = r[tgt];
-                if reg.is_str() {
-                    let str = reg.as_str(string_pool);
+                if reg.is_string() {
+                    let str = reg.as_str(str_pool);
                     let temp_arg = r[args.pop_unchecked()];
-                    let arg = temp_arg.as_str(string_pool);
+                    let arg = temp_arg.as_str(str_pool);
                     // r[dest] = str.contains(arg).into();
                     r[dest] = memmem::find(str.as_bytes(), arg.as_bytes())
                         .is_some()
@@ -1353,20 +1346,20 @@ pub fn execute(
                 }
             }
             Instr::CallLibFunc(LibFunc::Trim, tgt, dest) => {
-                r[dest] = str!(r[tgt].as_str(string_pool).trim());
+                r[dest] = str!(r[tgt].as_str(str_pool).trim());
             }
             Instr::CallLibFunc(LibFunc::TrimSequence, tgt, dest) => {
                 let temp_arg = r[args.pop_unchecked()];
-                let arg = temp_arg.as_str(string_pool);
+                let arg = temp_arg.as_str(str_pool);
                 let chars: Vec<char> = arg.chars().collect();
-                r[dest] = str!(r[tgt].as_str(string_pool).trim_matches(&chars[..]));
+                r[dest] = str!(r[tgt].as_str(str_pool).trim_matches(&chars[..]));
             }
             Instr::CallLibFunc(LibFunc::Find, tgt, dest) => {
                 let reg = r[tgt];
-                if reg.is_str() {
-                    let str = reg.as_str(string_pool);
+                if reg.is_string() {
+                    let str = reg.as_str(str_pool);
                     let temp_elem = r[args.pop_unchecked()];
-                    let element = temp_elem.as_str(string_pool);
+                    let element = temp_elem.as_str(str_pool);
                     r[dest] = if let Some(idx) = memmem::find(str.as_bytes(), element.as_bytes()) {
                         idx as i32
                     } else {
@@ -1389,36 +1382,30 @@ pub fn execute(
             }
             Instr::CallLibFunc(LibFunc::IsFloat, tgt, dest) => {
                 let temp_tgt = r[tgt];
-                let num = temp_tgt.as_str(string_pool);
+                let num = temp_tgt.as_str(str_pool);
                 r[dest] = (num.parse::<i64>().is_err() && num.parse::<f64>().is_ok()).into();
             }
             Instr::CallLibFunc(LibFunc::IsInt, tgt, dest) => {
-                r[dest] = r[tgt].as_str(string_pool).parse::<i64>().is_ok().into();
+                r[dest] = r[tgt].as_str(str_pool).parse::<i64>().is_ok().into();
             }
             Instr::CallLibFunc(LibFunc::TrimLeft, tgt, dest) => {
-                r[dest] = str!(r[tgt].as_str(string_pool).trim_start());
+                r[dest] = str!(r[tgt].as_str(str_pool).trim_start());
             }
             Instr::CallLibFunc(LibFunc::TrimRight, tgt, dest) => {
-                r[dest] = str!(r[tgt].as_str(string_pool).trim_end());
+                r[dest] = str!(r[tgt].as_str(str_pool).trim_end());
             }
             Instr::CallLibFunc(LibFunc::TrimSequenceLeft, tgt, dest) => {
-                let chars: Vec<char> = r[args.pop_unchecked()]
-                    .as_str(string_pool)
-                    .chars()
-                    .collect();
-                r[dest] = str!(r[tgt].as_str(string_pool).trim_start_matches(&chars[..]));
+                let chars: Vec<char> = r[args.pop_unchecked()].as_str(str_pool).chars().collect();
+                r[dest] = str!(r[tgt].as_str(str_pool).trim_start_matches(&chars[..]));
             }
             Instr::CallLibFunc(LibFunc::TrimSequenceRight, tgt, dest) => {
-                let chars: Vec<char> = r[args.pop_unchecked()]
-                    .as_str(string_pool)
-                    .chars()
-                    .collect();
-                r[dest] = str!(r[tgt].as_str(string_pool).trim_end_matches(&chars[..]));
+                let chars: Vec<char> = r[args.pop_unchecked()].as_str(str_pool).chars().collect();
+                r[dest] = str!(r[tgt].as_str(str_pool).trim_end_matches(&chars[..]));
             }
             Instr::CallLibFunc(LibFunc::Repeat, tgt, dest) => {
                 let reg = r[tgt];
-                if reg.is_str() {
-                    let str = reg.as_str(string_pool);
+                if reg.is_string() {
+                    let str = reg.as_str(str_pool);
                     let repeat_count = r[args.pop_unchecked()].as_int();
                     r[dest] = string!(str.repeat(repeat_count as usize));
                 } else if reg.is_array() {
@@ -1451,7 +1438,7 @@ pub fn execute(
                 }
             }
             Instr::CallLibFunc(LibFunc::Reverse, tgt, dest) => {
-                r[dest] = string!(r[tgt].as_str(string_pool).chars().rev().collect::<String>());
+                r[dest] = string!(r[tgt].as_str(str_pool).chars().rev().collect::<String>());
             }
             Instr::CallLibFuncVoid(LibFuncVoid::Reverse, tgt, _) => {
                 obj_pool.get_mut(r[tgt].as_array()).reverse();
@@ -1463,8 +1450,8 @@ pub fn execute(
                 let reg = r[tgt];
                 if reg.is_int() {
                     r[dest] = (reg.as_int() as f64).into();
-                } else if reg.is_str() {
-                    let str = reg.as_str(string_pool);
+                } else if reg.is_string() {
+                    let str = reg.as_str(str_pool);
                     r[dest] = if let Ok(f) = lexical_core::parse::<f64>(str.as_bytes()) {
                         f.into()
                     } else {
@@ -1476,8 +1463,8 @@ pub fn execute(
                 let reg = r[tgt];
                 if reg.is_float() {
                     r[dest] = (reg.as_float() as i32).into();
-                } else if reg.is_str() {
-                    let str = reg.as_str(string_pool);
+                } else if reg.is_string() {
+                    let str = reg.as_str(str_pool);
                     r[dest] = if let Ok(i) = lexical_core::parse::<i32>(str.as_bytes()) {
                         i.into()
                     } else {
@@ -1496,19 +1483,19 @@ pub fn execute(
                     str!(zmij::Buffer::new().format(value.as_float()))
                 } else if value.is_bool() {
                     Data::small_str(if value.as_bool() { "true" } else { "false" })
-                } else if value.is_str() {
+                } else if value.is_string() {
                     value
                 } else {
                     str!(
                         value
-                            .format(obj_pool, string_pool, map_pool, structs, false)
+                            .format(obj_pool, str_pool, map_pool, structs, false)
                             .as_str()
                     )
                 };
             }
             Instr::CallLibFunc(LibFunc::Bool, tgt, dest) => {
                 let temp_tgt = r[tgt];
-                let str = temp_tgt.as_str(string_pool);
+                let str = temp_tgt.as_str(str_pool);
                 r[dest] = if str == "true" {
                     TRUE
                 } else if str == "false" {
@@ -1523,7 +1510,7 @@ pub fn execute(
             #[cfg(not(target_arch = "wasm32"))]
             Instr::CallLibFunc(LibFunc::Input, tgt, dest) => {
                 let temp_tgt = r[tgt];
-                let str_msg = temp_tgt.as_str(string_pool);
+                let str_msg = temp_tgt.as_str(str_pool);
                 write!(handle, "{str_msg}").unwrap();
                 std::io::stdout().flush().unwrap();
                 let mut line = String::new();
@@ -1545,8 +1532,8 @@ pub fn execute(
                 let reg = r[tgt];
                 if reg.is_array() {
                     r[dest] = (obj_pool[reg.as_array()].len() as i32).into();
-                } else if reg.is_str() {
-                    r[dest] = (reg.as_str(string_pool).len() as i32).into();
+                } else if reg.is_string() {
+                    r[dest] = (reg.as_str(str_pool).len() as i32).into();
                 } else if reg.is_map() {
                     r[dest] = (map_pool[reg.as_map()].len() as i32).into();
                 } else {
@@ -1555,27 +1542,27 @@ pub fn execute(
             }
             Instr::CallLibFunc(LibFunc::StartsWith, source_register, dest_register) => {
                 r[dest_register] = r[source_register]
-                    .as_str(string_pool)
-                    .starts_with(r[args.pop_unchecked()].as_str(string_pool))
+                    .as_str(str_pool)
+                    .starts_with(r[args.pop_unchecked()].as_str(str_pool))
                     .into();
             }
             Instr::CallLibFunc(LibFunc::EndsWith, source_register, dest_register) => {
                 r[dest_register] = r[source_register]
-                    .as_str(string_pool)
-                    .ends_with(r[args.pop_unchecked()].as_str(string_pool))
+                    .as_str(str_pool)
+                    .ends_with(r[args.pop_unchecked()].as_str(str_pool))
                     .into();
             }
             #[allow(clippy::no_effect_replace)]
             Instr::CallLibFunc(LibFunc::Replace, source_register, dest_register) => {
-                r[dest_register] = string!(r[source_register].as_str(string_pool).replace(
-                    r[args.pop_unchecked()].as_str(string_pool),
-                    r[args.pop_unchecked()].as_str(string_pool),
+                r[dest_register] = string!(r[source_register].as_str(str_pool).replace(
+                    r[args.pop_unchecked()].as_str(str_pool),
+                    r[args.pop_unchecked()].as_str(str_pool),
                 ));
             }
             Instr::CallLibFunc(LibFunc::Split, source_register, dest_register) => {
                 let source = r[source_register];
                 let separator = unsafe { args.pop_unchecked() };
-                if source.is_str() {
+                if source.is_string() {
                     let output_str_reg_id = alloc_array(
                         obj_pool,
                         map_pool,
@@ -1587,9 +1574,9 @@ pub fn execute(
                         &mut map_live,
                         &mut obj_gc_stack,
                     );
-                    let source = source.as_str(string_pool);
+                    let source = source.as_str(str_pool);
                     let separator_data = r[separator];
-                    let separator = separator_data.as_str(string_pool);
+                    let separator = separator_data.as_str(str_pool);
                     let output = obj_pool.get_mut(output_str_reg_id as usize);
                     output.clear();
                     output.reserve(source.len() / 4);
@@ -1601,11 +1588,11 @@ pub fn execute(
                             if part.len() <= 6 {
                                 Data::small_str(part)
                             } else if let Some(id) = free_strings.pop() {
-                                part.clone_into(&mut string_pool[id as usize]);
+                                part.clone_into(&mut str_pool[id as usize]);
                                 Data::large_str_id(id as u64)
                             } else {
-                                let id = string_pool.len() as u64;
-                                string_pool.push(part.to_owned());
+                                let id = str_pool.len() as u64;
+                                str_pool.push(part.to_owned());
                                 Data::large_str_id(id)
                             }
                         });
@@ -1616,15 +1603,15 @@ pub fn execute(
                         if part.len() <= 6 {
                             Data::small_str(part)
                         } else if let Some(id) = free_strings.pop() {
-                            part.clone_into(&mut string_pool[id as usize]);
+                            part.clone_into(&mut str_pool[id as usize]);
                             Data::large_str_id(id as u64)
                         } else {
-                            let id = string_pool.len() as u64;
-                            string_pool.push(part.to_owned());
+                            let id = str_pool.len() as u64;
+                            str_pool.push(part.to_owned());
                             Data::large_str_id(id)
                         }
                     });
-                    raise_string_gc_threshold(&mut gc_string_threshold, string_pool.len());
+                    raise_string_gc_threshold(&mut gc_string_threshold, str_pool.len());
                     r[dest_register] = Data::array(output_str_reg_id);
                 } else if source.is_array() {
                     let source_array_id = source.as_array();
@@ -1710,13 +1697,11 @@ pub fn execute(
             }
             Instr::CallLibFunc(LibFunc::JoinStringArray, tgt, dest) => {
                 let temp_separator: Option<Data> = args.pop().map(|arg| r[arg]);
-                let separator = temp_separator
-                    .as_ref()
-                    .map_or("", |d| d.as_str(string_pool));
+                let separator = temp_separator.as_ref().map_or("", |d| d.as_str(str_pool));
                 let array = &obj_pool[r[tgt].as_array()];
                 let total_len: usize = array
                     .iter()
-                    .map(|x| x.as_str(string_pool).len())
+                    .map(|x| x.as_str(str_pool).len())
                     .sum::<usize>()
                     + separator
                         .len()
@@ -1726,7 +1711,7 @@ pub fn execute(
                     if i > 0 {
                         output.push_str(separator);
                     }
-                    output.push_str(x.as_str(string_pool));
+                    output.push_str(x.as_str(str_pool));
                 }
                 r[dest] = string!(output);
             }
@@ -1734,7 +1719,7 @@ pub fn execute(
             // FILE SYSTEM FUNCTIONS
             // -----
             Instr::CallLibFunc(LibFunc::FsRead, path, dest_reg_id) => {
-                r[dest_reg_id] = string!(match fs::read_to_string(r[path].as_str(string_pool)) {
+                r[dest_reg_id] = string!(match fs::read_to_string(r[path].as_str(str_pool)) {
                     Ok(p) => p,
                     Err(e) => {
                         cold_path();
@@ -1743,7 +1728,7 @@ pub fn execute(
                 });
             }
             Instr::CallLibFunc(LibFunc::FsExists, path, dest_reg_id) => {
-                r[dest_reg_id] = match fs::exists(r[path].as_str(string_pool)) {
+                r[dest_reg_id] = match fs::exists(r[path].as_str(str_pool)) {
                     Ok(b) => b.into(),
                     Err(e) => {
                         error_with_catch!(ErrType::from(e.kind()));
@@ -1752,9 +1737,7 @@ pub fn execute(
             }
             // Overwrites a file, will create it if it doesn't exist
             Instr::CallLibFuncVoid(LibFuncVoid::FsWrite, path, contents) => {
-                if let Err(e) =
-                    fs::write(r[path].as_str(string_pool), r[contents].as_str(string_pool))
-                {
+                if let Err(e) = fs::write(r[path].as_str(str_pool), r[contents].as_str(str_pool)) {
                     error_with_catch!(ErrType::from(e.kind()));
                 }
             }
@@ -1762,10 +1745,10 @@ pub fn execute(
             Instr::CallLibFuncVoid(LibFuncVoid::FsAppend, path, contents) => {
                 match fs::OpenOptions::new()
                     .append(true)
-                    .open(r[path].as_str(string_pool))
+                    .open(r[path].as_str(str_pool))
                 {
                     Ok(mut f) => {
-                        if let Err(e) = f.write_all(r[contents].as_str(string_pool).as_bytes()) {
+                        if let Err(e) = f.write_all(r[contents].as_str(str_pool).as_bytes()) {
                             error_with_catch!(ErrType::from(e.kind()));
                         }
                     }
@@ -1776,13 +1759,13 @@ pub fn execute(
             }
             // Deletes the file located at `path`, throwing an error if it doesn't exist.
             Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, _) => {
-                if let Err(e) = fs::remove_file(r[path].as_str(string_pool)) {
+                if let Err(e) = fs::remove_file(r[path].as_str(str_pool)) {
                     error_with_catch!(ErrType::from(e.kind()));
                 }
             }
             // Deletes the empty directory located at `path`
             Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, _) => {
-                if let Err(e) = fs::remove_dir(r[path].as_str(string_pool)) {
+                if let Err(e) = fs::remove_dir(r[path].as_str(str_pool)) {
                     error_with_catch!(ErrType::from(e.kind()));
                 }
             }
@@ -1830,10 +1813,8 @@ pub fn execute(
                                 .partial_cmp(&b.as_float())
                                 .unwrap_or(std::cmp::Ordering::Equal)
                         });
-                    } else if array[0].is_str() {
-                        array.sort_unstable_by(|a, b| {
-                            a.as_str(string_pool).cmp(b.as_str(string_pool))
-                        });
+                    } else if array[0].is_string() {
+                        array.sort_unstable_by(|a, b| a.as_str(str_pool).cmp(b.as_str(str_pool)));
                     }
                 }
             }
@@ -1849,7 +1830,7 @@ pub fn execute(
                 error_handles.pop_unchecked();
             },
             Instr::ThrowError(error_reg_id) => {
-                error_with_catch!(ErrType::Custom(r[error_reg_id].as_str(string_pool)));
+                error_with_catch!(ErrType::Custom(r[error_reg_id].as_str(str_pool)));
             }
             Instr::Halt(code) => {
                 cold_path();

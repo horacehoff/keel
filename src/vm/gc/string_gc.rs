@@ -50,7 +50,5 @@ fn track_strings(array_pool: &ObjectPool, array: &Vec<Data>, live: &mut [bool]) 
 
 #[inline(always)]
 pub fn raise_string_gc_threshold(gc_string_threshold: &mut u32, string_pool_len: usize) {
-    if string_pool_len >= *gc_string_threshold as usize {
-        *gc_string_threshold = string_pool_len.next_power_of_two().min(u32::MAX as usize) as u32;
-    }
+    *gc_string_threshold = string_pool_len.next_power_of_two().min(u32::MAX as usize) as u32;
 }

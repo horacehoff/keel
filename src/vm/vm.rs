@@ -18,7 +18,6 @@ use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
 use crate::map_gc::alloc_map;
-use crate::string_gc::raise_string_gc_threshold;
 use lexical_core::FormattedSize;
 use memchr::memmem;
 use smol_strc::SmolStr;
@@ -553,20 +552,6 @@ pub fn execute(
 
     let mut error_handles: Vec<ErrorCatch> = Vec::new();
 
-    macro_rules! str {
-        ($e: expr) => {
-            Data::str(
-                $e,
-                obj_pool,
-                str_pool,
-                r,
-                &recursion_stack,
-                &mut free_strings,
-                &mut gc_string_threshold,
-                &mut string_live,
-            )
-        };
-    }
     macro_rules! string {
         ($e: expr) => {
             Data::string(
@@ -591,7 +576,7 @@ pub fn execute(
                     args.set_len(err_handle.args_len as usize);
                     call_frames.set_len(err_handle.call_frames_len as usize);
                 }
-                r[err_handle.error_reg] = str!($err.kind());
+                r[err_handle.error_reg] = string!($err.kind());
                 i = err_handle.catch_loc as usize;
                 continue;
             }
@@ -605,7 +590,7 @@ pub fn execute(
                     args.set_len(err_handle.args_len as usize);
                     call_frames.set_len(err_handle.call_frames_len as usize);
                 }
-                r[err_handle.error_reg] = str!($err.kind());
+                r[err_handle.error_reg] = string!($err.kind());
                 i = err_handle.catch_loc as usize;
                 continue $label;
             }
@@ -1257,7 +1242,7 @@ pub fn execute(
                 if (idx as usize) >= bytes.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(bytes.len(), idx));
                 }
-                r[dest] = str!(unsafe {
+                r[dest] = string!(unsafe {
                     std::str::from_utf8_unchecked(std::slice::from_ref(
                         bytes.get_unchecked(idx as usize),
                     ))
@@ -1273,7 +1258,7 @@ pub fn execute(
                 {
                     error_with_catch!(ErrType::SliceOutOfBounds(s.len(), idx_start, idx_end));
                 }
-                r[dest_reg_id] = str!(&s[(idx_start as usize)..(idx_end as usize)]);
+                r[dest_reg_id] = string!(&s[(idx_start as usize)..(idx_end as usize)]);
             }
             Instr::Push(array, element) => {
                 obj_pool.get_mut(r[array].as_array()).push(r[element]);
@@ -1346,13 +1331,13 @@ pub fn execute(
                 }
             }
             Instr::CallLibFunc(LibFunc::Trim, tgt, dest) => {
-                r[dest] = str!(r[tgt].as_str(str_pool).trim());
+                r[dest] = string!(r[tgt].as_str(str_pool).trim());
             }
             Instr::CallLibFunc(LibFunc::TrimSequence, tgt, dest) => {
                 let temp_arg = r[args.pop_unchecked()];
                 let arg = temp_arg.as_str(str_pool);
                 let chars: Vec<char> = arg.chars().collect();
-                r[dest] = str!(r[tgt].as_str(str_pool).trim_matches(&chars[..]));
+                r[dest] = string!(r[tgt].as_str(str_pool).trim_matches(&chars[..]));
             }
             Instr::CallLibFunc(LibFunc::Find, tgt, dest) => {
                 let reg = r[tgt];
@@ -1389,18 +1374,18 @@ pub fn execute(
                 r[dest] = r[tgt].as_str(str_pool).parse::<i64>().is_ok().into();
             }
             Instr::CallLibFunc(LibFunc::TrimLeft, tgt, dest) => {
-                r[dest] = str!(r[tgt].as_str(str_pool).trim_start());
+                r[dest] = string!(r[tgt].as_str(str_pool).trim_start());
             }
             Instr::CallLibFunc(LibFunc::TrimRight, tgt, dest) => {
-                r[dest] = str!(r[tgt].as_str(str_pool).trim_end());
+                r[dest] = string!(r[tgt].as_str(str_pool).trim_end());
             }
             Instr::CallLibFunc(LibFunc::TrimSequenceLeft, tgt, dest) => {
                 let chars: Vec<char> = r[args.pop_unchecked()].as_str(str_pool).chars().collect();
-                r[dest] = str!(r[tgt].as_str(str_pool).trim_start_matches(&chars[..]));
+                r[dest] = string!(r[tgt].as_str(str_pool).trim_start_matches(&chars[..]));
             }
             Instr::CallLibFunc(LibFunc::TrimSequenceRight, tgt, dest) => {
                 let chars: Vec<char> = r[args.pop_unchecked()].as_str(str_pool).chars().collect();
-                r[dest] = str!(r[tgt].as_str(str_pool).trim_end_matches(&chars[..]));
+                r[dest] = string!(r[tgt].as_str(str_pool).trim_end_matches(&chars[..]));
             }
             Instr::CallLibFunc(LibFunc::Repeat, tgt, dest) => {
                 let reg = r[tgt];
@@ -1478,15 +1463,15 @@ pub fn execute(
                 r[dest] = if value.is_int() {
                     let mut buffer = [0u8; i32::FORMATTED_SIZE_DECIMAL];
                     let digits = lexical_core::write(value.as_int(), &mut buffer);
-                    str!(unsafe { str::from_utf8_unchecked(digits) })
+                    string!(unsafe { str::from_utf8_unchecked(digits) })
                 } else if value.is_float() {
-                    str!(zmij::Buffer::new().format(value.as_float()))
+                    string!(zmij::Buffer::new().format(value.as_float()))
                 } else if value.is_bool() {
                     Data::small_str(if value.as_bool() { "true" } else { "false" })
                 } else if value.is_string() {
                     value
                 } else {
-                    str!(
+                    string!(
                         value
                             .format(obj_pool, str_pool, map_pool, structs, false)
                             .as_str()
@@ -1515,7 +1500,7 @@ pub fn execute(
                 std::io::stdout().flush().unwrap();
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line).unwrap();
-                r[dest] = str!(line.trim_end_matches(['\n', '\r']));
+                r[dest] = string!(line.trim_end_matches(['\n', '\r']));
             }
             Instr::CallLibFunc(LibFunc::Floor, tgt, dest) => {
                 r[dest] = r[tgt].as_float().floor().into();
@@ -1611,7 +1596,6 @@ pub fn execute(
                             Data::large_str_id(id)
                         }
                     });
-                    raise_string_gc_threshold(&mut gc_string_threshold, str_pool.len());
                     r[dest_register] = Data::array(output_str_reg_id);
                 } else if source.is_array() {
                     let source_array_id = source.as_array();

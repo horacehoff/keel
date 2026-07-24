@@ -2148,6 +2148,7 @@ pub fn compile_expr(
 ) -> Vec<Instr> {
     let v_len = v.len();
     let fn_len = state.fns.len();
+    let symbols_len = state.namespace.symbols.len();
     let mut output: Vec<Instr> = Vec::with_capacity(input.len());
     for (idx, x) in input.iter().enumerate() {
         if let Some(id) = x.compile_with_code_context(
@@ -2165,6 +2166,7 @@ pub fn compile_expr(
     }
     v.truncate(v_len);
     state.fns.truncate(fn_len);
+    state.namespace.symbols.truncate(symbols_len);
     output
 }
 

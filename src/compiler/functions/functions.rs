@@ -37,7 +37,7 @@ pub fn check_arg_type(
     expected: &[DataType],
 ) {
     let inferred = args[arg_idx].infer_type(v, ctx, state);
-    let matches = if let DataType::Poly(polytype) = &inferred {
+    let matches = if let DataType::Union(polytype) = &inferred {
         polytype.iter().all(|x| expected.contains(x))
     } else {
         expected.contains(&inferred)

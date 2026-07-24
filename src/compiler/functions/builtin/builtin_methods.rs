@@ -46,7 +46,7 @@ pub fn builtin_methods(
     macro_rules! check_type {
         ($expected:pat,$expected_list:expr,$name:expr) => {
             if !{
-                if let DataType::Poly(polytype) = &obj_type {
+                if let DataType::Union(polytype) = &obj_type {
                     polytype.iter().all(|x| matches!(x, $expected))
                 } else {
                     matches!(obj_type, $expected)
@@ -419,7 +419,7 @@ pub fn builtin_methods(
         "join" => {
             let expected = DataType::Array(Some(Box::from(DataType::String)));
             if !{
-                if let DataType::Poly(polytype) = &obj_type {
+                if let DataType::Union(polytype) = &obj_type {
                     polytype.iter().all(|x| x == &expected)
                 } else {
                     obj_type == expected

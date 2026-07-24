@@ -396,7 +396,7 @@ end
 print(x)</code></pre></td>
 </tr>
 <tr>
-  <td><b>193.7ms</b></td>
+  <td><b>185.2ms</b></td>
   <td>2907ms</td>
   <td>535.8ms</td>
 </tr>

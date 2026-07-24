@@ -312,7 +312,7 @@ fn compile_function(
         DataType::Null
     } else {
         // If function returns anything, check if it returns the same thing each time
-        DataType::Poly(Box::from(fn_type)).check_poly()
+        DataType::Union(Box::from(fn_type)).check_poly()
     };
 
     v.truncate(v_len_before_args);

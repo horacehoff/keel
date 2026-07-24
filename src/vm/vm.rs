@@ -250,6 +250,7 @@ pub fn execute(
     let mut string_live: Vec<bool> = Vec::new();
 
     // Args converted from Data to libffi args are stored here
+    #[cfg(not(target_arch = "wasm32"))]
     let mut ffi_args: Vec<libffi::middle::Arg> = Vec::new();
     let mut dyn_lib_args: Vec<u64> = Vec::new();
     let mut keep_alive: Vec<Box<[u8]>> = Vec::new();

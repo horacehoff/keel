@@ -15,7 +15,7 @@ use smol_strc::SmolStr;
 use std::slice;
 use user_functions::handle_user_function;
 
-mod user_functions;
+pub mod user_functions;
 
 #[path = "builtin/builtin_functions.rs"]
 mod builtin_functions;

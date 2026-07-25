@@ -127,6 +127,41 @@ pub fn error_expected_function(t: &DataType, span: Span, file_idx: u16, sources:
 
 #[inline(never)]
 #[cold]
+pub fn error_function_needs_args_typed(
+    fn_name: &str,
+    span: Span,
+    fn_decl_span: (Span, u16),
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        &|| {
+            let src = &sources[file_idx as usize];
+            let fn_src = &sources[fn_decl_span.1 as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Cannot use function as a value")
+            .with_label(
+                Label::new((fn_src.filename.as_str(), fn_decl_span.0.into()))
+                    .with_message("Function is defined here")
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!("{} has an untyped argument", blue(fn_name)))
+                    .with_color(ariadne::Color::Red),
+            )
+            .with_note("Functions referenced by name need to have all of their arguments typed")
+            .finish()
+        },
+        sources,
+    );
+}
+
+#[inline(never)]
+#[cold]
 pub fn error_division_by_zero(modulo: bool, span: Span, file_idx: u16, sources: &[Source]) -> ! {
     throw_compiler_error(
         &|| {

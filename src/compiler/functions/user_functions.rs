@@ -124,7 +124,9 @@ pub fn handle_user_function(
         .collect::<Vec<DataType>>();
 
     for (i, (_, t)) in state.fns[fn_id].args.iter().enumerate() {
-        if let Some(t) = t {
+        if let Some(t) = t
+            && inferred_arg_types[i] != *t
+        {
             error_function_arg_invalid_type(
                 &inferred_arg_types[i],
                 t,
@@ -160,7 +162,6 @@ pub fn handle_user_function(
             &fn_args,
             fn_name,
             &inferred_arg_types,
-            args,
             &fn_code,
             fn_id as u16,
             is_recursive,
@@ -170,7 +171,6 @@ pub fn handle_user_function(
     // Re-derive index after possible mutation
     let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
     let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
-    let args_loc_len = state.fns[fn_id].impls[fn_impl_idx].args_loc.len();
 
     let saveframe_loc = output.len();
     let callsite_id = if is_recursive {
@@ -183,8 +183,7 @@ pub fn handle_user_function(
         None
     };
     // Move evaluated call args into the expected arg slots
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..args_loc_len {
+    for (i, arg_expr) in args.iter().enumerate() {
         let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
 
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
@@ -199,7 +198,7 @@ pub fn handle_user_function(
         }
 
         let start_len = output.len();
-        let arg_id = args[i]
+        let arg_id = arg_expr
             .compile(v, ctx, state, output, Some(tgt_id), false, true)
             .unwrap_id();
         if output.len() == start_len {
@@ -252,7 +251,6 @@ pub fn compile_function(
     fn_args: &[SmolStr],
     fn_name: &str,
     infered_arg_types: &[DataType],
-    _args: &[Expr],
     fn_code: &[Expr],
     fn_id: u16,
     is_recursive: bool,

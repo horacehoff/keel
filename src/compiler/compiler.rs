@@ -14,6 +14,7 @@ use crate::compiler::compiler_errors::error_not_literal_map_key;
 use crate::compiler::compiler_errors::error_range_invalid_type;
 use crate::compiler::compiler_errors::error_type_not_indexable;
 use crate::compiler::compiler_errors::error_unknown_namespace;
+use crate::compiler::functions::user_functions::compile_function;
 use crate::data::NULL;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
@@ -2289,6 +2290,49 @@ impl Expr {
                 }) = v.iter().rfind(|v_temp| *name == v_temp.name)
                 {
                     Some(*register_id)
+                } else if let Some(fn_id) =
+                    state
+                        .namespace
+                        .find_function(&[], name, *span, ctx.file_idx, state.sources)
+                {
+                    let arg_types: Vec<DataType> = state.fns[fn_id]
+                        .args
+                        .iter()
+                        .map(|(_, t)| t.clone().unwrap())
+                        .collect();
+
+                    let fn_impl_idx = state.fns[fn_id]
+                        .impls
+                        .iter()
+                        .position(|imp| *imp.arg_types == arg_types);
+                    if fn_impl_idx.is_none() {
+                        let fn_args = state.fns[fn_id]
+                            .args
+                            .iter()
+                            .map(|(a, _)| a.clone())
+                            .collect::<Vec<SmolStr>>();
+                        let fn_code = Rc::clone(&state.fns[fn_id].code);
+                        compile_function(
+                            output,
+                            v,
+                            ctx,
+                            state,
+                            fn_id,
+                            &fn_args,
+                            name,
+                            &arg_types,
+                            &fn_code,
+                            fn_id as u16,
+                            false,
+                            state.fns[fn_id].src_file,
+                        );
+                    }
+                    let fn_impl_idx =
+                        fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
+                    let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+
+                    state.registers.push(Data::function(loc));
+                    Some((state.registers.len() - 1) as u16)
                 } else {
                     compiler_errors::error_unknown_variable(
                         name,

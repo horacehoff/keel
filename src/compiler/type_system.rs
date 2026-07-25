@@ -9,6 +9,7 @@ use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::error_expected_function;
+use crate::compiler::compiler_errors::error_function_needs_args_typed;
 use crate::compiler::compiler_errors::error_invalid_type;
 use crate::compiler::compiler_errors::error_op;
 use crate::compiler::compiler_errors::error_struct_unknown_field;
@@ -642,14 +643,30 @@ fn track_return_flow(
 impl Expr {
     pub fn infer_type(&self, v: &mut Vec<Variable>, ctx: Ctx, state: &mut State<'_>) -> DataType {
         match self {
-            Self::Var(name, span) => v
-                .iter()
-                .rfind(|x| &x.name == name)
-                .unwrap_or_else(|| {
+            Self::Var(name, span) => {
+                if let Some(var) = v.iter().rfind(|x| &x.name == name) {
+                    var.var_type.clone()
+                } else if let Some(fn_id) =
+                    state
+                        .namespace
+                        .find_function(&[], name, *span, ctx.file_idx, state.sources)
+                {
+                    // When a function is referenced by name, there's no call site to infer argument types from
+                    // As such, functions refereced by name need to have all of their arguments typed
+                    if state.fns[fn_id].args.iter().any(|(_, t)| t.is_none()) {
+                        error_function_needs_args_typed(
+                            name,
+                            *span,
+                            (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
+                            ctx.file_idx,
+                            state.sources,
+                        );
+                    }
+                    DataType::Fn(fn_id as u16)
+                } else {
                     error_unknown_variable(name, *span, v, ctx.file_idx, state.sources);
-                })
-                .var_type
-                .clone(),
+                }
+            }
             Self::Float(_) => DataType::Float,
             Self::Int(_) => DataType::Int,
             Self::String(_) => DataType::String,
@@ -1050,7 +1067,17 @@ impl Expr {
                 let id = state.fns.len() as u16;
                 state.fns.push(Function {
                     name: fn_name,
-                    args: args.iter().map(|s| (s.clone(), None)).collect(),
+                    args: args
+                        .iter()
+                        .map(|(name, t)| {
+                            (
+                                name.clone(),
+                                t.as_ref().map(|t| {
+                                    t.to_datatype(ctx.file_idx, state.namespace, state.sources)
+                                }),
+                            )
+                        })
+                        .collect(),
                     code: Rc::from(code.clone()),
                     impls: Vec::new(),
                     is_recursive: None,

@@ -9,10 +9,12 @@ use crate::cold_path;
 use crate::compiler::expr::Expr;
 use crate::compiler::expr::Span;
 use crate::parser::Parser;
+use crate::parser::TypeExpr;
 use crate::parser::blocks::parse_block;
 use crate::parser::blocks::parse_block_expr;
 use crate::parser::parse_args;
 use crate::parser::parse_namespace;
+use crate::parser::parse_type;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 
@@ -237,7 +239,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 Token::LParen,
                 "Function arguments must be delimited by parentheses",
             );
-            let mut args: Vec<SmolStr> = Vec::with_capacity(2);
+            let mut args: Vec<(SmolStr, Option<TypeExpr>)> = Vec::with_capacity(2);
             loop {
                 let (next_token, next_token_span) = parser.next_token();
                 let Token::Identifier(arg_name) = next_token else {
@@ -247,12 +249,15 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                         ParserErr::UnexpectedToken(Token::Identifier(""), next_token, ""),
                     );
                 };
-                // parser.next_token_expect(
-                //     Token::Colon,
-                //     "Argument names and types must be separated by a colon",
-                // );
-                // let arg_type = parse_type(parser);
-                args.push(SmolStr::new(arg_name));
+                args.push((
+                    SmolStr::new(arg_name),
+                    if parser.peek_token() == Token::Colon {
+                        parser.next_token();
+                        Some(parse_type(parser))
+                    } else {
+                        None
+                    },
+                ));
                 if parser.peek_token() != Token::Comma {
                     break;
                 }

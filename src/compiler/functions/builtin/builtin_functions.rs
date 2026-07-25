@@ -12,6 +12,7 @@ use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::check_args_range;
 use crate::compiler::compiler_errors::error_expected_function;
+use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::data::Data;
 use crate::instr::Instr;
@@ -261,6 +262,22 @@ pub fn builtin_functions(
                     .map(|arg| arg.infer_type(v, ctx, state))
                     .collect::<Vec<DataType>>();
 
+                for (i, (_, t)) in state.fns[fn_id].args.iter().enumerate() {
+                    if let Some(t) = t
+                        && inferred_arg_types[i] != *t
+                    {
+                        error_function_arg_invalid_type(
+                            &inferred_arg_types[i],
+                            t,
+                            args_indexes[i],
+                            fn_name,
+                            Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
+                            ctx.file_idx,
+                            state.sources,
+                        );
+                    }
+                }
+
                 let fn_impl_idx = state.fns[fn_id]
                     .impls
                     .iter()
@@ -285,7 +302,6 @@ pub fn builtin_functions(
                         &fn_args,
                         &closure_name,
                         &inferred_arg_types,
-                        args,
                         &fn_code,
                         fn_id as u16,
                         false,
@@ -294,11 +310,10 @@ pub fn builtin_functions(
                 }
                 let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
 
-                let args_loc_len = state.fns[fn_id].impls[fn_impl_idx].args_loc.len();
-                for i in 0..args_loc_len {
+                for (i, arg_expr) in args.iter().enumerate() {
                     let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
                     let start_len = output.len();
-                    let arg_id = args[i]
+                    let arg_id = arg_expr
                         .compile(v, ctx, state, output, Some(tgt_id), false, true)
                         .unwrap_id();
                     if output.len() == start_len {

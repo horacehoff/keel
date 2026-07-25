@@ -129,6 +129,7 @@ impl Instr {
             | Self::SetInt(y, _)
             | Self::SetBool(_, y)
             | Self::CallFunc(_, y)
+            | Self::CallFuncDynamic(_, y)
             | Self::CallFuncRecursive(_, y)
             | Self::SaveFrame(_, y, _)
             | Self::AddFloat(_, _, y)
@@ -270,7 +271,8 @@ impl Instr {
             | Self::ThrowError(a)
             | Self::GetFieldStruct(a, _, _)
             | Self::NegBool(a, _)
-            | Self::ObjElemMov(a, _, _) => f(a),
+            | Self::ObjElemMov(a, _, _)
+            | Self::CallFuncDynamic(a, _) => f(a),
 
             Self::CallLibFuncVoid(func, a, b) => {
                 f(a);

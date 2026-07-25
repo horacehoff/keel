@@ -21,7 +21,7 @@ THIS SOFTWARE.
 --------
 MIT License
 Used by:
-- cc 1.3.0 - https://github.com/rust-lang/cc-rs
+- cc 1.4.0 - https://github.com/rust-lang/cc-rs
 - cfg-if 1.0.4 - https://github.com/rust-lang/cfg-if
 - find-msvc-tools 0.1.9 - https://github.com/rust-lang/cc-rs
 - js-sys 0.3.103 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys

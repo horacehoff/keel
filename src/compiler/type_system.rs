@@ -8,6 +8,7 @@ use crate::compiler::compiler_data::Function;
 use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
+use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_invalid_type;
 use crate::compiler::compiler_errors::error_op;
 use crate::compiler::compiler_errors::error_struct_unknown_field;
@@ -24,6 +25,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
+use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::compiler_data::Struct;
@@ -257,7 +259,7 @@ impl PartialEq for DataType {
             (Self::Array(Some(a)), Self::Array(Some(b))) => a == b,
             (Self::Union(a), Self::Union(b)) => a == b,
             (Self::Struct(a), Self::Struct(b)) => a == b,
-            (Self::Fn(_), Self::Fn(_)) => true,
+            (Self::Fn(fn_id), Self::Fn(fn_id_2)) => fn_id == fn_id_2,
             (Self::Map(a), Self::Map(b)) => {
                 (a.0.is_none() || b.0.is_none() || a.0 == b.0)
                     && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
@@ -850,30 +852,46 @@ impl Expr {
                             .map(|x| x.infer_type(v, ctx, state))
                             .collect::<Vec<DataType>>();
 
-                        let fn_id = state
-                            .fns
-                            .iter()
-                            .rposition(|func| func.name == function_name)
-                            .unwrap_or_else(|| {
-                                if namespace.len() == 1 {
-                                    error_unknown_function(
-                                        function_name,
-                                        *span,
-                                        state.namespace,
-                                        ctx.file_idx,
-                                        state.sources,
-                                    );
-                                } else {
-                                    error_unknown_function_in_namespace(
-                                        function_name,
-                                        state.namespace,
-                                        &namespace[..namespace.len() - 1],
-                                        *span,
-                                        ctx.file_idx,
-                                        state.sources,
-                                    );
-                                }
-                            });
+                        let fn_id = if namespace.len() == 1
+                            && let Some(var) =
+                                v.iter().rfind(|var| var.name.as_str() == function_name)
+                        {
+                            if let DataType::Fn(id) = var.var_type {
+                                id as usize
+                            } else {
+                                error_expected_function(
+                                    &var.var_type,
+                                    *span,
+                                    ctx.file_idx,
+                                    state.sources,
+                                )
+                            }
+                        } else {
+                            state
+                                .fns
+                                .iter()
+                                .rposition(|func| func.name == function_name)
+                                .unwrap_or_else(|| {
+                                    if namespace.len() == 1 {
+                                        error_unknown_function(
+                                            function_name,
+                                            *span,
+                                            state.namespace,
+                                            ctx.file_idx,
+                                            state.sources,
+                                        );
+                                    } else {
+                                        error_unknown_function_in_namespace(
+                                            function_name,
+                                            state.namespace,
+                                            &namespace[..namespace.len() - 1],
+                                            *span,
+                                            ctx.file_idx,
+                                            state.sources,
+                                        );
+                                    }
+                                })
+                        };
 
                         let func = &state.fns[fn_id];
                         // Check the return type cache
@@ -927,11 +945,7 @@ impl Expr {
                         v.truncate(v_len_before_args);
 
                         // Cache the result
-                        state
-                            .fns
-                            .iter_mut()
-                            .find(|f| f.name == function_name)
-                            .unwrap()
+                        state.fns[fn_id]
                             .return_type_cache
                             .push((Box::from(infered_arg_types), to_return.clone()));
 
@@ -1027,36 +1041,27 @@ impl Expr {
                         }) as u16,
                 )
             }
-            Self::AnonymousFunction(_, _, _) => {
-                todo!("Anonymous functions are WIP")
-                // let fn_name =
-                //     format_args!("{}{}{}", ctx.current_src_file, span.start, span.end).to_smolstr();
-                // if let Some(id) = state
-                //     .fns
-                //     .iter()
-                //     .rposition(|f| f.name == fn_name && &f.args == args)
-                // {
-                //     return DataType::Fn(id as u16);
-                // }
-                // let returns_null = check_if_returns_void(code);
-                // let mut callees = Vec::new();
-                // collect_direct_fn_calls(code, &mut callees);
-                // let id = state.fns.len() as u16;
-                // state.fns.push(Function {
-                //     name: fn_name,
-                //     args: args.clone(),
-                //     code: Rc::from(code.clone()),
-                //     impls: Vec::new(),
-                //     is_recursive: None,
-                //     returns_null,
-                //     src_file: ctx.current_src_file,
-                //     return_type_cache: Vec::new(),
-                //     direct_calls: callees.into_boxed_slice(),
-                //     name_span: *span,
-                // });
-                // state.fn_registers.push(Vec::new());
-                // // state.namespace.fns.push((x.clone(), id));
-                // DataType::Fn(id)
+            Self::AnonymousFunction(args, code, span) => {
+                let fn_name =
+                    format_args!("{}{}{}", ctx.file_idx, span.start, span.end).to_smolstr();
+                let returns_null = check_if_returns_void(code);
+                let mut callees = Vec::new();
+                collect_direct_fn_calls(code, &mut callees);
+                let id = state.fns.len() as u16;
+                state.fns.push(Function {
+                    name: fn_name,
+                    args: args.iter().map(|s| (s.clone(), None)).collect(),
+                    code: Rc::from(code.clone()),
+                    impls: Vec::new(),
+                    is_recursive: None,
+                    returns_null,
+                    src_file: ctx.file_idx,
+                    return_type_cache: Vec::new(),
+                    direct_calls: callees.into_boxed_slice(),
+                    name_span: *span,
+                });
+                state.fn_registers.push(Vec::new());
+                DataType::Fn(id)
             }
             _ => unsafe { unreachable_unchecked() },
         }

@@ -232,21 +232,12 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
         }
         // anonymous function
         Token::Function => {
-            parser.error(
-                t_span,
-                ParserErr::UnexpectedTokenStr(
-                    "Term",
-                    Token::Function,
-                    "Higher order functions are still WIP.",
-                ),
-            );
             let start = t_span.start;
             parser.next_token_expect(
                 Token::LParen,
                 "Function arguments must be delimited by parentheses",
             );
             let mut args: Vec<SmolStr> = Vec::with_capacity(2);
-            // let mut args: Vec<(SmolStr, SmolStr)> = Vec::with_capacity(2);
             loop {
                 let (next_token, next_token_span) = parser.next_token();
                 let Token::Identifier(arg_name) = next_token else {
@@ -294,8 +285,9 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                     (start, parser.last_token_end as u32).into(),
                 )
             } else {
+                let span = parser.peek_token_span();
                 parser.error(
-                    parser.peek_token_span(),
+                    span,
                     ParserErr::UnexpectedTokenStr(
                         "'->' (return type) OR '{' (function code block)",
                         next_token.unwrap(),

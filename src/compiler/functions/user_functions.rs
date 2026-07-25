@@ -14,6 +14,7 @@ use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args_user_fn;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
+use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
 use smol_strc::SmolStr;
@@ -117,7 +118,7 @@ pub fn handle_user_function(
     }
 
     // Infer arg types
-    let infered_arg_types = args
+    let inferred_arg_types = args
         .iter()
         .map(|arg| arg.infer_type(v, ctx, state))
         .collect::<Vec<DataType>>();
@@ -125,7 +126,7 @@ pub fn handle_user_function(
     for (i, (_, t)) in state.fns[fn_id].args.iter().enumerate() {
         if let Some(t) = t {
             error_function_arg_invalid_type(
-                &infered_arg_types[i],
+                &inferred_arg_types[i],
                 t,
                 args_indexes[i],
                 fn_name,
@@ -140,12 +141,10 @@ pub fn handle_user_function(
     let fn_impl_idx = state.fns[fn_id]
         .impls
         .iter()
-        .position(|fn_impl| *fn_impl.arg_types == infered_arg_types);
+        .position(|fn_impl| *fn_impl.arg_types == inferred_arg_types);
 
     if fn_impl_idx.is_none() {
         // If it hasn't, compile it (which adds it to the function's implementation list)
-
-        // Clone only when actually compiling a new specialisation
         let fn_args = state.fns[fn_id]
             .args
             .iter()
@@ -160,7 +159,7 @@ pub fn handle_user_function(
             fn_id,
             &fn_args,
             fn_name,
-            &infered_arg_types,
+            &inferred_arg_types,
             args,
             &fn_code,
             fn_id as u16,
@@ -188,7 +187,14 @@ pub fn handle_user_function(
     for i in 0..args_loc_len {
         let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
 
-        if matches!(infered_arg_types[i], DataType::Fn(_)) {
+        if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
+            let loc = state.fns[arg_fn_id as usize]
+                .impls
+                .first()
+                .map_or(0, |imp| imp.loc);
+            let fn_reg_id = state.registers.len() as u16;
+            state.registers.push(Data::function(loc));
+            output.push(Instr::Mov(fn_reg_id, tgt_id));
             continue;
         }
 
@@ -237,7 +243,7 @@ pub fn handle_user_function(
     }
 }
 
-fn compile_function(
+pub fn compile_function(
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
     ctx: Ctx,

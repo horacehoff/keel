@@ -119,6 +119,12 @@ pub fn error_invalid_index_type(t: &DataType, span: Span, file_idx: u16, sources
     );
 }
 
+#[cold]
+#[inline(never)]
+pub fn error_expected_function(t: &DataType, span: Span, file_idx: u16, sources: &[Source]) -> ! {
+    error_invalid_type(&DataType::Fn(0), t, span, None, None, file_idx, sources);
+}
+
 #[inline(never)]
 #[cold]
 pub fn error_division_by_zero(modulo: bool, span: Span, file_idx: u16, sources: &[Source]) -> ! {

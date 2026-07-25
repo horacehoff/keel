@@ -2027,7 +2027,6 @@ fn compile_struct_definition(
     span: Span,
     ctx: Ctx,
     state: &mut State<'_>,
-    _output: &mut Vec<Instr>,
 ) {
     let struct_id = state.structs.len() as u16;
     state.structs.push(Struct {
@@ -2059,10 +2058,8 @@ fn compile_function_definition(
     fn_args: &[(SmolStr, Option<TypeExpr>)],
     fn_code: &Rc<[Expr]>,
     span: Span,
-    _v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
-    _output: &mut Vec<Instr>,
 ) {
     if let Some(func) = state.fns.iter().find(|func| &func.name == fn_name) {
         compiler_errors::error_function_already_defined(func, span, ctx.file_idx, state.sources);
@@ -2677,7 +2674,7 @@ impl Expr {
             }
             Self::StructDeclare(name, fields, span) => {
                 debug_assert!(!uses_id);
-                compile_struct_definition(name, fields, *span, ctx, state, output);
+                compile_struct_definition(name, fields, *span, ctx, state);
                 None
             }
             Self::FunctionCall(args, namespace, markers, args_indexes) if !uses_id => {
@@ -2749,9 +2746,7 @@ impl Expr {
             }
             Self::FunctionDecl(fn_name, fn_args, fn_code, span) => {
                 debug_assert!(!uses_id);
-                compile_function_definition(
-                    fn_name, fn_args, fn_code, *span, v, ctx, state, output,
-                );
+                compile_function_definition(fn_name, fn_args, fn_code, *span, ctx, state);
                 None
             }
             Self::ReturnVal(return_value) => {

@@ -1,7 +1,9 @@
 use super::super::expr::Expr;
 use super::super::expr::Span;
+use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::check_arg_type;
+use super::user_functions::compile_function;
 use super::user_functions::handle_user_function;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
@@ -9,10 +11,13 @@ use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::check_args_range;
+use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
+use smol_strc::SmolStr;
+use std::rc::Rc;
 
 pub fn builtin_functions(
     name: &str,
@@ -243,7 +248,70 @@ pub fn builtin_functions(
             None
         }
         fn_name => {
-            if let Some(fn_id) =
+            if let Some(var) = v.iter().rfind(|var| var.name.as_str() == fn_name) {
+                let fn_reg = var.register_id;
+                let fn_id = if let DataType::Fn(id) = var.var_type {
+                    id as usize
+                } else {
+                    error_expected_function(&var.var_type, span, ctx.file_idx, state.sources)
+                };
+
+                let inferred_arg_types = args
+                    .iter()
+                    .map(|arg| arg.infer_type(v, ctx, state))
+                    .collect::<Vec<DataType>>();
+
+                let fn_impl_idx = state.fns[fn_id]
+                    .impls
+                    .iter()
+                    .position(|fn_impl| *fn_impl.arg_types == inferred_arg_types);
+
+                if fn_impl_idx.is_none() {
+                    // If it hasn't already been compiled for these argument types,
+                    // compile it (which adds it to the function's implementation list)
+                    let fn_args = state.fns[fn_id]
+                        .args
+                        .iter()
+                        .map(|(a, _)| a.clone())
+                        .collect::<Vec<SmolStr>>();
+                    let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[fn_id].code);
+                    let closure_name = state.fns[fn_id].name.clone();
+                    compile_function(
+                        output,
+                        v,
+                        ctx,
+                        state,
+                        fn_id,
+                        &fn_args,
+                        &closure_name,
+                        &inferred_arg_types,
+                        args,
+                        &fn_code,
+                        fn_id as u16,
+                        false,
+                        state.fns[fn_id].src_file,
+                    );
+                }
+                let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
+
+                let args_loc_len = state.fns[fn_id].impls[fn_impl_idx].args_loc.len();
+                for i in 0..args_loc_len {
+                    let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
+                    let start_len = output.len();
+                    let arg_id = args[i]
+                        .compile(v, ctx, state, output, Some(tgt_id), false, true)
+                        .unwrap_id();
+                    if output.len() == start_len {
+                        output.push(Instr::Mov(arg_id, tgt_id));
+                    } else {
+                        move_to_id(output, tgt_id);
+                    }
+                }
+
+                let return_register_id = state.alloc_reg_tgt(tgt_id);
+                output.push(Instr::CallFuncDynamic(fn_reg, return_register_id));
+                Some(return_register_id)
+            } else if let Some(fn_id) =
                 state
                     .namespace
                     .find_function(&[], fn_name, span, ctx.file_idx, state.sources)

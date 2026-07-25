@@ -115,6 +115,9 @@ pub enum Instr {
     /// Throws the error (a string) located in error_register_id
     ThrowError(u16),
 
+    /// CallFuncDynamic(fn_reg_id, return_reg_id)
+    CallFuncDynamic(u16, u16),
+
     /// ArrayMov(new_elem_reg_id, array_id, idx)\
     /// Replaces the idx-th element in the array (with the id array_id) with the element located in new_elem_reg_id
     ObjElemMov(u16, u16, u16),

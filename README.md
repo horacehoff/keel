@@ -85,5 +85,4 @@ keel -h/--help     # Print help
 - Better, more helpful errors
 - Better module system
 - Struct methods
-- Proper higher-order functions implementation
 - Better embedding API with limits

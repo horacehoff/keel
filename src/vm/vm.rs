@@ -1024,6 +1024,15 @@ pub fn execute(
                 }
                 r[dest_reg] = Data::map(new_id);
             }
+            Instr::CallFuncDynamic(fn_reg_id, return_reg_id) => {
+                call_frames.push(CallFrame {
+                    return_addr: i as u16,
+                    return_reg: return_reg_id,
+                    callsite_id: 0,
+                });
+                i = r[fn_reg_id].as_function();
+                continue;
+            }
             Instr::CallLibFunc(LibFunc::Uppercase, source_string_reg_id, dest_reg_id) => {
                 r[dest_reg_id] = string!(r[source_string_reg_id].as_str(str_pool).to_uppercase());
             }

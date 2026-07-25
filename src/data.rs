@@ -16,7 +16,8 @@ const NAN_ARRAY: u64 = NAN_BASE | (4 << 48);
 const NAN_NULL: u64 = NAN_BASE | (5 << 48);
 const NAN_INT: u64 = NAN_BASE | (6 << 48);
 const NAN_STRUCT: u64 = NAN_BASE | (7 << 48);
-const NAN_MAP: u64 = NAN_BASE | (7 << 48) | (1 << 47);
+const NAN_MAP: u64 = NAN_STRUCT | (1 << 47);
+const NAN_FUNCTION: u64 = NAN_MAP | (1 << 46);
 pub const NULL: Data = Data(NAN_NULL);
 pub const FALSE: Data = Data(NAN_BOOL);
 pub const TRUE: Data = Data(NAN_BOOL | 1);
@@ -311,7 +312,22 @@ impl Data {
     }
     #[inline(always)]
     pub const fn is_map(self) -> bool {
-        (self.0 & !PAYLOAD_MASK) == NAN_STRUCT && (self.0 & (1 << 47)) != 0
+        (self.0 & !PAYLOAD_MASK) == NAN_STRUCT
+            && (self.0 & (1 << 47)) != 0
+            && (self.0 & (1 << 46)) == 0
+    }
+    #[inline(always)]
+    pub const fn function(fn_instruction_address: u16) -> Self {
+        Self(NAN_FUNCTION | fn_instruction_address as u64)
+    }
+    #[inline(always)]
+    pub const fn as_function(self) -> usize {
+        debug_assert!(self.is_function());
+        (self.0 & 0xFFFF) as usize
+    }
+    #[inline(always)]
+    pub const fn is_function(self) -> bool {
+        (self.0 & !PAYLOAD_MASK) == NAN_STRUCT && (self.0 & (1 << 46)) != 0
     }
     pub fn format(
         self,
@@ -380,6 +396,8 @@ impl Data {
                     .join(",")
             )
             .to_smolstr()
+        } else if self.is_function() {
+            SmolStr::new_static("function")
         } else {
             unsafe { unreachable_unchecked() }
         }

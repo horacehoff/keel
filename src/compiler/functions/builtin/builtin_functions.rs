@@ -3,6 +3,7 @@ use super::super::expr::Span;
 use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::check_arg_type;
+use super::check_user_fn_arg_types;
 use super::user_functions::compile_function;
 use super::user_functions::handle_user_function;
 use crate::compiler::UnwrapId;
@@ -12,7 +13,6 @@ use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::check_args_range;
 use crate::compiler::compiler_errors::error_expected_function;
-use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::data::Data;
 use crate::instr::Instr;
@@ -262,21 +262,15 @@ pub fn builtin_functions(
                     .map(|arg| arg.infer_type(v, ctx, state))
                     .collect::<Vec<DataType>>();
 
-                for (i, (_, t)) in state.fns[fn_id].args.iter().enumerate() {
-                    if let Some(t) = t
-                        && inferred_arg_types[i] != *t
-                    {
-                        error_function_arg_invalid_type(
-                            &inferred_arg_types[i],
-                            t,
-                            args_indexes[i],
-                            fn_name,
-                            Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
-                            ctx.file_idx,
-                            state.sources,
-                        );
-                    }
-                }
+                check_user_fn_arg_types(
+                    fn_id,
+                    fn_name,
+                    &inferred_arg_types,
+                    args_indexes,
+                    v,
+                    ctx,
+                    state,
+                );
 
                 let fn_impl_idx = state.fns[fn_id]
                     .impls

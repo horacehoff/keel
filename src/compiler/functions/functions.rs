@@ -1,11 +1,13 @@
 use super::expr::Expr;
 use super::expr::Span;
 use super::type_system::DataType;
+use super::type_system::fn_matches_signature;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type_multiple;
 use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
 use crate::instr::Instr;
@@ -52,6 +54,42 @@ pub fn check_arg_type(
             ctx.file_idx,
             state.sources,
         )
+    }
+}
+
+pub fn check_user_fn_arg_types(
+    fn_id: usize,
+    fn_name: &str,
+    inferred_arg_types: &[DataType],
+    args_indexes: &[Span],
+    v: &mut Vec<Variable>,
+    ctx: Ctx,
+    state: &mut State<'_>,
+) {
+    let args_len = state.fns[fn_id].args.len();
+    for i in 0..args_len {
+        let t = state.fns[fn_id].args[i].1.clone();
+        if let Some(t) = &t {
+            if {
+                if let (DataType::FnSignature(expected_sig), DataType::Fn(concrete_id)) =
+                    (t, &inferred_arg_types[i])
+                {
+                    !fn_matches_signature(*concrete_id as usize, expected_sig, v, ctx, state)
+                } else {
+                    inferred_arg_types[i] != *t
+                }
+            } {
+                error_function_arg_invalid_type(
+                    &inferred_arg_types[i],
+                    t,
+                    args_indexes[i],
+                    fn_name,
+                    Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
+                    ctx.file_idx,
+                    state.sources,
+                );
+            }
+        }
     }
 }
 

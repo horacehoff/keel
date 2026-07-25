@@ -48,6 +48,7 @@ pub enum TypeExpr {
     Array(Box<Self>),
     Map(Box<Self>, Box<Self>),
     Union(Box<[Self]>),
+    Function(Box<[Self]>),
 }
 
 impl TypeExpr {
@@ -108,6 +109,12 @@ impl TypeExpr {
                     .collect(),
             )
             .check_poly(),
+            Self::Function(parts) => DataType::FnSignature(
+                parts
+                    .iter()
+                    .map(|t| t.to_datatype(file_idx, namespace, sources))
+                    .collect(),
+            ),
         }
     }
 }
@@ -124,6 +131,8 @@ pub enum DataType {
     Unknown,
     Union(Box<[Self]>),
     Fn(u16),
+    /// Arg types followed by the return type as the last element
+    FnSignature(Box<[Self]>),
     Struct(u16),
     Map(Box<(Option<Self>, Option<Self>)>),
 }
@@ -158,6 +167,18 @@ impl std::fmt::Display for DataType {
                 m.1.as_ref().unwrap_or(&Self::Unknown)
             ),
             Self::Fn(_) => write!(f, "function"),
+            Self::FnSignature(sig) => {
+                let (args, ret) = sig.split_at(sig.len() - 1);
+                write!(
+                    f,
+                    "fn({}) -> {}",
+                    args.iter()
+                        .map(|t| format!("{t}"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    ret[0]
+                )
+            }
         }
     }
 }
@@ -220,6 +241,18 @@ impl DataType {
                 )
                 .to_smolstr()
             }
+            Self::FnSignature(sig) => {
+                let (args, ret) = sig.split_at(sig.len() - 1);
+                format_args!(
+                    "fn({}) -> {}",
+                    args.iter()
+                        .map(|t| t.format_detailed(state))
+                        .collect::<Vec<SmolStr>>()
+                        .join(", "),
+                    ret[0].format_detailed(state)
+                )
+                .to_smolstr()
+            }
         }
     }
     #[inline(always)]
@@ -261,6 +294,7 @@ impl PartialEq for DataType {
             (Self::Union(a), Self::Union(b)) => a == b,
             (Self::Struct(a), Self::Struct(b)) => a == b,
             (Self::Fn(fn_id), Self::Fn(fn_id_2)) => fn_id == fn_id_2,
+            (Self::FnSignature(a), Self::FnSignature(b)) => a == b,
             (Self::Map(a), Self::Map(b)) => {
                 (a.0.is_none() || b.0.is_none() || a.0 == b.0)
                     && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
@@ -297,6 +331,10 @@ impl std::hash::Hash for DataType {
             Self::Map(m) => {
                 11u8.hash(state);
                 m.hash(state);
+            }
+            Self::FnSignature(sig) => {
+                12u8.hash(state);
+                sig.hash(state);
             }
         }
     }
@@ -462,6 +500,100 @@ pub fn track_returns(
         add_return_type!(&mut flow.types, DataType::Null);
     }
     flow.types
+}
+
+/// Resolves the return type of the function of index `fn_id` in `state.fns`.
+/// It only computes it once per argument types.
+fn resolve_function_return_type(
+    fn_id: usize,
+    infered_arg_types: &[DataType],
+    fn_name: &str,
+    v: &mut Vec<Variable>,
+    ctx: Ctx,
+    state: &mut State<'_>,
+) -> DataType {
+    if let Some((_, ret)) = state.fns[fn_id]
+        .return_type_cache
+        .iter()
+        .find(|(args, _)| **args == *infered_arg_types)
+    {
+        return ret.clone();
+    }
+
+    let fn_args = state.fns[fn_id].args.clone();
+    let fn_code = state.fns[fn_id].code.clone();
+    let fn_src_file = state.fns[fn_id].src_file;
+
+    let v_len_before_args = v.len();
+    for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
+        // 0 => placeholder id, it's never used
+        v.push(Variable {
+            name: fn_args[i].0.clone(),
+            register_id: 0,
+            var_type: infered_type,
+        });
+    }
+
+    // Mutual-recursion cycle guard -> if we are already in the
+    // middle of inferring this function's return type, return Unknown to break the cycle
+    let already_inferring = RETURN_TYPE_INFERRING.with(|s| s.borrow().contains(&fn_id));
+    if already_inferring {
+        v.truncate(v_len_before_args);
+        return DataType::Unknown;
+    }
+
+    RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().insert(fn_id));
+
+    let fn_ctx = Ctx {
+        file_idx: fn_src_file,
+        ..ctx
+    };
+    let fn_type = track_returns(&fn_code, v, fn_ctx, state, fn_name);
+
+    RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(&fn_id));
+
+    let to_return = if fn_type.is_empty() {
+        // If function doesn't return anything, return nothing
+        DataType::Null
+    } else {
+        // If function returns anything, check if it returns the same thing each time
+        DataType::Union(Box::from(fn_type)).check_poly()
+    };
+
+    v.truncate(v_len_before_args);
+
+    // Cache the result
+    state.fns[fn_id]
+        .return_type_cache
+        .push((Box::from(infered_arg_types), to_return.clone()));
+
+    to_return
+}
+
+/// Checks whether the function wth index `fn_id` is compatible with the signature `expected_sig`.
+pub fn fn_matches_signature(
+    fn_id: usize,
+    expected_sig: &[DataType],
+    v: &mut Vec<Variable>,
+    ctx: Ctx,
+    state: &mut State<'_>,
+) -> bool {
+    let expected_arg_types = &expected_sig[..expected_sig.len() - 1];
+    let expected_return_type = &expected_sig[expected_sig.len() - 1];
+    if state.fns[fn_id].args.len() != expected_arg_types.len() {
+        return false;
+    }
+    if state.fns[fn_id]
+        .args
+        .iter()
+        .zip(expected_arg_types)
+        .any(|((_, t), expected)| t.as_ref().is_some_and(|t| t != expected))
+    {
+        return false;
+    }
+    let fn_name = state.fns[fn_id].name.clone();
+    resolve_function_return_type(fn_id, expected_arg_types, &fn_name, v, ctx, state)
+        == *expected_return_type
 }
 
 struct FnReturnFlow {
@@ -910,63 +1042,14 @@ impl Expr {
                                 })
                         };
 
-                        let func = &state.fns[fn_id];
-                        // Check the return type cache
-                        if let Some((_, ret)) = func
-                            .return_type_cache
-                            .iter()
-                            .find(|(args, _)| **args == *infered_arg_types)
-                        {
-                            return ret.clone();
-                        }
-
-                        let fn_args = func.args.clone();
-                        let fn_code = func.code.clone();
-                        let v_len_before_args = v.len();
-                        for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
-                            // 0 => placeholder id, it's never used
-                            v.push(Variable {
-                                name: fn_args[i].0.clone(),
-                                register_id: 0,
-                                var_type: infered_type,
-                            });
-                        }
-
-                        // Mutual-recursion cycle guard -> if we are already in the
-                        // middle of inferring this function's return type, return Null to break the cycle
-                        let already_inferring =
-                            RETURN_TYPE_INFERRING.with(|s| s.borrow().contains(&fn_id));
-                        if already_inferring {
-                            v.truncate(v_len_before_args);
-                            return DataType::Unknown;
-                        }
-
-                        RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().insert(fn_id));
-
-                        let fn_ctx = Ctx {
-                            file_idx: func.src_file,
-                            ..ctx
-                        };
-                        let fn_type = track_returns(&fn_code, v, fn_ctx, state, function_name);
-
-                        RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(&fn_id));
-
-                        let to_return = if fn_type.is_empty() {
-                            // If function doesn't return anything, return nothing
-                            DataType::Null
-                        } else {
-                            // If function returns anything, check if it returns the same thing each time
-                            DataType::Union(Box::from(fn_type)).check_poly()
-                        };
-
-                        v.truncate(v_len_before_args);
-
-                        // Cache the result
-                        state.fns[fn_id]
-                            .return_type_cache
-                            .push((Box::from(infered_arg_types), to_return.clone()));
-
-                        to_return
+                        resolve_function_return_type(
+                            fn_id,
+                            &infered_arg_types,
+                            function_name,
+                            v,
+                            ctx,
+                            state,
+                        )
                     }
                 }
             }

@@ -5,6 +5,7 @@ use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::super::type_system::can_reach;
 use super::super::type_system::track_returns;
+use super::check_user_fn_arg_types;
 use crate::compiler::SymbolKind;
 use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
@@ -123,21 +124,15 @@ pub fn handle_user_function(
         .map(|arg| arg.infer_type(v, ctx, state))
         .collect::<Vec<DataType>>();
 
-    for (i, (_, t)) in state.fns[fn_id].args.iter().enumerate() {
-        if let Some(t) = t
-            && inferred_arg_types[i] != *t
-        {
-            error_function_arg_invalid_type(
-                &inferred_arg_types[i],
-                t,
-                args_indexes[i],
-                fn_name,
-                Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
-                ctx.file_idx,
-                state.sources,
-            );
-        }
-    }
+    check_user_fn_arg_types(
+        fn_id,
+        fn_name,
+        &inferred_arg_types,
+        args_indexes,
+        v,
+        ctx,
+        state,
+    );
 
     // Try to check if function has already been compiled for these specific arg types
     let fn_impl_idx = state.fns[fn_id]

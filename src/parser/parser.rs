@@ -618,6 +618,33 @@ fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
         let value_t = parse_type(parser);
         parser.next_token_expect(Token::RBrace, "Unmatched '{'");
         TypeExpr::Map(Box::new(key_t), Box::new(value_t))
+    } else if next_token == Token::Function {
+        parser.next_token_expect(
+            Token::LParen,
+            "Function types must have their arguments delimited by parentheses",
+        );
+        let mut arg_types: Vec<TypeExpr> = Vec::with_capacity(2);
+        loop {
+            if parser.peek_token() == Token::RParen {
+                parser.next_token();
+                break;
+            }
+            arg_types.push(parse_type(parser));
+            if parser.peek_token() == Token::Comma {
+                parser.next_token();
+            } else if parser.peek_token() != Token::RParen {
+                cold_path();
+                let span = parser.peek_token_span();
+                parser.error(span, ParserErr::ArgumentsMissingCommaSeparator);
+            }
+        }
+        arg_types.push(if parser.peek_token() == Token::Arrow {
+            parser.next_token();
+            parse_type(parser)
+        } else {
+            TypeExpr::Identifier(SmolStr::new_static("null"), span)
+        });
+        TypeExpr::Function(arg_types.into_boxed_slice())
     } else if let Token::Identifier(i) = next_token {
         if parser.peek_token() == Token::DoubleColon {
             parser.next_token();

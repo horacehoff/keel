@@ -18,10 +18,10 @@ use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct ErrorCatch {
-    pub catch_loc: u32,
+    pub catch_loc: u16,
     pub error_reg: u16,
-    pub call_frames_len: u32,
-    pub args_len: u32,
+    pub call_frames_len: u16,
+    pub args_len: u16,
 }
 
 #[derive(Debug)]

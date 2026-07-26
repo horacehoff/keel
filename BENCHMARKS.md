@@ -20,7 +20,7 @@ The PGO workflow is visible [here](.github/workflows/release.yml).
 | Keel | Python 3.14.5 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [fib.kl](/examples/fib/fib.kl) | [fib.py](/examples/fib/fib.py) | [fib.lua](/examples/fib/fib.lua) |
-| 189.1ms | 507.4ms | 183.4ms |
+| 178.9ms | 507.4ms | 183.4ms |
 
 
 ## N-body (N=500000)

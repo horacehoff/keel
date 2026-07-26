@@ -160,6 +160,7 @@ pub enum Instr {
     GetSliceString(u16, u16, u16),
 
     /// Push(array_reg_id, elem_reg_id)
+    /// Pushes `r[elem_reg_id]` to `obj_pool[r[array_reg_id]]`
     Push(u16, u16),
 
     /// Remove(array_reg_id, elem_index_reg_id)

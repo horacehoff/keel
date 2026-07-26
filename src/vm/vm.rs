@@ -280,32 +280,85 @@ pub fn execute(
     macro_rules! error_with_catch {
         ($err:expr) => {
             cold_path();
-            if !error_handles.is_empty() {
-                let err_handle = unsafe { error_handles.pop_unchecked() };
-                unsafe {
-                    args.set_len(err_handle.args_len as usize);
-                    call_frames.set_len(err_handle.call_frames_len as usize);
-                }
-                r[err_handle.error_reg] = string!($err.kind());
-                i = err_handle.catch_loc as usize;
-                continue;
-            }
-            throw_error(err_ctx, unsafe {*instructions.get_unchecked(i)}, $err);
+            i = error_with_catch(
+                $err,
+                r,
+                obj_pool,
+                str_pool,
+                &mut recursion_stack,
+                &mut free_strings,
+                &mut gc_string_threshold,
+                &mut string_live,
+                &mut args,
+                &mut call_frames,
+                &mut error_handles,
+                err_ctx,
+                instructions,
+                i,
+            );
+            continue;
         };
         ($err:expr, $label:lifetime) => {
             cold_path();
-            if !error_handles.is_empty() {
-                let err_handle = unsafe { error_handles.pop_unchecked() };
-                unsafe {
-                    args.set_len(err_handle.args_len as usize);
-                    call_frames.set_len(err_handle.call_frames_len as usize);
-                }
-                r[err_handle.error_reg] = string!($err.kind());
-                i = err_handle.catch_loc as usize;
-                continue $label;
-            }
-            throw_error(err_ctx, unsafe {*instructions.get_unchecked(i)}, $err);
+            i = error_with_catch(
+                $err,
+                r,
+                obj_pool,
+                str_pool,
+                &mut recursion_stack,
+                &mut free_strings,
+                &mut gc_string_threshold,
+                &mut string_live,
+                &mut args,
+                &mut call_frames,
+                &mut error_handles,
+                err_ctx,
+                instructions,
+                i,
+            );
+            continue $label;
         };
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn error_with_catch(
+        err: ErrType,
+        r: &mut RegisterFile,
+        obj_pool: &ObjectPool,
+        string_pool: &mut StringPool,
+        recursion_stack: &RegisterFile,
+        free_strings: &mut Vec<u16>,
+        gc_string_threshold: &mut u32,
+        string_live: &mut Vec<bool>,
+        args: &mut Vec<u16>,
+        call_frames: &mut Vec<CallFrame>,
+        error_handles: &mut Vec<ErrorCatch>,
+        err_ctx: &ErrorCtx,
+        instructions: &[Instr],
+        i: usize,
+    ) -> usize {
+        if error_handles.is_empty() {
+            throw_error(err_ctx, unsafe { *instructions.get_unchecked(i) }, err);
+        } else {
+            let err_handle = error_handles.pop_unchecked();
+            unsafe {
+                args.set_len(err_handle.args_len as usize);
+                call_frames.set_len(err_handle.call_frames_len as usize);
+            }
+
+            r[err_handle.error_reg] = Data::string(
+                err.kind(),
+                obj_pool,
+                string_pool,
+                r,
+                recursion_stack,
+                free_strings,
+                gc_string_threshold,
+                string_live,
+            );
+            err_handle.catch_loc as usize
+        }
     }
 
     'main: loop {
@@ -352,9 +405,13 @@ pub fn execute(
             }
             Instr::Return(tgt) => {
                 // Pop the latest call frame, set the return value and jump back to the callsite
-                let call_frame = call_frames.pop_unchecked();
-                i = call_frame.return_addr as usize;
-                r[call_frame.return_reg] = r[tgt];
+                let CallFrame {
+                    return_addr,
+                    return_reg,
+                    callsite_id: _,
+                } = call_frames.pop_unchecked();
+                i = return_addr as usize;
+                r[return_reg] = r[tgt];
             }
             Instr::RecursiveReturn(tgt) => {
                 let call_frame = call_frames.pop_unchecked();
@@ -859,6 +916,8 @@ pub fn execute(
                         .unwrap();
                     }
                     writeln!(handle, "}}").unwrap();
+                } else {
+                    unsafe { unreachable_unchecked() }
                 }
             }
             Instr::StoreFuncArg(id) => args.push(id),
@@ -874,7 +933,9 @@ pub fn execute(
                 if (index as usize) >= array.len() || index < 0 {
                     error_with_catch!(ErrType::IndexOutOfBounds(array.len(), index));
                 }
-                array[index as usize] = r[new_elem_reg_id];
+                unsafe {
+                    *array.get_unchecked_mut(index as usize) = r[new_elem_reg_id];
+                }
             }
             Instr::SetElementString(string_reg_id, new_str_reg_id, idx) => {
                 let index = r[idx].as_int();
@@ -973,7 +1034,8 @@ pub fn execute(
                 {
                     error_with_catch!(ErrType::SliceOutOfBounds(s.len(), idx_start, idx_end));
                 }
-                r[dest_reg_id] = string!(&s[(idx_start as usize)..(idx_end as usize)]);
+                r[dest_reg_id] =
+                    string!(unsafe { s.get_unchecked((idx_start as usize)..(idx_end as usize)) });
             }
             Instr::Push(array, element) => {
                 obj_pool.get_mut(r[array].as_array()).push(r[element]);
@@ -1292,7 +1354,7 @@ pub fn execute(
                     let separator_len = separator.len();
                     let mut i = 0;
                     for part_i in memmem::find_iter(source.as_bytes(), separator.as_bytes()) {
-                        let part = &source[i..part_i];
+                        let part = unsafe { source.get_unchecked(i..part_i) };
                         output.push({
                             if part.len() <= 6 {
                                 Data::small_str(part)
@@ -1307,7 +1369,7 @@ pub fn execute(
                         });
                         i = part_i + separator_len;
                     }
-                    let part = &source[i..];
+                    let part = unsafe { source.get_unchecked(i..) };
                     output.push({
                         if part.len() <= 6 {
                             Data::small_str(part)
@@ -1528,17 +1590,18 @@ pub fn execute(
             }
             Instr::StartErrorCatch(jmp_size, err_reg_id) => {
                 error_handles.push(ErrorCatch {
-                    catch_loc: (i as u32) + (jmp_size as u32),
+                    catch_loc: (i as u16) + jmp_size,
                     error_reg: err_reg_id,
-                    call_frames_len: call_frames.len() as u32,
-                    args_len: args.len() as u32,
+                    call_frames_len: call_frames.len() as u16,
+                    args_len: args.len() as u16,
                 });
             }
             Instr::StopErrorCatch => unsafe {
                 error_handles.pop_unchecked();
             },
             Instr::ThrowError(error_reg_id) => {
-                error_with_catch!(ErrType::Custom(r[error_reg_id].as_str(str_pool)));
+                let error_data = r[error_reg_id];
+                error_with_catch!(ErrType::Custom(error_data.as_str(str_pool)));
             }
             Instr::Halt(code) => {
                 cold_path();

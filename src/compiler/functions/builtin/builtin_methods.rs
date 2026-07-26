@@ -1,6 +1,8 @@
 use super::super::expr::Expr;
 use super::super::expr::Span;
 use super::super::type_system::DataType;
+use super::super::type_system::fn_args_match;
+use super::super::type_system::fn_matches_signature;
 use crate::compiler::Namespace;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
@@ -8,12 +10,17 @@ use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::check_args_range;
+use crate::compiler::compiler_errors::error_expected_function;
+use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::compiler_errors::error_invalid_obj_type;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::compiler::functions::check_arg_type;
+use crate::compiler::functions::user_functions::compile_function_impl;
+use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
+use std::hint::unreachable_unchecked;
 
 pub fn builtin_methods(
     name: &str,
@@ -521,6 +528,141 @@ pub fn builtin_methods(
                 .unwrap_id();
             output.push(Instr::MapInsertReg(id, key_id, val_id));
             None
+        }
+        "map" => {
+            check!(
+                DataType::Array(_) | DataType::String,
+                &[DataType::String, DataType::Array(None)],
+                name,
+                1
+            );
+
+            state.reserved_registers.insert(id);
+            state.free_registers.retain(|&r| r != id);
+
+            let fn_type = args[0].infer_type(v, ctx, state);
+            let fn_id = if let DataType::Fn(id) = fn_type {
+                id as usize
+            } else {
+                error_expected_function(&fn_type, args_indexes[0], ctx.file_idx, state.sources);
+            };
+
+            let is_str = obj_type == DataType::String;
+
+            let elem_type = if is_str {
+                DataType::String
+            } else {
+                match &obj_type {
+                    DataType::Array(Some(t)) => (**t).clone(),
+                    DataType::Array(None) => state.fns[fn_id].args[0]
+                        .1
+                        .clone()
+                        .unwrap_or(DataType::Unknown),
+                    _ => unsafe { unreachable_unchecked() },
+                }
+            };
+
+            if !{
+                if is_str {
+                    fn_matches_signature(
+                        fn_id,
+                        &[DataType::String, DataType::String],
+                        v,
+                        ctx,
+                        state,
+                    )
+                } else {
+                    fn_args_match(fn_id, std::slice::from_ref(&elem_type), state)
+                }
+            } {
+                let expected_type = DataType::FnSignature(Box::from([
+                    elem_type.clone(),
+                    if is_str {
+                        DataType::String
+                    } else {
+                        DataType::Unknown
+                    },
+                ]));
+                error_function_arg_invalid_type(
+                    &fn_type,
+                    &expected_type,
+                    args_indexes[0],
+                    name,
+                    None,
+                    ctx.file_idx,
+                    state.sources,
+                );
+            }
+
+            let fn_impl_idx = compile_function_impl(
+                output,
+                v,
+                ctx,
+                state,
+                fn_id,
+                std::slice::from_ref(&elem_type),
+            );
+            let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+            let arg_reg = state.fns[fn_id].impls[fn_impl_idx].args_loc[0];
+
+            let fn_value_reg = state.registers.len() as u16;
+            state.registers.push(Data::function(loc));
+
+            let result_id = state.alloc_reg_tgt(tgt_id);
+            if is_str {
+                let empty_str_id = state.registers.len() as u16;
+                state
+                    .registers
+                    .push(Data::p_str("", &mut state.pools.strings));
+                output.push(Instr::Mov(empty_str_id, result_id));
+            } else {
+                output.push(Instr::EmptyArray(result_id));
+            }
+
+            let len_id = state.alloc_reg();
+            output.push(Instr::CallLibFunc(LibFunc::Len, id, len_id));
+
+            let index_id = if ctx.single_run {
+                state.registers.push(0.into());
+                (state.registers.len() - 1) as u16
+            } else {
+                let r = state.alloc_reg();
+                output.push(Instr::SetInt(r, 0));
+                r
+            };
+
+            // Basically the same thing as compile_for_loop
+            let jmp_start_idx = output.len();
+            output.push(Instr::SupEqIntJmp(index_id, len_id, 0));
+
+            let body_start = output.len();
+            if is_str {
+                output.push(Instr::GetIndexString(id, index_id, arg_reg));
+            } else {
+                output.push(Instr::GetIndexArray(id, index_id, arg_reg));
+            }
+            let fn_return_val_id = state.alloc_reg();
+            output.push(Instr::CallFuncDynamic(fn_value_reg, fn_return_val_id));
+            if is_str {
+                output.push(Instr::AddStr(result_id, fn_return_val_id, result_id));
+            } else {
+                output.push(Instr::Push(result_id, fn_return_val_id));
+            }
+            let jump_size = (output.len() - body_start + 1) as u16;
+
+            output.push(Instr::IncInt(index_id));
+            output.push(Instr::InfIntJmpBack(index_id, len_id, jump_size));
+
+            let exit_size = (output.len() - jmp_start_idx) as u16;
+            output[jmp_start_idx] = Instr::SupEqIntJmp(index_id, len_id, exit_size);
+
+            if ctx.single_run {
+                state.free_reg(len_id, v);
+                state.free_reg(index_id, v);
+                state.free_reg(fn_return_val_id, v);
+            }
+
+            Some(result_id)
         }
         fn_name => error_unknown_function(
             fn_name,

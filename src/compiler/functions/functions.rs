@@ -69,26 +69,24 @@ pub fn check_user_fn_arg_types(
     let args_len = state.fns[fn_id].args.len();
     for i in 0..args_len {
         let t = state.fns[fn_id].args[i].1.clone();
-        if let Some(t) = &t {
-            if {
-                if let (DataType::FnSignature(expected_sig), DataType::Fn(concrete_id)) =
-                    (t, &inferred_arg_types[i])
-                {
-                    !fn_matches_signature(*concrete_id as usize, expected_sig, v, ctx, state)
-                } else {
-                    inferred_arg_types[i] != *t
-                }
-            } {
-                error_function_arg_invalid_type(
-                    &inferred_arg_types[i],
-                    t,
-                    args_indexes[i],
-                    fn_name,
-                    Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
-                    ctx.file_idx,
-                    state.sources,
-                );
+        if let Some(t) = &t
+            && if let (DataType::FnSignature(expected_sig), DataType::Fn(concrete_id)) =
+                (t, &inferred_arg_types[i])
+            {
+                !fn_matches_signature(*concrete_id as usize, expected_sig, v, ctx, state)
+            } else {
+                inferred_arg_types[i] != *t
             }
+        {
+            error_function_arg_invalid_type(
+                &inferred_arg_types[i],
+                t,
+                args_indexes[i],
+                fn_name,
+                Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
+                ctx.file_idx,
+                state.sources,
+            );
         }
     }
 }

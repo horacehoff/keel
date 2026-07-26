@@ -291,10 +291,11 @@ impl PartialEq for DataType {
             | (Self::Array(_), Self::Array(None))
             | (Self::Array(None), Self::Array(_)) => true,
             (Self::Array(Some(a)), Self::Array(Some(b))) => a == b,
-            (Self::Union(a), Self::Union(b)) => a == b,
+            (Self::Union(a), Self::Union(b)) | (Self::FnSignature(a), Self::FnSignature(b)) => {
+                a == b
+            }
             (Self::Struct(a), Self::Struct(b)) => a == b,
             (Self::Fn(fn_id), Self::Fn(fn_id_2)) => fn_id == fn_id_2,
-            (Self::FnSignature(a), Self::FnSignature(b)) => a == b,
             (Self::Map(a), Self::Map(b)) => {
                 (a.0.is_none() || b.0.is_none() || a.0 == b.0)
                     && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
@@ -504,7 +505,7 @@ pub fn track_returns(
 
 /// Resolves the return type of the function of index `fn_id` in `state.fns`.
 /// It only computes it once per argument types.
-fn resolve_function_return_type(
+pub fn resolve_function_return_type(
     fn_id: usize,
     infered_arg_types: &[DataType],
     fn_name: &str,
@@ -570,6 +571,15 @@ fn resolve_function_return_type(
     to_return
 }
 
+pub fn fn_args_match(fn_id: usize, expected_args: &[DataType], state: &State<'_>) -> bool {
+    state.fns[fn_id].args.len() == expected_args.len()
+        && !state.fns[fn_id]
+            .args
+            .iter()
+            .zip(expected_args)
+            .any(|((_, t), expected)| t.as_ref().is_some_and(|t| t != expected))
+}
+
 /// Checks whether the function wth index `fn_id` is compatible with the signature `expected_sig`.
 pub fn fn_matches_signature(
     fn_id: usize,
@@ -580,15 +590,7 @@ pub fn fn_matches_signature(
 ) -> bool {
     let expected_arg_types = &expected_sig[..expected_sig.len() - 1];
     let expected_return_type = &expected_sig[expected_sig.len() - 1];
-    if state.fns[fn_id].args.len() != expected_arg_types.len() {
-        return false;
-    }
-    if state.fns[fn_id]
-        .args
-        .iter()
-        .zip(expected_arg_types)
-        .any(|((_, t), expected)| t.as_ref().is_some_and(|t| t != expected))
-    {
+    if !fn_args_match(fn_id, expected_arg_types, state) {
         return false;
     }
     let fn_name = state.fns[fn_id].name.clone();
@@ -1053,7 +1055,7 @@ impl Expr {
                     }
                 }
             }
-            Self::ObjFunctionCall(obj, _, namespace, _, _, _) => {
+            Self::ObjFunctionCall(obj, args, namespace, _, _, args_indexes) => {
                 match namespace.last().unwrap().as_str() {
                     "uppercase"
                     | "lowercase"
@@ -1104,6 +1106,39 @@ impl Expr {
                         let obj_type = obj.infer_type(v, ctx, state);
                         if let DataType::Map(m) = obj_type {
                             m.1.unwrap_or(DataType::Unknown)
+                        } else {
+                            unsafe { unreachable_unchecked() }
+                        }
+                    }
+                    "map" => {
+                        let obj_type = obj.infer_type(v, ctx, state);
+                        let fn_type = args[0].infer_type(v, ctx, state);
+                        let DataType::Fn(fn_id) = fn_type else {
+                            error_expected_function(
+                                &fn_type,
+                                args_indexes[0],
+                                ctx.file_idx,
+                                state.sources,
+                            );
+                        };
+                        if obj_type == DataType::String {
+                            DataType::String
+                        } else if let DataType::Array(elem_type) = obj_type {
+                            let elem_type = match elem_type {
+                                Some(t) => *t,
+                                None => state.fns[fn_id as usize].args[0]
+                                    .1
+                                    .clone()
+                                    .unwrap_or(DataType::Unknown),
+                            };
+                            DataType::Array(Some(Box::new(resolve_function_return_type(
+                                fn_id as usize,
+                                &[elem_type],
+                                "map",
+                                v,
+                                ctx,
+                                state,
+                            ))))
                         } else {
                             unsafe { unreachable_unchecked() }
                         }

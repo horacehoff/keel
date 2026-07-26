@@ -22,6 +22,65 @@ use smol_strc::SmolStr;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+/// Computes whether the function `state.fns[fn_id]` is recursive.
+/// This is only computed once per function.
+pub fn is_function_recursive(fn_id: usize, state: &mut State<'_>) -> bool {
+    if let Some(is_recursive) = state.fns[fn_id].is_recursive {
+        is_recursive
+    } else {
+        let name = state.fns[fn_id].name.clone();
+        let mut visited = HashSet::new();
+        visited.insert(name.clone());
+        let is_recursive = can_reach(&name, &name, state.fns, &mut visited);
+        state.fns[fn_id].is_recursive = Some(is_recursive);
+        is_recursive
+    }
+}
+
+/// Returns the index into `state.fns[fn_id].impls` for this specialization (those arg types)
+/// matching `inferred_arg_types`. If it doesn't exist yet, it's compiled via `compile_function`.
+pub fn compile_function_impl(
+    output: &mut Vec<Instr>,
+    v: &mut Vec<Variable>,
+    ctx: Ctx,
+    state: &mut State<'_>,
+    fn_id: usize,
+    inferred_arg_types: &[DataType],
+) -> usize {
+    // Try to check if function has already been compiled for these specific arg types
+    if let Some(idx) = state.fns[fn_id]
+        .impls
+        .iter()
+        .position(|fn_impl| fn_impl.arg_types.as_ref() == inferred_arg_types)
+    {
+        return idx;
+    }
+    // If it hasn't, compile a new specialization of this function
+    let is_recursive = is_function_recursive(fn_id, state);
+    let fn_args = state.fns[fn_id]
+        .args
+        .iter()
+        .map(|(a, _)| a.clone())
+        .collect::<Vec<SmolStr>>();
+    let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[fn_id].code);
+    let fn_name = &state.fns[fn_id].name.clone();
+    compile_function(
+        output,
+        v,
+        ctx,
+        state,
+        fn_id,
+        &fn_args,
+        fn_name,
+        inferred_arg_types,
+        &fn_code,
+        fn_id as u16,
+        is_recursive,
+        state.fns[fn_id].src_file,
+    );
+    state.fns[fn_id].impls.len() - 1
+}
+
 pub fn handle_user_function(
     fn_name: &str,
     fn_id: usize,
@@ -34,17 +93,7 @@ pub fn handle_user_function(
     span: Span,
     args_indexes: &[Span],
 ) -> Option<u16> {
-    // Lazily resolve mutual recursion the first time this function is compiled
-    let is_recursive = if let Some(is_recursive) = state.fns[fn_id].is_recursive {
-        is_recursive
-    } else {
-        let name = state.fns[fn_id].name.clone();
-        let mut visited = HashSet::new();
-        visited.insert(name.clone());
-        let is_recursive = can_reach(&name, &name, state.fns, &mut visited);
-        state.fns[fn_id].is_recursive = Some(is_recursive);
-        is_recursive
-    };
+    let is_recursive = is_function_recursive(fn_id, state);
 
     let fn_returns_null = state.fns[fn_id].returns_null;
 
@@ -134,37 +183,7 @@ pub fn handle_user_function(
         state,
     );
 
-    // Try to check if function has already been compiled for these specific arg types
-    let fn_impl_idx = state.fns[fn_id]
-        .impls
-        .iter()
-        .position(|fn_impl| *fn_impl.arg_types == inferred_arg_types);
-
-    if fn_impl_idx.is_none() {
-        // If it hasn't, compile it (which adds it to the function's implementation list)
-        let fn_args = state.fns[fn_id]
-            .args
-            .iter()
-            .map(|(a, _)| a.clone())
-            .collect::<Vec<SmolStr>>();
-        let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[fn_id].code);
-        compile_function(
-            output,
-            v,
-            ctx,
-            state,
-            fn_id,
-            &fn_args,
-            fn_name,
-            &inferred_arg_types,
-            &fn_code,
-            fn_id as u16,
-            is_recursive,
-            state.fns[fn_id].src_file,
-        );
-    }
-    // Re-derive index after possible mutation
-    let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
+    let fn_impl_idx = compile_function_impl(output, v, ctx, state, fn_id, &inferred_arg_types);
     let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
 
     let saveframe_loc = output.len();

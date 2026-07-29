@@ -22,6 +22,8 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 - **FFI support**: call C/dynamic libraries directly from Keel
 - **Built-in REPL**
 
+Keel also has a [VS Code extension](https://marketplace.visualstudio.com/items?itemName=horacehoff.keel) that provides syntax highlighting.
+
 [Browse examples](examples/)
 
 ## Quick showcase

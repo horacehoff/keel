@@ -154,7 +154,7 @@ pub enum Token<'a> {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
     Identifier(&'a str),
 
-    #[regex(r"[0-9]*[.][0-9]+", |lex| {
+    #[regex(r"[0-9]*\.[0-9]+", |lex| {
         let slice = lex.slice();
         lexical_core::parse::<f64>(slice.as_bytes()).unwrap()
     })]

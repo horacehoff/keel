@@ -1,0 +1,38 @@
+{
+  "name": "keel",
+  "displayName": "Keel Programming Language",
+  "description": "Syntax highlighting for the Keel programming language",
+  "repository": "https://github.com/horacehoff/keel",
+  "publisher": "horacehoff",
+  "version": "0.0.1",
+  "icon": "images/icon.png",
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "keel",
+        "aliases": [
+          "Keel",
+          "keel"
+        ],
+        "extensions": [
+          ".kl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "keel",
+        "scopeName": "source.keel",
+        "path": "./syntaxes/keel.tmLanguage.json"
+      }
+    ]
+  }
+}

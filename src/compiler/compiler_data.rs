@@ -9,12 +9,13 @@ use crate::instr::Instr;
 use crate::vm::MapPool;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
-#[cfg(not(target_arch = "wasm32"))]
-use libloading::Library;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
 use std::rc::Rc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use libloading::Library;
 
 #[derive(Debug)]
 pub struct ErrorCatch {

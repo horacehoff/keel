@@ -1143,6 +1143,18 @@ impl Expr {
                             unsafe { unreachable_unchecked() }
                         }
                     }
+                    "filter" => {
+                        let fn_type = args[0].infer_type(v, ctx, state);
+                        if !matches!(fn_type, DataType::Fn(_)) {
+                            error_expected_function(
+                                &fn_type,
+                                args_indexes[0],
+                                ctx.file_idx,
+                                state.sources,
+                            );
+                        }
+                        obj.infer_type(v, ctx, state)
+                    }
                     _ => unsafe { unreachable_unchecked() },
                 }
             }

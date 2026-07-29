@@ -16,11 +16,8 @@ pub fn parse_expr_with_precedence(
     allow_struct: bool,
 ) -> Expr {
     let lhs_start = input.peek_token_span().start;
-    let mut end = input.peek_token_span().end;
     let mut lhs = parse_term(input, allow_struct);
-    if let Some(s) = input.peek_token_opt_span() {
-        end = s.end;
-    }
+    let end = input.last_token_end as u32;
     lhs = parse_postfix_op(input, lhs, (lhs_start, end).into());
     let mut lhs_end = input.last_token_end as u32;
     while let Some(peek) = input.peek_token_opt() {

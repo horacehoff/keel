@@ -28,9 +28,12 @@ pub fn handle_method_calls(
     let id = obj
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
-    state.free_reg(id, v);
 
-    builtin_methods(
+    if name != "map" && name != "filter" {
+        state.free_reg(id, v);
+    }
+
+    let output_id = builtin_methods(
         name,
         id,
         obj_type,
@@ -44,5 +47,9 @@ pub fn handle_method_calls(
         obj_span,
         fn_span,
         args_indexes,
-    )
+    );
+
+    state.free_reg(id, v);
+
+    output_id
 }

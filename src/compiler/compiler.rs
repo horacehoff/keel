@@ -1133,7 +1133,7 @@ fn compile_eq_op(
     let r_type = r.infer_type(v, ctx, state);
     let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
         && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
-    let is_string = l_type == DataType::String || r_type == DataType::String;
+    let is_string = l_type == DataType::String && r_type == DataType::String;
     let id_l = l
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
@@ -1166,7 +1166,7 @@ fn compile_neq_op(
     let r_type = r.infer_type(v, ctx, state);
     let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
         && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
-    let is_string = l_type == DataType::String || r_type == DataType::String;
+    let is_string = l_type == DataType::String && r_type == DataType::String;
     let id_l = l
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
@@ -3258,7 +3258,7 @@ pub fn compile(
 
     let code = parser::parse(&main_src.contents, &main_src);
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     if debug {
         println!("PARSING TIME: {:.2?}", now.elapsed());
     }

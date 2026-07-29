@@ -579,7 +579,7 @@ pub fn error_invalid_obj_type(
                     .with_message(format_args!(
                         "Function {} expects this expression's type to be {BLUE}{}{RESET} but here its type is {}",
                         blue(fn_name),
-                        expected_type.iter().map(|s| s.to_smolstr()).collect::<Vec<SmolStr>>().join("{RESET} or {BLUE}"),
+                        expected_type.iter().map(|s| s.to_smolstr()).collect::<Vec<SmolStr>>().join(&format_args!("{RESET} or {BLUE}").to_string()),
                         red(perceived_type)
                     ))
                     .with_color(ariadne::Color::Red),
@@ -1391,7 +1391,7 @@ pub fn error_function_arg_invalid_type_multiple(
 
             report = report.with_label(
                 Label::new((src.filename.as_str(), arg_span.into()))
-                    .with_message(format_args!("Function {} expects this argument to be of type {GREEN}{}{RESET}, but this expression's type is {}", blue(fn_name), expected_type.iter().map(|s| s.to_smolstr()).collect::<Vec<SmolStr>>().join("{RESET} or {GREEN}"), red(perceived_type)))
+                    .with_message(format_args!("Function {} expects this argument to be of type {GREEN}{}{RESET}, but this expression's type is {}", blue(fn_name), expected_type.iter().map(|s| s.to_smolstr()).collect::<Vec<SmolStr>>().join(&format_args!("{RESET} or {GREEN}").to_string()), red(perceived_type)))
                     .with_color(ariadne::Color::Red),
             );
 

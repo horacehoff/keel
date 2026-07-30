@@ -140,8 +140,12 @@ pub fn builtin_methods(
         }
         "len" => {
             check!(
-                DataType::Array(_) | DataType::String,
-                &[DataType::String, DataType::Array(None)],
+                DataType::Array(_) | DataType::String | DataType::Map(_),
+                &[
+                    DataType::String,
+                    DataType::Array(None),
+                    DataType::Map(Box::from((None, None)))
+                ],
                 name,
                 0
             );

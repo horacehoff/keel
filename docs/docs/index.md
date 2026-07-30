@@ -48,5 +48,7 @@ Once installed, you can use the `keel` command like any other:
 [^extension]: Keel files have the `.kl` file extension.
 *[REPL]: Read-Eval-Print-Loop
 
+Keel also has a [VS Code extension](https://marketplace.visualstudio.com/items?itemName=horacehoff.keel) that provides syntax highlighting.
+
 ## Benchmarks
 ![Keel benchmarks](images/keel-benchmarks.png){ loading=lazy }

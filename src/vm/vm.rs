@@ -1244,7 +1244,7 @@ pub fn execute(
                     handle,
                     "The answer to the Ultimate Question of Life, the Universe, and Everything is 42."
                 );
-                r[dest] = 42.into();
+                r[dest] = Data::int(42);
             }
             Instr::CallLibFunc(LibFunc::Len, tgt, dest) => {
                 let reg = r[tgt];

@@ -441,9 +441,3 @@ impl From<bool> for Data {
         Self(NAN_BOOL | (value as u64))
     }
 }
-impl From<Data> for bool {
-    #[inline(always)]
-    fn from(value: Data) -> Self {
-        value.as_bool()
-    }
-}

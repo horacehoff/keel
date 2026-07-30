@@ -1359,6 +1359,7 @@ fn compile_inline_condition(
         };
         if let Some(
             Instr::IsFalseJmp(_, jump_size)
+            | Instr::IsTrueJmp(_, jump_size)
             | Instr::SupEqFloatJmp(_, _, jump_size)
             | Instr::SupEqIntJmp(_, _, jump_size)
             | Instr::SupFloatJmp(_, _, jump_size)
@@ -1368,9 +1369,11 @@ fn compile_inline_condition(
             | Instr::InfFloatJmp(_, _, jump_size)
             | Instr::InfIntJmp(_, _, jump_size)
             | Instr::NotEqJmp(_, _, jump_size)
-            | Instr::ObjNotEqJmp(_, _, jump_size)
             | Instr::EqJmp(_, _, jump_size)
-            | Instr::ObjEqJmp(_, _, jump_size),
+            | Instr::ObjNotEqJmp(_, _, jump_size)
+            | Instr::ObjEqJmp(_, _, jump_size)
+            | Instr::StrNotEqJmp(_, _, jump_size)
+            | Instr::StrEqJmp(_, _, jump_size),
         ) = output.get_mut(*y)
         {
             *jump_size = diff as u16;
@@ -2625,14 +2628,10 @@ impl Expr {
             ),
             Self::AnonymousFunction(_, _, _) => {
                 debug_assert!(uses_id);
-                if let Some(&id) = state.const_registers.get(&NULL) {
-                    Some(id)
-                } else {
-                    let id = state.registers.len() as u16;
-                    state.const_registers.insert(NULL, id);
-                    state.registers.push(NULL);
-                    Some(id)
-                }
+                let output_id = state.registers.len();
+                // This is replaced later on by `builtin_functions` when it's called
+                state.registers.push(Data::function(0));
+                Some(output_id as u16)
             }
 
             // ------------------

@@ -241,6 +241,9 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
             );
             let mut args: Vec<(SmolStr, Option<TypeExpr>)> = Vec::with_capacity(2);
             loop {
+                if parser.peek_token() == Token::RParen {
+                    break;
+                }
                 let (next_token, next_token_span) = parser.next_token();
                 let Token::Identifier(arg_name) = next_token else {
                     cold_path();

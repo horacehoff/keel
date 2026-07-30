@@ -418,7 +418,6 @@ Used by:
 - lexical-parse-float 1.0.6 - https://github.com/Alexhuszagh/rust-lexical
 - lexical-parse-integer 1.0.6 - https://github.com/Alexhuszagh/rust-lexical
 - lexical-util 1.0.7 - https://github.com/Alexhuszagh/rust-lexical
-- lexical-write-float 1.0.6 - https://github.com/Alexhuszagh/rust-lexical
 - lexical-write-integer 1.0.6 - https://github.com/Alexhuszagh/rust-lexical
 - once_cell 1.21.4 - https://github.com/matklad/once_cell
 - proc-macro2 1.0.107 - https://github.com/dtolnay/proc-macro2

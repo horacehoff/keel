@@ -113,12 +113,13 @@ Returns the given string as lowercase.
 
 ## Len
 
-`<string | T[]>.len() -> int`<br/>
+`<string | T[] | {K: V}>.len() -> int`<br/>
 Returns the length of the given collection.
 
 ```
 "Hello".len() // Returns 5
 [1,2,3].len() // Returns 3
+{"true": true, "false": false}.len() // Returns 2
 ```
 
 ## Contains
@@ -435,4 +436,54 @@ let map = {"test1": 42, "test2": 67};
 map.insert("test3", 314);
 map.insert("test1", 3000);
 print(map); // prints {"test1":3000,"test2":67,"test3":314}
+```
+
+## Map
+
+`<T[]>.map(fn(T) -> U) -> U[]`<br/>
+`<string>.map(fn(string) -> string) -> string`<br/>
+Maps the values of the array or string with the given function.
+
+```
+print(
+  [0,1,2,3]
+  .map(
+    fn (elem: int) {
+      return elem+1;
+    }
+  )
+); // prints [1,2,3,4]
+print(
+  "hello!"
+  .map(
+    fn (letter) {
+      return if letter == "!" {"..."} else {letter};
+    }
+  )
+); // prints "hello..."
+```
+
+## Filter
+
+`<T[]>.filter(fn(T) -> bool) -> T[]`<br/>
+`<string>.filter(fn(string) -> bool) -> string`<br/>
+Maps the values of the array or string with the given function.
+
+```
+print(
+  [0,1,2,3]
+  .filter(
+    fn (elem: int) {
+      return elem != 0;
+    }
+  )
+); // prints [1,2,3]
+print(
+  "hello!"
+  .filter(
+    fn (letter) {
+      return letter != "!";
+    }
+  )
+); // prints "hello"
 ```

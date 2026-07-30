@@ -304,6 +304,9 @@ pub fn builtin_functions(
                 }
                 let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
 
+                let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+                state.registers[fn_reg as usize] = Data::function(loc);
+
                 for (i, arg_expr) in args.iter().enumerate() {
                     let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
                     let start_len = output.len();

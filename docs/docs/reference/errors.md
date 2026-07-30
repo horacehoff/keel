@@ -3,23 +3,35 @@ icon: lucide/circle-alert
 ---
 # Errors
 
-Keel aims to have pretty & helpful error messages. Right now, they're not very helpful...
+Keel aims to have pretty (thanks [Ariadne](https://crates.io/crates/ariadne)!) and helpful error messages. Currently, some error messages are more helpful than others. This is a work in progress, and error messages will continue to improve over time.
 ```rust
-fn main() {
-    print(x)
+struct Point {
+    x:float,
+    y:float,
+    z:float
 }
 
+fn main() {
+    let origin = Point {x: 0.0, y: 0.0, z: 0.0};
+    origin.x = 10;
+}
+```
+```
 -- OUTPUT -- 
-KEEL ERROR
-Error:
-   ╭─[ test.kl:3:1 ]
+Error: Incompatible types
+   ╭─[ testing/error.kl:2:7 ]
    │
- 3 │ }
-   │ ┬
-   │ ╰── Expected SemiColon, but got '}'. Lines must end with a ';'.
+ 2 │     x:float,
+   │       ───┬──
+   │          ╰──── Field x in struct Point expects type float
+   │
+ 9 │     origin.x = 10;
+   │                ─┬
+   │                 ╰── This expression is of type int
+   │
+   │ Help: Try using the float() function
 ───╯
 ```
-... but they're pretty! (thanks [Ariadne](https://crates.io/crates/ariadne)!)
 
 ## List of catchable errors
 
@@ -57,5 +69,4 @@ Error:
 ### FFI
 
 - `null_byte_in_string`
-- `c_array_return_type_not_supported`
 - `invalid_return_type`

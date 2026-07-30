@@ -7,7 +7,7 @@ icon: lucide/package
 
 You can import other Keel files with the `import` keyword at the top-level.
 
-Imports can be nested, and circular imports are detected and produce an error.
+Imports can be nested and circular.
 
 *[at the top-level]: Outside of any function.
 

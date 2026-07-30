@@ -30,7 +30,7 @@ fn main() {
     While integers are stored as `i32`, it would technically be possible to stretch them to `i48`. While this isn't planned for now, there's room to grow in the future if it becomes desirable.
 
 ## Float (`float`)
-A [float](https://wikipedia.org/wiki/Floating-point_arithmetic) is a number with a decimal point. Keel floats are `f64`, meaning they're 64 bits big and can store values from `-1.7976931348623157 * 10^308` to `1.7976931348623157 * 10^308`. If a value become too big, floats saturate to positive or negative infinity.
+A [float](https://wikipedia.org/wiki/Floating-point_arithmetic) is a number with a decimal point. Keel floats are `f64`, meaning they're 64 bits big and can store values from `-1.7976931348623157 * 10^308` to `1.7976931348623157 * 10^308`. If a value becomes too big, floats saturate to positive or negative infinity.
 Floats must always be written with the decimal point included.
 
 [Float operators](../reference/operators.md#integerfloat-operators)
@@ -162,3 +162,28 @@ fn main() {
 ```
 
 *[Map keys must be literals]: This requirement will be removed soon.
+
+## Function (`fn(T, U, ...) -> V`)
+[Functions](functions.md) are valid types and can be passed as arguments.
+
+They can either be [inline function declarations](functions.md#inline-functions) or referenced by name.
+When referenced by name, all the arguments of the function must be typed.
+
+If the `-> V` part is skipped, the function's return type is null.
+
+``` rust
+fn test(flag: bool, f1: fn(), f2: fn(bool, int) -> string) {
+    if flag {
+        f1();
+    } else {
+        print(f2(false,0));
+    }
+}
+
+fn main() {
+    test(false, 
+        fn() {print("Hell yeah!");}, 
+        fn(flag, n) {return str(flag) + ": " + str(n);}
+    );
+}
+```

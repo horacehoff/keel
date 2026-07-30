@@ -84,7 +84,7 @@ keel -h/--help     # Print help
 ```
 
 ## Near-future roadmap
-- Better, more helpful errors
-- Better module system
+- Global constants
+- Structured errors
 - Struct methods
 - Better embedding API with limits

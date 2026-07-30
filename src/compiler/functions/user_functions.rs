@@ -148,13 +148,14 @@ pub fn handle_user_function(
                 )
             }
         }
+
+        *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
         for arg in args {
             let arg_id = arg
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
             output.push(Instr::StoreFuncArg(arg_id));
             state.free_reg(arg_id, v);
-            *state.allocated_arg_count += 1;
         }
 
         let register_id = if returns_null {

@@ -5,14 +5,14 @@ use crate::vm::StringPool;
 
 pub fn string_gc(
     array_pool: &ObjectPool,
-    string_pool: &StringPool,
+    str_pool: &StringPool,
     free_strings: &mut Vec<u16>,
     registers: &RegisterFile,
     recursion_stack: &RegisterFile,
     live: &mut Vec<bool>,
 ) {
     live.clear();
-    live.resize(string_pool.len(), false);
+    live.resize(str_pool.len(), false);
     for data in registers.0.iter().chain(recursion_stack.0.iter()) {
         if data.is_large_str() {
             live[data.get_str_pool_id()] = true;

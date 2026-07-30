@@ -125,6 +125,37 @@ pub fn error_expected_function(t: &DataType, span: Span, file_idx: u16, sources:
     error_invalid_type(&DataType::Fn(0), t, span, None, None, file_idx, sources);
 }
 
+#[cold]
+#[inline(never)]
+pub fn error_invalid_c_type(t: &DataType, span: Span, file_idx: u16, sources: &[Source]) -> ! {
+    throw_compiler_error(
+        &|| {
+            let src = &sources[file_idx as usize];
+            Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename.as_str(), span.into()),
+            )
+            .with_message("Cannot pass type through FFI")
+            .with_label(
+                Label::new((src.filename.as_str(), span.into()))
+                    .with_message(format_args!("{} cannot be passed through FFI", red(t)))
+                    .with_color(ariadne::Color::Red),
+            )
+            .with_note(format_args!(
+                "The following types can be passed through FFI:\n- {}\n- {}\n- {}\n- {}\n- {}\n- {}",
+                DataType::Int,
+                DataType::Float,
+                DataType::String,
+                DataType::Bool,
+                DataType::Array(None),
+                DataType::Struct(0),
+            ))
+            .finish()
+        },
+        sources,
+    );
+}
+
 #[inline(never)]
 #[cold]
 pub fn error_function_needs_args_typed(

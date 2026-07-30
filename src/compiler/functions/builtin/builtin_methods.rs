@@ -39,12 +39,12 @@ pub fn builtin_methods(
 ) -> Option<u16> {
     macro_rules! add_args {
         () => {
+            *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
             for arg in args.iter().rev() {
                 let arg_id = arg
                     .compile(v, ctx, state, output, None, false, true)
                     .unwrap_id();
                 output.push(Instr::StoreFuncArg(arg_id));
-                *state.allocated_arg_count += 1;
                 state.free_reg(arg_id, v);
             }
         };
@@ -610,7 +610,7 @@ pub fn builtin_methods(
                 let empty_str_id = state.registers.len() as u16;
                 state
                     .registers
-                    .push(Data::p_str("", &mut state.pools.strings));
+                    .push(Data::p_str("", &mut state.pools.str_pool));
                 output.push(Instr::Mov(empty_str_id, result_id));
             } else {
                 output.push(Instr::EmptyArray(result_id));
@@ -724,7 +724,7 @@ pub fn builtin_methods(
                 let empty_str_id = state.registers.len() as u16;
                 state
                     .registers
-                    .push(Data::p_str("", &mut state.pools.strings));
+                    .push(Data::p_str("", &mut state.pools.str_pool));
                 output.push(Instr::Mov(empty_str_id, result_id));
             } else {
                 output.push(Instr::EmptyArray(result_id));

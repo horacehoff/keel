@@ -47,7 +47,7 @@ pub fn builtin_functions(
             let infered = args[0].infer_type(v, ctx, state);
             state.registers.push(Data::p_str(
                 infered.format_detailed(state).as_str(),
-                &mut state.pools.strings,
+                &mut state.pools.str_pool,
             ));
             Some((state.registers.len() - 1) as u16)
         }
@@ -138,7 +138,7 @@ pub fn builtin_functions(
             let id = if args.is_empty() {
                 state
                     .registers
-                    .push(Data::p_str("", &mut state.pools.strings));
+                    .push(Data::p_str("", &mut state.pools.str_pool));
                 (state.registers.len() - 1) as u16
             } else {
                 check_arg_type(
@@ -186,7 +186,7 @@ pub fn builtin_functions(
                     .compile(v, ctx, state, output, None, false, true)
                     .unwrap_id();
                 output.push(Instr::StoreFuncArg(id_first_arg));
-                *state.allocated_arg_count += 1;
+                *state.allocated_arg_count = (*state.allocated_arg_count).max(1);
                 id_second_arg
             };
             state.free_reg(id_first_arg, v);

@@ -70,9 +70,10 @@ pub enum Expr {
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
     IntForLoop(SmolStr, Box<Self>, Box<Self>, Box<[Self]>, Span, Span),
     /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type, fn_name_span)], (start, end))
+    /// FnSignature types is [return_type, arg_types] => return_type is always specified
     ImportDylib(
         SmolStr,
-        Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)]>,
+        Box<[(SmolStr, Box<[(TypeExpr, Span)]>, Span)]>,
         Span,
     ),
 

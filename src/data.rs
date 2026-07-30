@@ -1,6 +1,7 @@
 use crate::compiler::compiler_data::Struct;
 use crate::vm::{MapPool, RegisterFile, StringPool};
 use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ObjectPool};
+use lexical_core::FormattedSize;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::hash::Hasher;
@@ -93,8 +94,8 @@ impl PoolString for &str {
         self.clone_into(slot);
     }
     #[inline(always)]
-    fn push_to_pool(self, string_pool: &mut StringPool) {
-        string_pool.push(self.to_owned());
+    fn push_to_pool(self, str_pool: &mut StringPool) {
+        str_pool.push(self.to_owned());
     }
     #[inline(always)]
     fn str_len(&self) -> usize {
@@ -184,14 +185,14 @@ impl Data {
     }
     /// Same as str(), except this never runs the GC because this function is called by the compiler
     #[inline(always)]
-    pub fn p_str(s: &str, string_pool: &mut StringPool) -> Self {
+    pub fn p_str(s: &str, str_pool: &mut StringPool) -> Self {
         if s.len() <= 6 {
             Self::small_str(s)
-        } else if let Some(id) = string_pool.iter().position(|existing| existing == s) {
+        } else if let Some(id) = str_pool.iter().position(|existing| existing == s) {
             Self(NAN_STRING_LARGE | id as u64)
         } else {
-            let string_pool_id = string_pool.len() as u64;
-            string_pool.push(s.to_owned());
+            let string_pool_id = str_pool.len() as u64;
+            str_pool.push(s.to_owned());
             Self(NAN_STRING_LARGE | string_pool_id)
         }
     }
@@ -199,7 +200,7 @@ impl Data {
     pub fn string<S: PoolString>(
         s: S,
         array_pool: &ObjectPool,
-        string_pool: &mut StringPool,
+        str_pool: &mut StringPool,
         registers: &RegisterFile,
         recursion_stack: &RegisterFile,
         free_strings: &mut Vec<u16>,
@@ -209,11 +210,11 @@ impl Data {
         if s.str_len() <= 6 {
             Self::small_str(s.pool_as_str())
         } else {
-            if string_pool.len() >= (*gc_string_threshold as usize) && free_strings.is_empty() {
-                raise_string_gc_threshold(gc_string_threshold, string_pool.len());
+            if str_pool.len() >= (*gc_string_threshold as usize) && free_strings.is_empty() {
+                raise_string_gc_threshold(gc_string_threshold, str_pool.len());
                 string_gc(
                     array_pool,
-                    string_pool,
+                    str_pool,
                     free_strings,
                     registers,
                     recursion_stack,
@@ -221,17 +222,17 @@ impl Data {
                 );
             }
             if let Some(id) = free_strings.pop() {
-                s.move_to_slot(string_pool.get_mut(id as usize));
+                s.move_to_slot(str_pool.get_mut(id as usize));
                 Self(NAN_STRING_LARGE | (id as u64))
             } else {
-                let string_pool_id = string_pool.len() as u64;
-                s.push_to_pool(string_pool);
+                let string_pool_id = str_pool.len() as u64;
+                s.push_to_pool(str_pool);
                 Self(NAN_STRING_LARGE | string_pool_id)
             }
         }
     }
     #[inline(always)]
-    pub fn as_str(&self, string_pool: &StringPool) -> &str {
+    pub fn as_str(&self, str_pool: &StringPool) -> &str {
         debug_assert!(self.is_string());
         if (self.0 & !PAYLOAD_MASK) == NAN_STRING_SMALL {
             let payload = self.0 & PAYLOAD_MASK;
@@ -242,8 +243,8 @@ impl Data {
                 std::str::from_utf8_unchecked(slice)
             }
         } else {
-            let payload = (self.0 & PAYLOAD_MASK) as usize;
-            unsafe { &*(string_pool[payload].as_str() as *const str) }
+            let string_pool_idx = (self.0 & PAYLOAD_MASK) as usize;
+            unsafe { &*(str_pool[string_pool_idx].as_str() as *const str) }
         }
     }
     #[inline(always)]
@@ -329,32 +330,39 @@ impl Data {
     pub const fn is_function(self) -> bool {
         (self.0 & !PAYLOAD_MASK) == NAN_STRUCT && (self.0 & (1 << 46)) != 0
     }
+    #[inline(never)]
     pub fn format(
         self,
         obj_pool: &ObjectPool,
-        string_pool: &StringPool,
+        str_pool: &StringPool,
         map_pool: &MapPool,
         structs: &[Struct],
         show_str: bool,
     ) -> SmolStr {
         if self.is_float() {
-            self.as_float().to_smolstr()
+            SmolStr::new(zmij::Buffer::new().format(self.as_float()))
         } else if self.is_int() {
-            self.as_int().to_smolstr()
+            let mut buffer = [0u8; i32::FORMATTED_SIZE_DECIMAL];
+            let digits = lexical_core::write(self.as_int(), &mut buffer);
+            SmolStr::new(unsafe { str::from_utf8_unchecked(digits) })
         } else if self.is_bool() {
-            self.as_bool().to_smolstr()
+            if self.as_bool() {
+                SmolStr::new_static("true")
+            } else {
+                SmolStr::new_static("false")
+            }
         } else if self.is_string() {
             if show_str {
-                self.as_str(string_pool).to_smolstr()
+                self.as_str(str_pool).to_smolstr()
             } else {
-                format_args!("\"{}\"", self.as_str(string_pool)).to_smolstr()
+                format_args!("\"{}\"", self.as_str(str_pool)).to_smolstr()
             }
         } else if self.is_array() {
             format_args!(
                 "[{}]",
                 obj_pool[self.as_array()]
                     .iter()
-                    .map(|x| x.format(obj_pool, string_pool, map_pool, structs, false))
+                    .map(|x| x.format(obj_pool, str_pool, map_pool, structs, false))
                     .collect::<Vec<SmolStr>>()
                     .join(",")
             )
@@ -369,11 +377,8 @@ impl Data {
                 obj_pool[self.as_struct()]
                     .iter()
                     .map(|x| {
-                        format_args!(
-                            "{}",
-                            x.format(obj_pool, string_pool, map_pool, structs, false)
-                        )
-                        .to_smolstr()
+                        format_args!("{}", x.format(obj_pool, str_pool, map_pool, structs, false))
+                            .to_smolstr()
                     })
                     .collect::<Vec<SmolStr>>()
                     .join(",")
@@ -387,8 +392,8 @@ impl Data {
                     .map(|(key, val)| {
                         format_args!(
                             "{}:{}",
-                            key.format(obj_pool, string_pool, map_pool, structs, false),
-                            val.format(obj_pool, string_pool, map_pool, structs, false),
+                            key.format(obj_pool, str_pool, map_pool, structs, false),
+                            val.format(obj_pool, str_pool, map_pool, structs, false),
                         )
                         .to_smolstr()
                     })

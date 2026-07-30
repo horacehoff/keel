@@ -47,7 +47,7 @@ embed = []
 smol_strc = "0.3.6"
 ariadne = "0.6.0"
 memchr = "2.8.3"
-lexical-core = "1.0.6"
+lexical-core = {version="1.0.6", default-features=false, features=["write-integers","parse-integers","parse-floats"]}
 zmij = "1.0.21"
 logos = "0.16.1"
 rustc-hash = "2.1.3"

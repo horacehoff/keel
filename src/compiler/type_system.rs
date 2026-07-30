@@ -10,6 +10,7 @@ use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_function_needs_args_typed;
+use crate::compiler::compiler_errors::error_invalid_c_type;
 use crate::compiler::compiler_errors::error_invalid_type;
 use crate::compiler::compiler_errors::error_op;
 use crate::compiler::compiler_errors::error_struct_unknown_field;
@@ -49,6 +50,7 @@ pub enum TypeExpr {
     Map(Box<Self>, Box<Self>),
     Union(Box<[Self]>),
     Function(Box<[Self]>),
+    Null,
 }
 
 impl TypeExpr {
@@ -59,6 +61,7 @@ impl TypeExpr {
         sources: &[Source],
     ) -> DataType {
         match self {
+            Self::Null => DataType::Null,
             Self::Identifier(s, span) => match s.as_str() {
                 "int" => DataType::Int,
                 "float" => DataType::Float,
@@ -146,7 +149,7 @@ impl std::fmt::Display for DataType {
             Self::String => write!(f, "string"),
             Self::Array(array_type) => match array_type {
                 Some(array_type) => write!(f, "{array_type}[]"),
-                None => write!(f, "Unknown[]"),
+                None => write!(f, "T[]"),
             },
             Self::Null => write!(f, "null"),
             Self::Unknown => write!(f, "Unknown"),
@@ -194,7 +197,7 @@ impl DataType {
                 Some(array_type) => {
                     format_args!("{}[]", array_type.format_detailed(state)).to_smolstr()
                 }
-                None => SmolStr::new_static("Unknown[]"),
+                None => SmolStr::new_static("T[]"),
             },
             Self::Null => SmolStr::new_static("null"),
             Self::Unknown => SmolStr::new_static("Unknown"),
@@ -261,19 +264,28 @@ impl DataType {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn to_c_type(&self, structs: &[Struct]) -> Type {
+    pub fn to_c_type(
+        &self,
+        is_return_type: bool,
+        span: Span,
+        structs: &[Struct],
+        file_idx: u16,
+        sources: &[Source],
+    ) -> Type {
         match self {
             Self::Int => libffi::middle::Type::i32(),
             Self::Float => libffi::middle::Type::f64(),
             Self::String | Self::Array(_) => libffi::middle::Type::pointer(),
-            Self::Null => libffi::middle::Type::void(),
-            Self::Struct(id) => libffi::middle::Type::structure(
-                structs[*id as usize]
-                    .fields
-                    .iter()
-                    .map(|(_, field_type, _)| field_type.to_c_type(structs)),
-            ),
-            _ => unsafe { unreachable_unchecked() },
+            Self::Bool => libffi::middle::Type::u8(),
+            Self::Null if is_return_type => libffi::middle::Type::void(),
+            Self::Struct(id) => {
+                libffi::middle::Type::structure(structs[*id as usize].fields.iter().map(
+                    |(_, field_type, span)| {
+                        field_type.to_c_type(is_return_type, *span, structs, file_idx, sources)
+                    },
+                ))
+            }
+            invalid_type => error_invalid_c_type(invalid_type, span, file_idx, sources),
         }
     }
 }

@@ -294,8 +294,11 @@ fn compile_array_literal(
         }
     }
     let array_id = {
-        state.pools.objs.push(Vec::with_capacity(array_items.len()));
-        state.pools.objs.len() - 1
+        state
+            .pools
+            .obj_pool
+            .push(Vec::with_capacity(array_items.len()));
+        state.pools.obj_pool.len() - 1
     };
     if array_items.is_empty() && !ctx.single_run {
         let array_reg = {
@@ -313,16 +316,16 @@ fn compile_array_literal(
             if elem.is_constant_literal() {
                 state
                     .pools
-                    .objs
+                    .obj_pool
                     .get_mut(array_id)
                     .push(state.registers[id as usize]);
             } else {
                 output.push(Instr::ObjElemMov(
                     id,
                     array_id as u16,
-                    state.pools.objs[array_id].len() as u16,
+                    state.pools.obj_pool[array_id].len() as u16,
                 ));
-                state.pools.objs.get_mut(array_id).push(NULL);
+                state.pools.obj_pool.get_mut(array_id).push(NULL);
             }
         }
         state.registers.push(Data::array(array_id as u32));
@@ -338,12 +341,12 @@ fn compile_array_literal(
             if elem.is_constant_literal() {
                 state
                     .pools
-                    .objs
+                    .obj_pool
                     .get_mut(array_id)
                     .push(state.registers[id as usize]);
             } else {
                 constant_array = false;
-                state.pools.objs.get_mut(array_id).push(NULL);
+                state.pools.obj_pool.get_mut(array_id).push(NULL);
             }
             elem_ids.push(id);
         }
@@ -361,7 +364,7 @@ fn compile_array_literal(
             output.push(Instr::CloneArray(
                 template_reg,
                 dest_reg,
-                state.pools.objs[array_id].len() as u16,
+                state.pools.obj_pool[array_id].len() as u16,
             ));
             dest_reg
         } else {
@@ -410,8 +413,8 @@ fn compile_struct_literal(
         )
     }
     let struct_id = {
-        state.pools.objs.push(Vec::with_capacity(fields.len()));
-        state.pools.objs.len() - 1
+        state.pools.obj_pool.push(Vec::with_capacity(fields.len()));
+        state.pools.obj_pool.len() - 1
     };
     if ctx.single_run {
         for field_idx in 0..expected_fields_len {
@@ -439,16 +442,16 @@ fn compile_struct_literal(
                 if field_expr.is_constant_literal() {
                     state
                         .pools
-                        .objs
+                        .obj_pool
                         .get_mut(struct_id)
                         .push(state.registers[id as usize]);
                 } else {
                     output.push(Instr::ObjElemMov(
                         id,
                         struct_id as u16,
-                        state.pools.objs[struct_id].len() as u16,
+                        state.pools.obj_pool[struct_id].len() as u16,
                     ));
-                    state.pools.objs.get_mut(struct_id).push(NULL);
+                    state.pools.obj_pool.get_mut(struct_id).push(NULL);
                 }
             } else {
                 let missing_elems = (0..expected_fields_len)
@@ -501,11 +504,11 @@ fn compile_struct_literal(
                 if field_expr.is_constant_literal() {
                     state
                         .pools
-                        .objs
+                        .obj_pool
                         .get_mut(struct_id)
                         .push(state.registers[id as usize]);
                 } else {
-                    state.pools.objs.get_mut(struct_id).push(NULL);
+                    state.pools.obj_pool.get_mut(struct_id).push(NULL);
                     dynamic.push((id, field_idx as u16));
                 }
             } else {
@@ -556,8 +559,8 @@ fn compile_map_literal(
 ) -> u16 {
     let mut global_key_type: DataType = DataType::Unknown;
     let mut global_val_type: DataType = DataType::Unknown;
-    let map_id = state.pools.maps.len();
-    state.pools.maps.push(HashMap::with_capacity_and_hasher(
+    let map_id = state.pools.map_pool.len();
+    state.pools.map_pool.push(HashMap::with_capacity_and_hasher(
         kv_pairs.len(),
         BuildHasherDefault::default(),
     ));
@@ -615,9 +618,9 @@ fn compile_map_literal(
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
             if val.is_constant_literal() {
-                state.pools.maps[map_id].insert(key_val, state.registers[id as usize]);
+                state.pools.map_pool[map_id].insert(key_val, state.registers[id as usize]);
             } else {
-                state.pools.maps[map_id].insert(key_val, NULL);
+                state.pools.map_pool[map_id].insert(key_val, NULL);
                 output.push(Instr::MapInsert(
                     map_id as u16,
                     state.registers.len() as u16,
@@ -684,9 +687,9 @@ fn compile_map_literal(
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
             if val.is_constant_literal() {
-                state.pools.maps[map_id].insert(key_val, state.registers[val_id as usize]);
+                state.pools.map_pool[map_id].insert(key_val, state.registers[val_id as usize]);
             } else {
-                state.pools.maps[map_id].insert(key_val, NULL);
+                state.pools.map_pool[map_id].insert(key_val, NULL);
                 dynamic.push((key_val, val_id));
             }
         }
@@ -831,6 +834,7 @@ fn compile_array_slice(
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
     output.push(Instr::StoreFuncArg(idx_end_id));
+    *state.allocated_arg_count = (*state.allocated_arg_count).max(1);
     state.free_reg(idx_start_id, v);
     state.free_reg(idx_end_id, v);
     let dest_reg_id = state.alloc_reg();
@@ -2237,10 +2241,10 @@ impl Expr {
                 if var_assignment {
                     state
                         .registers
-                        .push(Data::p_str(str, &mut state.pools.strings));
+                        .push(Data::p_str(str, &mut state.pools.str_pool));
                     return Some((state.registers.len() - 1) as u16);
                 }
-                let data = Data::p_str(str, &mut state.pools.strings);
+                let data = Data::p_str(str, &mut state.pools.str_pool);
                 if let Some(&id) = state.const_registers.get(&data) {
                     Some(id)
                 } else {
@@ -2939,7 +2943,7 @@ fn parse_toplevel(
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: &mut Vec<(
         u16,
         u16,
-        Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)]>,
+        Box<[(SmolStr, Box<[(TypeExpr, Span)]>, Span)]>,
         Rc<Library>,
         Span,
     )>,
@@ -3142,7 +3146,7 @@ fn resolve_types(
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: Vec<(
         u16,
         u16,
-        Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)]>,
+        Box<[(SmolStr, Box<[(TypeExpr, Span)]>, Span)]>,
         Rc<Library>,
         Span,
     )>,
@@ -3183,21 +3187,32 @@ fn resolve_types(
         let namespace = &file_namespaces[&src_file_idx];
         let fns = fn_signatures
             .iter()
-            .map(|(fn_name, fn_args, fn_return_type, fn_name_span)| {
+            .map(|(fn_name, fn_args, fn_name_span)| {
+                let (fn_return_type, fn_return_type_span) = unsafe { fn_args.get_unchecked(0) };
                 let fn_args = fn_args
                     .iter()
-                    .map(|t| t.to_datatype(src_file_idx, namespace, sources))
-                    .collect::<Vec<DataType>>()
+                    .skip(1)
+                    .map(|(t, span)| (t.to_datatype(src_file_idx, namespace, sources), *span))
+                    .collect::<Vec<(DataType, Span)>>()
                     .into_boxed_slice();
                 let fn_return_type = fn_return_type.to_datatype(src_file_idx, namespace, sources);
                 let return_val = FnSignature {
                     name: fn_name.clone(),
-                    args: fn_args.clone(),
+                    args: fn_args.iter().map(|(t, _)| t.clone()).collect(),
                     return_type: fn_return_type.clone(),
                     id: dynamic_libs_fns.len() as u16,
                 };
-                let arg_types: Vec<_> = fn_args.iter().map(|t| t.to_c_type(structs)).collect();
-                let return_type = fn_return_type.to_c_type(structs);
+                let arg_types: Vec<_> = fn_args
+                    .iter()
+                    .map(|(t, span)| t.to_c_type(false, *span, structs, src_file_idx, sources))
+                    .collect();
+                let return_type = fn_return_type.to_c_type(
+                    true,
+                    *fn_return_type_span,
+                    structs,
+                    src_file_idx,
+                    sources,
+                );
                 let cif = libffi::middle::Cif::new(arg_types, return_type);
                 let ptr = unsafe {
                     libffi::middle::CodePtr(
@@ -3217,7 +3232,7 @@ fn resolve_types(
                 };
 
                 let mut types = vec![fn_return_type];
-                types.extend(fn_args);
+                types.extend(fn_args.iter().map(|(t, _)| t.clone()));
 
                 dynamic_libs_fns.push(DynamicLibFn {
                     types: Box::from(types),
@@ -3266,9 +3281,9 @@ pub fn compile(
     let mut variables: Vec<Variable> = Vec::new();
     let mut registers: Vec<Data> = Vec::new();
     let mut pools: Pools = Pools {
-        objs: Pool::with_capacity(10),
-        maps: Pool::with_capacity(2),
-        strings: Pool::with_capacity(10),
+        obj_pool: Pool::with_capacity(5),
+        map_pool: Pool::with_capacity(0),
+        str_pool: Pool::with_capacity(5),
     };
     let mut instr_src: Vec<InstrSrc> = Vec::new();
     let mut fn_registers: Vec<Vec<u16>> = Vec::new();
@@ -3296,7 +3311,7 @@ pub fn compile(
     let mut pending_dylibs: Vec<(
         u16,
         u16,
-        Box<[(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)]>,
+        Box<[(SmolStr, Box<[(TypeExpr, Span)]>, Span)]>,
         Rc<Library>,
         Span,
     )> = Vec::new();
@@ -3378,9 +3393,9 @@ pub fn compile(
     #[cfg(debug_assertions)]
     if debug {
         println!("---- DEBUG ----");
-        if !pools.objs.is_empty() {
+        if !pools.obj_pool.is_empty() {
             println!("---  ARRAYS  ---");
-            for (i, data) in pools.objs.iter().enumerate() {
+            for (i, data) in pools.obj_pool.iter().enumerate() {
                 println!(" {i} {data:?}");
             }
         }
@@ -3388,7 +3403,13 @@ pub fn compile(
         for (i, data) in registers.iter().enumerate() {
             println!(
                 " [{i}] {}",
-                data.format(&pools.objs, &pools.strings, &pools.maps, &structs, true)
+                data.format(
+                    &pools.obj_pool,
+                    &pools.str_pool,
+                    &pools.map_pool,
+                    &structs,
+                    true
+                )
             );
         }
         if !instructions.is_empty() {

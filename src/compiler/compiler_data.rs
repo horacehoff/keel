@@ -88,10 +88,11 @@ pub struct Struct {
     pub name_span: Span,
 }
 
+#[allow(clippy::struct_field_names)]
 pub struct Pools {
-    pub objs: ObjectPool,
-    pub maps: MapPool,
-    pub strings: StringPool,
+    pub obj_pool: ObjectPool,
+    pub map_pool: MapPool,
+    pub str_pool: StringPool,
 }
 
 pub struct Source {

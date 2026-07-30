@@ -653,6 +653,8 @@ fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
         } else {
             TypeExpr::Identifier(SmolStr::new(i), span)
         }
+    } else if Token::Null == next_token {
+        TypeExpr::Null
     } else {
         cold_path();
         parser.error(
@@ -686,7 +688,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
         );
     };
     parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'.");
-    let mut fn_signatures: Vec<(SmolStr, Box<[TypeExpr]>, TypeExpr, Span)> = Vec::new();
+    let mut fn_signatures: Vec<(SmolStr, Box<[(TypeExpr, Span)]>, Span)> = Vec::new();
     let end: u32;
     loop {
         if parser.peek_token() == Token::RBrace {
@@ -695,15 +697,19 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
         }
 
         let type_start = parser.peek_token();
+        let type_start_span = parser.peek_token_span().start;
         let first = parse_type(parser);
+        let type_end_span = parser.last_token_end;
         let fn_name_span: Span;
-        let (return_type, fn_name) = if parser.peek_token() == Token::LParen {
+        let mut args: Vec<(TypeExpr, Span)> = Vec::with_capacity(2);
+        let fn_name = if parser.peek_token() == Token::LParen {
             if let TypeExpr::Identifier(name, span) = first {
                 fn_name_span = span;
-                (
+                args.push((
                     TypeExpr::Identifier(SmolStr::new_static("null"), span),
-                    name,
-                )
+                    (type_start_span, type_start_span).into(),
+                ));
+                name
             } else {
                 parser.error(
                     span,
@@ -730,18 +736,21 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
                     ),
                 );
             };
-            (first, fn_name)
+            args.push((first, (type_start_span, type_end_span as u32).into()));
+            fn_name
         };
         parser.next_token_expect(
             Token::LParen,
             "Function arguments must be delimited by parentheses",
         );
-        let mut args: Vec<TypeExpr> = Vec::with_capacity(2);
         loop {
             if parser.peek_token() == Token::RParen {
                 break;
             }
-            args.push(parse_type(parser));
+            let type_span_start = parser.peek_token_span().start;
+            let t = parse_type(parser);
+            let type_span_end = parser.last_token_end as u32;
+            args.push((t, (type_span_start, type_span_end).into()));
             if parser.peek_token() == Token::Comma {
                 parser.next_token();
             } else if !(parser.peek_token() == Token::RParen) {
@@ -755,7 +764,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
             Token::SemiColon,
             "Function definitions must end with a semicolon",
         );
-        fn_signatures.push((fn_name, Box::from(args), return_type, fn_name_span));
+        fn_signatures.push((fn_name, Box::from(args), fn_name_span));
     }
     Expr::ImportDylib(path, Box::from(fn_signatures), (start, end).into())
 }

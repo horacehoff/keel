@@ -6,46 +6,41 @@ All times are measured with [hyperfine](https://github.com/sharkdp/hyperfine) (`
 Keel release binaries are built with PGO, and the instrumented binary is trained on representative Keel programs, including smaller-input versions of some benchmarks shown here.
 The PGO workflow is visible [here](.github/workflows/release.yml).
 
+Native binaries are built with `-O2`. The compiler used is Clang.
+
 
 ## Iterative fib(46) x 200000
 
-| Keel | Python 3.14.5 | LuaJIT (-joff) |
-| --- | --- | --- |
-| [iter_fib.kl](/examples/iter_fib/iter_fib.kl) | [iter_fib.py](/examples/iter_fib/iter_fib.py) | [iter_fib.lua](/examples/iter_fib/iter_fib.lua) |
-| 73.4ms | 740ms | 72.5ms |
+| Keel | Python 3.14.5 | LuaJIT (-joff) | Native (C) |
+| --- | --- | --- | --- |
+| [iter_fib.kl](/examples/iter_fib/iter_fib.kl) | [iter_fib.py](/examples/iter_fib/iter_fib.py) | [iter_fib.lua](/examples/iter_fib/iter_fib.lua) | [iter_fib.c](/examples/iter_fib/iter_fib.c) |
+| 73.4ms | 740ms | 72.5ms | 2.1ms |
 
 
 ## Recursive fib(10,15,20,25,30,33)
 
-| Keel | Python 3.14.5 | LuaJIT (-joff) |
-| --- | --- | --- |
-| [fib.kl](/examples/fib/fib.kl) | [fib.py](/examples/fib/fib.py) | [fib.lua](/examples/fib/fib.lua) |
-| 178.9ms | 507.4ms | 183.4ms |
+| Keel | Python 3.14.5 | LuaJIT (-joff) | Native (C) |
+| --- | --- | --- | --- |
+| [fib.kl](/examples/fib/fib.kl) | [fib.py](/examples/fib/fib.py) | [fib.lua](/examples/fib/fib.lua) | [fib.c](/examples/fib/fib.c) |
+| 178.9ms | 507.4ms | 183.4ms | 16.3ms |
 
 
 ## N-body (N=500000)
-Based on [this benchmark from The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/nbody.html#nbody).\
-`nbody_lua` is based on [the fastest Lua implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-lua-2.html).\
-`nbody_py` is based on [the fastest Python implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-python3-1.html).
+Based on [this benchmark from The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/nbody.html#nbody) and [the fastest Lua implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-lua-2.html).
 
-| Keel | Python 3.14.5 | LuaJIT (-joff) |
-| --- | --- | --- |
-| [nbody_lua.kl](/examples/nbody/nbody_lua.kl) | [nbody_lua.py](/examples/nbody/nbody_lua.py) | [nbody_lua.lua](/examples/nbody/nbody_lua.lua) |
-| 451.5ms | 2649ms | 458.5ms |
-
-| Keel | Python 3.14.5 | LuaJIT (-joff) |
-| --- | --- | --- |
-| [nbody_py.kl](/examples/nbody/nbody_py.kl) | [nbody_py.py](/examples/nbody/nbody_py.py) | [nbody_py.lua](/examples/nbody/nbody_py.lua) |
-| 565.4ms | 2726ms | 581.2ms |
+| Keel | Python 3.14.5 | LuaJIT (-joff) | Native (C) |
+| --- | --- | --- | --- |
+| [nbody.kl](/examples/nbody/nbody.kl) | [nbody.py](/examples/nbody/nbody.py) | [nbody.lua](/examples/nbody/nbody.lua) | [nbody.c](/examples/nbody/nbody.c) |
+| 451.5ms | 2649ms | 458.5ms | 48.9ms |
 
 ## Binary trees (N=16)
 Based on [this benchmark from The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/binarytrees.html#binarytrees).\
 Based on [this Python implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-python3-2.html) and [this Lua implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-lua-2.html).
 
-| Keel | Python 3.14.5 | LuaJIT (-joff) |
-| --- | --- | --- |
-| [binary-trees.kl](/examples/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/binary-trees/binary-trees.lua) |
-| 540.7ms | 1264ms | 541.8ms |
+| Keel | Python 3.14.5 | LuaJIT (-joff) | Native (C) |
+| --- | --- | --- | --- |
+| [binary-trees.kl](/examples/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/binary-trees/binary-trees.lua) | [binary-trees.c](/examples/binary-trees/binary-trees.c) |
+| 540.7ms | 1264ms | 541.8ms | 247.4ms |
 
 
 ## Quicksort (N=10000)

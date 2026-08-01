@@ -1704,6 +1704,9 @@ fn compile_for_loop(
         state,
     );
     // Clean up variables
+    for var in &v[v_len..] {
+        state.free_reg(var.register_id, v);
+    }
     v.truncate(v_len);
     state.free_loop_scope_registers(regs_before, &cond_code, v);
 
@@ -1928,6 +1931,7 @@ fn compile_var_declaration(
             .symbols
             .push((name.clone(), SymbolKind::Fn(*fn_id)));
     }
+    state.free_registers.retain(|&id| id != var_id);
     v.push(Variable {
         name: name.clone(),
         register_id: var_id,

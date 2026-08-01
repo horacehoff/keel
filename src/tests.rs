@@ -2693,6 +2693,43 @@ pub fn array_join_no_sep() {
 }
 
 #[test]
+pub fn reg_not_reused_post_sqrt() {
+    run_and_check_registers!(
+        "
+        struct Body {
+            x: float,
+            y: float,
+            z: float,
+            mass: float
+        }
+        fn energy(bodies) {
+            let e = 0.0;
+            for i in ..bodies.len() {
+                let bi = bodies[i];
+                let bim = bi.mass;
+                for j in i+1..bodies.len() {
+                    let bj = bodies[j];
+                    let dx = bi.x-bj.x;
+                    let dy = bi.y-bj.y;
+                    let dz = bi.z-bj.z;
+                    let distance = (dx*dx + dy*dy + dz*dz).sqrt();
+                    e -= (bim * bj.mass) / distance;
+                }
+            }
+            print(e);
+        }
+        fn main() {
+            let bodies = [
+                Body {x: 0.0, y: 0.0, z: 0.0, mass: 10.0},
+                Body {x: 3.0, y: 0.0, z: 0.0, mass: 2.0}
+            ];
+            energy(bodies);
+        }",
+        (-20.0 / 3.0).into()
+    );
+}
+
+#[test]
 pub fn float_div_zero() {
     run_and_check_registers!(
         "

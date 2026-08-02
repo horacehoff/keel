@@ -29,11 +29,14 @@ use std::io::Write;
 use std::ops::Index;
 use std::ops::IndexMut;
 
-#[path = "./ffi/ffi.rs"]
-mod ffi;
+#[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+use std::io::IsTerminal;
 
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
+
+#[path = "./ffi/ffi.rs"]
+mod ffi;
 
 pub type ObjectPool = Pool<Vec<Data>>;
 pub type MapPool = Pool<HashMap<Data, Data, BuildHasherDefault<DataHash>>>;
@@ -248,9 +251,21 @@ pub fn execute(
     let mut recursion_stack = RegisterFile(Vec::with_capacity(allocated_call_depth * r.len()));
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    let mut handle = std::io::stdout().lock();
+    let stdout = std::io::stdout();
+
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+    let stdout_is_terminal = stdout.is_terminal();
+
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+    const stdout_is_terminal: bool = false;
+
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+    let mut handle = std::io::BufWriter::with_capacity(8 * 1024, stdout.lock());
+
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     let mut handle = crate::captured_output::CapturedOutputWriter;
+
+    let mut output = String::with_capacity(256);
 
     let mut free_arrays: Vec<u32> = Vec::with_capacity(obj_pool.len());
     let mut free_maps: Vec<u32> = Vec::with_capacity(map_pool.len());
@@ -870,14 +885,15 @@ pub fn execute(
             Instr::NegInt(tgt, dest) => {
                 r[dest] = (-r[tgt].as_int()).into();
             }
-            Instr::Print(tgt) => unsafe {
-                writeln!(
-                    handle,
-                    "{}",
-                    r[tgt].format(obj_pool, str_pool, map_pool, structs, true)
-                )
-                .unwrap_unchecked();
-            },
+            Instr::Print(tgt) => {
+                r[tgt].format_to(&mut output, obj_pool, str_pool, map_pool, structs, false);
+                output.push('\n');
+                handle.write_all(output.as_bytes()).unwrap();
+                output.clear();
+                if stdout_is_terminal {
+                    handle.flush().unwrap();
+                }
+            }
             Instr::StoreFuncArg(id) => args.push(id),
             Instr::ObjElemMov(new_elem_reg_id, array_id, idx) => unsafe {
                 *obj_pool
@@ -1539,6 +1555,8 @@ pub fn execute(
             }
             Instr::Halt(code) => {
                 cold_path();
+
+                handle.flush().unwrap();
 
                 #[cfg(not(target_arch = "wasm32"))]
                 if code != 0 {

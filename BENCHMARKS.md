@@ -132,59 +132,10 @@ print(count)</code></pre></td>
 
 ## FizzBuzz - 1 000 000 iterations
 
-<table>
-<tr>
-  <th>Keel</th>
-  <th>Python 3</th>
-  <th>LuaJIT (-joff)</th>
-</tr>
-<tr>
-<td><pre><code class="language-rust">fn main() {
-    let last = "";
-    for i in 1..1000001 {
-        if i % 15 == 0 {
-            last = "FizzBuzz";
-        } else if i % 3 == 0 {
-            last = "Fizz";
-        } else if i % 5 == 0 {
-            last = "Buzz";
-        } else {
-            last = str(i);
-        }
-    }
-    print(last);
-}</code></pre></td>
-<td><pre><code class="language-python">last = ""
-for i in range(1, 1000001):
-    if i % 15 == 0:
-        last = "FizzBuzz"
-    elif i % 3 == 0:
-        last = "Fizz"
-    elif i % 5 == 0:
-        last = "Buzz"
-    else:
-        last = str(i)
-print(last)</code></pre></td>
-<td><pre><code class="language-lua">local last = ""
-for i = 1, 1000000 do
-    if i % 15 == 0 then
-        last = "FizzBuzz"
-    elseif i % 3 == 0 then
-        last = "Fizz"
-    elseif i % 5 == 0 then
-        last = "Buzz"
-    else
-        last = tostring(i)
-    end
-end
-print(last)</code></pre></td>
-</tr>
-<tr>
-  <td><b>21.6ms</b></td>
-  <td>149.2ms</td>
-  <td>84.2ms</td>
-</tr>
-</table>
+| Keel | Python 3.14.5 | LuaJIT (-joff) | Native (C) |
+| --- | --- | --- | --- |
+| [fizzbuzz.kl](/examples/fizzbuzz/fizzbuzz.kl) | [fizzbuzz.py](/examples/fizzbuzz/fizzbuzz.py) | [fizzbuzz.lua](/examples/fizzbuzz/fizzbuzz.lua) | [fizzbuzz.c](/examples/fizzbuzz/fizzbuzz.c) |
+| 32.5ms | 304.8ms | 124.3ms | 71.5ms |
 
 
 ## Standard library operations * 100 000
@@ -341,58 +292,19 @@ print(count)</code></pre></td>
 
 ## C FFI call overhead * 10 000 000
 
-All programs call the same shared C library function in a huge loop. The C function is intentionally trivial so the measured time reflects the cost of crossing the language-C boundary, not the C computation itself.
+FFI call overhead is measured by comparing the execution time of an increment loop entirely in the given language against an equivalent loop that performs the increment through an FFI C function call. 
+The C function is intentionally trivial so that the measured time reflects the cost of crossing the language-C boundary, not the C computation itself.
 
-**`bench_ffi.c`** (compiled with `-O2`):
+[ffi.c](/examples/ffi/ffi.c) (compiled with `-O2`):
 ```c
-int increment(int x) {
-    return x + 1;
-}
+int increment(int x) { return x + 1; }
 ```
 
-<table>
-<tr>
-  <th>Keel</th>
-  <th>Python 3</th>
-  <th>LuaJIT (-joff)</th>
-</tr>
-<tr>
-<td><pre><code class="language-rust">dylib "./bench_ffi.dylib" {
-    int increment(int);
-}
-
-fn main() {
-    let x = 0;
-    for _ in 0..10000000 {
-        x = bench_ffi::increment(x);
-    }
-    print(x);
-}</code></pre></td>
-<td><pre><code class="language-python">import ctypes
-
-lib = ctypes.CDLL("./bench_ffi.dylib")
-lib.increment.restype = ctypes.c_int
-lib.increment.argtypes = [ctypes.c_int]
-
-x = 0
-for _ in range(10_000_000):
-    x = lib.increment(x)
-print(x)</code></pre></td>
-<td><pre><code class="language-lua">local ffi = require("ffi")
-ffi.cdef[[
-    int increment(int x);
-]]
-local lib = ffi.load("./bench_ffi")
-
-local x = 0
-for _ = 1, 10000000 do
-    x = lib.increment(x)
-end
-print(x)</code></pre></td>
-</tr>
-<tr>
-  <td><b>185.2ms</b></td>
-  <td>2907ms</td>
-  <td>535.8ms</td>
-</tr>
-</table>
+| Keel | Python 3.14.5 | LuaJIT (-joff) |
+| --- | --- | --- |
+| [ffi_baseline.kl](/examples/ffi/ffi_baseline.kl) | [ffi_baseline.py](/examples/ffi/ffi_baseline.py) | [ffi_baseline.lua](/examples/ffi/ffi_baseline.lua) |
+| 48.4ms | 485.7ms | 62.8ms |
+| [ffi.kl](/examples/ffi/ffi.kl) | [ffi.py](/examples/ffi/ffi.py) | [ffi.lua](/examples/ffi/ffi.lua) |
+| 177.4ms | 2860ms | 511.6ms |
+| **FFI OVERHEAD** | **FFI OVERHEAD** | **FFI OVERHEAD** |
+| 129ms | 2374.3ms | 448.8ms |

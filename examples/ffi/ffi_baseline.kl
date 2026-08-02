@@ -1,0 +1,7 @@
+fn main() {
+    let x = 0;
+    for _ in 0..10000000 {
+        x = x+1;
+    }
+    print(x);
+}

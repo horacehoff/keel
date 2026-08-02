@@ -1704,9 +1704,6 @@ fn compile_for_loop(
         state,
     );
     // Clean up variables
-    for var in &v[v_len..] {
-        state.free_reg(var.register_id, v);
-    }
     v.truncate(v_len);
     state.free_loop_scope_registers(regs_before, &cond_code, v);
 
@@ -2172,6 +2169,9 @@ pub fn compile_expr(
         ) {
             state.free_reg(id, v);
         }
+    }
+    for var in &v[v_len..] {
+        state.free_reg(var.register_id, v);
     }
     v.truncate(v_len);
     state.fns.truncate(fn_len);

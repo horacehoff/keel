@@ -2,8 +2,6 @@ use crate::compiler::compiler_data::Struct;
 use crate::vm::{MapPool, RegisterFile, StringPool};
 use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ObjectPool};
 use lexical_core::FormattedSize;
-use smol_strc::SmolStr;
-use smol_strc::ToSmolStr;
 use std::hash::Hasher;
 use std::hint::unreachable_unchecked;
 
@@ -330,79 +328,96 @@ impl Data {
     pub const fn is_function(self) -> bool {
         (self.0 & !PAYLOAD_MASK) == NAN_STRUCT && (self.0 & (1 << 46)) != 0
     }
-    #[inline(never)]
     pub fn format(
         self,
         obj_pool: &ObjectPool,
         str_pool: &StringPool,
         map_pool: &MapPool,
         structs: &[Struct],
-        show_str: bool,
-    ) -> SmolStr {
+        show_str_quotation_marks: bool,
+    ) -> String {
+        let mut output = String::with_capacity(4);
+        self.format_to(
+            &mut output,
+            obj_pool,
+            str_pool,
+            map_pool,
+            structs,
+            show_str_quotation_marks,
+        );
+        output
+    }
+    /// Formats the `Data` into the given output (it's only used for printing right now)
+    #[inline(never)]
+    pub fn format_to(
+        self,
+        output: &mut String,
+        obj_pool: &ObjectPool,
+        str_pool: &StringPool,
+        map_pool: &MapPool,
+        structs: &[Struct],
+        show_str_quotation_marks: bool,
+    ) {
         if self.is_float() {
-            SmolStr::new(zmij::Buffer::new().format(self.as_float()))
+            output.push_str(zmij::Buffer::new().format(self.as_float()));
         } else if self.is_int() {
             let mut buffer = [0u8; i32::FORMATTED_SIZE_DECIMAL];
             let digits = lexical_core::write(self.as_int(), &mut buffer);
-            SmolStr::new(unsafe { str::from_utf8_unchecked(digits) })
+            output.push_str(unsafe { str::from_utf8_unchecked(digits) });
         } else if self.is_bool() {
-            if self.as_bool() {
-                SmolStr::new_static("true")
-            } else {
-                SmolStr::new_static("false")
-            }
+            output.push_str(if self.as_bool() { "true" } else { "false" });
         } else if self.is_string() {
-            if show_str {
-                self.as_str(str_pool).to_smolstr()
+            if show_str_quotation_marks {
+                output.push('"');
+                output.push_str(self.as_str(str_pool));
+                output.push('"');
             } else {
-                format_args!("\"{}\"", self.as_str(str_pool)).to_smolstr()
+                output.push_str(self.as_str(str_pool));
             }
         } else if self.is_array() {
-            format_args!(
-                "[{}]",
-                obj_pool[self.as_array()]
-                    .iter()
-                    .map(|x| x.format(obj_pool, str_pool, map_pool, structs, false))
-                    .collect::<Vec<SmolStr>>()
-                    .join(",")
-            )
-            .to_smolstr()
+            output.push('[');
+            let mut show_comma = false;
+            for value in &obj_pool[self.as_array()] {
+                if show_comma {
+                    output.push(',');
+                } else {
+                    show_comma = true;
+                }
+                value.format_to(output, obj_pool, str_pool, map_pool, structs, true);
+            }
+            output.push(']');
         } else if self.is_null() {
-            SmolStr::new_static("null")
+            output.push_str("null");
         } else if self.is_struct() {
             let s_name = unsafe { &structs.get_unchecked(self.struct_type_id() as usize).name };
-            format_args!(
-                "{} {{{}}}",
-                s_name,
-                obj_pool[self.as_struct()]
-                    .iter()
-                    .map(|x| {
-                        format_args!("{}", x.format(obj_pool, str_pool, map_pool, structs, false))
-                            .to_smolstr()
-                    })
-                    .collect::<Vec<SmolStr>>()
-                    .join(",")
-            )
-            .to_smolstr()
+            output.push_str(s_name);
+            output.push_str(" {");
+            let mut show_comma = false;
+            for value in &obj_pool[self.as_struct()] {
+                if show_comma {
+                    output.push(',');
+                } else {
+                    show_comma = true;
+                }
+                value.format_to(output, obj_pool, str_pool, map_pool, structs, true);
+            }
+            output.push('}');
         } else if self.is_map() {
-            let m = &map_pool[self.as_map()];
-            format_args!(
-                "{{{}}}",
-                m.iter()
-                    .map(|(key, val)| {
-                        format_args!(
-                            "{}:{}",
-                            key.format(obj_pool, str_pool, map_pool, structs, false),
-                            val.format(obj_pool, str_pool, map_pool, structs, false),
-                        )
-                        .to_smolstr()
-                    })
-                    .collect::<Vec<SmolStr>>()
-                    .join(",")
-            )
-            .to_smolstr()
+            output.push('{');
+            let mut show_comma = false;
+            for (key, value) in &map_pool[self.as_map()] {
+                if show_comma {
+                    output.push(',');
+                } else {
+                    show_comma = true;
+                }
+                key.format_to(output, obj_pool, str_pool, map_pool, structs, true);
+                output.push(':');
+                value.format_to(output, obj_pool, str_pool, map_pool, structs, true);
+            }
+            output.push('}');
         } else if self.is_function() {
-            SmolStr::new_static("function")
+            output.push_str("function");
         } else {
             unsafe { unreachable_unchecked() }
         }

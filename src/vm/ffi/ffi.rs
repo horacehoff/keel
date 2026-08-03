@@ -3,12 +3,13 @@ use super::DataType;
 use super::NULL;
 use super::ObjectPool;
 use super::RegisterFile;
-use super::Span;
 use super::StringPool;
 use super::Struct;
 use super::UncheckedSliceOps;
-use smol_strc::SmolStr;
 use std::hint::unreachable_unchecked;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::compiler::compiler_data::StructField;
 
 /// Writes `bytes` into `dst` at `index`
 pub unsafe fn write_bytes_at_offset(
@@ -134,16 +135,21 @@ fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usi
 /// Returns (size, alignment, field_offsets)
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_struct_size_datatype(
-    struct_fields: &[(SmolStr, DataType, Span)],
+    struct_fields: &[StructField],
     structs: &[Struct],
 ) -> (usize, usize, Vec<usize>) {
     let mut offset: usize = 0;
     let mut max_alignment: usize = 0;
     let mut field_offsets: Vec<usize> = Vec::new();
-    for (_, field, _) in struct_fields {
+    for StructField {
+        name: _,
+        field_type,
+        span: _,
+    } in struct_fields
+    {
         let elem_size: usize;
         let elem_alignment: usize;
-        match field {
+        match field_type {
             DataType::Int => {
                 elem_size = 4;
                 elem_alignment = 4;
@@ -225,7 +231,7 @@ pub fn c_struct_to_keel_struct(
     field_offsets: &[usize],
     obj_pool: &mut ObjectPool,
     string_pool: &mut StringPool,
-    struct_fields: &[(SmolStr, DataType, Span)],
+    struct_fields: &[StructField],
     r: &mut RegisterFile,
     recursion_stack: &RegisterFile,
     free_strings: &mut Vec<u16>,
@@ -235,7 +241,15 @@ pub fn c_struct_to_keel_struct(
 ) -> Vec<Data> {
     let mut buf: Vec<Data> = Vec::new();
     buf.reserve_exact(struct_fields.len());
-    for (i, (_, field_type, _)) in struct_fields.iter().enumerate() {
+    for (
+        i,
+        StructField {
+            name: _,
+            field_type,
+            span: _,
+        },
+    ) in struct_fields.iter().enumerate()
+    {
         let field_offset = *unsafe { field_offsets.get_unchecked(i) };
         match field_type {
             DataType::Int => {

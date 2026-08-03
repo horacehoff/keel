@@ -1,9 +1,8 @@
 use crate::array_gc::alloc_array;
-use crate::compiler::compiler_data::DynamicLibFn;
+use crate::compiler::compiler_data::DylibFn;
 use crate::compiler::compiler_data::ErrorCatch;
 use crate::compiler::compiler_data::Pools;
 use crate::compiler::compiler_data::Struct;
-use crate::compiler::expr::Span;
 use crate::compiler::type_system::DataType;
 use crate::data::Data;
 use crate::data::DataHash;
@@ -239,7 +238,7 @@ pub fn execute(
     }: &mut Pools,
     err_ctx: &ErrorCtx,
     fn_registers: &[Vec<u16>],
-    dyn_libs: &[DynamicLibFn],
+    dyn_libs: &[DylibFn],
     structs: &[Struct],
     allocated_arg_count: usize,
     allocated_call_depth: usize,

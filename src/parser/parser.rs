@@ -2,6 +2,9 @@ use crate::BOLD;
 use crate::RED;
 use crate::RESET;
 use crate::compiler::compiler_data::Source;
+use crate::compiler::expr::DylibFnExpr;
+use crate::compiler::expr::DylibImportExpr;
+use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::{Expr, Span, var_assign};
 use crate::compiler::type_system::TypeExpr;
 use crate::errors::BLUE;
@@ -279,14 +282,14 @@ impl<'a> Parser<'a> {
 
 // Call after DoubleColon is skipped
 // Returns end
-fn parse_namespace(parser: &mut Parser<'_>, initial: SmolStr) -> (Box<[SmolStr]>, u32) {
-    let mut namespace: Vec<SmolStr> = Vec::with_capacity(2);
-    namespace.push(initial);
+fn parse_qualified_name(parser: &mut Parser<'_>, initial: SmolStr) -> (QualifiedName, u32) {
+    let mut qualified_name: Vec<SmolStr> = Vec::with_capacity(2);
+    qualified_name.push(initial);
     let mut end: u32;
     loop {
         let (next_token, span) = parser.next_token();
         if let Token::Identifier(i) = next_token {
-            namespace.push(SmolStr::new(i));
+            qualified_name.push(SmolStr::new(i));
             end = span.end;
         } else {
             cold_path();
@@ -303,22 +306,22 @@ fn parse_namespace(parser: &mut Parser<'_>, initial: SmolStr) -> (Box<[SmolStr]>
         if next_token == Token::DoubleColon {
             continue;
         }
-        return (Box::from(namespace), end);
+        return (QualifiedName::new(qualified_name), end);
     }
 }
 
 // Must be called after LParen is skipped
 fn parse_args(parser: &mut Parser<'_>) -> (Box<[Expr]>, Box<[Span]>, u32) {
     let mut args = Vec::with_capacity(4);
-    let mut arg_markers: Vec<Span> = Vec::with_capacity(4);
+    let mut arg_spans: Vec<Span> = Vec::with_capacity(4);
     loop {
         if parser.peek_token() == Token::RParen {
             let end = parser.next_token().1.end;
-            return (Box::from(args), Box::from(arg_markers), end);
+            return (Box::from(args), Box::from(arg_spans), end);
         }
         let arg_start: u32 = parser.peek_token_span().start;
         args.push(parse_expr(parser));
-        arg_markers.push((arg_start, parser.peek_token_span().start).into());
+        arg_spans.push((arg_start, parser.peek_token_span().start).into());
         if parser.peek_token() == Token::Comma {
             parser.next_token();
         } else if !(parser.peek_token() == Token::RParen) {
@@ -648,7 +651,7 @@ fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
     } else if let Token::Identifier(i) = next_token {
         if parser.peek_token() == Token::DoubleColon {
             parser.next_token();
-            let (namespace, end) = parse_namespace(parser, SmolStr::new(i));
+            let (namespace, end) = parse_qualified_name(parser, SmolStr::new(i));
             TypeExpr::NamespacedIdentifier(namespace, (span.start, end).into())
         } else {
             TypeExpr::Identifier(SmolStr::new(i), span)
@@ -688,7 +691,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
         );
     };
     parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'.");
-    let mut fn_signatures: Vec<(SmolStr, Box<[(TypeExpr, Span)]>, Span)> = Vec::new();
+    let mut fn_signatures: Vec<DylibFnExpr> = Vec::new();
     let end: u32;
     loop {
         if parser.peek_token() == Token::RBrace {
@@ -764,9 +767,17 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
             Token::SemiColon,
             "Function definitions must end with a semicolon",
         );
-        fn_signatures.push((fn_name, Box::from(args), fn_name_span));
+        fn_signatures.push(DylibFnExpr {
+            name: fn_name,
+            args: Box::from(args),
+            name_span: fn_name_span,
+        });
     }
-    Expr::ImportDylib(path, Box::from(fn_signatures), (start, end).into())
+    Expr::ImportDylib(DylibImportExpr {
+        path,
+        functions: Box::from(fn_signatures),
+        span: (start, end).into(),
+    })
 }
 
 #[inline(always)]

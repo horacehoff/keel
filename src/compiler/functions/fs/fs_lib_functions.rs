@@ -2,7 +2,7 @@ use super::super::expr::Expr;
 use super::super::expr::Span;
 use super::super::type_system::DataType;
 use super::check_arg_type;
-use crate::compiler::Namespace;
+use crate::compiler::Scope;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
@@ -183,7 +183,7 @@ pub fn fs_lib_functions(
             error_unknown_function(
                 fn_name,
                 span,
-                &Namespace::default(),
+                &Scope::default(),
                 ctx.file_idx,
                 state.sources,
             );

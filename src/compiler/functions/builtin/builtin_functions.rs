@@ -325,7 +325,7 @@ pub fn builtin_functions(
                 Some(return_register_id)
             } else if let Some(fn_id) =
                 state
-                    .namespace
+                    .scope
                     .find_function(&[], fn_name, span, ctx.file_idx, state.sources)
             {
                 handle_user_function(
@@ -341,7 +341,7 @@ pub fn builtin_functions(
                     args_indexes,
                 )
             } else {
-                error_unknown_function(fn_name, span, state.namespace, ctx.file_idx, state.sources);
+                error_unknown_function(fn_name, span, state.scope, ctx.file_idx, state.sources);
             }
         }
     }

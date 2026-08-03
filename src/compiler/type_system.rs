@@ -1,7 +1,7 @@
 use super::expr::Expr;
 use super::expr::Span;
 use super::expr::symbol_of_expr;
-use crate::compiler::Namespace;
+use crate::compiler::Scope;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::FnSignature;
 use crate::compiler::compiler_data::Function;
@@ -20,6 +20,9 @@ use crate::compiler::compiler_errors::error_unknown_struct;
 use crate::compiler::compiler_errors::error_unknown_type;
 use crate::compiler::compiler_errors::error_unknown_type_with_namespace;
 use crate::compiler::compiler_errors::error_unknown_variable;
+use crate::compiler::expr::FunctionCallExpr;
+use crate::compiler::expr::IfBlockExpr;
+use crate::compiler::expr::QualifiedName;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
@@ -45,7 +48,7 @@ thread_local! {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TypeExpr {
     Identifier(SmolStr, Span),
-    NamespacedIdentifier(Box<[SmolStr]>, Span),
+    NamespacedIdentifier(QualifiedName, Span),
     Array(Box<Self>),
     Map(Box<Self>, Box<Self>),
     Union(Box<[Self]>),
@@ -54,12 +57,7 @@ pub enum TypeExpr {
 }
 
 impl TypeExpr {
-    pub fn to_datatype(
-        &self,
-        file_idx: u16,
-        namespace: &Namespace,
-        sources: &[Source],
-    ) -> DataType {
+    pub fn to_datatype(&self, file_idx: u16, scope: &Scope, sources: &[Source]) -> DataType {
         match self {
             Self::Null => DataType::Null,
             Self::Identifier(s, span) => match s.as_str() {
@@ -70,52 +68,48 @@ impl TypeExpr {
                 "null" => DataType::Null,
                 struct_name => {
                     if let Some(struct_id) =
-                        namespace.find_struct(&[], struct_name, *span, file_idx, sources)
+                        scope.find_struct(&[], struct_name, *span, file_idx, sources)
                     {
                         DataType::Struct(struct_id as u16)
                     } else {
-                        error_unknown_type(*span, file_idx, struct_name, sources, namespace);
+                        error_unknown_type(*span, file_idx, struct_name, sources, scope);
                     }
                 }
             },
             Self::NamespacedIdentifier(s, span) => {
-                if let Some(struct_id) = namespace.find_struct(
-                    &s[..s.len() - 1],
-                    unsafe { s.last().unwrap_unchecked() },
-                    *span,
-                    file_idx,
-                    sources,
-                ) {
+                if let Some(struct_id) =
+                    scope.find_struct(s.get_namespace(), s.get_name(), *span, file_idx, sources)
+                {
                     DataType::Struct(struct_id as u16)
                 } else {
                     cold_path();
                     error_unknown_type_with_namespace(
                         *span,
                         file_idx,
-                        unsafe { s.last().unwrap_unchecked() },
+                        s.get_name(),
                         sources,
-                        namespace,
-                        &s[..s.len() - 1],
+                        scope,
+                        s.get_namespace(),
                     )
                 }
             }
             Self::Array(inner_t) => DataType::Array(Some(Box::new(
-                inner_t.to_datatype(file_idx, namespace, sources),
+                inner_t.to_datatype(file_idx, scope, sources),
             ))),
             Self::Map(k_t, v_t) => DataType::Map(Box::from((
-                Some(k_t.to_datatype(file_idx, namespace, sources)),
-                Some(v_t.to_datatype(file_idx, namespace, sources)),
+                Some(k_t.to_datatype(file_idx, scope, sources)),
+                Some(v_t.to_datatype(file_idx, scope, sources)),
             ))),
             Self::Union(poly) => DataType::Union(
                 poly.iter()
-                    .map(|t| t.to_datatype(file_idx, namespace, sources))
+                    .map(|t| t.to_datatype(file_idx, scope, sources))
                     .collect(),
             )
             .check_poly(),
             Self::Function(parts) => DataType::FnSignature(
                 parts
                     .iter()
-                    .map(|t| t.to_datatype(file_idx, namespace, sources))
+                    .map(|t| t.to_datatype(file_idx, scope, sources))
                     .collect(),
             ),
         }
@@ -217,10 +211,12 @@ impl DataType {
                     s.name,
                     s.fields
                         .iter()
-                        .map(
-                            |(n, t, _)| format_args!("{n}: {}", t.format_detailed(state))
-                                .to_smolstr()
+                        .map(|field| format_args!(
+                            "{}: {}",
+                            field.name,
+                            field.field_type.format_detailed(state)
                         )
+                        .to_smolstr())
                         .collect::<Vec<SmolStr>>()
                         .join(", ")
                 )
@@ -279,11 +275,15 @@ impl DataType {
             Self::Bool => libffi::middle::Type::u8(),
             Self::Null if is_return_type => libffi::middle::Type::void(),
             Self::Struct(id) => {
-                libffi::middle::Type::structure(structs[*id as usize].fields.iter().map(
-                    |(_, field_type, span)| {
-                        field_type.to_c_type(is_return_type, *span, structs, file_idx, sources)
-                    },
-                ))
+                libffi::middle::Type::structure(structs[*id as usize].fields.iter().map(|field| {
+                    field.field_type.to_c_type(
+                        is_return_type,
+                        field.span,
+                        structs,
+                        file_idx,
+                        sources,
+                    )
+                }))
             }
             invalid_type => error_invalid_c_type(invalid_type, span, file_idx, sources),
         }
@@ -363,11 +363,19 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
     let mut expr_stack: Vec<&Expr> = content.iter().collect();
     while let Some(expression) = expr_stack.pop() {
         match expression {
-            Expr::FunctionCall(args, namespace, _, _) => {
-                calls.push(namespace.last().unwrap().clone());
+            Expr::FunctionCall(FunctionCallExpr {
+                qualified_name,
+                args,
+                ..
+            }) => {
+                calls.push(qualified_name.get_name().clone());
                 expr_stack.extend(args.iter());
             }
-            Expr::Condition(x, y, _)
+            Expr::IfBlock(IfBlockExpr {
+                condition: x,
+                code: y,
+                ..
+            })
             | Expr::InlineCondition(x, y, _)
             | Expr::ElseIfBlock(x, y)
             | Expr::WhileBlock(x, y)
@@ -406,7 +414,7 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
             }
             Expr::Array(elems, _) => expr_stack.extend(elems.iter()),
             Expr::Struct(_, fields, _) => {
-                expr_stack.extend(fields.iter().map(|(_, expr, _, _)| expr));
+                expr_stack.extend(fields.iter().map(|field| &field.value));
             }
             Expr::GetStructField(expr, _, _, _) => expr_stack.push(expr),
             Expr::SetStructField(expr, _, value, _, _, _) => {
@@ -465,7 +473,7 @@ pub fn check_if_returns_void(content: &[Expr]) -> bool {
         match content {
             Expr::ElseIfBlock(_, code)
             | Expr::ElseBlock(code)
-            | Expr::Condition(_, code, _)
+            | Expr::IfBlock(IfBlockExpr { code, .. })
             | Expr::InlineCondition(_, code, _)
             | Expr::WhileBlock(_, code)
             | Expr::ForLoop(_, _, code, _)
@@ -679,7 +687,7 @@ fn track_return_flow(
     let mut return_types: Vec<DataType> = Vec::new();
     for expr in content {
         match expr {
-            Expr::Condition(_, code, _) | Expr::InlineCondition(_, code, _) => {
+            Expr::IfBlock(IfBlockExpr { code, .. }) | Expr::InlineCondition(_, code, _) => {
                 let flow = track_condition_returns(code, v, ctx, state, fn_name);
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
@@ -794,7 +802,7 @@ impl Expr {
                     var.var_type.clone()
                 } else if let Some(fn_id) =
                     state
-                        .namespace
+                        .scope
                         .find_function(&[], name, *span, ctx.file_idx, state.sources)
                 {
                     // When a function is referenced by name, there's no call site to infer argument types from
@@ -952,25 +960,25 @@ impl Expr {
                 DataType::Unknown => DataType::Unknown,
                 _ => unsafe { unreachable_unchecked() },
             },
-            Self::GetStructField(s, field, struct_span, field_span) => {
+            Self::GetStructField(s, field_name, struct_span, field_span) => {
                 let s = s.infer_type(v, ctx, state);
                 if let DataType::Struct(s_id) = s {
                     state.structs[s_id as usize]
                         .fields
                         .iter()
-                        .find(|x| &x.0 == field)
+                        .find(|field| &field.name == field_name)
                         .unwrap_or_else(|| {
                             let s = &state.structs[s_id as usize];
                             error_struct_unknown_field(
                                 ctx.file_idx,
                                 *field_span,
-                                field,
+                                field_name,
                                 &s.name,
                                 &s.fields,
                                 state.sources,
                             )
                         })
-                        .1
+                        .field_type
                         .clone()
                 } else {
                     error_invalid_type(
@@ -990,83 +998,88 @@ impl Expr {
                 DataType::Unknown => DataType::Unknown,
                 _ => unsafe { unreachable_unchecked() },
             },
-            Self::FunctionCall(args, namespace, span, _) => {
-                match namespace.last().unwrap().as_str() {
-                    "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
-                    "type" | "str" | "input" | "read" => DataType::String,
-                    "float" => DataType::Float,
-                    "int" | "the_answer" => DataType::Int,
-                    "bool" | "exists" => DataType::Bool,
-                    "range" => DataType::Array(Some(Box::from(DataType::Int))),
-                    "argv" => DataType::Array(Some(Box::from(DataType::String))),
-                    function_name => {
-                        if let Some(lib) = state.dyn_libs.iter().find(|l| l.name == namespace[0])
-                            && let Some(FnSignature {
-                                name: _,
-                                args: _,
-                                return_type: fn_return_type,
-                                id: _,
-                            }) = lib.fns.iter().find(|x| x.name == function_name)
-                        {
-                            return fn_return_type.clone();
-                        }
-                        let infered_arg_types = args
-                            .iter()
-                            .map(|x| x.infer_type(v, ctx, state))
-                            .collect::<Vec<DataType>>();
-
-                        let fn_id = if namespace.len() == 1
-                            && let Some(var) =
-                                v.iter().rfind(|var| var.name.as_str() == function_name)
-                        {
-                            if let DataType::Fn(id) = var.var_type {
-                                id as usize
-                            } else {
-                                error_expected_function(
-                                    &var.var_type,
-                                    *span,
-                                    ctx.file_idx,
-                                    state.sources,
-                                )
-                            }
-                        } else {
-                            state
-                                .fns
-                                .iter()
-                                .rposition(|func| func.name == function_name)
-                                .unwrap_or_else(|| {
-                                    if namespace.len() == 1 {
-                                        error_unknown_function(
-                                            function_name,
-                                            *span,
-                                            state.namespace,
-                                            ctx.file_idx,
-                                            state.sources,
-                                        );
-                                    } else {
-                                        error_unknown_function_in_namespace(
-                                            function_name,
-                                            state.namespace,
-                                            &namespace[..namespace.len() - 1],
-                                            *span,
-                                            ctx.file_idx,
-                                            state.sources,
-                                        );
-                                    }
-                                })
-                        };
-
-                        resolve_function_return_type(
-                            fn_id,
-                            &infered_arg_types,
-                            function_name,
-                            v,
-                            ctx,
-                            state,
-                        )
+            Self::FunctionCall(FunctionCallExpr {
+                qualified_name,
+                args,
+                span,
+                arg_spans: _,
+            }) => match qualified_name.get_name().as_str() {
+                "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
+                "type" | "str" | "input" | "read" => DataType::String,
+                "float" => DataType::Float,
+                "int" | "the_answer" => DataType::Int,
+                "bool" | "exists" => DataType::Bool,
+                "range" => DataType::Array(Some(Box::from(DataType::Int))),
+                "argv" => DataType::Array(Some(Box::from(DataType::String))),
+                function_name => {
+                    if let Some(lib) = state
+                        .dyn_libs
+                        .iter()
+                        .find(|l| &l.name == qualified_name.get_namespace().last().unwrap())
+                        && let Some(FnSignature {
+                            name: _,
+                            args: _,
+                            return_type: fn_return_type,
+                            id: _,
+                        }) = lib.fns.iter().find(|x| x.name == function_name)
+                    {
+                        return fn_return_type.clone();
                     }
+                    let infered_arg_types = args
+                        .iter()
+                        .map(|x| x.infer_type(v, ctx, state))
+                        .collect::<Vec<DataType>>();
+
+                    let fn_id = if qualified_name.is_namespace_empty()
+                        && let Some(var) = v.iter().rfind(|var| var.name.as_str() == function_name)
+                    {
+                        if let DataType::Fn(id) = var.var_type {
+                            id as usize
+                        } else {
+                            error_expected_function(
+                                &var.var_type,
+                                *span,
+                                ctx.file_idx,
+                                state.sources,
+                            )
+                        }
+                    } else {
+                        state
+                            .fns
+                            .iter()
+                            .rposition(|func| func.name == function_name)
+                            .unwrap_or_else(|| {
+                                if qualified_name.is_namespace_empty() {
+                                    error_unknown_function(
+                                        function_name,
+                                        *span,
+                                        state.scope,
+                                        ctx.file_idx,
+                                        state.sources,
+                                    );
+                                } else {
+                                    error_unknown_function_in_namespace(
+                                        function_name,
+                                        state.scope,
+                                        qualified_name.get_namespace(),
+                                        *span,
+                                        ctx.file_idx,
+                                        state.sources,
+                                    );
+                                }
+                            })
+                    };
+
+                    resolve_function_return_type(
+                        fn_id,
+                        &infered_arg_types,
+                        function_name,
+                        v,
+                        ctx,
+                        state,
+                    )
                 }
-            }
+            },
             Self::ObjFunctionCall(obj, args, namespace, _, _, args_indexes) => {
                 match namespace.last().unwrap().as_str() {
                     "uppercase"
@@ -1188,12 +1201,12 @@ impl Expr {
                 }
                 DataType::Union(Box::from(types)).check_poly()
             }
-            Self::Struct(namespace, _, span) => {
-                let struct_name = &namespace[namespace.len() - 1];
-                let namespace = &namespace[..(namespace.len() - 1)];
+            Self::Struct(name, _, span) => {
+                let struct_name = name.get_name();
+                let namespace = name.get_namespace();
                 DataType::Struct(
                     state
-                        .namespace
+                        .scope
                         .find_struct(namespace, struct_name, *span, ctx.file_idx, state.sources)
                         .unwrap_or_else(|| {
                             error_unknown_struct(struct_name, *span, state.sources, ctx.file_idx);
@@ -1215,7 +1228,7 @@ impl Expr {
                             (
                                 name.clone(),
                                 t.as_ref().map(|t| {
-                                    t.to_datatype(ctx.file_idx, state.namespace, state.sources)
+                                    t.to_datatype(ctx.file_idx, state.scope, state.sources)
                                 }),
                             )
                         })

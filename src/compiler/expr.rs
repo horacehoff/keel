@@ -2,6 +2,75 @@ use super::type_system::TypeExpr;
 use smol_strc::SmolStr;
 use std::{hint::unreachable_unchecked, rc::Rc};
 
+#[derive(PartialEq, Clone, Debug)]
+pub struct IfBlockExpr {
+    pub condition: Box<Expr>,
+    /// Contains any else_if_blocks / else_block
+    pub code: Box<[Expr]>,
+    pub span: Span,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct DylibFnExpr {
+    pub name: SmolStr,
+    /// Invariant:
+    /// - `args.len() > 0`
+    /// - `args[0]` is the function's return type
+    pub args: Box<[(TypeExpr, Span)]>,
+    pub name_span: Span,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct DylibImportExpr {
+    pub path: SmolStr,
+    pub functions: Box<[DylibFnExpr]>,
+    pub span: Span,
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct StructFieldExpr {
+    pub name: SmolStr,
+    pub value: Expr,
+    pub name_span: Span,
+    pub value_span: Span,
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct FunctionCallExpr {
+    pub qualified_name: QualifiedName,
+    pub args: Box<[Expr]>,
+    pub span: Span,
+    pub arg_spans: Box<[Span]>,
+}
+
+/// A fully-qualified symbol name.
+/// Invariant:
+/// - len > 0
+/// - last element is the symbol's name
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct QualifiedName(Box<[SmolStr]>);
+
+impl QualifiedName {
+    pub fn new<T>(src: T) -> Self
+    where
+        Box<[SmolStr]>: From<T>,
+    {
+        Self(Box::from(src))
+    }
+    #[inline(always)]
+    pub const fn get_name(&self) -> &SmolStr {
+        unsafe { self.0.last().unwrap_unchecked() }
+    }
+    #[inline(always)]
+    pub fn get_namespace(&self) -> &[SmolStr] {
+        &self.0[..self.0.len() - 1]
+    }
+    #[inline(always)]
+    pub const fn is_namespace_empty(&self) -> bool {
+        self.0.len() < 2
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Float(f64),
@@ -15,7 +84,7 @@ pub enum Expr {
     /// Map(key-value pairs, span)
     Map(Box<[(Self, Span, Self, Span)]>, Span),
     /// Struct(name, fields, span)
-    Struct(Box<[SmolStr]>, Box<[(SmolStr, Self, Span, Span)]>, Span),
+    Struct(QualifiedName, Box<[StructFieldExpr]>, Span),
     /// StructDeclare(name, fields, span)
     StructDeclare(SmolStr, Box<[(SmolStr, TypeExpr, Span)]>, Span),
     /// GetStructField(struct_expr, field, struct_span, field_span, value_span)
@@ -26,8 +95,7 @@ pub enum Expr {
     VarDeclare(SmolStr, Box<Self>),
     /// VarDeclare(name, value, start, end)
     VarAssign(SmolStr, Box<Self>, Span),
-    /// Condition(condition, code (contains else_if_blocks and potentially else_block), start, end)
-    Condition(Box<Self>, Box<[Self]>, Span),
+    IfBlock(IfBlockExpr),
     /// InlineCondition - expression-form if/else, always produces a value, must have an else branch
     InlineCondition(Box<Self>, Box<[Self]>, Span),
     ElseIfBlock(Box<Self>, Box<[Self]>),
@@ -37,7 +105,7 @@ pub enum Expr {
     AnonymousFunction(Box<[(SmolStr, Option<TypeExpr>)]>, Box<[Self]>, Span),
     WhileBlock(Box<Self>, Box<[Self]>),
     /// FunctionCall(args, (optional namespace + name), start, end, (arg_start,arg_end))
-    FunctionCall(Box<[Self]>, Box<[SmolStr]>, Span, Box<[Span]>),
+    FunctionCall(FunctionCallExpr),
     /// ObjFunctionCall(obj, args, namespace, obj_span, fn_span, arg_markers)
     ObjFunctionCall(
         // WILL BE REMOVED SOON
@@ -69,13 +137,7 @@ pub enum Expr {
     ForLoop(SmolStr, Box<Self>, Box<[Self]>, Span),
     /// IntForLoop(loop_var_name, first_elem, final_elem, code)
     IntForLoop(SmolStr, Box<Self>, Box<Self>, Box<[Self]>, Span, Span),
-    /// ImportDylib(lib_path, [(fn_name, fn_args, fn_return_type, fn_name_span)], (start, end))
-    /// FnSignature types is [return_type, arg_types] => return_type is always specified
-    ImportDylib(
-        SmolStr,
-        Box<[(SmolStr, Box<[(TypeExpr, Span)]>, Span)]>,
-        Span,
-    ),
+    ImportDylib(DylibImportExpr),
 
     /// ImportFile(path,alias ,(start, end))
     ImportFile(SmolStr, Option<SmolStr>, Span),
@@ -132,15 +194,15 @@ pub const fn symbol_of_expr(expr: &Expr) -> &'static str {
 pub fn code_modifies_variable(var_name: &SmolStr, code: &[Expr]) -> bool {
     code.iter().any(|expr| match expr {
         Expr::VarAssign(n, _, _) => n == var_name,
-        Expr::Condition(_, body, _)
-        | Expr::WhileBlock(_, body)
-        | Expr::EvalBlock(body)
-        | Expr::LoopBlock(body)
-        | Expr::InlineCondition(_, body, _)
-        | Expr::ElseIfBlock(_, body)
-        | Expr::ElseBlock(body)
-        | Expr::ForLoop(_, _, body, _)
-        | Expr::IntForLoop(_, _, _, body, _, _) => code_modifies_variable(var_name, body),
+        Expr::IfBlock(IfBlockExpr { code, .. })
+        | Expr::WhileBlock(_, code)
+        | Expr::EvalBlock(code)
+        | Expr::LoopBlock(code)
+        | Expr::InlineCondition(_, code, _)
+        | Expr::ElseIfBlock(_, code)
+        | Expr::ElseBlock(code)
+        | Expr::ForLoop(_, _, code, _)
+        | Expr::IntForLoop(_, _, _, code, _, _) => code_modifies_variable(var_name, code),
         _ => false,
     })
 }

@@ -15,6 +15,7 @@ use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args_user_fn;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
+use crate::compiler::expr::FunctionCallExpr;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
@@ -114,8 +115,12 @@ pub fn handle_user_function(
     // Actual general function inlining is coming soon
     if state.fns[fn_id].code.len() == 1
         && let Expr::ReturnVal(ret) = &state.fns[fn_id].code[0]
-        && let Some(Expr::FunctionCall(call_args, namespace, _, _)) = &**ret
-        && namespace.len() >= 2
+        && let Some(Expr::FunctionCall(FunctionCallExpr {
+            qualified_name,
+            args: call_args,
+            ..
+        })) = &**ret
+        && !qualified_name.is_namespace_empty()
         && call_args.len() == args_len
         && call_args
             .iter()
@@ -124,11 +129,11 @@ pub fn handle_user_function(
         && let Some(fn_sig) = state
             .dyn_libs
             .iter()
-            .find(|lib| lib.name == namespace[namespace.len() - 2])
+            .find(|lib| &lib.name == qualified_name.get_namespace().last().unwrap())
             .and_then(|lib| {
                 lib.fns
                     .iter()
-                    .find(|f| f.name == namespace[namespace.len() - 1])
+                    .find(|f| &f.name == qualified_name.get_name())
             })
     {
         let dyn_id = fn_sig.id;
@@ -306,9 +311,9 @@ pub fn compile_function(
         .enumerate()
         .for_each(|(i, infered_type)| {
             if let DataType::Fn(fn_id) = infered_type {
-                anon_fns.push(state.namespace.symbols.len());
+                anon_fns.push(state.scope.symbols.len());
                 state
-                    .namespace
+                    .scope
                     .symbols
                     .push((fn_args[i].clone(), SymbolKind::Fn(*fn_id)));
                 v.push(Variable {
@@ -367,7 +372,7 @@ pub fn compile_function(
         state,
     );
     for i in anon_fns.into_iter().rev() {
-        state.namespace.symbols.remove(i);
+        state.scope.symbols.remove(i);
     }
 
     let mut reserved_registers = get_tgt_ids(&parsed);

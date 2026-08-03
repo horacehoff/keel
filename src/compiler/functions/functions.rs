@@ -10,10 +10,10 @@ use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type_multiple;
 use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
+use crate::compiler::expr::FunctionCallExpr;
 use crate::instr::Instr;
 use builtin_functions::builtin_functions;
 use fs_lib_functions::fs_lib_functions;
-use smol_strc::SmolStr;
 use std::slice;
 use user_functions::handle_user_function;
 
@@ -98,46 +98,30 @@ pub fn handle_functions(
     state: &mut State<'_>,
     tgt_id: Option<u16>,
     // method call data
-    args: &[Expr],
-    namespace: &[SmolStr],
-    span: Span,
-    args_indexes: &[Span],
+    function_call: &FunctionCallExpr,
 ) -> Option<u16> {
-    let len = namespace.len() - 1;
-    let fn_name = namespace[len].as_str();
-    let namespace = &namespace[0..len];
+    let qualified_name = &function_call.qualified_name;
+    let args = &function_call.args;
+    let arg_spans = &function_call.arg_spans;
+    let span = function_call.span;
+    let fn_name = qualified_name.get_name();
+    let namespace = qualified_name.get_namespace();
     if namespace.is_empty() {
         builtin_functions(
-            fn_name,
-            output,
-            v,
-            ctx,
-            state,
-            tgt_id,
-            args,
-            span,
-            args_indexes,
+            fn_name, output, v, ctx, state, tgt_id, args, span, arg_spans,
         )
     } else if namespace == ["fs"] {
         #[cfg(target_arch = "wasm32")]
         wasm_error("WASM does not support the file system library");
 
         fs_lib_functions(
-            fn_name,
-            output,
-            v,
-            ctx,
-            state,
-            tgt_id,
-            args,
-            span,
-            args_indexes,
+            fn_name, output, v, ctx, state, tgt_id, args, span, arg_spans,
         )
     } else if let Some((fn_args, returns_null, dyn_id)) = state
         .dyn_libs
         .iter()
         .find(|l| l.name == namespace[0])
-        .and_then(|lib| lib.fns.iter().find(|x| x.name == fn_name))
+        .and_then(|lib| lib.fns.iter().find(|x| &x.name == fn_name))
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
         check_args(
@@ -155,7 +139,7 @@ pub fn handle_functions(
                 ctx,
                 state,
                 args,
-                args_indexes,
+                arg_spans,
                 i,
                 slice::from_ref(a),
             );
@@ -184,25 +168,16 @@ pub fn handle_functions(
         }
     } else if let Some(fn_id) =
         state
-            .namespace
+            .scope
             .find_function(namespace, fn_name, span, ctx.file_idx, state.sources)
     {
         handle_user_function(
-            fn_name,
-            fn_id,
-            output,
-            v,
-            ctx,
-            state,
-            tgt_id,
-            args,
-            span,
-            args_indexes,
+            fn_name, fn_id, output, v, ctx, state, tgt_id, args, span, arg_spans,
         )
     } else {
         error_unknown_function_in_namespace(
             fn_name,
-            state.namespace,
+            state.scope,
             namespace,
             span,
             ctx.file_idx,

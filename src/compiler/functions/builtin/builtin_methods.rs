@@ -3,7 +3,7 @@ use super::super::expr::Span;
 use super::super::type_system::DataType;
 use super::super::type_system::fn_args_match;
 use super::super::type_system::fn_matches_signature;
-use crate::compiler::Namespace;
+use crate::compiler::Scope;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
@@ -785,7 +785,7 @@ pub fn builtin_methods(
         fn_name => error_unknown_function(
             fn_name,
             fn_span,
-            &Namespace::default(),
+            &Scope::default(),
             ctx.file_idx,
             state.sources,
         ),

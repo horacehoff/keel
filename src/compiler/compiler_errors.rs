@@ -1,11 +1,12 @@
 use super::DataType;
 use super::Expr;
 use super::Function;
-use super::Namespace;
+use super::Scope;
 use super::Source;
 use super::Span;
 use super::State;
 use super::Variable;
+use crate::compiler::compiler_data::StructField;
 use crate::errors::BLUE;
 use crate::errors::GREEN;
 use crate::errors::RESET;
@@ -757,7 +758,7 @@ pub fn error_struct_unknown_field(
     field_span: Span,
     field: &SmolStr,
     struct_name: &SmolStr,
-    fields: &[(SmolStr, DataType, Span)],
+    fields: &[StructField],
     sources: &[Source],
 ) -> ! {
     throw_compiler_error(
@@ -778,7 +779,8 @@ pub fn error_struct_unknown_field(
                     .with_color(ariadne::Color::Red),
             );
 
-            let similar_field = find_closest_str(field, fields.iter().map(|(f, _, _)| f.as_str()));
+            let similar_field =
+                find_closest_str(field, fields.iter().map(|field| field.name.as_str()));
             if let Some(similar_field) = similar_field {
                 report = report.with_help(format_args!(
                     "A field with a similar name exists: {}",
@@ -789,7 +791,7 @@ pub fn error_struct_unknown_field(
                     "The available fields are: {}",
                     fields
                         .iter()
-                        .map(|(field, _, _)| blue(field))
+                        .map(|field| blue(&field.name))
                         .collect::<Vec<_>>()
                         .join(", "),
                 ));
@@ -949,11 +951,11 @@ pub fn error_unknown_variable(
 pub fn error_unknown_function(
     fn_name: &str,
     span: Span,
-    namespace: &Namespace,
+    scope: &Scope,
     file_idx: u16,
     sources: &[Source],
 ) -> ! {
-    let similar_fn = find_closest_str(fn_name, namespace.fns().map(|f| f.0.as_str()));
+    let similar_fn = find_closest_str(fn_name, scope.fns().map(|f| f.0.as_str()));
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
@@ -1019,14 +1021,14 @@ pub fn error_unknown_namespace(
 #[inline(never)]
 pub fn error_unknown_function_in_namespace(
     fn_name: &str,
-    namespace: &Namespace,
+    scope: &Scope,
     path: &[SmolStr],
     span: Span,
     file_idx: u16,
     sources: &[Source],
 ) -> ! {
     let namespace_str = path.join("::");
-    let namespace = namespace.walk_to_namespace(path, span, file_idx, sources);
+    let namespace = scope.walk_to_namespace(path, span, file_idx, sources);
     let similar_fn = find_closest_str(fn_name, namespace.fns().map(|s| s.0.as_str()));
     throw_compiler_error(
         &|| {
@@ -1218,9 +1220,9 @@ pub fn error_unknown_type(
     file_idx: u16,
     t: &str,
     sources: &[Source],
-    namespace: &Namespace,
+    scope: &Scope,
 ) -> ! {
-    let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0.as_str()));
+    let closest_struct = find_closest_str(t, scope.structs().map(|s| s.0.as_str()));
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
@@ -1255,11 +1257,11 @@ pub fn error_unknown_type_with_namespace(
     file_idx: u16,
     t: &str,
     sources: &[Source],
-    namespace: &Namespace,
+    scope: &Scope,
     path: &[SmolStr],
 ) -> ! {
     let namespace_str = path.join("::");
-    let namespace = namespace.walk_to_namespace(path, span, file_idx, sources);
+    let namespace = scope.walk_to_namespace(path, span, file_idx, sources);
     let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0.as_str()));
     throw_compiler_error(
         &|| {

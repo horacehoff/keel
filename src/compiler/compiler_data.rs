@@ -2,7 +2,7 @@ use super::expr::Expr;
 use super::expr::Span;
 use super::registers::get_tgt_ids;
 use super::type_system::DataType;
-use crate::compiler::Namespace;
+use crate::compiler::Scope;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
@@ -56,13 +56,13 @@ pub struct FnSignature {
 }
 
 #[derive(Debug)]
-pub struct Dynamiclib {
+pub struct Dylib {
     pub name: SmolStr,
     pub fns: Box<[FnSignature]>,
 }
 
 #[derive(Debug)]
-pub struct DynamicLibFn {
+pub struct DylibFn {
     /// [ return_type, arg_types... ]
     pub types: Box<[DataType]>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -73,7 +73,7 @@ pub struct DynamicLibFn {
     pub cif: libffi::middle::Cif,
 }
 
-impl DynamicLibFn {
+impl DylibFn {
     #[inline(always)]
     pub fn get_return_type(&self) -> &DataType {
         unsafe { self.types.get_unchecked(0) }
@@ -81,9 +81,16 @@ impl DynamicLibFn {
 }
 
 #[derive(Debug)]
+pub struct StructField {
+    pub name: SmolStr,
+    pub field_type: DataType,
+    pub span: Span,
+}
+
+#[derive(Debug)]
 pub struct Struct {
     pub name: SmolStr,
-    pub fields: Box<[(SmolStr, DataType, Span)]>,
+    pub fields: Box<[StructField]>,
     pub id: u16,
     pub name_span: Span,
 }
@@ -148,14 +155,14 @@ pub struct State<'a> {
     pub pools: &'a mut Pools,
     pub instr_src: &'a mut Vec<InstrSrc>,
     pub fn_registers: &'a mut Vec<Vec<u16>>,
-    pub dyn_libs: &'a mut Vec<Dynamiclib>,
+    pub dyn_libs: &'a mut Vec<Dylib>,
     pub allocated_arg_count: &'a mut usize,
     pub allocated_call_depth: &'a mut usize,
     pub const_registers: &'a mut FxHashMap<Data, u16>,
     pub free_registers: &'a mut Vec<u16>,
     pub sources: &'a mut Vec<Source>,
     pub reserved_registers: FxHashSet<u16>,
-    pub namespace: &'a mut Namespace,
+    pub scope: &'a mut Scope,
 }
 
 impl State<'_> {

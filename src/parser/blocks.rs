@@ -5,6 +5,9 @@ use super::parser_expr::parse_expr;
 use super::parser_expr::parse_expr_no_struct;
 use crate::cold_path;
 use crate::compiler::expr::Expr;
+use crate::compiler::expr::FunctionCallExpr;
+use crate::compiler::expr::IfBlockExpr;
+use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
 use crate::parser::Parser;
 use crate::parser::TypeExpr;
@@ -44,11 +47,11 @@ pub fn parse_condition_block(parser: &mut Parser<'_>, start: u32) -> Expr {
             break;
         }
     }
-    Expr::Condition(
-        Box::new(condition),
-        Box::from(output_code),
-        (start, parser.last_token_end as u32).into(),
-    )
+    Expr::IfBlock(IfBlockExpr {
+        condition: Box::new(condition),
+        code: Box::from(output_code),
+        span: (start, parser.last_token_end as u32).into(),
+    })
 }
 
 /// LBrace Code RBrace
@@ -243,12 +246,12 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
     let else_code: Box<[Expr]> = if let Some(c) = catch_all_code {
         Box::from(c)
     } else {
-        Box::from([Expr::FunctionCall(
-            Box::new([usr_var]),
-            Box::from([SmolStr::new("throw")]),
-            (start, end).into(),
-            Box::from([]),
-        )])
+        Box::from([Expr::FunctionCall(FunctionCallExpr {
+            qualified_name: QualifiedName::new([SmolStr::new("throw")]),
+            args: Box::new([usr_var]),
+            span: (start, end).into(),
+            arg_spans: Box::new([]),
+        })])
     };
 
     if catch_blocks.is_empty() {
@@ -281,11 +284,11 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
     Expr::TryCatchBlock(
         Box::from(try_code),
         catch_all_var,
-        Box::from([Expr::Condition(
-            Box::from(main_condition),
-            Box::from(output_code),
-            (start, end).into(),
-        )]),
+        Box::from([Expr::IfBlock(IfBlockExpr {
+            condition: Box::from(main_condition),
+            code: Box::from(output_code),
+            span: (start, end).into(),
+        })]),
     )
 }
 
@@ -412,13 +415,13 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
     }
     Expr::EvalBlock(Box::from([
         Expr::VarDeclare(obj_var.clone(), Box::new(match_obj)),
-        Expr::Condition(
-            Box::from(Expr::Eq(
+        Expr::IfBlock(IfBlockExpr {
+            condition: Box::from(Expr::Eq(
                 Box::new(Expr::Var(obj_var, (start, end).into())),
                 Box::from(first_condition.unwrap()),
             )),
-            Box::from(output_code),
-            (start, end).into(),
-        ),
+            code: Box::from(output_code),
+            span: (start, end).into(),
+        }),
     ]))
 }

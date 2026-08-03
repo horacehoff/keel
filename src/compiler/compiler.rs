@@ -1,5 +1,6 @@
 use crate::compiler::compiler_data::InstrSrc;
 use crate::compiler::compiler_data::Source;
+use crate::compiler::compiler_data::StructField;
 use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
 use crate::compiler::compiler_errors::error_cannot_load_dynlib;
 use crate::compiler::compiler_errors::error_cannot_push_type_to_array;
@@ -14,6 +15,13 @@ use crate::compiler::compiler_errors::error_not_literal_map_key;
 use crate::compiler::compiler_errors::error_range_invalid_type;
 use crate::compiler::compiler_errors::error_type_not_indexable;
 use crate::compiler::compiler_errors::error_unknown_namespace;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::compiler::expr::DylibFnExpr;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::compiler::expr::DylibImportExpr;
+use crate::compiler::expr::IfBlockExpr;
+use crate::compiler::expr::QualifiedName;
+use crate::compiler::expr::StructFieldExpr;
 use crate::compiler::functions::user_functions::compile_function;
 use crate::data::NULL;
 use crate::errors::BLUE;
@@ -25,8 +33,8 @@ use crate::parser;
 use crate::vm::Pool;
 use crate::{data::Data, instr::Instr};
 use compiler_data::Ctx;
-use compiler_data::DynamicLibFn;
-use compiler_data::Dynamiclib;
+use compiler_data::Dylib;
+use compiler_data::DylibFn;
 use compiler_data::FnSignature;
 use compiler_data::Function;
 use compiler_data::Pools;
@@ -382,22 +390,22 @@ fn compile_array_literal(
 }
 
 fn compile_struct_literal(
-    namespace: &[SmolStr],
-    fields: &[(SmolStr, Expr, Span, Span)],
+    name: &QualifiedName,
+    fields: &[StructFieldExpr],
     span: Span,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
-    let name = &namespace[namespace.len() - 1];
-    let namespace = &namespace[..(namespace.len() - 1)];
+    let struct_name = name.get_name();
+    let namespace = name.get_namespace();
     let Some(expected_struct_idx) =
         state
-            .namespace
-            .find_struct(namespace, name, span, ctx.file_idx, state.sources)
+            .scope
+            .find_struct(namespace, struct_name, span, ctx.file_idx, state.sources)
     else {
-        compiler_errors::error_unknown_struct(name, span, state.sources, ctx.file_idx);
+        compiler_errors::error_unknown_struct(struct_name, span, state.sources, ctx.file_idx);
     };
     let type_id = state.structs[expected_struct_idx].id;
     let expected_fields_len = state.structs[expected_struct_idx].fields.len();
@@ -405,10 +413,10 @@ fn compile_struct_literal(
         let unexpected_field = &fields[expected_fields_len];
         compiler_errors::error_struct_no_such_field(
             ctx.file_idx,
-            name,
+            struct_name,
             state.structs[expected_struct_idx].name_span,
-            unexpected_field.2,
-            &unexpected_field.0,
+            unexpected_field.name_span,
+            &unexpected_field.name,
             state.sources,
         )
     }
@@ -418,28 +426,32 @@ fn compile_struct_literal(
     };
     if ctx.single_run {
         for field_idx in 0..expected_fields_len {
-            if let Some((_, field_expr, _, field_value_span)) = fields
-                .iter()
-                .find(|(f, _, _, _)| f == &state.structs[expected_struct_idx].fields[field_idx].0)
-            {
-                let field_type = field_expr.infer_type(v, ctx, state);
+            if let Some(StructFieldExpr {
+                name: _,
+                value,
+                name_span: _,
+                value_span,
+            }) = fields.iter().find(|field| {
+                field.name == state.structs[expected_struct_idx].fields[field_idx].name
+            }) {
+                let field_type = value.infer_type(v, ctx, state);
                 let field = &state.structs[expected_struct_idx].fields[field_idx];
-                if !struct_field_type_matches(&field.1, &field_type) {
+                if !struct_field_type_matches(&field.field_type, &field_type) {
                     compiler_errors::error_struct_field_invalid_type(
                         ctx.file_idx,
-                        name,
-                        field.2,
-                        &field.0,
-                        &field.1,
-                        *field_value_span,
+                        struct_name,
+                        field.span,
+                        &field.name,
+                        &field.field_type,
+                        *value_span,
                         &field_type,
                         state.sources,
                     );
                 }
-                let id = field_expr
+                let id = value
                     .compile(v, ctx, state, output, None, false, true)
                     .unwrap_id();
-                if field_expr.is_constant_literal() {
+                if value.is_constant_literal() {
                     state
                         .pools
                         .obj_pool
@@ -457,11 +469,11 @@ fn compile_struct_literal(
                 let missing_elems = (0..expected_fields_len)
                     .into_iter()
                     .filter(|i| {
-                        !fields.iter().any(|(f, _, _, _)| {
-                            f == &state.structs[expected_struct_idx].fields[*i].0
+                        !fields.iter().any(|field| {
+                            field.name == state.structs[expected_struct_idx].fields[*i].name
                         })
                     })
-                    .map(|i| &state.structs[struct_id].fields[i].0)
+                    .map(|i| &state.structs[struct_id].fields[i].name)
                     .collect::<Vec<&SmolStr>>();
                 compiler_errors::error_struct_missing_fields(
                     ctx.file_idx,
@@ -480,28 +492,32 @@ fn compile_struct_literal(
     } else {
         let mut dynamic: Vec<(u16, u16)> = Vec::with_capacity(expected_fields_len);
         for field_idx in 0..expected_fields_len {
-            if let Some((_, field_expr, _, field_value_span)) = fields
-                .iter()
-                .find(|(f, _, _, _)| f == &state.structs[expected_struct_idx].fields[field_idx].0)
-            {
-                let field_type = field_expr.infer_type(v, ctx, state);
+            if let Some(StructFieldExpr {
+                name: _,
+                value,
+                name_span: _,
+                value_span,
+            }) = fields.iter().find(|field| {
+                field.name == state.structs[expected_struct_idx].fields[field_idx].name
+            }) {
+                let field_type = value.infer_type(v, ctx, state);
                 let field = &state.structs[expected_struct_idx].fields[field_idx];
-                if !struct_field_type_matches(&field.1, &field_type) {
+                if !struct_field_type_matches(&field.field_type, &field_type) {
                     compiler_errors::error_struct_field_invalid_type(
                         ctx.file_idx,
-                        name,
-                        field.2,
-                        &field.0,
-                        &field.1,
-                        *field_value_span,
+                        struct_name,
+                        field.span,
+                        &field.name,
+                        &field.field_type,
+                        *value_span,
                         &field_type,
                         state.sources,
                     );
                 }
-                let id = field_expr
+                let id = value
                     .compile(v, ctx, state, output, None, false, true)
                     .unwrap_id();
-                if field_expr.is_constant_literal() {
+                if value.is_constant_literal() {
                     state
                         .pools
                         .obj_pool
@@ -515,11 +531,11 @@ fn compile_struct_literal(
                 let missing_elems = (0..expected_fields_len)
                     .into_iter()
                     .filter(|i| {
-                        !fields.iter().any(|(f, _, _, _)| {
-                            f == &state.structs[expected_struct_idx].fields[*i].0
+                        !fields.iter().any(|field| {
+                            field.name == state.structs[expected_struct_idx].fields[*i].name
                         })
                     })
-                    .map(|i| &state.structs[struct_id].fields[i].0)
+                    .map(|i| &state.structs[struct_id].fields[i].name)
                     .collect::<Vec<&SmolStr>>();
                 compiler_errors::error_struct_missing_fields(
                     ctx.file_idx,
@@ -734,7 +750,7 @@ fn compile_struct_field_access(
         let idx = s
             .fields
             .iter()
-            .position(|f| &f.0 == field)
+            .position(|f| &f.name == field)
             .unwrap_or_else(|| {
                 compiler_errors::error_struct_unknown_field(
                     ctx.file_idx,
@@ -1470,8 +1486,14 @@ fn compile_struct_field_assignment(
     let mut field_index: Option<u16> = None;
     let field_struct = &state.structs[struct_id as usize];
     let struct_name = &field_struct.name;
-    for (i, (expected_field_name, expected_field_type, expected_field_span)) in
-        field_struct.fields.iter().enumerate()
+    for (
+        i,
+        StructField {
+            name: expected_field_name,
+            field_type: expected_field_type,
+            span: expected_field_span,
+        },
+    ) in field_struct.fields.iter().enumerate()
     {
         if expected_field_name == field {
             if !struct_field_type_matches(expected_field_type, &new_val_type) {
@@ -1510,8 +1532,11 @@ fn compile_struct_field_assignment(
 }
 
 fn compile_condition(
-    main_condition: &Expr,
-    code: &[Expr],
+    IfBlockExpr {
+        condition,
+        code,
+        span: _,
+    }: &IfBlockExpr,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
@@ -1532,7 +1557,7 @@ fn compile_condition(
 
     // Compile the main condition
     let (true_jump_idxs, false_jump_idxs) =
-        compile_short_circuit_condition(main_condition, v, ctx, state, output, false);
+        compile_short_circuit_condition(condition, v, ctx, state, output, false);
     conditional_false_jmp_idxs.push(false_jump_idxs);
 
     // Modify true jump instructions to point to body_start
@@ -1924,7 +1949,7 @@ fn compile_var_declaration(
 
     if let DataType::Fn(fn_id) = &var_type {
         state
-            .namespace
+            .scope
             .symbols
             .push((name.clone(), SymbolKind::Fn(*fn_id)));
     }
@@ -2045,18 +2070,16 @@ fn compile_struct_definition(
         id: struct_id,
         name_span: span,
     });
-    state.namespace.symbols.push((
+    state.scope.symbols.push((
         name.clone(),
         SymbolKind::Struct((state.structs.len() - 1) as u16),
     ));
     let parsed_fields = fields
         .iter()
-        .map(|(f, f_t, f_span)| {
-            (
-                f.clone(),
-                f_t.to_datatype(ctx.file_idx, state.namespace, state.sources),
-                *f_span,
-            )
+        .map(|(field_name, field_type, field_span)| StructField {
+            name: field_name.clone(),
+            field_type: field_type.to_datatype(ctx.file_idx, state.scope, state.sources),
+            span: *field_span,
         })
         .collect();
     state.structs[struct_id as usize].fields = parsed_fields;
@@ -2076,7 +2099,7 @@ fn compile_function_definition(
     let mut callees = Vec::new();
     collect_direct_fn_calls(fn_code, &mut callees);
     state
-        .namespace
+        .scope
         .symbols
         .push((fn_name.clone(), SymbolKind::Fn(state.fns.len() as u16)));
     state.fns.push(Function {
@@ -2084,8 +2107,8 @@ fn compile_function_definition(
         args: Box::from(fn_args.iter().map(|(a, t)| {
             (
                 a.clone(),
-                t.clone()
-                    .map(|t_e| t_e.to_datatype(ctx.file_idx, state.namespace, state.sources)),
+                t.as_ref()
+                    .map(|t_e| t_e.to_datatype(ctx.file_idx, state.scope, state.sources)),
             )
         }))
         .collect(),
@@ -2154,7 +2177,7 @@ pub fn compile_expr(
 ) -> Vec<Instr> {
     let v_len = v.len();
     let fn_len = state.fns.len();
-    let symbols_len = state.namespace.symbols.len();
+    let symbols_len = state.scope.symbols.len();
     let mut output: Vec<Instr> = Vec::with_capacity(input.len());
     for (idx, x) in input.iter().enumerate() {
         if let Some(id) = x.compile_with_code_context(
@@ -2175,7 +2198,7 @@ pub fn compile_expr(
     }
     v.truncate(v_len);
     state.fns.truncate(fn_len);
-    state.namespace.symbols.truncate(symbols_len);
+    state.scope.symbols.truncate(symbols_len);
     output
 }
 
@@ -2303,7 +2326,7 @@ impl Expr {
                     Some(*register_id)
                 } else if let Some(fn_id) =
                     state
-                        .namespace
+                        .scope
                         .find_function(&[], name, *span, ctx.file_idx, state.sources)
                 {
                     let arg_types: Vec<DataType> = state.fns[fn_id]
@@ -2365,10 +2388,10 @@ impl Expr {
                     output,
                 ))
             }
-            Self::Struct(namespace, fields, span) => {
+            Self::Struct(name, fields, span) => {
                 debug_assert!(uses_id);
                 Some(compile_struct_literal(
-                    namespace, fields, *span, v, ctx, state, output,
+                    name, fields, *span, v, ctx, state, output,
                 ))
             }
             Self::Map(kv_pairs, span) => {
@@ -2607,28 +2630,19 @@ impl Expr {
                     tgt_id,
                 ))
             }
-            Self::FunctionCall(args, namespace, markers, args_indexes) if uses_id => Some(
-                handle_functions(
-                    output,
-                    v,
-                    ctx,
-                    state,
-                    tgt_id,
-                    args,
-                    namespace,
-                    *markers,
-                    args_indexes,
-                )
-                .unwrap_or_else(|| {
-                    if let Some(&id) = state.const_registers.get(&NULL) {
-                        id
-                    } else {
-                        let id = state.registers.len() as u16;
-                        state.const_registers.insert(NULL, id);
-                        state.registers.push(NULL);
-                        id
-                    }
-                }),
+            Self::FunctionCall(function_call) if uses_id => Some(
+                handle_functions(output, v, ctx, state, tgt_id, function_call).unwrap_or_else(
+                    || {
+                        if let Some(&id) = state.const_registers.get(&NULL) {
+                            id
+                        } else {
+                            let id = state.registers.len() as u16;
+                            state.const_registers.insert(NULL, id);
+                            state.registers.push(NULL);
+                            id
+                        }
+                    },
+                ),
             ),
             Self::AnonymousFunction(_, _, _) => {
                 debug_assert!(uses_id);
@@ -2681,9 +2695,9 @@ impl Expr {
                 );
                 None
             }
-            Self::Condition(main_condition, code, _) => {
+            Self::IfBlock(if_block) => {
                 debug_assert!(!uses_id);
-                compile_condition(main_condition, code, v, ctx, state, output);
+                compile_condition(if_block, v, ctx, state, output);
                 None
             }
             Self::WhileBlock(condition, code) => {
@@ -2728,18 +2742,8 @@ impl Expr {
                 compile_struct_definition(name, fields, *span, ctx, state);
                 None
             }
-            Self::FunctionCall(args, namespace, markers, args_indexes) if !uses_id => {
-                let output_id = handle_functions(
-                    output,
-                    v,
-                    ctx,
-                    state,
-                    tgt_id,
-                    args,
-                    namespace,
-                    *markers,
-                    args_indexes,
-                );
+            Self::FunctionCall(function_call) if !uses_id => {
+                let output_id = handle_functions(output, v, ctx, state, tgt_id, function_call);
                 if let Some(id) = output_id {
                     state.free_reg(id, v);
                 }
@@ -2846,12 +2850,12 @@ pub enum SymbolKind {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Namespace {
+pub struct Scope {
     pub symbols: Vec<(SmolStr, SymbolKind)>,
     pub children: Vec<(SmolStr, Self)>,
 }
 
-impl Namespace {
+impl Scope {
     pub fn fns(&self) -> impl Iterator<Item = &(SmolStr, SymbolKind)> {
         self.symbols
             .iter()
@@ -2936,17 +2940,17 @@ fn parse_toplevel(
     fns: &mut Vec<Function>,
     structs: &mut Vec<Struct>,
     fn_registers: &mut Vec<Vec<u16>>,
-    dynamic_libs: &mut Vec<Dynamiclib>,
+    dynamic_libs: &mut Vec<Dylib>,
     sources: &mut Vec<Source>,
-    namespace: &mut Namespace,
-    files: &mut FxHashMap<PathBuf, Namespace>,
-    file_namespaces: &mut FxHashMap<u16, Namespace>,
+    scope: &mut Scope,
+    files: &mut FxHashMap<PathBuf, Scope>,
+    file_scopes: &mut FxHashMap<u16, Scope>,
     pending_structs: &mut Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
     pending_fns: &mut Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)>,
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: &mut Vec<(
         u16,
         u16,
-        Box<[(SmolStr, Box<[(TypeExpr, Span)]>, Span)]>,
+        Box<[DylibFnExpr]>,
         Rc<Library>,
         Span,
     )>,
@@ -2956,7 +2960,7 @@ fn parse_toplevel(
         match expr {
             Expr::FunctionDecl(fn_name, fn_args, fn_code, span) => {
                 if let Some((_, SymbolKind::Fn(func_id))) =
-                    namespace.symbols.iter().rfind(|(f, _)| f == &fn_name)
+                    scope.symbols.iter().rfind(|(f, _)| f == &fn_name)
                 {
                     let func = &fns[*func_id as usize];
                     compiler_errors::error_function_already_defined(
@@ -2985,7 +2989,7 @@ fn parse_toplevel(
                     name_span: span,
                 });
                 pending_fns.push((fn_id, src_file_idx, fn_args));
-                namespace.symbols.push((fn_name, SymbolKind::Fn(fn_id)));
+                scope.symbols.push((fn_name, SymbolKind::Fn(fn_id)));
             }
             Expr::StructDeclare(name, fields, span) => {
                 let struct_id = structs.len() as u16;
@@ -2995,9 +2999,7 @@ fn parse_toplevel(
                     id: struct_id,
                     name_span: span,
                 });
-                namespace
-                    .symbols
-                    .push((name, SymbolKind::Struct(struct_id)));
+                scope.symbols.push((name, SymbolKind::Struct(struct_id)));
                 pending_structs.push((struct_id, src_file_idx, fields));
             }
             #[cfg(target_arch = "wasm32")]
@@ -3009,12 +3011,16 @@ fn parse_toplevel(
         }
     }
 
-    files.insert(file_path.to_path_buf(), namespace.clone());
+    files.insert(file_path.to_path_buf(), scope.clone());
 
     for import in imports {
         match import {
             #[cfg(not(target_arch = "wasm32"))]
-            Expr::ImportDylib(path, fn_signatures, span) => {
+            Expr::ImportDylib(DylibImportExpr {
+                path,
+                functions,
+                span,
+            }) => {
                 let base_path = if Path::new(path.as_str()).is_relative() {
                     file_path
                         .parent()
@@ -3050,11 +3056,11 @@ fn parse_toplevel(
                 pending_dylibs.push((
                     src_file_idx,
                     dynamic_libs.len() as u16,
-                    fn_signatures,
+                    functions,
                     lib,
                     span,
                 ));
-                dynamic_libs.push(Dynamiclib {
+                dynamic_libs.push(Dylib {
                     name: dylib_name,
                     fns: Box::new([]),
                 });
@@ -3090,7 +3096,7 @@ fn parse_toplevel(
                 });
 
                 if let Some(cached) = files.get(&file_path) {
-                    namespace.children.push((child_name, cached.clone()));
+                    scope.children.push((child_name, cached.clone()));
                     continue;
                 }
 
@@ -3110,7 +3116,7 @@ fn parse_toplevel(
                 let file_code =
                     parser::parse(&sources.last().unwrap().contents, sources.last().unwrap());
 
-                let mut child_namespace = Namespace {
+                let mut child_scope = Scope {
                     symbols: Vec::new(),
                     children: Vec::new(),
                 };
@@ -3124,21 +3130,21 @@ fn parse_toplevel(
                     fn_registers,
                     dynamic_libs,
                     sources,
-                    &mut child_namespace,
+                    &mut child_scope,
                     files,
-                    file_namespaces,
+                    file_scopes,
                     pending_structs,
                     pending_fns,
                     #[cfg(not(target_arch = "wasm32"))]
                     pending_dylibs,
                 );
-                files.insert(file_path, child_namespace.clone());
-                namespace.children.push((child_name, child_namespace));
+                files.insert(file_path, child_scope.clone());
+                scope.children.push((child_name, child_scope));
             }
             _ => unsafe { unreachable_unchecked() },
         }
     }
-    file_namespaces.insert(src_file_idx, namespace.clone());
+    file_scopes.insert(src_file_idx, scope.clone());
 }
 
 fn resolve_types(
@@ -3149,24 +3155,26 @@ fn resolve_types(
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: Vec<(
         u16,
         u16,
-        Box<[(SmolStr, Box<[(TypeExpr, Span)]>, Span)]>,
+        Box<[DylibFnExpr]>,
         Rc<Library>,
         Span,
     )>,
-    file_namespaces: &FxHashMap<u16, Namespace>,
-    dynamic_libs_fns: &mut Vec<DynamicLibFn>,
-    dynamic_libs: &mut [Dynamiclib],
+    file_namespaces: &FxHashMap<u16, Scope>,
+    dynamic_libs_fns: &mut Vec<DylibFn>,
+    dynamic_libs: &mut [Dylib],
     sources: &[Source],
 ) {
     for (struct_id, src_file_idx, fields) in pending_structs {
         let resolved_fields = fields
             .iter()
-            .map(|(field_name, field_type, field_span)| {
-                (
-                    field_name.clone(),
-                    field_type.to_datatype(src_file_idx, &file_namespaces[&src_file_idx], sources),
-                    *field_span,
-                )
+            .map(|(field_name, field_type, field_span)| StructField {
+                name: field_name.clone(),
+                field_type: field_type.to_datatype(
+                    src_file_idx,
+                    &file_namespaces[&src_file_idx],
+                    sources,
+                ),
+                span: *field_span,
             })
             .collect();
         structs[struct_id as usize].fields = resolved_fields;
@@ -3190,61 +3198,68 @@ fn resolve_types(
         let namespace = &file_namespaces[&src_file_idx];
         let fns = fn_signatures
             .iter()
-            .map(|(fn_name, fn_args, fn_name_span)| {
-                let (fn_return_type, fn_return_type_span) = unsafe { fn_args.get_unchecked(0) };
-                let fn_args = fn_args
-                    .iter()
-                    .skip(1)
-                    .map(|(t, span)| (t.to_datatype(src_file_idx, namespace, sources), *span))
-                    .collect::<Vec<(DataType, Span)>>()
-                    .into_boxed_slice();
-                let fn_return_type = fn_return_type.to_datatype(src_file_idx, namespace, sources);
-                let return_val = FnSignature {
-                    name: fn_name.clone(),
-                    args: fn_args.iter().map(|(t, _)| t.clone()).collect(),
-                    return_type: fn_return_type.clone(),
-                    id: dynamic_libs_fns.len() as u16,
-                };
-                let arg_types: Vec<_> = fn_args
-                    .iter()
-                    .map(|(t, span)| t.to_c_type(false, *span, structs, src_file_idx, sources))
-                    .collect();
-                let return_type = fn_return_type.to_c_type(
-                    true,
-                    *fn_return_type_span,
-                    structs,
-                    src_file_idx,
-                    sources,
-                );
-                let cif = libffi::middle::Cif::new(arg_types, return_type);
-                let ptr = unsafe {
-                    libffi::middle::CodePtr(
-                        lib.get::<*const ()>(fn_name.as_bytes())
-                            .unwrap_or_else(|_| {
-                                error_cannot_find_dynlib_symbol(
-                                    fn_name,
-                                    *fn_name_span,
-                                    span,
-                                    src_file_idx,
-                                    sources,
-                                );
-                            })
-                            .try_as_raw_ptr()
-                            .unwrap_unchecked(),
-                    )
-                };
+            .map(
+                |DylibFnExpr {
+                     name,
+                     args,
+                     name_span,
+                 }| {
+                    let (fn_return_type, fn_return_type_span) = unsafe { args.get_unchecked(0) };
+                    let fn_args = args
+                        .iter()
+                        .skip(1)
+                        .map(|(t, span)| (t.to_datatype(src_file_idx, namespace, sources), *span))
+                        .collect::<Vec<(DataType, Span)>>()
+                        .into_boxed_slice();
+                    let fn_return_type =
+                        fn_return_type.to_datatype(src_file_idx, namespace, sources);
+                    let return_val = FnSignature {
+                        name: name.clone(),
+                        args: fn_args.iter().map(|(t, _)| t.clone()).collect(),
+                        return_type: fn_return_type.clone(),
+                        id: dynamic_libs_fns.len() as u16,
+                    };
+                    let arg_types: Vec<_> = fn_args
+                        .iter()
+                        .map(|(t, span)| t.to_c_type(false, *span, structs, src_file_idx, sources))
+                        .collect();
+                    let return_type = fn_return_type.to_c_type(
+                        true,
+                        *fn_return_type_span,
+                        structs,
+                        src_file_idx,
+                        sources,
+                    );
+                    let cif = libffi::middle::Cif::new(arg_types, return_type);
+                    let ptr = unsafe {
+                        libffi::middle::CodePtr(
+                            lib.get::<*const ()>(name.as_bytes())
+                                .unwrap_or_else(|_| {
+                                    error_cannot_find_dynlib_symbol(
+                                        name,
+                                        *name_span,
+                                        span,
+                                        src_file_idx,
+                                        sources,
+                                    );
+                                })
+                                .try_as_raw_ptr()
+                                .unwrap_unchecked(),
+                        )
+                    };
 
-                let mut types = vec![fn_return_type];
-                types.extend(fn_args.iter().map(|(t, _)| t.clone()));
+                    let mut types = vec![fn_return_type];
+                    types.extend(fn_args.iter().map(|(t, _)| t.clone()));
 
-                dynamic_libs_fns.push(DynamicLibFn {
-                    types: Box::from(types),
-                    _lib: Rc::clone(&lib),
-                    ptr,
-                    cif,
-                });
-                return_val
-            })
+                    dynamic_libs_fns.push(DylibFn {
+                        types: Box::from(types),
+                        _lib: Rc::clone(&lib),
+                        ptr,
+                        cif,
+                    });
+                    return_val
+                },
+            )
             .collect();
         dynamic_libs[dynlib_id as usize].fns = fns;
     }
@@ -3260,7 +3275,7 @@ pub fn compile(
     Pools,
     Vec<InstrSrc>,
     Vec<Vec<u16>>,
-    Vec<DynamicLibFn>,
+    Vec<DylibFn>,
     usize,
     usize,
     Vec<Source>,
@@ -3292,8 +3307,8 @@ pub fn compile(
     let mut fn_registers: Vec<Vec<u16>> = Vec::new();
     let mut functions: Vec<Function> = Vec::new();
     let mut structs: Vec<Struct> = Vec::new();
-    let mut dyn_libs: Vec<Dynamiclib> = Vec::new();
-    let mut dyn_lib_fns: Vec<DynamicLibFn> = Vec::new();
+    let mut dyn_libs: Vec<Dylib> = Vec::new();
+    let mut dyn_lib_fns: Vec<DylibFn> = Vec::new();
     let mut allocated_arg_count = 0;
     let mut allocated_call_depth = 0;
     let mut const_registers: FxHashMap<Data, u16> = FxHashMap::default();
@@ -3303,21 +3318,15 @@ pub fn compile(
     let main_path = PathBuf::from(filename)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(filename));
-    let mut namespace = Namespace::default();
+    let mut scope = Scope::default();
 
-    let mut files: FxHashMap<PathBuf, Namespace> = FxHashMap::default();
-    let mut file_namespaces: FxHashMap<u16, Namespace> = FxHashMap::default();
+    let mut files: FxHashMap<PathBuf, Scope> = FxHashMap::default();
+    let mut file_scopes: FxHashMap<u16, Scope> = FxHashMap::default();
     let mut pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)> = Vec::new();
     let mut pending_fns: Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)> =
         Vec::with_capacity(2);
     #[cfg(not(target_arch = "wasm32"))]
-    let mut pending_dylibs: Vec<(
-        u16,
-        u16,
-        Box<[(SmolStr, Box<[(TypeExpr, Span)]>, Span)]>,
-        Rc<Library>,
-        Span,
-    )> = Vec::new();
+    let mut pending_dylibs: Vec<(u16, u16, Box<[DylibFnExpr]>, Rc<Library>, Span)> = Vec::new();
 
     parse_toplevel(
         code,
@@ -3328,9 +3337,9 @@ pub fn compile(
         &mut fn_registers,
         &mut dyn_libs,
         &mut sources,
-        &mut namespace,
+        &mut scope,
         &mut files,
-        &mut file_namespaces,
+        &mut file_scopes,
         &mut pending_structs,
         &mut pending_fns,
         #[cfg(not(target_arch = "wasm32"))]
@@ -3343,7 +3352,7 @@ pub fn compile(
         pending_fns,
         #[cfg(not(target_arch = "wasm32"))]
         pending_dylibs,
-        &file_namespaces,
+        &file_scopes,
         &mut dyn_lib_fns,
         &mut dyn_libs,
         &sources,
@@ -3370,7 +3379,7 @@ pub fn compile(
         free_registers: &mut free_registers,
         sources: &mut sources,
         reserved_registers: FxHashSet::default(),
-        namespace: &mut namespace,
+        scope: &mut scope,
     };
     let mut instructions = compile_expr(
         &state.fns

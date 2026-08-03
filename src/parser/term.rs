@@ -7,13 +7,16 @@ use super::parser_expr::parse_expr_no_struct;
 use super::parser_expr::parse_expr_with_precedence;
 use crate::cold_path;
 use crate::compiler::expr::Expr;
+use crate::compiler::expr::FunctionCallExpr;
+use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
+use crate::compiler::expr::StructFieldExpr;
 use crate::parser::Parser;
 use crate::parser::TypeExpr;
 use crate::parser::blocks::parse_block;
 use crate::parser::blocks::parse_block_expr;
 use crate::parser::parse_args;
-use crate::parser::parse_namespace;
+use crate::parser::parse_qualified_name;
 use crate::parser::parse_type;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
@@ -21,14 +24,19 @@ use smol_strc::ToSmolStr;
 // Must be called right after LParen is skipped
 // Identifier LParen Expr RParen
 // Parses: Expr RParen
-fn parse_fn_call(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, span: Span) -> Expr {
-    let (args, arg_markers, _) = parse_args(parser);
-    Expr::FunctionCall(args, namespace, span, arg_markers)
+fn parse_fn_call(parser: &mut Parser<'_>, qualified_name: QualifiedName, span: Span) -> Expr {
+    let (args, arg_spans, _) = parse_args(parser);
+    Expr::FunctionCall(FunctionCallExpr {
+        qualified_name,
+        args,
+        span,
+        arg_spans,
+    })
 }
 
 // Must be called right after LParen is skipped
-fn parse_struct(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u32) -> Expr {
-    let mut fields: Vec<(SmolStr, Expr, Span, Span)> = Vec::with_capacity(4);
+fn parse_struct(parser: &mut Parser<'_>, name: QualifiedName, start: u32) -> Expr {
+    let mut fields: Vec<StructFieldExpr> = Vec::with_capacity(4);
     let end: u32;
     loop {
         let (next_token, field_name_span) = parser.next_token();
@@ -51,12 +59,12 @@ fn parse_struct(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u32) 
         );
         let field_start: u32 = parser.peek_token_span().start;
         let field_value = parse_expr(parser);
-        fields.push((
-            field_name,
-            field_value,
-            field_name_span,
-            (field_start, parser.peek_token_span().start).into(),
-        ));
+        fields.push(StructFieldExpr {
+            name: field_name,
+            value: field_value,
+            name_span: field_name_span,
+            value_span: (field_start, parser.peek_token_span().start).into(),
+        });
         let (next_token, span) = parser.next_token();
         if next_token == Token::RBrace {
             end = span.end;
@@ -77,7 +85,7 @@ fn parse_struct(parser: &mut Parser<'_>, namespace: Box<[SmolStr]>, start: u32) 
         }
     }
 
-    Expr::Struct(namespace, Box::from(fields), (start, end).into())
+    Expr::Struct(name, Box::from(fields), (start, end).into())
 }
 
 pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
@@ -96,17 +104,17 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 // Identifier LParen Expr RParen
                 Some(Token::LParen) => {
                     parser.next_token();
-                    parse_fn_call(parser, Box::new([s.to_smolstr()]), t_span)
+                    parse_fn_call(parser, QualifiedName::new([s.to_smolstr()]), t_span)
                 }
                 // STRUCT
                 Some(Token::LBrace) if allow_struct => {
                     parser.next_token();
-                    parse_struct(parser, Box::from([SmolStr::new(s)]), start)
+                    parse_struct(parser, QualifiedName::new([SmolStr::new(s)]), start)
                 }
                 // NAMESPACE
                 Some(Token::DoubleColon) => {
                     parser.next_token();
-                    let (namespace, end) = parse_namespace(parser, SmolStr::new(s));
+                    let (namespace, end) = parse_qualified_name(parser, SmolStr::new(s));
                     let (next_token, _) = parser.next_token();
                     if next_token == Token::LParen {
                         // FUNCTION CALL WITH NAMESPACE:

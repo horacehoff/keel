@@ -1,5 +1,3 @@
-use super::super::expr::Expr;
-use super::super::expr::Span;
 use super::super::type_system::DataType;
 use super::check_arg_type;
 use crate::compiler::Scope;
@@ -9,34 +7,27 @@ use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::error_unknown_function;
+use crate::compiler::expr::FunctionCallExpr;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
 
 pub fn fs_lib_functions(
-    name: &str,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
-    args: &[Expr],
-    span: Span,
-    args_indexes: &[Span],
+    function_call: &FunctionCallExpr,
 ) -> Option<u16> {
+    let args = &function_call.args;
+    let span = function_call.span;
+    let arg_spans = &function_call.arg_spans;
+    let name = function_call.qualified_name.get_name().as_str();
     match name {
         "read" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -48,16 +39,7 @@ pub fn fs_lib_functions(
         }
         "exists" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -69,26 +51,8 @@ pub fn fs_lib_functions(
         }
         "write" => {
             check_args(args, 2, name, span, state.sources, ctx.file_idx);
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                1,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
+            check_arg_type(name, v, ctx, state, args, arg_spans, 1, &[DataType::String]);
             let filepath = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -106,26 +70,8 @@ pub fn fs_lib_functions(
         }
         "append" => {
             check_args(args, 2, name, span, state.sources, ctx.file_idx);
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                1,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
+            check_arg_type(name, v, ctx, state, args, arg_spans, 1, &[DataType::String]);
             let filepath = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -143,16 +89,7 @@ pub fn fs_lib_functions(
         }
         "delete" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let path = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -162,16 +99,7 @@ pub fn fs_lib_functions(
         }
         "delete_dir" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let path = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();

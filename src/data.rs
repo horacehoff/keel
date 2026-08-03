@@ -437,19 +437,6 @@ impl From<Data> for f64 {
     }
 }
 
-impl From<i32> for Data {
-    #[inline(always)]
-    fn from(value: i32) -> Self {
-        Self::int(value)
-    }
-}
-impl From<Data> for i32 {
-    #[inline(always)]
-    fn from(value: Data) -> Self {
-        value.as_int()
-    }
-}
-
 impl From<bool> for Data {
     #[inline(always)]
     fn from(value: bool) -> Self {

@@ -104,7 +104,6 @@ pub enum Expr {
     /// AnonymousFunction(args, code, span)
     AnonymousFunction(Box<[(SmolStr, Option<TypeExpr>)]>, Box<[Self]>, Span),
     WhileBlock(Box<Self>, Box<[Self]>),
-    /// FunctionCall(args, (optional namespace + name), start, end, (arg_start,arg_end))
     FunctionCall(FunctionCallExpr),
     /// ObjFunctionCall(obj, args, namespace, obj_span, fn_span, arg_markers)
     ObjFunctionCall(

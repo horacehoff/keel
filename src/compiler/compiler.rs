@@ -44,7 +44,7 @@ use compiler_data::Variable;
 use expr::Expr;
 use expr::Span;
 use expr::code_modifies_variable;
-use functions::handle_functions;
+use functions::compile_function_call;
 use methods::handle_method_calls;
 use registers::move_reg_to_reg;
 use registers::move_to_id;
@@ -1682,7 +1682,7 @@ fn compile_for_loop(
 
     // set up the id of the index variable (0..len)
     let index_id = if ctx.single_run {
-        state.registers.push(0.into());
+        state.registers.push(Data::int(0));
         (state.registers.len() - 1) as u16
     } else {
         let id = state.alloc_reg();
@@ -2236,11 +2236,11 @@ impl Expr {
         match self {
             Self::Int(num) => {
                 debug_assert!(uses_id);
+                let data = Data::int(*num);
                 if var_assignment {
-                    state.registers.push((*num).into());
+                    state.registers.push(data);
                     return Some((state.registers.len() - 1) as u16);
                 }
-                let data = (*num).into();
                 if let Some(&id) = state.const_registers.get(&data) {
                     Some(id)
                 } else {
@@ -2631,7 +2631,7 @@ impl Expr {
                 ))
             }
             Self::FunctionCall(function_call) if uses_id => Some(
-                handle_functions(output, v, ctx, state, tgt_id, function_call).unwrap_or_else(
+                compile_function_call(function_call, output, v, ctx, state, tgt_id).unwrap_or_else(
                     || {
                         if let Some(&id) = state.const_registers.get(&NULL) {
                             id
@@ -2743,7 +2743,7 @@ impl Expr {
                 None
             }
             Self::FunctionCall(function_call) if !uses_id => {
-                let output_id = handle_functions(output, v, ctx, state, tgt_id, function_call);
+                let output_id = compile_function_call(function_call, output, v, ctx, state, tgt_id);
                 if let Some(id) = output_id {
                     state.free_reg(id, v);
                 }

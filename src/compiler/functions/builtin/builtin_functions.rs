@@ -1,5 +1,4 @@
 use super::super::expr::Expr;
-use super::super::expr::Span;
 use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::check_arg_type;
@@ -14,6 +13,7 @@ use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::check_args_range;
 use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_unknown_function;
+use crate::compiler::expr::FunctionCallExpr;
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
@@ -21,16 +21,17 @@ use smol_strc::SmolStr;
 use std::rc::Rc;
 
 pub fn builtin_functions(
-    name: &str,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
-    args: &[Expr],
-    span: Span,
-    args_indexes: &[Span],
+    function_call: &FunctionCallExpr,
 ) -> Option<u16> {
+    let args = &function_call.args;
+    let span = function_call.span;
+    let arg_spans = &function_call.arg_spans;
+    let name = function_call.qualified_name.get_name().as_str();
     match name {
         "print" => {
             for arg in args {
@@ -59,7 +60,7 @@ pub fn builtin_functions(
                 ctx,
                 state,
                 args,
-                args_indexes,
+                arg_spans,
                 0,
                 &[DataType::String, DataType::Int],
             );
@@ -80,7 +81,7 @@ pub fn builtin_functions(
                 ctx,
                 state,
                 args,
-                args_indexes,
+                arg_spans,
                 0,
                 &[DataType::String, DataType::Float],
             );
@@ -105,16 +106,7 @@ pub fn builtin_functions(
         }
         "bool" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -130,7 +122,7 @@ pub fn builtin_functions(
                 0,
                 1,
                 name,
-                args_indexes,
+                arg_spans,
                 ctx.file_idx,
                 state.sources,
                 span,
@@ -141,16 +133,7 @@ pub fn builtin_functions(
                     .push(Data::p_str("", &mut state.pools.str_pool));
                 (state.registers.len() - 1) as u16
             } else {
-                check_arg_type(
-                    name,
-                    v,
-                    ctx,
-                    state,
-                    args,
-                    args_indexes,
-                    0,
-                    &[DataType::String],
-                );
+                check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
                 args[0]
                     .compile(v, ctx, state, output, None, false, true)
                     .unwrap_id()
@@ -166,14 +149,14 @@ pub fn builtin_functions(
                 1,
                 2,
                 name,
-                args_indexes,
+                arg_spans,
                 ctx.file_idx,
                 state.sources,
                 span,
             );
-            check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::Int]);
             if args.len() != 1 {
-                check_arg_type(name, v, ctx, state, args, args_indexes, 1, &[DataType::Int]);
+                check_arg_type(name, v, ctx, state, args, arg_spans, 1, &[DataType::Int]);
             }
 
             let id_first_arg = args[0]
@@ -213,7 +196,7 @@ pub fn builtin_functions(
                 0,
                 1,
                 name,
-                args_indexes,
+                arg_spans,
                 ctx.file_idx,
                 state.sources,
                 span,
@@ -221,7 +204,7 @@ pub fn builtin_functions(
             let halt_code = if args.is_empty() {
                 0
             } else {
-                check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
+                check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::Int]);
                 args[0]
                     .compile(v, ctx, state, output, None, false, true)
                     .unwrap_id()
@@ -231,16 +214,7 @@ pub fn builtin_functions(
         }
         "throw" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let err_reg_id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -266,7 +240,7 @@ pub fn builtin_functions(
                     fn_id,
                     fn_name,
                     &inferred_arg_types,
-                    args_indexes,
+                    arg_spans,
                     v,
                     ctx,
                     state,
@@ -328,18 +302,7 @@ pub fn builtin_functions(
                     .scope
                     .find_function(&[], fn_name, span, ctx.file_idx, state.sources)
             {
-                handle_user_function(
-                    fn_name,
-                    fn_id,
-                    output,
-                    v,
-                    ctx,
-                    state,
-                    tgt_id,
-                    args,
-                    span,
-                    args_indexes,
-                )
+                handle_user_function(function_call, fn_id, output, v, ctx, state, tgt_id)
             } else {
                 error_unknown_function(fn_name, span, state.scope, ctx.file_idx, state.sources);
             }

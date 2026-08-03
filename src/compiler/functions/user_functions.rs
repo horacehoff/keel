@@ -1,5 +1,4 @@
 use super::super::expr::Expr;
-use super::super::expr::Span;
 use super::super::registers::get_tgt_ids;
 use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
@@ -83,38 +82,42 @@ pub fn compile_function_impl(
 }
 
 pub fn handle_user_function(
-    fn_name: &str,
-    fn_id: usize,
+    function_call: &FunctionCallExpr,
+    function_idx: usize,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
-    args: &[Expr],
-    span: Span,
-    args_indexes: &[Span],
 ) -> Option<u16> {
-    let is_recursive = is_function_recursive(fn_id, state);
+    let args = &function_call.args;
+    let fn_name = function_call.qualified_name.get_name();
+    let span = function_call.span;
+    let args_indexes = &function_call.arg_spans;
+    let is_recursive = is_function_recursive(function_idx, state);
 
-    let fn_returns_null = state.fns[fn_id].returns_null;
+    let fn_returns_null = state.fns[function_idx].returns_null;
 
     // Check if the arguments are correct
-    let args_len = state.fns[fn_id].args.len();
+    let args_len = state.fns[function_idx].args.len();
     check_args_user_fn(
         args,
         args_len,
         fn_name,
         ctx.file_idx,
         span,
-        (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
+        (
+            state.fns[function_idx].name_span,
+            state.fns[function_idx].src_file,
+        ),
         state,
         args_indexes,
     );
 
     //This inlines dylib wrappers
     // Actual general function inlining is coming soon
-    if state.fns[fn_id].code.len() == 1
-        && let Expr::ReturnVal(ret) = &state.fns[fn_id].code[0]
+    if state.fns[function_idx].code.len() == 1
+        && let Expr::ReturnVal(ret) = &state.fns[function_idx].code[0]
         && let Some(Expr::FunctionCall(FunctionCallExpr {
             qualified_name,
             args: call_args,
@@ -124,7 +127,7 @@ pub fn handle_user_function(
         && call_args.len() == args_len
         && call_args
             .iter()
-            .zip(state.fns[fn_id].args.iter())
+            .zip(state.fns[function_idx].args.iter())
             .all(|(e, (p, _))| matches!(e, Expr::Var(n, _) if n == p))
         && let Some(fn_sig) = state
             .dyn_libs
@@ -147,7 +150,10 @@ pub fn handle_user_function(
                     &expected_arg_types[i],
                     args_indexes[i],
                     fn_name,
-                    Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
+                    Some((
+                        state.fns[function_idx].name_span,
+                        state.fns[function_idx].src_file,
+                    )),
                     ctx.file_idx,
                     state.sources,
                 )
@@ -180,7 +186,7 @@ pub fn handle_user_function(
         .collect::<Vec<DataType>>();
 
     check_user_fn_arg_types(
-        fn_id,
+        function_idx,
         fn_name,
         &inferred_arg_types,
         args_indexes,
@@ -189,8 +195,9 @@ pub fn handle_user_function(
         state,
     );
 
-    let fn_impl_idx = compile_function_impl(output, v, ctx, state, fn_id, &inferred_arg_types);
-    let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+    let fn_impl_idx =
+        compile_function_impl(output, v, ctx, state, function_idx, &inferred_arg_types);
+    let loc = state.fns[function_idx].impls[fn_impl_idx].loc;
 
     let saveframe_loc = output.len();
     let callsite_id = if is_recursive {
@@ -204,7 +211,7 @@ pub fn handle_user_function(
     };
     // Move evaluated call args into the expected arg slots
     for (i, arg_expr) in args.iter().enumerate() {
-        let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
+        let tgt_id = state.fns[function_idx].impls[fn_impl_idx].args_loc[i];
 
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
             let loc = state.fns[arg_fn_id as usize]
@@ -230,7 +237,7 @@ pub fn handle_user_function(
     if !is_recursive {
         state
             .fn_registers
-            .get_mut(fn_id)
+            .get_mut(function_idx)
             .unwrap()
             .extend(get_tgt_ids(&output[saveframe_loc..]));
     }

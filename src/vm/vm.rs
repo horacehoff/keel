@@ -396,7 +396,7 @@ pub fn execute(
                 continue;
             }
             Instr::Mov(tgt, dest) => r[dest] = r[tgt],
-            Instr::SetInt(dest, n) => r[dest] = n.into(),
+            Instr::SetInt(dest, n) => r[dest] = Data::int(n),
             Instr::SetBool(b, dest) => r[dest] = b.into(),
             Instr::CallFunc(new_loc, return_id) => {
                 call_frames.push(CallFrame {
@@ -534,7 +534,7 @@ pub fn execute(
                 // Call the function, and convert the result back into Data
                 r[dest] = unsafe {
                     match func.get_return_type() {
-                        DataType::Int => func.cif.call::<i32>(func.ptr, &ffi_args).into(),
+                        DataType::Int => Data::int(func.cif.call::<i32>(func.ptr, &ffi_args)),
                         DataType::Float => func.cif.call::<f64>(func.ptr, &ffi_args).into(),
                         DataType::String => {
                             let ptr = func
@@ -590,7 +590,7 @@ pub fn execute(
                 r[dest] = (r[o1].as_float() + r[o2].as_float()).into();
             }
             Instr::AddInt(o1, o2, dest) => {
-                r[dest] = (r[o1].as_int() + r[o2].as_int()).into();
+                r[dest] = Data::int(r[o1].as_int() + r[o2].as_int());
             }
             Instr::AddStr(o1, o2, dest) => {
                 let d1 = r[o1];
@@ -693,7 +693,7 @@ pub fn execute(
                 r[dest] = (r[o1].as_float() * r[o2].as_float()).into();
             }
             Instr::MulInt(o1, o2, dest) => {
-                r[dest] = (r[o1].as_int() * r[o2].as_int()).into();
+                r[dest] = Data::int(r[o1].as_int() * r[o2].as_int());
             }
             Instr::DivFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() / r[o2].as_float()).into();
@@ -703,13 +703,13 @@ pub fn execute(
                 if b == 0 {
                     error_with_catch!(ErrType::DivisionByZero);
                 }
-                r[dest] = (r[o1].as_int() / b).into();
+                r[dest] = Data::int(r[o1].as_int() / b);
             }
             Instr::SubFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() - r[o2].as_float()).into();
             }
             Instr::SubInt(o1, o2, dest) => {
-                r[dest] = (r[o1].as_int() - r[o2].as_int()).into();
+                r[dest] = Data::int(r[o1].as_int() - r[o2].as_int());
             }
             Instr::ModFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() % r[o2].as_float()).into();
@@ -719,13 +719,13 @@ pub fn execute(
                 if b == 0 {
                     error_with_catch!(ErrType::ModuloByZero);
                 }
-                r[dest] = (r[o1].as_int() % b).into();
+                r[dest] = Data::int(r[o1].as_int() % b);
             }
             Instr::PowFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float().powf(r[o2].as_float())).into();
             }
             Instr::PowInt(o1, o2, dest) => {
-                r[dest] = (r[o1].as_int().pow(r[o2].as_int() as u32)).into();
+                r[dest] = Data::int(r[o1].as_int().pow(r[o2].as_int() as u32));
             }
             Instr::IncInt(reg) => r[reg].inc_int(),
             Instr::DecInt(reg) => r[reg].dec_int(),
@@ -882,7 +882,7 @@ pub fn execute(
                 r[dest] = (-r[tgt].as_float()).into();
             }
             Instr::NegInt(tgt, dest) => {
-                r[dest] = (-r[tgt].as_int()).into();
+                r[dest] = Data::int(-r[tgt].as_int());
             }
             Instr::Print(tgt) => {
                 r[tgt].format_to(&mut output, obj_pool, str_pool, map_pool, structs, false);
@@ -1093,23 +1093,21 @@ pub fn execute(
                     let temp_elem = r[args.pop_unchecked()];
                     let element = temp_elem.as_str(str_pool);
                     r[dest] = if let Some(idx) = memmem::find(str.as_bytes(), element.as_bytes()) {
-                        idx as i32
+                        Data::int(idx as i32)
                     } else {
                         cold_path();
-                        -1
+                        Data::int(-1)
                     }
-                    .into();
                 } else if reg.is_array() {
                     let arr_id = reg.as_array();
                     let element = r[args.pop_unchecked()];
-                    r[dest] =
-                        if let Some(idx) = obj_pool[arr_id].iter().position(|x| x == &element) {
-                            idx as i32
-                        } else {
-                            cold_path();
-                            -1
-                        }
-                        .into();
+                    r[dest] = if let Some(idx) = obj_pool[arr_id].iter().position(|x| x == &element)
+                    {
+                        Data::int(idx as i32)
+                    } else {
+                        cold_path();
+                        Data::int(-1)
+                    };
                 }
             }
             Instr::CallLibFunc(LibFunc::IsFloat, tgt, dest) => {
@@ -1166,7 +1164,7 @@ pub fn execute(
                 r[dest] = if tgt.is_float() {
                     tgt.as_float().abs().into()
                 } else {
-                    tgt.as_int().abs().into()
+                    Data::int(tgt.as_int().abs())
                 }
             }
             Instr::CallLibFunc(LibFunc::Reverse, tgt, dest) => {
@@ -1194,11 +1192,11 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Int, tgt, dest) => {
                 let reg = r[tgt];
                 if reg.is_float() {
-                    r[dest] = (reg.as_float() as i32).into();
+                    r[dest] = Data::int(reg.as_float() as i32);
                 } else if reg.is_string() {
                     let str = reg.as_str(str_pool);
                     r[dest] = if let Ok(i) = lexical_core::parse::<i32>(str.as_bytes()) {
-                        i.into()
+                        Data::int(i)
                     } else {
                         cold_path();
                         error_with_catch!(ErrType::InvalidInt);
@@ -1264,11 +1262,11 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Len, tgt, dest) => {
                 let reg = r[tgt];
                 if reg.is_array() {
-                    r[dest] = (obj_pool[reg.as_array()].len() as i32).into();
+                    r[dest] = Data::int(obj_pool[reg.as_array()].len() as i32);
                 } else if reg.is_string() {
-                    r[dest] = (reg.as_str(str_pool).len() as i32).into();
+                    r[dest] = Data::int(reg.as_str(str_pool).len() as i32);
                 } else if reg.is_map() {
-                    r[dest] = (map_pool[reg.as_map()].len() as i32).into();
+                    r[dest] = Data::int(map_pool[reg.as_map()].len() as i32);
                 } else {
                     unsafe { unreachable_unchecked() }
                 }
@@ -1411,7 +1409,7 @@ pub fn execute(
                     &mut obj_gc_stack,
                 );
                 let range_arr = obj_pool.get_mut(output_array_id as usize);
-                range_arr.extend((min..max).map(Data::from));
+                range_arr.extend((min..max).map(Data::int));
                 r[dest] = Data::array(output_array_id);
             }
             Instr::CallLibFunc(LibFunc::JoinStringArray, tgt, dest) => {

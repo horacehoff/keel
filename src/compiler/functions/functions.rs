@@ -91,62 +91,56 @@ pub fn check_user_fn_arg_types(
     }
 }
 
-pub fn handle_functions(
+pub fn compile_function_call(
+    function_call: &FunctionCallExpr,
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
-    // method call data
-    function_call: &FunctionCallExpr,
 ) -> Option<u16> {
-    let qualified_name = &function_call.qualified_name;
-    let args = &function_call.args;
-    let arg_spans = &function_call.arg_spans;
-    let span = function_call.span;
-    let fn_name = qualified_name.get_name();
-    let namespace = qualified_name.get_namespace();
+    let namespace = function_call.qualified_name.get_namespace();
     if namespace.is_empty() {
-        builtin_functions(
-            fn_name, output, v, ctx, state, tgt_id, args, span, arg_spans,
-        )
+        builtin_functions(output, v, ctx, state, tgt_id, function_call)
     } else if namespace == ["fs"] {
         #[cfg(target_arch = "wasm32")]
         wasm_error("WASM does not support the file system library");
 
-        fs_lib_functions(
-            fn_name, output, v, ctx, state, tgt_id, args, span, arg_spans,
-        )
+        fs_lib_functions(output, v, ctx, state, tgt_id, function_call)
     } else if let Some((fn_args, returns_null, dyn_id)) = state
         .dyn_libs
         .iter()
         .find(|l| l.name == namespace[0])
-        .and_then(|lib| lib.fns.iter().find(|x| &x.name == fn_name))
+        .and_then(|lib| {
+            lib.fns
+                .iter()
+                .find(|x| &x.name == function_call.qualified_name.get_name())
+        })
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
         check_args(
-            args,
+            &function_call.args,
             fn_args.len(),
-            fn_name,
-            span,
+            function_call.qualified_name.get_name(),
+            function_call.span,
             state.sources,
             ctx.file_idx,
         );
         for (i, a) in fn_args.iter().enumerate() {
             check_arg_type(
-                fn_name,
+                function_call.qualified_name.get_name(),
                 v,
                 ctx,
                 state,
-                args,
-                arg_spans,
+                &function_call.args,
+                &function_call.arg_spans,
                 i,
                 slice::from_ref(a),
             );
         }
 
-        *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
-        for arg in args {
+        *state.allocated_arg_count = (*state.allocated_arg_count).max(function_call.args.len());
+        for arg in &function_call.args {
             let arg_id = arg
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -160,26 +154,26 @@ pub fn handle_functions(
             state.alloc_reg_tgt(tgt_id)
         };
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
-        state.add_to_src(ctx, output, span);
+        state.add_to_src(ctx, output, function_call.span);
         if returns_null {
             None
         } else {
             Some(register_id)
         }
-    } else if let Some(fn_id) =
-        state
-            .scope
-            .find_function(namespace, fn_name, span, ctx.file_idx, state.sources)
-    {
-        handle_user_function(
-            fn_name, fn_id, output, v, ctx, state, tgt_id, args, span, arg_spans,
-        )
+    } else if let Some(fn_id) = state.scope.find_function(
+        namespace,
+        function_call.qualified_name.get_name(),
+        function_call.span,
+        ctx.file_idx,
+        state.sources,
+    ) {
+        handle_user_function(function_call, fn_id, output, v, ctx, state, tgt_id)
     } else {
         error_unknown_function_in_namespace(
-            fn_name,
+            function_call.qualified_name.get_name(),
             state.scope,
             namespace,
-            span,
+            function_call.span,
             ctx.file_idx,
             state.sources,
         );

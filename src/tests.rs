@@ -96,7 +96,7 @@ pub fn rec_fib_1() {
             print(x);
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -114,7 +114,7 @@ pub fn rec_fib_25() {
             print(x);
         }
         ",
-        75025.into()
+        Data::int(75025)
     );
 }
 
@@ -137,7 +137,7 @@ pub fn fn_call_in_if_in_for() {
             print(count);
         }
         ",
-        7.into()
+       Data::int(7)
     );
 }
 
@@ -159,7 +159,7 @@ pub fn while_and_condition() {
         print(result);
         }
         ",
-        109376.into()
+        Data::int(109376)
     );
 }
 
@@ -182,7 +182,7 @@ pub fn iter_fib_40() {
         print(c);
         }
         ",
-        102334155.into()
+        Data::int(102334155)
     );
 }
 #[test]
@@ -205,7 +205,7 @@ pub fn iter_fib_40_loop() {
             print(sum);
         }
         ",
-        1000000.into()
+        Data::int(1000000)
     );
 }
 
@@ -219,7 +219,7 @@ pub fn string_split_array_len() {
             print(parts.len());
         }
         "#,
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -249,7 +249,7 @@ pub fn for_loop_sum() {
             print(sum);
         }
         ",
-        15.into()
+        Data::int(15)
     );
 }
 
@@ -263,7 +263,7 @@ pub fn array_sort() {
             print(arr[0]);
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -277,7 +277,7 @@ pub fn array_push_len() {
             print(arr.len());
         }
         ",
-        4.into()
+        Data::int(4)
     );
 }
 
@@ -291,7 +291,7 @@ pub fn array_partition() {
             print(p[0][0]+p[1][2]);
         }
         ",
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -307,7 +307,7 @@ pub fn int_for_loop() {
             print(sum);
         }
         ",
-        45.into()
+        Data::int(45)
     );
 }
 
@@ -321,7 +321,7 @@ pub fn string_trim() {
             print(t.len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -337,7 +337,7 @@ pub fn recursive_factorial() {
             print(fact(10));
         }
         ",
-        3628800.into()
+        Data::int(3628800)
     );
 }
 
@@ -351,7 +351,7 @@ pub fn inline_condition_true() {
             print(result);
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -365,7 +365,7 @@ pub fn inline_condition_false() {
             print(result);
         }
         ",
-        0.into()
+        Data::int(0)
     );
 }
 
@@ -379,7 +379,7 @@ pub fn inline_condition_else_if() {
             print(result);
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -392,7 +392,7 @@ pub fn inline_condition_as_arg() {
             print(if x == 42 { 99 } else { 0 });
         }
         ",
-        99.into()
+        Data::int(99)
     );
 }
 
@@ -470,7 +470,7 @@ pub fn float_to_int_conversion() {
             print(x);
         }
         ",
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -483,7 +483,7 @@ pub fn int_to_str_conversion() {
             print(x.len());
         }
         "#,
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -512,7 +512,7 @@ pub fn string_replace() {
             print(r.len());
         }
         "#,
-        10.into()
+        Data::int(10)
     );
 }
 
@@ -525,7 +525,7 @@ pub fn string_find() {
             print(s.find("world"));
         }
         "#,
-        6.into()
+        Data::int(6)
     );
 }
 
@@ -538,7 +538,7 @@ pub fn string_repeat() {
             print(s.repeat(3).len());
         }
         "#,
-        6.into()
+        Data::int(6)
     );
 }
 #[test]
@@ -551,7 +551,7 @@ pub fn array_repeat() {
             print(t.len()+t[2]);
         }
         "#,
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -578,7 +578,7 @@ pub fn array_reverse() {
             print(arr[0]);
         }
         ",
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -592,7 +592,7 @@ pub fn array_remove() {
             print(arr.len());
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -606,7 +606,7 @@ pub fn array_join() {
             print(s.len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -620,7 +620,7 @@ pub fn array_modify_index() {
             print(arr[1]);
         }
         ",
-        99.into()
+        Data::int(99)
     );
 }
 
@@ -637,7 +637,7 @@ pub fn break_loop() {
             print(x);
         }
         ",
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -654,7 +654,7 @@ pub fn continue_in_loop() {
             print(sum);
         }
         ",
-        25.into()
+        Data::int(25)
     );
 }
 
@@ -672,7 +672,7 @@ pub fn nested_loops() {
             print(count);
         }
         ",
-        16.into()
+        Data::int(16)
     );
 }
 
@@ -711,7 +711,7 @@ pub fn negation() {
             print(-x);
         }
         ",
-        (-5).into()
+        Data::int(-5)
     );
 }
 
@@ -724,7 +724,7 @@ pub fn power_operator() {
             print(x);
         }
         ",
-        1024.into()
+        Data::int(1024)
     );
 }
 
@@ -737,7 +737,7 @@ pub fn multi_arg_function() {
             print(add(3, 4));
         }
         ",
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -752,7 +752,7 @@ pub fn function_called_after_loop() {
             print(double(sum));
         }
         ",
-        90.into()
+        Data::int(90)
     );
 }
 
@@ -773,7 +773,7 @@ pub fn recursive_fn_inside_for_loop() {
             print(sum);
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -791,7 +791,7 @@ pub fn recursive_fib_after_loop() {
             print(fib(10));
         }
         ",
-        55.into()
+        Data::int(55)
     );
 }
 
@@ -822,7 +822,7 @@ pub fn sieve_of_eratosthenes() {
             print(count);
         }
         ",
-        9592.into()
+        Data::int(9592)
     );
 }
 
@@ -844,7 +844,7 @@ pub fn collatz_steps() {
             print(steps);
         }
         ",
-        111.into()
+        Data::int(111)
     );
 }
 
@@ -858,7 +858,7 @@ pub fn string_word_count() {
             print(words.len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -875,7 +875,7 @@ pub fn range_sum() {
             print(sum);
         }
         ",
-        5050.into()
+        Data::int(5050)
     );
 }
 
@@ -898,7 +898,7 @@ pub fn bubble_sort() {
             print(arr[0]+arr[8]);
         }
         ",
-        10.into()
+        Data::int(10)
     );
 }
 
@@ -934,7 +934,7 @@ pub fn quicksort() {
             print(sorted[0] + sorted[6]);
         }
         "#,
-        85.into()
+        Data::int(85)
     );
 }
 
@@ -954,7 +954,7 @@ pub fn for_loop_called_twice() {
             print(sum([1, 2, 3]));
         }
         ",
-        6.into()
+        Data::int(6)
     );
 }
 
@@ -971,7 +971,7 @@ pub fn two_for_loops_in_sequence() {
             print(sum);
         }
         ",
-        66.into()
+        Data::int(66)
     );
 }
 
@@ -989,7 +989,7 @@ pub fn early_return_from_for_loop() {
             print(first_positive([-3, -1, 5, 8]));
         }
         ",
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -1009,7 +1009,7 @@ pub fn early_return_from_while_loop() {
             print(find(20));
         }
         ",
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -1023,7 +1023,7 @@ pub fn nested_fn_call_as_arg() {
             print(double(inc(double(3))));
         }
         ",
-        14.into()
+        Data::int(14)
     );
 }
 
@@ -1042,7 +1042,7 @@ pub fn multi_loop_fn_called_twice() {
             run([1, 2, 3]);
         }
         ",
-        12.into()
+        Data::int(12)
     );
 }
 
@@ -1063,7 +1063,7 @@ pub fn while_fn_called_twice() {
             print(count_down(5));
         }
         ",
-        15.into()
+        Data::int(15)
     );
 }
 
@@ -1079,7 +1079,7 @@ pub fn function_returns_array() {
             print(arr[0]+arr[1]+arr[2]);
         }
         ",
-        24.into()
+        Data::int(24)
     );
 }
 
@@ -1095,7 +1095,7 @@ pub fn pass_array_to_function() {
             print(last([7, 8, 9]));
         }
         ",
-        9.into()
+        Data::int(9)
     );
 }
 
@@ -1111,7 +1111,7 @@ pub fn string_split_then_iterate() {
             print(count);
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -1138,7 +1138,7 @@ pub fn deeply_nested_conditions() {
             print(classify(50));
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -1155,7 +1155,7 @@ pub fn break_in_while_loop() {
             print(i);
         }
         ",
-        42.into()
+        Data::int(42)
     );
 }
 
@@ -1169,7 +1169,7 @@ pub fn for_loop_discard_var() {
             print(count);
         }
         ",
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -1187,7 +1187,7 @@ pub fn int_range_loop_fn_called_twice() {
             print(sum_to(10));
         }
         ",
-        45.into()
+        Data::int(45)
     );
 }
 
@@ -1201,7 +1201,7 @@ pub fn inc_int_to_basic() {
             print(y);
         }
         ",
-        6.into()
+        Data::int(6)
     );
 }
 
@@ -1215,7 +1215,7 @@ pub fn dec_int_to_basic() {
             print(y);
         }
         ",
-        4.into()
+        Data::int(4)
     );
 }
 
@@ -1229,7 +1229,7 @@ pub fn inc_int_commutative() {
             print(y);
         }
         ",
-        11.into()
+        Data::int(11)
     );
 }
 
@@ -1244,7 +1244,7 @@ pub fn inc_int_to_chained() {
             print(z);
         }
         ",
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -1258,7 +1258,7 @@ pub fn inc_int_as_function_arg() {
             print(identity(x + 1));
         }
         ",
-        8.into()
+        Data::int(8)
     );
 }
 
@@ -1271,7 +1271,7 @@ pub fn dec_int_as_return_value() {
             print(pred(20));
         }
         ",
-        19.into()
+        Data::int(19)
     );
 }
 
@@ -1286,7 +1286,7 @@ pub fn inc_int_in_condition() {
             print(result);
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -1300,7 +1300,7 @@ pub fn inc_int_does_not_mutate_source() {
             print(x);
         }
         ",
-        41.into()
+        Data::int(41)
     );
 }
 
@@ -1314,7 +1314,7 @@ pub fn dec_int_does_not_mutate_source() {
             print(x);
         }
         ",
-        41.into()
+        Data::int(41)
     );
 }
 
@@ -1328,7 +1328,7 @@ pub fn int_wraps_on_overflow() {
             print(x);
         }
         ",
-        (-2147483648_i32).into()
+        Data::int(-2147483648)
     );
 }
 
@@ -1342,7 +1342,7 @@ pub fn int_wraps_on_underflow() {
             print(x);
         }
         ",
-        2147483647_i32.into()
+        Data::int(2147483647)
     );
 }
 
@@ -1355,7 +1355,7 @@ pub fn negative_int_literal() {
             print(x);
         }
         ",
-        (-2147483648_i32).into()
+        Data::int(-2147483648)
     );
 }
 
@@ -1368,7 +1368,7 @@ pub fn string_exactly_6_chars() {
             print(s.len());
         }
         "#,
-        6.into()
+        Data::int(6)
     );
 }
 
@@ -1381,7 +1381,7 @@ pub fn string_exactly_7_chars() {
             print(s.len());
         }
         "#,
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -1396,7 +1396,7 @@ pub fn string_small_to_large_concat() {
             print(c.len());
         }
         "#,
-        8.into()
+        Data::int(8)
     );
 }
 
@@ -1409,7 +1409,7 @@ pub fn string_escape_newline() {
             print(s.len());
         }
         "#,
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -1422,7 +1422,7 @@ pub fn string_escape_tab() {
             print(s.len());
         }
         "#,
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -1435,7 +1435,7 @@ pub fn string_escape_backslash() {
             print(s.len());
         }
         "#,
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -1448,7 +1448,7 @@ pub fn string_escape_quote() {
             print(s.len());
         }
         "#,
-        11.into()
+        Data::int(11)
     );
 }
 
@@ -1462,7 +1462,7 @@ pub fn empty_range_for_loop() {
             print(count);
         }
         ",
-        99.into()
+        Data::int(99)
     );
 }
 
@@ -1476,7 +1476,7 @@ pub fn while_never_executes() {
             print(x);
         }
         ",
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -1495,7 +1495,7 @@ pub fn break_only_breaks_inner_loop() {
             print(outer);
         }
         ",
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -1508,7 +1508,7 @@ pub fn empty_array_len() {
             print(arr.len());
         }
         ",
-        0.into()
+        Data::int(0)
     );
 }
 
@@ -1523,7 +1523,7 @@ pub fn empty_array_iteration() {
             print(count);
         }
         ",
-        0.into()
+        Data::int(0)
     );
 }
 
@@ -1536,7 +1536,7 @@ pub fn single_element_array_len() {
             print(arr.len());
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -1552,7 +1552,7 @@ pub fn array_after_all_removes() {
             print(arr.len());
         }
         ",
-        0.into()
+        Data::int(0)
     );
 }
 
@@ -1599,7 +1599,7 @@ pub fn null_literal_as_default() {
             print(result);
         }
         ",
-        42.into()
+        Data::int(42)
     );
 }
 
@@ -1653,7 +1653,7 @@ pub fn array_push_type_inference_propagation() {
             print(largest_gap(primes));
         }
         ",
-        6.into()
+        Data::int(6)
     );
 }
 
@@ -1680,7 +1680,7 @@ pub fn split_result_survives_string_gc() {
             }}
         "#
         ),
-        11.into()
+        Data::int(11)
     );
 }
 
@@ -1780,7 +1780,7 @@ pub fn expr_eval_mutual_recursion() {
             print(checksum);
         }
         "#,
-        90023650.into()
+        Data::int(90023650)
     );
 }
 
@@ -1805,7 +1805,7 @@ pub fn fn_call_in_if_and_in_nested_for() {
             print(sum);
         }
         "#,
-        14.into()
+        Data::int(14)
     );
 }
 
@@ -1824,7 +1824,7 @@ pub fn branch_without_return() {
             print(choose(1));
         }
         ",
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -1843,7 +1843,7 @@ pub fn unusued_branch_wth_return() {
             print(choose(0));
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -1864,7 +1864,7 @@ pub fn unreachable_return_after_exhaustive_condition() {
             print(choose(1));
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -1926,7 +1926,7 @@ pub fn return_flow_exhaustive_condition_ignores_later_conflicting_return() {
             print(choose(2) + 1);
         }
         "#,
-        31.into()
+        Data::int(31)
     );
 }
 
@@ -2020,7 +2020,7 @@ pub fn match_basic_int() {
             print(result);
         }
         ",
-        20.into()
+        Data::int(20)
     );
 }
 
@@ -2039,7 +2039,7 @@ pub fn match_with_wildcard() {
             print(result);
         }
         "#,
-        99.into()
+        Data::int(99)
     );
 }
 
@@ -2057,7 +2057,7 @@ pub fn match_first_arm() {
             print(result);
         }
         ",
-        100.into()
+        Data::int(100)
     );
 }
 
@@ -2075,7 +2075,7 @@ pub fn match_no_match() {
             print(result);
         }
         ",
-        0.into()
+        Data::int(0)
     );
 }
 
@@ -2095,7 +2095,7 @@ pub fn match_string_arms() {
             print(code);
         }
         "#,
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -2119,7 +2119,7 @@ pub fn match_arm_computation() {
             print(result);
         }
         ",
-        56.into()
+        Data::int(56)
     );
 }
 
@@ -2136,7 +2136,7 @@ pub fn loop_break() {
             print(i);
         }
         ",
-        10.into()
+        Data::int(10)
     );
 }
 
@@ -2156,7 +2156,7 @@ pub fn loop_continue() {
             print(sum);
         }
         ",
-        100.into()
+        Data::int(100)
     );
 }
 
@@ -2180,7 +2180,7 @@ pub fn nested_loop_blocks() {
             print(count);
         }
         ",
-        12.into()
+        Data::int(12)
     );
 }
 
@@ -2204,7 +2204,7 @@ pub fn nested_loop_inner_break() {
             print(outer);
         }
         ",
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -2219,7 +2219,7 @@ pub fn nested_fn() {
             print(add(3, 4));
         }
         ",
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -2238,7 +2238,7 @@ pub fn nested_fn_in_loop() {
             print(sum);
         }
         ",
-        30.into()
+        Data::int(30)
     );
 }
 
@@ -2255,7 +2255,7 @@ pub fn block_scope() {
             print(x);
         }
         ",
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -2270,7 +2270,7 @@ pub fn range_two_arg() {
             print(sum);
         }
         ",
-        35.into()
+        Data::int(35)
     );
 }
 
@@ -2283,7 +2283,7 @@ pub fn range_two_arg_index() {
             print(arr[0]);
         }
         ",
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -2296,7 +2296,7 @@ pub fn string_uppercase() {
             print(s.uppercase().len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -2309,7 +2309,7 @@ pub fn string_lowercase() {
             print(s.lowercase().len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -2370,7 +2370,7 @@ pub fn string_trim_sequence() {
             print(s.trim_sequence("-").len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -2383,7 +2383,7 @@ pub fn string_trim_sequence_left() {
             print(s.trim_sequence_left("-").len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -2396,7 +2396,7 @@ pub fn string_trim_sequence_right() {
             print(s.trim_sequence_right("-").len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -2422,7 +2422,7 @@ pub fn int_abs() {
             print(x.abs());
         }
         ",
-        42.into()
+        Data::int(42)
     );
 }
 
@@ -2436,7 +2436,7 @@ pub fn string_reverse_method() {
             print(r.len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -2449,7 +2449,7 @@ pub fn array_find() {
             print(arr.find(30));
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -2462,7 +2462,7 @@ pub fn array_find_missing() {
             print(arr.find(99));
         }
         ",
-        (-1).into()
+        Data::int(-1)
     );
 }
 
@@ -2490,7 +2490,7 @@ pub fn array_sort_strings() {
             print(arr[0].len());
         }
         "#,
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -2503,7 +2503,7 @@ pub fn nested_array_index() {
             print(arr[1][1]);
         }
         ",
-        4.into()
+        Data::int(4)
     );
 }
 
@@ -2517,7 +2517,7 @@ pub fn nested_array_set() {
             print(arr[0][1]);
         }
         ",
-        99.into()
+        Data::int(99)
     );
 }
 
@@ -2553,7 +2553,7 @@ pub fn the_answer() {
             print(the_answer());
         }
         ",
-        42.into()
+        Data::int(42)
     );
 }
 
@@ -2567,7 +2567,7 @@ pub fn compound_mul_assign() {
             print(x);
         }
         ",
-        15.into()
+        Data::int(15)
     );
 }
 
@@ -2581,7 +2581,7 @@ pub fn compound_div_assign() {
             print(x);
         }
         ",
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -2595,7 +2595,7 @@ pub fn compound_mod_assign() {
             print(x);
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -2609,7 +2609,7 @@ pub fn compound_pow_assign() {
             print(x);
         }
         ",
-        256.into()
+        Data::int(256)
     );
 }
 
@@ -2636,7 +2636,7 @@ pub fn string_set_index() {
             print(s.len());
         }
         "#,
-        6.into()
+        Data::int(6)
     );
 }
 
@@ -2674,7 +2674,7 @@ pub fn array_join_sep() {
             print(s.len());
         }
         "#,
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -2688,7 +2688,7 @@ pub fn array_join_no_sep() {
             print(s.len());
         }
         "#,
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -2790,7 +2790,7 @@ pub fn array_slice() {
             print(y[0]);
         }
         "#,
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -2805,7 +2805,7 @@ pub fn array_slice_negative_index() {
             print(y[0]);
         }
         "#,
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -2852,7 +2852,7 @@ pub fn try_catch_no_error() {
             print(result);
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -2872,7 +2872,7 @@ pub fn try_catch_catches_error() {
             print(result);
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -2893,7 +2893,7 @@ pub fn try_catch_filtered_match() {
             print(result);
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -2914,7 +2914,7 @@ pub fn try_catch_filtered_fallthrough() {
             print(result);
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -2935,7 +2935,7 @@ pub fn throw_is_catchable() {
             print(result);
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -2956,7 +2956,7 @@ pub fn try_catch_division_by_zero() {
             print(result);
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -2989,7 +2989,7 @@ pub fn struct_field_access() {
             print(p.x);
         }
         ",
-        7.into()
+        Data::int(7)
     );
 }
 
@@ -3018,7 +3018,7 @@ pub fn struct_field_modify() {
             print(p.x);
         }
         ",
-        42.into()
+        Data::int(42)
     );
 }
 
@@ -3033,7 +3033,7 @@ pub fn struct_fields_exprs() {
             print(p.x + p.y);
         }
         ",
-        16.into()
+        Data::int(16)
     );
 }
 
@@ -3048,7 +3048,7 @@ pub fn struct_field_assign_shorthand() {
             print(p.x);
         }
         ",
-        15.into()
+        Data::int(15)
     );
 }
 
@@ -3063,7 +3063,7 @@ pub fn struct_nested_field_access() {
             print(o.test.v);
         }
         ",
-        99.into()
+        Data::int(99)
     );
 }
 
@@ -3079,7 +3079,7 @@ pub fn struct_nested_field_modify() {
             print(o.test.v);
         }
         ",
-        50.into()
+        Data::int(50)
     );
 }
 
@@ -3096,7 +3096,7 @@ pub fn struct_passed_to_function() {
             print(get_x(p));
         }
         ",
-        8.into()
+        Data::int(8)
     );
 }
 
@@ -3113,7 +3113,7 @@ pub fn struct_functin_ret() {
             print(p.y);
         }
         ",
-        6.into()
+        Data::int(6)
     );
 }
 
@@ -3127,7 +3127,7 @@ pub fn struct_array_field_access() {
             print(b.items[1]);
         }
         ",
-        20.into()
+        Data::int(20)
     );
 }
 
@@ -3142,7 +3142,7 @@ pub fn struct_array_field_modify() {
             print(b.items[2]);
         }
         ",
-        99.into()
+        Data::int(99)
     );
 }
 
@@ -3156,7 +3156,7 @@ pub fn struct_nested_array_field_access() {
             print(g.cells[1][0]);
         }
         ",
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -3171,7 +3171,7 @@ pub fn struct_nested_array_field_modify() {
             print(g.cells[0][1]);
         }
         ",
-        77.into()
+        Data::int(77)
     );
 }
 
@@ -3185,7 +3185,7 @@ pub fn struct_structs_array_access() {
             print(arr[1].x);
         }
         ",
-        3.into()
+        Data::int(3)
     );
 }
 
@@ -3200,7 +3200,7 @@ pub fn struct_structs_array_modify() {
             print(arr[0].y);
         }
         ",
-        50.into()
+        Data::int(50)
     );
 }
 
@@ -3262,7 +3262,7 @@ pub fn struct_ref() {
             print(a.v);
         }
         ",
-        9.into()
+        Data::int(9)
     );
 }
 
@@ -3280,7 +3280,7 @@ pub fn struct_field_condition() {
             }
         }
         ",
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -3533,7 +3533,7 @@ pub fn loop_function_reg_interference() {
             print(run(Test { v: 42 }));
         }
         "#,
-        1.into()
+        Data::int(1)
     );
 }
 
@@ -3557,7 +3557,7 @@ pub fn map_get_key() {
             print(m.get(0));
         }
         ",
-        42.into()
+        Data::int(42)
     );
 }
 
@@ -3572,7 +3572,7 @@ pub fn map_insert_new_pair() {
             print(m.get(a));
         }
         ",
-        2.into()
+        Data::int(2)
     );
 }
 
@@ -3586,7 +3586,7 @@ pub fn map_overwrite_pair() {
             print(m.get(false).len());
         }
         ",
-        5.into()
+        Data::int(5)
     );
 }
 
@@ -3603,6 +3603,6 @@ pub fn map_loop() {
             }
             print(sum);
         }",
-        500.into()
+        Data::int(500)
     );
 }

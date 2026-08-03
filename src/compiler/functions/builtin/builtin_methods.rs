@@ -35,7 +35,7 @@ pub fn builtin_methods(
     args: &[Expr],
     obj_span: Span,
     fn_span: Span,
-    args_indexes: &[Span],
+    arg_spans: &[Span],
 ) -> Option<u16> {
     macro_rules! add_args {
         () => {
@@ -78,12 +78,12 @@ pub fn builtin_methods(
                 args,
                 $args,
                 name,
-                if args_indexes.is_empty() {
+                if arg_spans.is_empty() {
                     fn_span
                 } else {
                     Span {
-                        start: args_indexes[0].start,
-                        end: args_indexes.last().unwrap().end,
+                        start: arg_spans[0].start,
+                        end: arg_spans.last().unwrap().end,
                     }
                 },
                 state.sources,
@@ -162,16 +162,7 @@ pub fn builtin_methods(
             );
 
             if obj_type == DataType::String {
-                check_arg_type(
-                    name,
-                    v,
-                    ctx,
-                    state,
-                    args,
-                    args_indexes,
-                    0,
-                    &[DataType::String],
-                );
+                check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             }
 
             add_args!();
@@ -188,16 +179,7 @@ pub fn builtin_methods(
         "trim_sequence" => {
             check!(DataType::String, &[DataType::String], name, 1);
 
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimSequence, id, output_id));
@@ -218,21 +200,12 @@ pub fn builtin_methods(
                     ctx,
                     state,
                     args,
-                    args_indexes,
+                    arg_spans,
                     0,
                     std::slice::from_ref(array_elem_type),
                 );
             } else if obj_type == DataType::String {
-                check_arg_type(
-                    name,
-                    v,
-                    ctx,
-                    state,
-                    args,
-                    args_indexes,
-                    0,
-                    &[DataType::String],
-                );
+                check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
             }
 
             add_args!();
@@ -268,16 +241,7 @@ pub fn builtin_methods(
         "trim_sequence_left" => {
             check!(DataType::String, &[DataType::String], name, 1);
 
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
 
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -287,16 +251,7 @@ pub fn builtin_methods(
         "trim_sequence_right" => {
             check!(DataType::String, &[DataType::String], name, 1);
 
-            check_arg_type(
-                name,
-                v,
-                ctx,
-                state,
-                args,
-                args_indexes,
-                0,
-                &[DataType::String],
-            );
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
 
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -315,7 +270,7 @@ pub fn builtin_methods(
                 1
             );
 
-            check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::Int]);
 
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -333,7 +288,7 @@ pub fn builtin_methods(
                     ctx,
                     state,
                     args,
-                    args_indexes,
+                    arg_spans,
                     0,
                     std::slice::from_ref(array_elem_type),
                 );
@@ -401,7 +356,7 @@ pub fn builtin_methods(
         }
         "split" => {
             check!(DataType::String, &[DataType::String], name, 1);
-            check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[obj_type]);
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[obj_type]);
             add_args!();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Split, id, output_id));
@@ -417,7 +372,7 @@ pub fn builtin_methods(
                     ctx,
                     state,
                     args,
-                    args_indexes,
+                    arg_spans,
                     0,
                     std::slice::from_ref(&array_elem_type),
                 );
@@ -450,22 +405,13 @@ pub fn builtin_methods(
                 0,
                 1,
                 "join",
-                args_indexes,
+                arg_spans,
                 ctx.file_idx,
                 state.sources,
                 fn_span,
             );
             if !args.is_empty() {
-                check_arg_type(
-                    name,
-                    v,
-                    ctx,
-                    state,
-                    args,
-                    args_indexes,
-                    0,
-                    &[DataType::String],
-                );
+                check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
                 add_args!();
             }
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -474,7 +420,7 @@ pub fn builtin_methods(
         }
         "remove" => {
             check!(DataType::Array(_), &[DataType::Array(None)], name, 1);
-            check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[DataType::Int]);
+            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::Int]);
             let arg_id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
@@ -499,14 +445,14 @@ pub fn builtin_methods(
             if let DataType::Map(t) = obj_type
                 && let Some(key_type) = t.0
             {
-                check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[key_type]);
+                check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[key_type]);
             }
             let arg_id = args[0]
                 .compile(v, ctx, state, output, None, false, true)
                 .unwrap_id();
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::MapGet(id, arg_id, output_id));
-            state.add_to_src(ctx, output, args_indexes[0]);
+            state.add_to_src(ctx, output, arg_spans[0]);
             Some(output_id)
         }
         "insert" => {
@@ -518,10 +464,10 @@ pub fn builtin_methods(
             );
             if let DataType::Map(m) = obj_type {
                 if let Some(t) = m.0 {
-                    check_arg_type(name, v, ctx, state, args, args_indexes, 0, &[t]);
+                    check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[t]);
                 }
                 if let Some(t) = m.1 {
-                    check_arg_type(name, v, ctx, state, args, args_indexes, 1, &[t]);
+                    check_arg_type(name, v, ctx, state, args, arg_spans, 1, &[t]);
                 }
             }
             let key_id = args[0]
@@ -545,7 +491,7 @@ pub fn builtin_methods(
             let fn_id = if let DataType::Fn(id) = fn_type {
                 id as usize
             } else {
-                error_expected_function(&fn_type, args_indexes[0], ctx.file_idx, state.sources);
+                error_expected_function(&fn_type, arg_spans[0], ctx.file_idx, state.sources);
             };
 
             let is_str = obj_type == DataType::String;
@@ -587,7 +533,7 @@ pub fn builtin_methods(
                 error_function_arg_invalid_type(
                     &fn_type,
                     &expected_type,
-                    args_indexes[0],
+                    arg_spans[0],
                     name,
                     None,
                     ctx.file_idx,
@@ -624,7 +570,7 @@ pub fn builtin_methods(
             output.push(Instr::CallLibFunc(LibFunc::Len, id, len_id));
 
             let index_id = if ctx.single_run {
-                state.registers.push(0.into());
+                state.registers.push(Data::int(0));
                 (state.registers.len() - 1) as u16
             } else {
                 let r = state.alloc_reg();
@@ -677,7 +623,7 @@ pub fn builtin_methods(
             let fn_id = if let DataType::Fn(id) = fn_type {
                 id as usize
             } else {
-                error_expected_function(&fn_type, args_indexes[0], ctx.file_idx, state.sources);
+                error_expected_function(&fn_type, arg_spans[0], ctx.file_idx, state.sources);
             };
 
             let is_str = obj_type == DataType::String;
@@ -701,7 +647,7 @@ pub fn builtin_methods(
                 error_function_arg_invalid_type(
                     &fn_type,
                     &expected_type,
-                    args_indexes[0],
+                    arg_spans[0],
                     name,
                     None,
                     ctx.file_idx,
@@ -738,7 +684,7 @@ pub fn builtin_methods(
             output.push(Instr::CallLibFunc(LibFunc::Len, id, len_id));
 
             let index_id = if ctx.single_run {
-                state.registers.push(0.into());
+                state.registers.push(Data::int(0));
                 (state.registers.len() - 1) as u16
             } else {
                 let r = state.alloc_reg();

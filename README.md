@@ -55,6 +55,8 @@ fn main() {
 
 ## Installation
 
+You can install Keel manually by downloading the desired version from the [releases page](https://github.com/horacehoff/keel/releases/latest), or use one of the following installation commands.
+
 ### macOS / Linux
 
 ```sh
@@ -63,7 +65,11 @@ curl -fsSL https://raw.githubusercontent.com/horacehoff/keel/main/install.sh | s
 
 ### Windows
 
-Download the latest `.zip` from the [releases page](https://github.com/horacehoff/keel/releases/latest) and add the binary to your PATH.
+Run the following command in a PowerShell terminal. Administrator privileges are not required to run this command or the installation script.
+
+```powershell
+irm https://raw.githubusercontent.com/horacehoff/keel/main/install.ps1 | iex
+```
 
 ### Build from source (without PGO)
 

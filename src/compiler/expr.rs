@@ -43,6 +43,37 @@ pub struct FunctionCallExpr {
     pub arg_spans: Box<[Span]>,
 }
 
+#[derive(PartialEq, Clone, Debug)]
+pub struct IntForLoopExpr {
+    pub var_name: SmolStr,
+    /// Invariant:
+    /// - code.len() >= 2
+    /// - code[0] is the lower bound
+    /// - code[1] is the lower bound
+    pub code: Box<[Expr]>,
+    pub lower_bound_span: Span,
+    pub upper_bound_span: Span,
+}
+
+impl IntForLoopExpr {
+    #[inline(always)]
+    pub fn get_lower_bound(&self) -> &Expr {
+        unsafe { self.code.get_unchecked(0) }
+    }
+    #[inline(always)]
+    pub fn get_upper_bound(&self) -> &Expr {
+        unsafe { self.code.get_unchecked(1) }
+    }
+    #[inline(always)]
+    pub fn get_loop_code(&self) -> &[Expr] {
+        if self.code.len() > 2 {
+            unsafe { self.code.get_unchecked(2..) }
+        } else {
+            &[]
+        }
+    }
+}
+
 /// A fully-qualified symbol name.
 /// Invariant:
 /// - len > 0
@@ -105,18 +136,7 @@ pub enum Expr {
     AnonymousFunction(Box<[(SmolStr, Option<TypeExpr>)]>, Box<[Self]>, Span),
     WhileBlock(Box<Self>, Box<[Self]>),
     FunctionCall(FunctionCallExpr),
-    /// ObjFunctionCall(obj, args, namespace, obj_span, fn_span, arg_markers)
-    ObjFunctionCall(
-        // WILL BE REMOVED SOON
-        Box<Self>,
-        Box<[Self]>,
-        Box<[SmolStr]>,
-        // obj_span
-        Span,
-        // fn_span
-        Span,
-        Box<[Span]>,
-    ),
+    ObjFunctionCall(FunctionCallExpr),
     /// FunctionDecl(name, args, code, span)
     FunctionDecl(
         SmolStr,
@@ -134,8 +154,7 @@ pub enum Expr {
 
     /// ForLoop(loop_var_name, loop_array+code, obj_markers)
     ForLoop(SmolStr, Box<Self>, Box<[Self]>, Span),
-    /// IntForLoop(loop_var_name, first_elem, final_elem, code)
-    IntForLoop(SmolStr, Box<Self>, Box<Self>, Box<[Self]>, Span, Span),
+    IntForLoop(IntForLoopExpr),
     ImportDylib(DylibImportExpr),
 
     /// ImportFile(path,alias ,(start, end))
@@ -200,8 +219,8 @@ pub fn code_modifies_variable(var_name: &SmolStr, code: &[Expr]) -> bool {
         | Expr::InlineCondition(_, code, _)
         | Expr::ElseIfBlock(_, code)
         | Expr::ElseBlock(code)
-        | Expr::ForLoop(_, _, code, _)
-        | Expr::IntForLoop(_, _, _, code, _, _) => code_modifies_variable(var_name, code),
+        | Expr::ForLoop(_, _, code, _) => code_modifies_variable(var_name, code),
+        Expr::IntForLoop(for_loop) => code_modifies_variable(var_name, for_loop.get_loop_code()),
         _ => false,
     })
 }

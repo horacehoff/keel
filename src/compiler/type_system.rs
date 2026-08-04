@@ -369,7 +369,10 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 ..
             }) => {
                 calls.push(qualified_name.get_name().clone());
-                expr_stack.extend(args.iter());
+                expr_stack.extend(args);
+            }
+            Expr::ObjFunctionCall(FunctionCallExpr { args, .. }) => {
+                expr_stack.extend(args);
             }
             Expr::IfBlock(IfBlockExpr {
                 condition: x,
@@ -378,13 +381,12 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
             })
             | Expr::InlineCondition(x, y, _)
             | Expr::ElseIfBlock(x, y)
-            | Expr::WhileBlock(x, y)
-            | Expr::ObjFunctionCall(x, y, _, _, _, _) => {
+            | Expr::WhileBlock(x, y) => {
                 expr_stack.push(x);
-                expr_stack.extend(y.iter());
+                expr_stack.extend(y);
             }
             Expr::ElseBlock(x) | Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
-                expr_stack.extend(x.iter());
+                expr_stack.extend(x);
             }
             Expr::ReturnVal(code) => {
                 if let Some(code) = code.as_ref() {
@@ -401,18 +403,18 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
             | Expr::VarAssign(_, x, _)
             | Expr::Neg(x, _, _)
             | Expr::BoolNeg(x, _, _) => expr_stack.push(x),
-            Expr::ForLoop(_, _, code, _) => expr_stack.extend(code.iter()),
-            Expr::IntForLoop(_, start, end, code, _, _) => {
-                expr_stack.push(start);
-                expr_stack.push(end);
-                expr_stack.extend(code.iter());
+            Expr::ForLoop(_, _, code, _) => expr_stack.extend(code),
+            Expr::IntForLoop(int_for_loop) => {
+                expr_stack.push(int_for_loop.get_lower_bound());
+                expr_stack.push(int_for_loop.get_upper_bound());
+                expr_stack.extend(int_for_loop.get_loop_code());
             }
             Expr::ArrayModify(array, index, value, _, _) => {
                 expr_stack.push(array);
                 expr_stack.push(index);
                 expr_stack.push(value);
             }
-            Expr::Array(elems, _) => expr_stack.extend(elems.iter()),
+            Expr::Array(elems, _) => expr_stack.extend(elems),
             Expr::Struct(_, fields, _) => {
                 expr_stack.extend(fields.iter().map(|field| &field.value));
             }
@@ -422,8 +424,8 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 expr_stack.push(value);
             }
             Expr::TryCatchBlock(try_code, _, catch_code) => {
-                expr_stack.extend(try_code.iter());
-                expr_stack.extend(catch_code.iter());
+                expr_stack.extend(try_code);
+                expr_stack.extend(catch_code);
             }
             Expr::ArrayGetIndex(x, y, _)
             | Expr::Mul(x, y, _, _)
@@ -478,9 +480,13 @@ pub fn check_if_returns_void(content: &[Expr]) -> bool {
             | Expr::WhileBlock(_, code)
             | Expr::ForLoop(_, _, code, _)
             | Expr::EvalBlock(code)
-            | Expr::LoopBlock(code)
-            | Expr::IntForLoop(_, _, _, code, _, _) => {
+            | Expr::LoopBlock(code) => {
                 if !check_if_returns_void(code) {
+                    return false;
+                }
+            }
+            Expr::IntForLoop(int_for_loop) => {
+                if !check_if_returns_void(int_for_loop.get_loop_code()) {
                     return false;
                 }
             }
@@ -728,14 +734,14 @@ fn track_return_flow(
                 let flow = track_scoped_returns(code, v, ctx, state, fn_name);
                 extend_return_types!(&mut return_types, flow.types);
             }
-            Expr::IntForLoop(var_name, _, _, code, _, _) => {
+            Expr::IntForLoop(int_for_loop) => {
                 let v_len = v.len();
                 v.push(Variable {
-                    name: var_name.clone(),
+                    name: int_for_loop.var_name.clone(),
                     register_id: 0,
                     var_type: DataType::Int,
                 });
-                let flow = track_return_flow(code, v, ctx, state, fn_name);
+                let flow = track_return_flow(int_for_loop.get_loop_code(), v, ctx, state, fn_name);
                 extend_return_types!(&mut return_types, flow.types);
                 v.truncate(v_len);
             }
@@ -759,15 +765,15 @@ fn track_return_flow(
                 extend_return_types!(&mut return_types, flow.types);
                 v.truncate(v_len);
             }
-            Expr::ObjFunctionCall(obj, args, namespace, _, _, _)
-                if namespace.last().unwrap().as_str() == "push" =>
+            Expr::ObjFunctionCall(function_call)
+                if function_call.qualified_name.get_name() == "push" =>
             {
-                if let Expr::Var(var_name, _) = obj.as_ref()
+                if let Expr::Var(var_name, _) = &function_call.args[0]
                     && v.iter()
                         .rfind(|var| &var.name == var_name)
                         .is_some_and(|var| var.var_type == DataType::Array(None))
                 {
-                    let arg_type = args[0].infer_type(v, ctx, state);
+                    let arg_type = function_call.args[1].infer_type(v, ctx, state);
                     if let Some(var) = v.iter_mut().rfind(|var| &var.name == var_name) {
                         var.var_type = DataType::Array(Some(Box::new(arg_type)));
                     }
@@ -1080,8 +1086,9 @@ impl Expr {
                     )
                 }
             },
-            Self::ObjFunctionCall(obj, args, namespace, _, _, args_indexes) => {
-                match namespace.last().unwrap().as_str() {
+            Self::ObjFunctionCall(function_call) => {
+                let obj = &function_call.args[0];
+                match function_call.qualified_name.get_name().as_str() {
                     "uppercase"
                     | "lowercase"
                     | "replace"
@@ -1137,11 +1144,11 @@ impl Expr {
                     }
                     "map" => {
                         let obj_type = obj.infer_type(v, ctx, state);
-                        let fn_type = args[0].infer_type(v, ctx, state);
+                        let fn_type = function_call.args[1].infer_type(v, ctx, state);
                         let DataType::Fn(fn_id) = fn_type else {
                             error_expected_function(
                                 &fn_type,
-                                args_indexes[0],
+                                function_call.arg_spans[0],
                                 ctx.file_idx,
                                 state.sources,
                             );
@@ -1169,11 +1176,11 @@ impl Expr {
                         }
                     }
                     "filter" => {
-                        let fn_type = args[0].infer_type(v, ctx, state);
+                        let fn_type = function_call.args[1].infer_type(v, ctx, state);
                         if !matches!(fn_type, DataType::Fn(_)) {
                             error_expected_function(
                                 &fn_type,
-                                args_indexes[0],
+                                function_call.arg_spans[0],
                                 ctx.file_idx,
                                 state.sources,
                             );

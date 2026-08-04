@@ -7,6 +7,7 @@ use crate::cold_path;
 use crate::compiler::expr::Expr;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::IfBlockExpr;
+use crate::compiler::expr::IntForLoopExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
 use crate::parser::Parser;
@@ -105,36 +106,50 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
     if peek_token == Token::RangeDot {
         // shorthand IntForLoop
         parser.next_token();
+
+        let mut code: Vec<Expr> = Vec::with_capacity(4);
+        code.push(Expr::Int(0));
+
         let start2 = parser.peek_token_span().start;
+
         let upper_bound = parse_expr_no_struct(parser);
+        code.push(upper_bound);
+
         let end2 = parser.last_token_end as u32;
+
         let for_loop_code = parse_block(parser);
-        Expr::IntForLoop(
-            id,
-            Box::new(Expr::Int(0)),
-            Box::new(upper_bound),
-            Box::from(for_loop_code),
-            (start, start).into(),
-            (start2, end2).into(),
-        )
+        code.extend(for_loop_code);
+
+        Expr::IntForLoop(IntForLoopExpr {
+            var_name: id,
+            code: code.into_boxed_slice(),
+            lower_bound_span: (start, start).into(),
+            upper_bound_span: (start2, end2).into(),
+        })
     } else {
         let for_collection = parse_expr_no_struct(parser);
         let end = parser.last_token_end as u32;
         let peek_token = parser.peek_token();
         if peek_token == Token::RangeDot {
             parser.next_token();
+
+            let mut code: Vec<Expr> = Vec::with_capacity(4);
+            code.push(for_collection); // lower bound
+
             let start2 = parser.peek_token_span().start;
             let upper_bound = parse_expr_no_struct(parser);
+            code.push(upper_bound);
+
             let end2 = parser.last_token_end as u32;
             let for_loop_code = parse_block(parser);
-            Expr::IntForLoop(
-                id,
-                Box::new(for_collection),
-                Box::new(upper_bound),
-                Box::from(for_loop_code),
-                (start, start).into(),
-                (start2, end2).into(),
-            )
+            code.extend(for_loop_code);
+
+            Expr::IntForLoop(IntForLoopExpr {
+                var_name: id,
+                code: code.into_boxed_slice(),
+                lower_bound_span: (start, end).into(),
+                upper_bound_span: (start2, end2).into(),
+            })
         } else {
             let for_loop_code = parse_block(parser);
             Expr::ForLoop(

@@ -3,6 +3,8 @@ use super::lexer::Token;
 use super::term::parse_term;
 use crate::cold_path;
 use crate::compiler::expr::Expr;
+use crate::compiler::expr::FunctionCallExpr;
+use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
 use crate::parser::Parser;
 use crate::parser::parse_args;
@@ -209,15 +211,24 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                 if peek_token == Some(Token::LParen) {
                     // ObjFunctionCall
                     parser.next_token();
-                    let (args, arg_markers, end) = parse_args(parser);
-                    let obj_function_call = Expr::ObjFunctionCall(
-                        Box::new(base),
-                        args,
-                        Box::new([SmolStr::new(id)]),
-                        base_span,
-                        (id_span.start, end).into(),
-                        arg_markers,
-                    );
+
+                    let mut args: Vec<Expr> = Vec::with_capacity(2);
+                    args.push(base);
+
+                    let mut arg_spans: Vec<Span> = Vec::with_capacity(2);
+                    arg_spans.push(base_span);
+
+                    let (fn_args, fn_arg_spans, end) = parse_args(parser);
+
+                    args.extend(fn_args);
+                    arg_spans.extend(fn_arg_spans);
+
+                    let obj_function_call = Expr::ObjFunctionCall(FunctionCallExpr {
+                        qualified_name: QualifiedName::new([SmolStr::new(id)]),
+                        args: args.into_boxed_slice(),
+                        span: (id_span.start, end).into(),
+                        arg_spans: arg_spans.into_boxed_slice(),
+                    });
                     base_span.end = end;
                     base = obj_function_call;
                 } else if peek_token == Some(Token::DoubleColon) {
@@ -251,15 +262,23 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                             );
                         }
                     }
-                    let (args, arg_markers, end) = parse_args(parser);
-                    let obj_function_call = Expr::ObjFunctionCall(
-                        Box::new(base),
-                        args,
-                        Box::from(namespace),
-                        base_span,
-                        (id_span.start, end).into(),
-                        arg_markers,
-                    );
+                    let mut args: Vec<Expr> = Vec::with_capacity(2);
+                    args.push(base);
+
+                    let mut arg_spans: Vec<Span> = Vec::with_capacity(2);
+                    arg_spans.push(base_span);
+
+                    let (fn_args, fn_arg_spans, end) = parse_args(parser);
+
+                    args.extend(fn_args);
+                    arg_spans.extend(fn_arg_spans);
+
+                    let obj_function_call = Expr::ObjFunctionCall(FunctionCallExpr {
+                        qualified_name: QualifiedName::new(namespace),
+                        args: args.into_boxed_slice(),
+                        span: (id_span.start, end).into(),
+                        arg_spans: arg_spans.into_boxed_slice(),
+                    });
                     base_span.end = end;
                     base = obj_function_call;
                 } else {

@@ -1,53 +1,33 @@
-use super::expr::{Expr, Span};
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_data::{Ctx, State};
+use crate::compiler::expr::FunctionCallExpr;
 use crate::instr::Instr;
 use builtin_methods::builtin_methods;
-use smol_strc::SmolStr;
 
 #[path = "builtin/builtin_methods.rs"]
 mod builtin_methods;
 
-pub fn handle_method_calls(
+pub fn compile_method_call(
     output: &mut Vec<Instr>,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
-    obj: &Expr,
-    args: &[Expr],
-    namespace: &[SmolStr],
-    obj_span: Span,
-    fn_span: Span,
-    args_indexes: &[Span],
+    function_call: &FunctionCallExpr,
 ) -> Option<u16> {
-    let name = namespace[namespace.len() - 1].as_str();
-
-    let obj_type = obj.infer_type(v, ctx, state);
-    let id = obj
+    let obj_type = function_call.args[0].infer_type(v, ctx, state);
+    let id = function_call.args[0]
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
 
-    if name != "map" && name != "filter" {
+    if function_call.qualified_name.get_name() != "map"
+        && function_call.qualified_name.get_name() != "filter"
+    {
         state.free_reg(id, v);
     }
 
-    let output_id = builtin_methods(
-        name,
-        id,
-        obj_type,
-        output,
-        v,
-        ctx,
-        state,
-        tgt_id,
-        obj,
-        args,
-        obj_span,
-        fn_span,
-        args_indexes,
-    );
+    let output_id = builtin_methods(id, obj_type, output, v, ctx, state, tgt_id, function_call);
 
     state.free_reg(id, v);
 

@@ -457,7 +457,7 @@ DEALINGS IN THE SOFTWARE.
 --------
 MIT License
 Used by:
-- aho-corasick 1.1.4 - https://github.com/BurntSushi/aho-corasick
+- aho-corasick 1.1.5 - https://github.com/BurntSushi/aho-corasick
 - memchr 2.8.3 - https://github.com/BurntSushi/memchr
 
 The MIT License (MIT)

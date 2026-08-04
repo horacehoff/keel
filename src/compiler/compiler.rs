@@ -20,6 +20,7 @@ use crate::compiler::expr::DylibFnExpr;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::expr::DylibImportExpr;
 use crate::compiler::expr::IfBlockExpr;
+use crate::compiler::expr::IntForLoopExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::StructFieldExpr;
 use crate::compiler::functions::user_functions::compile_function;
@@ -45,7 +46,7 @@ use expr::Expr;
 use expr::Span;
 use expr::code_modifies_variable;
 use functions::compile_function_call;
-use methods::handle_method_calls;
+use methods::compile_method_call;
 use registers::move_reg_to_reg;
 use registers::move_to_id;
 use rustc_hash::FxHashMap;
@@ -1764,17 +1765,18 @@ fn compile_for_loop(
 }
 
 fn compile_int_for_loop(
-    var_name: &SmolStr,
-    start_elem: &Expr,
-    end_elem: &Expr,
-    code: &[Expr],
-    span1: Span,
-    span2: Span,
+    int_for_loop: &IntForLoopExpr,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
+    let start_elem = int_for_loop.get_lower_bound();
+    let end_elem = int_for_loop.get_upper_bound();
+    let span1 = int_for_loop.lower_bound_span;
+    let span2 = int_for_loop.upper_bound_span;
+    let var_name = &int_for_loop.var_name;
+    let code = int_for_loop.get_loop_code();
     // IntForLoop is compiled to:
     // ----
     // (1) if i >= end_elem jump out
@@ -2710,11 +2712,9 @@ impl Expr {
                 compile_for_loop(var_name, array, code, *span, v, ctx, state, output);
                 None
             }
-            Self::IntForLoop(var_name, start_elem, end_elem, code, span1, span2) => {
+            Self::IntForLoop(int_for_loop) => {
                 debug_assert!(!uses_id);
-                compile_int_for_loop(
-                    var_name, start_elem, end_elem, code, *span1, *span2, v, ctx, state, output,
-                );
+                compile_int_for_loop(int_for_loop, v, ctx, state, output);
                 None
             }
             Self::LoopBlock(code) => {
@@ -2749,45 +2749,16 @@ impl Expr {
                 }
                 None
             }
-            Self::ObjFunctionCall(obj, args, namespace, obj_span, fn_span, args_indexes)
-                if !uses_id =>
-            {
-                let output_id = handle_method_calls(
-                    output,
-                    v,
-                    ctx,
-                    state,
-                    tgt_id,
-                    obj,
-                    args,
-                    namespace,
-                    *obj_span,
-                    *fn_span,
-                    args_indexes,
-                );
+            Self::ObjFunctionCall(function_call) if !uses_id => {
+                let output_id = compile_method_call(output, v, ctx, state, tgt_id, function_call);
                 if let Some(id) = output_id {
                     state.free_reg(id, v);
                 }
                 None
             }
-            Self::ObjFunctionCall(obj, args, namespace, obj_span, fn_span, args_indexes)
-                if uses_id =>
-            {
-                Some(
-                    handle_method_calls(
-                        output,
-                        v,
-                        ctx,
-                        state,
-                        tgt_id,
-                        obj,
-                        args,
-                        namespace,
-                        *obj_span,
-                        *fn_span,
-                        args_indexes,
-                    )
-                    .unwrap_or_else(|| {
+            Self::ObjFunctionCall(function_call) if uses_id => Some(
+                compile_method_call(output, v, ctx, state, tgt_id, function_call).unwrap_or_else(
+                    || {
                         if let Some(&id) = state.const_registers.get(&NULL) {
                             id
                         } else {
@@ -2796,9 +2767,9 @@ impl Expr {
                             state.registers.push(NULL);
                             id
                         }
-                    }),
-                )
-            }
+                    },
+                ),
+            ),
             Self::FunctionDecl(fn_name, fn_args, fn_code, span) => {
                 debug_assert!(!uses_id);
                 compile_function_definition(fn_name, fn_args, fn_code, *span, ctx, state);

@@ -1,6 +1,5 @@
 use crate::compiler::compile;
 use crate::errors::BOLD;
-use crate::errors::ErrorCtx;
 use crate::errors::RED;
 use crate::errors::RESET;
 use crate::repl::repl;
@@ -53,21 +52,20 @@ pub fn run(code: String) {
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let (
         instructions,
-        registers,
-        mut arrays,
-        instr_src,
+        mut registers,
+        mut pools,
+        err_ctx,
         fn_registers,
         fn_dyn_libs,
         allocated_arg_count,
         allocated_call_depth,
-        sources,
         struct_fields,
     ) = compile(code, "playground.kl", false);
     vm::execute(
         &instructions,
-        &mut RegisterFile(registers),
-        &mut arrays,
-        &ErrorCtx { instr_src, sources },
+        &mut registers,
+        &mut pools,
+        &err_ctx,
         &fn_registers,
         &fn_dyn_libs,
         &struct_fields,
@@ -81,28 +79,25 @@ pub fn run(code: String) {
 #[allow(clippy::missing_safety_doc)] // WIP
 pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
     std::panic::set_hook(Box::new(|_| {}));
-    let code = unsafe { CStr::from_ptr(code) }
-        .to_string_lossy()
-        .to_string();
+    let code = unsafe { CStr::from_ptr(code) }.to_string_lossy().to_string();
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let _ = catch_unwind(|| {
         let (
             instructions,
-            registers,
-            mut arrays,
-            instr_src,
+            mut registers,
+            mut pools,
+            err_ctx,
             fn_registers,
             fn_dyn_libs,
             allocated_arg_count,
             allocated_call_depth,
-            sources,
             struct_fields,
         ) = compile(code, "embedded.kl", false);
         vm::execute(
             &instructions,
-            &mut RegisterFile(registers),
-            &mut arrays,
-            &ErrorCtx { instr_src, sources },
+            &mut registers,
+            &mut pools,
+            &err_ctx,
             &fn_registers,
             &fn_dyn_libs,
             &struct_fields,
@@ -178,33 +173,29 @@ pub fn main() {
             let now = std::time::Instant::now();
             let (
                 instructions,
-                registers,
-                mut arrays,
-                instr_src,
+                mut registers,
+                mut pools,
+                err_ctx,
                 fn_registers,
                 fn_dyn_libs,
                 allocated_arg_count,
                 allocated_call_depth,
-                sources,
                 struct_fields,
             ) = compile(contents, filename, true);
             println!("COMPILATION TIME: {:.2?}", now.elapsed());
             let now = std::time::Instant::now();
             vm::execute(
                 &instructions,
-                &mut RegisterFile(registers),
-                &mut arrays,
-                &ErrorCtx { instr_src, sources },
+                &mut registers,
+                &mut pools,
+                &err_ctx,
                 &fn_registers,
                 &fn_dyn_libs,
                 &struct_fields,
                 allocated_arg_count,
                 allocated_call_depth,
             );
-            println!(
-                "EXECUTION TIME: {:.3}ms",
-                now.elapsed().as_nanos() / 1_000_000
-            );
+            println!("EXECUTION TIME: {:.3}ms", now.elapsed().as_nanos() / 1_000_000);
             return;
         } else if next == Some(String::from("--debug-parser")) {
             compile(contents, filename, false);
@@ -214,21 +205,20 @@ pub fn main() {
 
     let (
         instructions,
-        registers,
+        mut registers,
         mut arrays,
-        instr_src,
+        err_ctx,
         fn_registers,
         fn_dyn_libs,
         allocated_arg_count,
         allocated_call_depth,
-        sources,
         struct_fields,
     ) = compile(contents, filename, false);
     vm::execute(
         &instructions,
-        &mut RegisterFile(registers),
+        &mut registers,
         &mut arrays,
-        &ErrorCtx { instr_src, sources },
+        &err_ctx,
         &fn_registers,
         &fn_dyn_libs,
         &struct_fields,

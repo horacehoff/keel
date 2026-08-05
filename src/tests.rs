@@ -1,6 +1,4 @@
-use crate::RegisterFile;
 use crate::compile;
-use crate::compiler::compiler_data::Source;
 use crate::data::Data;
 use crate::instr::Instr;
 
@@ -9,28 +7,20 @@ macro_rules! run_and_check_registers {
         let filename = "test.kl";
         let (
             instructions,
-            registers,
-            mut arrays,
-            instr_src,
+            mut registers,
+            mut pools,
+            err_ctx,
             fn_registers,
             _,
             allocated_arg_count,
             allocated_call_depth,
             _,
-            _,
         ) = compile(String::from($contents), filename, true);
-        let mut reg = RegisterFile(registers);
         crate::vm::execute(
             &instructions,
-            &mut reg,
-            &mut arrays,
-            &crate::errors::ErrorCtx {
-                instr_src,
-                sources: vec![Source {
-                    filename: filename.into(),
-                    contents: String::from($contents),
-                }],
-            },
+            &mut registers,
+            &mut pools,
+            &err_ctx,
             &fn_registers,
             &[],
             &[],
@@ -38,11 +28,7 @@ macro_rules! run_and_check_registers {
             allocated_call_depth,
         );
         assert!(instructions.iter().any(|x| {
-            if let Instr::Print(tgt) = x {
-                reg[(*tgt) as usize] == $expected
-            } else {
-                false
-            }
+            if let Instr::Print(tgt) = x { registers[(*tgt) as usize] == $expected } else { false }
         }));
     };
 }
@@ -52,27 +38,20 @@ macro_rules! run {
         let filename = "test.kl";
         let (
             instructions,
-            registers,
-            mut arrays,
-            instr_src,
+            mut registers,
+            mut pools,
+            err_ctx,
             fn_registers,
             _,
             allocated_arg_count,
             allocated_call_depth,
             _,
-            _,
         ) = compile(String::from($contents), filename, true);
         crate::vm::execute(
             &instructions,
-            &mut RegisterFile(registers),
-            &mut arrays,
-            &crate::errors::ErrorCtx {
-                instr_src,
-                sources: vec![Source {
-                    filename: filename.into(),
-                    contents: String::from($contents),
-                }],
-            },
+            &mut registers,
+            &mut pools,
+            &err_ctx,
             &fn_registers,
             &[],
             &[],

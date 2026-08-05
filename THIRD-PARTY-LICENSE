@@ -59,7 +59,7 @@ DEALINGS IN THE SOFTWARE.
 --------
 MIT License
 Used by:
-- regex-automata 0.4.16 - https://github.com/rust-lang/regex
+- regex-automata 0.4.18 - https://github.com/rust-lang/regex
 - regex-syntax 0.8.11 - https://github.com/rust-lang/regex
 
 Copyright (c) 2014 The Rust Project Developers

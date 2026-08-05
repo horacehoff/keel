@@ -66,15 +66,11 @@ impl IntForLoopExpr {
     }
     #[inline(always)]
     pub fn get_loop_code(&self) -> &[Expr] {
-        if self.code.len() > 2 {
-            unsafe { self.code.get_unchecked(2..) }
-        } else {
-            &[]
-        }
+        if self.code.len() > 2 { unsafe { self.code.get_unchecked(2..) } } else { &[] }
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FunctionDeclarationArgumentExpr {
     pub name: SmolStr,
     pub enforced_type: Option<TypeExpr>,
@@ -135,7 +131,7 @@ pub enum Expr {
     String(SmolStr),
     Var(SmolStr, Span),
 
-    ConstDeclare(SmolStr, Box<Expr>),
+    ConstDeclare(SmolStr, Box<Self>),
 
     /// Array(contents, [entire_array, elem_spans...])
     Array(Box<[Self]>, Box<[Span]>),
@@ -275,30 +271,21 @@ impl Span {
     #[inline(always)]
     #[must_use]
     pub const fn extend(self, span: Self) -> Self {
-        Self {
-            start: self.start,
-            end: span.end,
-        }
+        Self { start: self.start, end: span.end }
     }
 }
 
 impl From<std::range::Range<usize>> for Span {
     #[inline(always)]
     fn from(value: std::range::Range<usize>) -> Self {
-        Self {
-            start: value.start as u32,
-            end: value.end as u32,
-        }
+        Self { start: value.start as u32, end: value.end as u32 }
     }
 }
 
 impl From<std::ops::Range<usize>> for Span {
     #[inline(always)]
     fn from(value: std::ops::Range<usize>) -> Self {
-        Self {
-            start: value.start as u32,
-            end: value.end as u32,
-        }
+        Self { start: value.start as u32, end: value.end as u32 }
     }
 }
 
@@ -312,10 +299,7 @@ impl From<Span> for std::ops::Range<usize> {
 impl From<(usize, usize)> for Span {
     #[inline(always)]
     fn from((start, end): (usize, usize)) -> Self {
-        Self {
-            start: start as u32,
-            end: end as u32,
-        }
+        Self { start: start as u32, end: end as u32 }
     }
 }
 

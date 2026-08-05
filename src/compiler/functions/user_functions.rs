@@ -41,7 +41,6 @@ pub fn is_function_recursive(fn_id: usize, state: &mut State<'_>) -> bool {
 /// matching `inferred_arg_types`. If it doesn't exist yet, it's compiled via `compile_function`.
 pub fn compile_function_impl(
     output: &mut Vec<Instr>,
-    v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     fn_id: usize,
@@ -57,16 +56,11 @@ pub fn compile_function_impl(
     }
     // If it hasn't, compile a new specialization of this function
     let is_recursive = is_function_recursive(fn_id, state);
-    let fn_args = state.fns[fn_id]
-        .args
-        .iter()
-        .map(|(a, _)| a.clone())
-        .collect::<Vec<SmolStr>>();
+    let fn_args = state.fns[fn_id].args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>();
     let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[fn_id].code);
     let fn_name = &state.fns[fn_id].name.clone();
     compile_function(
         output,
-        v,
         ctx,
         state,
         fn_id,
@@ -85,7 +79,6 @@ pub fn handle_user_function(
     function_call: &FunctionCallExpr,
     function_idx: usize,
     output: &mut Vec<Instr>,
-    v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
@@ -106,10 +99,7 @@ pub fn handle_user_function(
         fn_name,
         ctx.file_idx,
         span,
-        (
-            state.fns[function_idx].name_span,
-            state.fns[function_idx].src_file,
-        ),
+        (state.fns[function_idx].name_span, state.fns[function_idx].src_file),
         state,
         args_indexes,
     );
@@ -119,9 +109,7 @@ pub fn handle_user_function(
     if state.fns[function_idx].code.len() == 1
         && let Expr::ReturnVal(ret) = &state.fns[function_idx].code[0]
         && let Some(Expr::FunctionCall(FunctionCallExpr {
-            qualified_name,
-            args: call_args,
-            ..
+            qualified_name, args: call_args, ..
         })) = &**ret
         && !qualified_name.is_namespace_empty()
         && call_args.len() == args_len
@@ -133,27 +121,20 @@ pub fn handle_user_function(
             .dyn_libs
             .iter()
             .find(|lib| &lib.name == qualified_name.get_namespace().last().unwrap())
-            .and_then(|lib| {
-                lib.fns
-                    .iter()
-                    .find(|f| &f.name == qualified_name.get_name())
-            })
+            .and_then(|lib| lib.fns.iter().find(|f| &f.name == qualified_name.get_name()))
     {
         let dyn_id = fn_sig.id;
         let returns_null = fn_sig.return_type == DataType::Null;
         let expected_arg_types = fn_sig.args.clone();
         for (i, arg) in args.iter().enumerate() {
-            let inferred = arg.infer_type(v, ctx, state);
+            let inferred = arg.infer_type(ctx, state);
             if inferred != expected_arg_types[i] {
                 error_function_arg_invalid_type(
                     &inferred,
                     &expected_arg_types[i],
                     args_indexes[i],
                     fn_name,
-                    Some((
-                        state.fns[function_idx].name_span,
-                        state.fns[function_idx].src_file,
-                    )),
+                    Some((state.fns[function_idx].name_span, state.fns[function_idx].src_file)),
                     ctx.file_idx,
                     state.sources,
                 )
@@ -162,41 +143,24 @@ pub fn handle_user_function(
 
         *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
         for arg in args {
-            let arg_id = arg
-                .compile(v, ctx, state, output, None, false, true)
-                .unwrap_id();
+            let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
             output.push(Instr::StoreFuncArg(arg_id));
-            state.free_reg(arg_id, v);
+            state.free_reg(arg_id);
         }
 
-        let register_id = if returns_null {
-            0
-        } else {
-            state.alloc_reg_tgt(tgt_id)
-        };
+        let register_id = if returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
         state.add_to_src(ctx, output, span);
         return Some(register_id);
     }
 
     // Infer arg types
-    let inferred_arg_types = args
-        .iter()
-        .map(|arg| arg.infer_type(v, ctx, state))
-        .collect::<Vec<DataType>>();
+    let inferred_arg_types =
+        args.iter().map(|arg| arg.infer_type(ctx, state)).collect::<Vec<DataType>>();
 
-    check_user_fn_arg_types(
-        function_idx,
-        fn_name,
-        &inferred_arg_types,
-        args_indexes,
-        v,
-        ctx,
-        state,
-    );
+    check_user_fn_arg_types(function_idx, fn_name, &inferred_arg_types, args_indexes, ctx, state);
 
-    let fn_impl_idx =
-        compile_function_impl(output, v, ctx, state, function_idx, &inferred_arg_types);
+    let fn_impl_idx = compile_function_impl(output, ctx, state, function_idx, &inferred_arg_types);
     let loc = state.fns[function_idx].impls[fn_impl_idx].loc;
 
     let saveframe_loc = output.len();
@@ -214,20 +178,14 @@ pub fn handle_user_function(
         let tgt_id = state.fns[function_idx].impls[fn_impl_idx].args_loc[i];
 
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
-            let loc = state.fns[arg_fn_id as usize]
-                .impls
-                .first()
-                .map_or(0, |imp| imp.loc);
-            let fn_reg_id = state.registers.len() as u16;
-            state.registers.push(Data::function(loc));
+            let loc = state.fns[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.loc);
+            let fn_reg_id = state.new_reg(Data::function(loc));
             output.push(Instr::Mov(fn_reg_id, tgt_id));
             continue;
         }
 
         let start_len = output.len();
-        let arg_id = arg_expr
-            .compile(v, ctx, state, output, Some(tgt_id), false, true)
-            .unwrap_id();
+        let arg_id = arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
         if output.len() == start_len {
             output.push(Instr::Mov(arg_id, tgt_id));
         } else {
@@ -242,11 +200,7 @@ pub fn handle_user_function(
             .extend(get_tgt_ids(&output[saveframe_loc..]));
     }
 
-    let return_register_id = if fn_returns_null {
-        0
-    } else {
-        state.alloc_reg_tgt(tgt_id)
-    };
+    let return_register_id = if fn_returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
     if is_recursive {
         output.push(Instr::CallFuncRecursive(loc, return_register_id));
     } else {
@@ -262,16 +216,11 @@ pub fn handle_user_function(
         );
     }
 
-    if fn_returns_null {
-        None
-    } else {
-        Some(return_register_id)
-    }
+    if fn_returns_null { None } else { Some(return_register_id) }
 }
 
 pub fn compile_function(
     output: &mut Vec<Instr>,
-    v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     function_id: usize,
@@ -310,34 +259,20 @@ pub fn compile_function(
     let fn_start = output.len();
     let loc = fn_start as u16 + ctx.offset;
 
-    let v_len_before_args = v.len();
+    let v_len_before_args = state.v.len();
     // let fn_len = state.namespace.symbols.len();
     let mut anon_fns: Vec<usize> = Vec::new();
-    infered_arg_types
-        .iter()
-        .enumerate()
-        .for_each(|(i, infered_type)| {
-            if let DataType::Fn(fn_id) = infered_type {
-                anon_fns.push(state.scope.symbols.len());
-                state
-                    .scope
-                    .symbols
-                    .push((fn_args[i].clone(), SymbolKind::Fn(*fn_id)));
-                v.push(Variable {
-                    name: fn_args[i].clone(),
-                    register_id: 0,
-                    var_type: DataType::Fn(*fn_id),
-                });
-            } else {
-                // 0 => placeholder id, it's never used
-                v.push(Variable {
-                    name: fn_args[i].clone(),
-                    register_id: 0,
-                    var_type: infered_type.clone(),
-                });
-            }
-        });
-    let fn_type = track_returns(fn_code, v, ctx, state, fn_name);
+    infered_arg_types.iter().enumerate().for_each(|(i, infered_type)| {
+        if let DataType::Fn(fn_id) = infered_type {
+            anon_fns.push(state.scope.symbols.len());
+            state.scope.symbols.push((fn_args[i].clone(), SymbolKind::Fn(*fn_id)));
+            state.new_var(fn_args[i].clone(), 0, DataType::Fn(*fn_id));
+        } else {
+            // 0 => placeholder id, it's never used
+            state.new_var(fn_args[i].clone(), 0, infered_type.clone());
+        }
+    });
+    let fn_type = track_returns(fn_code, ctx, state, fn_name);
     let return_type = if fn_type.is_empty() {
         // If function doesn't return anything, return nothing
         DataType::Null
@@ -346,7 +281,7 @@ pub fn compile_function(
         DataType::Union(Box::from(fn_type)).check_poly()
     };
 
-    v.truncate(v_len_before_args);
+    state.v.truncate(v_len_before_args);
 
     // Add this func specialization to the func's metadata
     let func = state.fns.get_mut(function_id).unwrap();
@@ -356,19 +291,15 @@ pub fn compile_function(
         arg_types: Box::from(infered_arg_types),
     });
     // Cache the return type
-    if !func
-        .return_type_cache
-        .iter()
-        .any(|(args, _)| **args == *infered_arg_types)
-    {
-        func.return_type_cache
-            .push((Box::from(infered_arg_types), return_type));
+    if !func.return_type_cache.iter().any(|(args, _)| **args == *infered_arg_types) {
+        func.return_type_cache.push((Box::from(infered_arg_types), return_type));
     }
+
+    std::mem::swap(state.v, &mut v_temp);
 
     // Compile the function into instructions using local vars
     let parsed = compile_expr(
         fn_code,
-        &mut v_temp,
         Ctx {
             is_compiling_recursive: is_recursive,
             file_idx: fn_file_idx,
@@ -378,6 +309,8 @@ pub fn compile_function(
         },
         state,
     );
+    std::mem::swap(state.v, &mut v_temp);
+
     for i in anon_fns.into_iter().rev() {
         state.scope.symbols.remove(i);
     }
@@ -397,9 +330,7 @@ pub fn compile_function(
     reserved_registers.sort_unstable();
     reserved_registers.dedup();
     state.reserved_registers.extend(reserved_registers);
-    state
-        .free_registers
-        .retain(|reg| !state.reserved_registers.contains(reg));
+    state.free_registers.retain(|reg| !state.reserved_registers.contains(reg));
 
     if is_recursive {
         let all_written_regs: Vec<u16> = get_tgt_ids(&parsed);
@@ -433,11 +364,7 @@ pub fn compile_function(
             }
         }
     } else {
-        state
-            .fn_registers
-            .get_mut(fn_id as usize)
-            .unwrap()
-            .extend(get_tgt_ids(&parsed));
+        state.fn_registers.get_mut(fn_id as usize).unwrap().extend(get_tgt_ids(&parsed));
     }
 
     output.extend(parsed);

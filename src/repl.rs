@@ -5,10 +5,7 @@ use std::io::{Write, stdin, stdout};
 #[cold]
 #[inline(never)]
 pub fn repl() {
-    println!(
-        "{BLUE}KEEL {} -- REPL (read-eval-print-loop){RESET}",
-        env!("CARGO_PKG_VERSION")
-    );
+    println!("{BLUE}KEEL {} -- REPL (read-eval-print-loop){RESET}", env!("CARGO_PKG_VERSION"));
 
     let exe = std::env::current_exe().expect("{RED}[ERROR]{RESET} Cannot find keel binary path");
     let tmp = std::env::temp_dir().join("keel_repl_tmp.kl");
@@ -21,9 +18,7 @@ pub fn repl() {
         let mut s = String::new();
         print!("> ");
         let _ = stdout().flush();
-        stdin()
-            .read_line(&mut s)
-            .expect("{RED}[ERROR]{RESET} Incorrect input string");
+        stdin().read_line(&mut s).expect("{RED}[ERROR]{RESET} Incorrect input string");
         if s.ends_with('\n') {
             s.pop();
         }

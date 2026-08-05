@@ -20,8 +20,9 @@ pub unsafe fn write_bytes_at_offset(
     debug_assert!((index + bytes.len()) <= dst.len());
     unsafe {
         // u8 and MaybeUninit<u8> have the exact same layout, so this pointer cast is safe
-        dst.get_unchecked_mut(index..(index + bytes.len()))
-            .copy_from_slice(&*(bytes as *const [u8] as *const [std::mem::MaybeUninit<u8>]));
+        dst.get_unchecked_mut(index..(index + bytes.len())).copy_from_slice(
+            &*(std::ptr::from_ref::<[u8]>(bytes) as *const [std::mem::MaybeUninit<u8>]),
+        );
     }
 }
 
@@ -96,7 +97,7 @@ pub fn array_to_c_ptr(
 }
 
 /// Computes a Keel struct's size, alignment, and per-field offsets
-/// Returns (size, alignment, field_offsets)
+/// Returns (size, alignment, `field_offsets`)
 #[cfg(not(target_arch = "wasm32"))]
 fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usize, Vec<usize>) {
     let mut offset: usize = 0;
@@ -123,16 +124,12 @@ fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usi
         field_offsets.push(field_offset);
         max_alignment = max_alignment.max(elem_alignment);
     }
-    (
-        offset.next_multiple_of(max_alignment),
-        max_alignment,
-        field_offsets,
-    )
+    (offset.next_multiple_of(max_alignment), max_alignment, field_offsets)
 }
 
-/// (Uses DataType)
+/// (Uses `DataType`)
 /// Computes a Keel struct's size, alignment, and per-field offsets
-/// Returns (size, alignment, field_offsets)
+/// Returns (size, alignment, `field_offsets`)
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_struct_size_datatype(
     struct_fields: &[StructField],
@@ -141,12 +138,7 @@ pub fn get_struct_size_datatype(
     let mut offset: usize = 0;
     let mut max_alignment: usize = 0;
     let mut field_offsets: Vec<usize> = Vec::new();
-    for StructField {
-        name: _,
-        field_type,
-        span: _,
-    } in struct_fields
-    {
+    for StructField { name: _, field_type, span: _ } in struct_fields {
         let elem_size: usize;
         let elem_alignment: usize;
         match field_type {
@@ -171,11 +163,7 @@ pub fn get_struct_size_datatype(
         field_offsets.push(field_offset);
         max_alignment = max_alignment.max(elem_alignment);
     }
-    (
-        offset.next_multiple_of(max_alignment),
-        max_alignment,
-        field_offsets,
-    )
+    (offset.next_multiple_of(max_alignment), max_alignment, field_offsets)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -193,12 +181,10 @@ pub fn keel_struct_to_c_struct(
             let offset = *field_offsets.get_unchecked(i);
             if field.is_int() {
                 let bytes = field.as_int().to_ne_bytes();
-                buf.get_unchecked_mut(offset..offset + 4)
-                    .copy_from_slice_unchecked(&bytes);
+                buf.get_unchecked_mut(offset..offset + 4).copy_from_slice_unchecked(&bytes);
             } else if field.is_float() {
                 let bytes = field.as_float().to_ne_bytes();
-                buf.get_unchecked_mut(offset..offset + 8)
-                    .copy_from_slice_unchecked(&bytes);
+                buf.get_unchecked_mut(offset..offset + 8).copy_from_slice_unchecked(&bytes);
             } else if field.is_string() {
                 let bytes = std::ffi::CString::new(field.as_str(string_pool))
                     .expect("interior null byte in string passed to C")
@@ -206,17 +192,14 @@ pub fn keel_struct_to_c_struct(
                     .into_boxed_slice();
                 let ptr = (bytes.as_ptr() as u64).to_ne_bytes();
                 keep_alive.push(bytes);
-                buf.get_unchecked_mut(offset..offset + 8)
-                    .copy_from_slice_unchecked(&ptr);
+                buf.get_unchecked_mut(offset..offset + 8).copy_from_slice_unchecked(&ptr);
             } else if field.is_array() {
                 let ptr = array_to_c_ptr(*field, obj_pool, string_pool, keep_alive).to_ne_bytes();
-                buf.get_unchecked_mut(offset..offset + 8)
-                    .copy_from_slice_unchecked(&ptr);
+                buf.get_unchecked_mut(offset..offset + 8).copy_from_slice_unchecked(&ptr);
             } else if field.is_struct() {
                 let b =
                     keel_struct_to_c_struct(field.as_struct(), obj_pool, string_pool, keep_alive);
-                buf.get_unchecked_mut(offset..offset + b.len())
-                    .copy_from_slice_unchecked(&b);
+                buf.get_unchecked_mut(offset..offset + b.len()).copy_from_slice_unchecked(&b);
             } else {
                 unreachable_unchecked()
             }
@@ -241,15 +224,7 @@ pub fn c_struct_to_keel_struct(
 ) -> Vec<Data> {
     let mut buf: Vec<Data> = Vec::new();
     buf.reserve_exact(struct_fields.len());
-    for (
-        i,
-        StructField {
-            name: _,
-            field_type,
-            span: _,
-        },
-    ) in struct_fields.iter().enumerate()
-    {
+    for (i, StructField { name: _, field_type, span: _ }) in struct_fields.iter().enumerate() {
         let field_offset = *unsafe { field_offsets.get_unchecked(i) };
         match field_type {
             DataType::Int => {
@@ -276,9 +251,7 @@ pub fn c_struct_to_keel_struct(
                     NULL
                 } else {
                     Data::string(
-                        unsafe { std::ffi::CStr::from_ptr(ptr) }
-                            .to_string_lossy()
-                            .into_owned(),
+                        unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy().into_owned(),
                         obj_pool,
                         string_pool,
                         r,
@@ -307,10 +280,7 @@ pub fn c_struct_to_keel_struct(
                 );
                 let new_struct_id = obj_pool.len();
                 obj_pool.push(nested_data_fields);
-                buf.push(Data::struct_instance(
-                    *nested_struct_id,
-                    new_struct_id as u32,
-                ));
+                buf.push(Data::struct_instance(*nested_struct_id, new_struct_id as u32));
             }
             _ => unsafe { unreachable_unchecked() },
         }

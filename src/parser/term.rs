@@ -26,12 +26,7 @@ use smol_strc::ToSmolStr;
 // Parses: Expr RParen
 fn parse_fn_call(parser: &mut Parser<'_>, qualified_name: QualifiedName, span: Span) -> Expr {
     let (args, arg_spans, _) = parse_args(parser);
-    Expr::FunctionCall(FunctionCallExpr {
-        qualified_name,
-        args,
-        span,
-        arg_spans,
-    })
+    Expr::FunctionCall(FunctionCallExpr { qualified_name, args, span, arg_spans })
 }
 
 // Must be called right after LParen is skipped
@@ -53,10 +48,7 @@ fn parse_struct(parser: &mut Parser<'_>, name: QualifiedName, start: u32) -> Exp
                 ),
             )
         };
-        parser.next_token_expect(
-            Token::Colon,
-            "A colon must separate a field from its value.",
-        );
+        parser.next_token_expect(Token::Colon, "A colon must separate a field from its value.");
         let field_start: u32 = parser.peek_token_span().start;
         let field_value = parse_expr(parser);
         fields.push(StructFieldExpr {
@@ -355,10 +347,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
         }
         unexpected => {
             cold_path();
-            parser.error(
-                t_span,
-                ParserErr::UnexpectedTokenStr("Term", unexpected, ""),
-            );
+            parser.error(t_span, ParserErr::UnexpectedTokenStr("Term", unexpected, ""));
         }
     }
 }

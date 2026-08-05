@@ -235,14 +235,14 @@ impl Data {
         if (self.0 & !PAYLOAD_MASK) == NAN_STRING_SMALL {
             let payload = self.0 & PAYLOAD_MASK;
             let len = ((64 - payload.leading_zeros()) as usize + 7) >> 3;
-            let ptr = self as *const Self as *const u8;
+            let ptr = std::ptr::from_ref::<Self>(self).cast::<u8>();
             unsafe {
                 let slice = std::slice::from_raw_parts(ptr, len);
                 std::str::from_utf8_unchecked(slice)
             }
         } else {
             let string_pool_idx = (self.0 & PAYLOAD_MASK) as usize;
-            unsafe { &*(str_pool[string_pool_idx].as_str() as *const str) }
+            unsafe { &*std::ptr::from_ref::<str>(str_pool[string_pool_idx].as_str()) }
         }
     }
     #[inline(always)]

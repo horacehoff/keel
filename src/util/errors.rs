@@ -166,15 +166,8 @@ impl ErrType<'_> {
 #[cold]
 #[inline(never)]
 pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
-    let InstrSrc {
-        instr: _,
-        span: Span { start, end },
-        file_id,
-    } = ctx
-        .instr_src
-        .iter()
-        .find(|s| s.instr == instr)
-        .unwrap_or(&InstrSrc {
+    let InstrSrc { instr: _, span: Span { start, end }, file_id } =
+        ctx.instr_src.iter().find(|s| s.instr == instr).unwrap_or(&InstrSrc {
             instr: Instr::Halt(1),
             span: Span { start: 0, end: 0 },
             file_id: 0,
@@ -194,20 +187,12 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
     .finish();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report
-        .eprint((
-            src.filename.as_str(),
-            ariadne::Source::from(src.contents.as_str()),
-        ))
-        .unwrap();
+    report.eprint((src.filename.as_str(), ariadne::Source::from(src.contents.as_str()))).unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (
-                src.filename.as_str(),
-                ariadne::Source::from(src.contents.as_str()),
-            ),
+            (src.filename.as_str(), ariadne::Source::from(src.contents.as_str())),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
@@ -254,10 +239,7 @@ pub fn throw_compiler_error<'a>(
                     sources
                         .iter()
                         .map(|src| {
-                            (
-                                src.filename.as_str(),
-                                ariadne::Source::from(src.contents.as_str()),
-                            )
+                            (src.filename.as_str(), ariadne::Source::from(src.contents.as_str()))
                         })
                         .collect(),
                 ),

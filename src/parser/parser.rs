@@ -101,32 +101,22 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         }
     };
     eprintln!("{RED}KEEL ERROR{RESET}");
-    let report = Report::build(
-        ReportKind::Error,
-        (src.filename.as_str(), (start as usize)..(end as usize)),
-    )
-    .with_label(
-        Label::new((src.filename.as_str(), (start as usize)..(end as usize)))
-            .with_message(err_message)
-            .with_color(Color::Red),
-    )
-    .finish();
+    let report =
+        Report::build(ReportKind::Error, (src.filename.as_str(), (start as usize)..(end as usize)))
+            .with_label(
+                Label::new((src.filename.as_str(), (start as usize)..(end as usize)))
+                    .with_message(err_message)
+                    .with_color(Color::Red),
+            )
+            .finish();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report
-        .eprint((
-            src.filename.as_str(),
-            ariadne::Source::from(src.contents.as_str()),
-        ))
-        .unwrap();
+    report.eprint((src.filename.as_str(), ariadne::Source::from(src.contents.as_str()))).unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (
-                src.filename.as_str(),
-                ariadne::Source::from(src.contents.as_str()),
-            ),
+            (src.filename.as_str(), ariadne::Source::from(src.contents.as_str())),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
@@ -174,10 +164,7 @@ impl<'a> Parser<'a> {
     }
     #[inline(always)]
     fn peek_token(&mut self) -> Token<'a> {
-        let Some((t, start, end)) = self
-            .input
-            .peek()
-            .map(|(t, span)| (*t, span.start, span.end))
+        let Some((t, start, end)) = self.input.peek().map(|(t, span)| (*t, span.start, span.end))
         else {
             self.error(self.eof_span(), ParserErr::UnexpectedEOF);
         };
@@ -188,24 +175,15 @@ impl<'a> Parser<'a> {
     }
     #[inline(always)]
     fn peek_token_span(&mut self) -> Span {
-        let Some((_, start, end)) = self
-            .input
-            .peek()
-            .map(|(t, span)| (*t, span.start, span.end))
+        let Some((_, start, end)) = self.input.peek().map(|(t, span)| (*t, span.start, span.end))
         else {
             self.error(self.eof_span(), ParserErr::UnexpectedEOF);
         };
-        Span {
-            start: start as u32,
-            end: end as u32,
-        }
+        Span { start: start as u32, end: end as u32 }
     }
     #[inline(always)]
     fn peek_token_opt(&mut self) -> Option<Token<'a>> {
-        let (t, start, end) = self
-            .input
-            .peek()
-            .map(|(t, span)| (*t, span.start, span.end))?;
+        let (t, start, end) = self.input.peek().map(|(t, span)| (*t, span.start, span.end))?;
         Some(t.unwrap_or_else(
             #[cold]
             |()| self.error((start, end).into(), ParserErr::UnknownToken),
@@ -213,9 +191,7 @@ impl<'a> Parser<'a> {
     }
     #[inline(always)]
     fn peek_token_opt_span(&mut self) -> Option<Span> {
-        self.input
-            .peek()
-            .map(|x| (x.1.start as u32, x.1.end as u32).into())
+        self.input.peek().map(|x| (x.1.start as u32, x.1.end as u32).into())
     }
     #[inline(always)]
     fn next_token_expect(&mut self, expected: Token, msg: &'static str) -> Span {
@@ -404,14 +380,7 @@ fn parse_op_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32, op: Token<
     };
     var_assign(
         e.clone(),
-        add_op(
-            input,
-            op,
-            e,
-            v,
-            (e_start, operand_end).into(),
-            (v_start, v_end).into(),
-        ),
+        add_op(input, op, e, v, (e_start, operand_end).into(), (v_start, v_end).into()),
         (e_start, e_end).into(),
         (v_start, v_end).into(),
     )
@@ -489,14 +458,11 @@ fn error_unclosed_delimiter(
 
         if let Some((actual_closer_token, actual_closer_token_span)) = end {
             report = report.with_label(
-                Label::new((
-                    parser.ctx.src.filename.as_str(),
-                    actual_closer_token_span.into(),
-                ))
-                .with_message(format_args!(
-                    "Expected {expected_closer_token} but found {actual_closer_token}"
-                ))
-                .with_color(ariadne::Color::Red),
+                Label::new((parser.ctx.src.filename.as_str(), actual_closer_token_span.into()))
+                    .with_message(format_args!(
+                        "Expected {expected_closer_token} but found {actual_closer_token}"
+                    ))
+                    .with_color(ariadne::Color::Red),
             );
         } else {
             report = report
@@ -507,10 +473,7 @@ fn error_unclosed_delimiter(
                         ))
                         .with_color(ariadne::Color::Red),
                 )
-                .with_help(format_args!(
-                    "Add a {} here to close it",
-                    blue(expected_closer_token)
-                ));
+                .with_help(format_args!("Add a {} here to close it", blue(expected_closer_token)));
         }
 
         report.finish()
@@ -523,10 +486,7 @@ fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
     parser.throw_parser_err(|| {
         Report::build(
             ariadne::ReportKind::Error,
-            (
-                parser.ctx.src.filename.as_str(),
-                (parser.last_token_end..parser.last_token_end),
-            ),
+            (parser.ctx.src.filename.as_str(), (parser.last_token_end..parser.last_token_end)),
         )
         .with_message("Missing semicolon")
         .with_label(
@@ -581,16 +541,10 @@ fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
                 ),
             );
         };
-        parser.next_token_expect(
-            Token::SemiColon,
-            "Import statements must end with a semicolon",
-        );
+        parser.next_token_expect(Token::SemiColon, "Import statements must end with a semicolon");
         Expr::ImportFile(path, Some(alias), (start, span.end).into())
     } else {
-        parser.next_token_expect(
-            Token::SemiColon,
-            "Import statements must end with a semicolon",
-        );
+        parser.next_token_expect(Token::SemiColon, "Import statements must end with a semicolon");
         Expr::ImportFile(path, None, (start, end).into())
     }
 }
@@ -763,10 +717,8 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
             }
         }
         parser.next_token_expect(Token::RParen, "Unmatched ')'");
-        parser.next_token_expect(
-            Token::SemiColon,
-            "Function definitions must end with a semicolon",
-        );
+        parser
+            .next_token_expect(Token::SemiColon, "Function definitions must end with a semicolon");
         fn_signatures.push(DylibFnExpr {
             name: fn_name,
             args: Box::from(args),

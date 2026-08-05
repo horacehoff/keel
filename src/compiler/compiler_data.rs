@@ -123,17 +123,11 @@ pub struct Ctx {
 impl Ctx {
     #[inline(always)]
     pub const fn no_single_run(self) -> Self {
-        Self {
-            single_run: false,
-            ..self
-        }
+        Self { single_run: false, ..self }
     }
     #[inline(always)]
     pub const fn advance_offset(self, output_len: u16) -> Self {
-        Self {
-            offset: self.offset + output_len,
-            ..self
-        }
+        Self { offset: self.offset + output_len, ..self }
     }
     #[inline(always)]
     pub const fn set_offset(self, offset: u16) -> Self {
@@ -149,6 +143,7 @@ pub struct InstrSrc {
 }
 
 pub struct State<'a> {
+    pub v: &'a mut Vec<Variable>,
     pub registers: &'a mut Vec<Data>,
     pub fns: &'a mut Vec<Function>,
     pub structs: &'a mut Vec<Struct>,
@@ -166,14 +161,50 @@ pub struct State<'a> {
 }
 
 impl State<'_> {
+    #[must_use]
+    pub fn find_var(&self, var_name: &str) -> Option<&Variable> {
+        self.v.iter().rfind(|variable| variable.name.as_str() == var_name)
+    }
+    #[must_use]
+    pub fn find_var_mut(&mut self, var_name: &str) -> Option<&mut Variable> {
+        self.v.iter_mut().rfind(|variable| variable.name.as_str() == var_name)
+    }
+    #[must_use]
+    pub fn find_var_idx(&self, var_name: &str) -> Option<usize> {
+        self.v.iter().rposition(|variable| variable.name.as_str() == var_name)
+    }
+    #[inline(always)]
+    pub fn new_var(&mut self, name: SmolStr, register_id: u16, var_type: DataType) {
+        self.v.push(Variable { name, register_id, var_type });
+    }
+    /// Creates a brand new register containing `data` and returns its index.
+    #[must_use]
+    pub fn new_reg(&mut self, data: Data) -> u16 {
+        let register_id = self.registers.len() as u16;
+        self.registers.push(data);
+        register_id
+    }
+    /// Allocates a brand new constant register containing `data` and returns its index.
+    /// If a constant register containing `data` already exists, it simply returns its index and doesn't create a new register.
+    #[must_use]
+    pub fn new_const_reg(&mut self, data: Data) -> u16 {
+        if let Some(&id) = self.const_registers.get(&data) {
+            id
+        } else {
+            let register_id = self.registers.len() as u16;
+            self.const_registers.insert(data, register_id);
+            self.registers.push(data);
+            register_id
+        }
+    }
     /// Marks a register as free, allowing it to later be reused by `alloc_reg`.
     /// The register is marked as free iff:
     /// - the register isn't tied to any variable
     /// - the register isn't a constant register
     /// - the register isn't reserved in `reserved_registers`
     /// - the register isn't already marked as free
-    pub fn free_reg(&mut self, id: u16, v: &[Variable]) {
-        if !v.iter().any(|var| var.register_id == id)
+    pub fn free_reg(&mut self, id: u16) {
+        if !self.v.iter().any(|var| var.register_id == id)
             && !self.const_registers.values().any(|&reg| reg == id)
             && !self.reserved_registers.contains(&id)
             && !self.free_registers.contains(&id)
@@ -182,56 +213,39 @@ impl State<'_> {
         }
     }
     /// Allocates a register. It `free_registers` isn't empty, it will reuse the latest one. Else, it will allocate a new one.
+    #[must_use]
     pub fn alloc_reg(&mut self) -> u16 {
-        if let Some(reg) = self.free_registers.pop() {
-            reg
-        } else {
-            self.registers.push(NULL);
-            (self.registers.len() - 1) as u16
-        }
+        if let Some(reg) = self.free_registers.pop() { reg } else { self.new_reg(NULL) }
     }
     /// Allocates a register, reusing `tgt_id` if it holds some register id.
     /// If `tgt_id == None`, it calls `alloc_reg()`.
     #[inline(always)]
+    #[must_use]
     pub fn alloc_reg_tgt(&mut self, tgt_id: Option<u16>) -> u16 {
-        if let Some(id) = tgt_id {
-            id
-        } else {
-            self.alloc_reg()
-        }
+        if let Some(id) = tgt_id { id } else { self.alloc_reg() }
     }
     /// Frees registers that are written by instructions in scope_instrs.
-    pub fn free_scope_registers(
-        &mut self,
-        regs_before: u16,
-        scope_instrs: &[Instr],
-        v: &[Variable],
-    ) {
+    pub fn free_scope_registers(&mut self, regs_before: u16, scope_instrs: &[Instr]) {
         for id in get_tgt_ids(scope_instrs) {
             if id >= regs_before {
-                self.free_reg(id, v);
+                self.free_reg(id);
             }
         }
     }
 
     /// Similar to free_scope_registers, but also frees CloneArray template registers. Only call this after a loop ends.
-    pub fn free_loop_scope_registers(
-        &mut self,
-        regs_before: u16,
-        scope_instrs: &[Instr],
-        v: &[Variable],
-    ) {
-        self.free_scope_registers(regs_before, scope_instrs, v);
+    pub fn free_loop_scope_registers(&mut self, regs_before: u16, scope_instrs: &[Instr]) {
+        self.free_scope_registers(regs_before, scope_instrs);
         // Free CloneArray template registers
         for instr in scope_instrs {
             if let Instr::CloneArray(template_reg, _, _) = instr
                 && *template_reg >= regs_before
             {
-                self.free_reg(*template_reg, v);
+                self.free_reg(*template_reg);
             } else if let Instr::CloneStruct(template_reg, _) = instr
                 && *template_reg >= regs_before
             {
-                self.free_reg(*template_reg, v);
+                self.free_reg(*template_reg);
             }
         }
     }

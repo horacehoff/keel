@@ -34,7 +34,6 @@ use std::io::IsTerminal;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
 
-#[path = "./ffi/ffi.rs"]
 mod ffi;
 
 pub type ObjectPool = Pool<Vec<Data>>;
@@ -63,10 +62,7 @@ fn obj_eq(
         if x_obj == y_obj {
             return true;
         }
-        x_obj
-            .iter()
-            .zip(y_obj)
-            .all(|(x, y)| obj_eq(*x, *y, obj_pool, map_pool, string_pool))
+        x_obj.iter().zip(y_obj).all(|(x, y)| obj_eq(*x, *y, obj_pool, map_pool, string_pool))
     } else if x.is_map() {
         let x_map = &map_pool[x.as_map()];
         let y_map = &map_pool[y.as_map()];
@@ -77,9 +73,7 @@ fn obj_eq(
             return true;
         }
         x_map.iter().all(|(k, v)| {
-            y_map
-                .get(k)
-                .is_some_and(|y_v| obj_eq(*v, *y_v, obj_pool, map_pool, string_pool))
+            y_map.get(k).is_some_and(|y_v| obj_eq(*v, *y_v, obj_pool, map_pool, string_pool))
         })
     } else {
         false
@@ -227,15 +221,52 @@ impl IndexMut<usize> for RegisterFile {
     }
 }
 
+#[cold]
+#[inline(never)]
+fn error_with_catch(
+    err: ErrType,
+    r: &mut RegisterFile,
+    obj_pool: &ObjectPool,
+    string_pool: &mut StringPool,
+    recursion_stack: &RegisterFile,
+    free_strings: &mut Vec<u16>,
+    gc_string_threshold: &mut u32,
+    string_live: &mut Vec<bool>,
+    args: &mut Vec<u16>,
+    call_frames: &mut Vec<CallFrame>,
+    error_handles: &mut Vec<ErrorCatch>,
+    err_ctx: &ErrorCtx,
+    instructions: &[Instr],
+    i: usize,
+) -> usize {
+    if error_handles.is_empty() {
+        throw_error(err_ctx, unsafe { *instructions.get_unchecked(i) }, err);
+    } else {
+        let err_handle = error_handles.pop_unchecked();
+        unsafe {
+            args.set_len(err_handle.args_len as usize);
+            call_frames.set_len(err_handle.call_frames_len as usize);
+        }
+
+        r[err_handle.error_reg] = Data::string(
+            err.kind(),
+            obj_pool,
+            string_pool,
+            r,
+            recursion_stack,
+            free_strings,
+            gc_string_threshold,
+            string_live,
+        );
+        err_handle.catch_loc as usize
+    }
+}
+
 #[allow(unused_unsafe)]
 pub fn execute(
     instructions: &[Instr],
     r: &mut RegisterFile,
-    Pools {
-        obj_pool,
-        map_pool,
-        str_pool,
-    }: &mut Pools,
+    Pools { obj_pool, map_pool, str_pool }: &mut Pools,
     err_ctx: &ErrorCtx,
     fn_registers: &[Vec<u16>],
     dyn_libs: &[DylibFn],
@@ -344,47 +375,6 @@ pub fn execute(
         };
     }
 
-    #[cold]
-    #[inline(never)]
-    fn error_with_catch(
-        err: ErrType,
-        r: &mut RegisterFile,
-        obj_pool: &ObjectPool,
-        string_pool: &mut StringPool,
-        recursion_stack: &RegisterFile,
-        free_strings: &mut Vec<u16>,
-        gc_string_threshold: &mut u32,
-        string_live: &mut Vec<bool>,
-        args: &mut Vec<u16>,
-        call_frames: &mut Vec<CallFrame>,
-        error_handles: &mut Vec<ErrorCatch>,
-        err_ctx: &ErrorCtx,
-        instructions: &[Instr],
-        i: usize,
-    ) -> usize {
-        if error_handles.is_empty() {
-            throw_error(err_ctx, unsafe { *instructions.get_unchecked(i) }, err);
-        } else {
-            let err_handle = error_handles.pop_unchecked();
-            unsafe {
-                args.set_len(err_handle.args_len as usize);
-                call_frames.set_len(err_handle.call_frames_len as usize);
-            }
-
-            r[err_handle.error_reg] = Data::string(
-                err.kind(),
-                obj_pool,
-                string_pool,
-                r,
-                recursion_stack,
-                free_strings,
-                gc_string_threshold,
-                string_live,
-            );
-            err_handle.catch_loc as usize
-        }
-    }
-
     'main: loop {
         match unsafe { *instructions.get_unchecked(i) } {
             Instr::Jmp(size) => {
@@ -429,11 +419,8 @@ pub fn execute(
             }
             Instr::Return(tgt) => {
                 // Pop the latest call frame, set the return value and jump back to the callsite
-                let CallFrame {
-                    return_addr,
-                    return_reg,
-                    callsite_id: _,
-                } = call_frames.pop_unchecked();
+                let CallFrame { return_addr, return_reg, callsite_id: _ } =
+                    call_frames.pop_unchecked();
                 i = return_addr as usize;
                 r[return_reg] = r[tgt];
             }
@@ -442,9 +429,8 @@ pub fn execute(
                 let temp = r[tgt];
                 let regs = unsafe { fn_registers.get_unchecked(call_frame.callsite_id as usize) };
                 let base = recursion_stack.len() - regs.len();
-                for (reg, &saved) in regs
-                    .iter()
-                    .zip(unsafe { recursion_stack.0.get_unchecked(base..) })
+                for (reg, &saved) in
+                    regs.iter().zip(unsafe { recursion_stack.0.get_unchecked(base..) })
                 {
                     r[*reg] = saved;
                 }
@@ -537,9 +523,7 @@ pub fn execute(
                         DataType::Int => Data::int(func.cif.call::<i32>(func.ptr, &ffi_args)),
                         DataType::Float => func.cif.call::<f64>(func.ptr, &ffi_args).into(),
                         DataType::String => {
-                            let ptr = func
-                                .cif
-                                .call::<*const std::ffi::c_char>(func.ptr, &ffi_args);
+                            let ptr = func.cif.call::<*const std::ffi::c_char>(func.ptr, &ffi_args);
                             if ptr.is_null() {
                                 cold_path();
                                 NULL
@@ -663,9 +647,9 @@ pub fn execute(
                 r[dest_reg] = Data::struct_instance(src_reg.struct_type_id(), new_id as u32);
             }
             Instr::AddArray(o1, o2, dest) => {
-                let arr_a_id = r[o1].as_array();
-                let arr_b_id = r[o2].as_array();
-                let array_id = alloc_array(
+                let array1_id = r[o1].as_array();
+                let array2_id = r[o2].as_array();
+                let output_array_id = alloc_array(
                     obj_pool,
                     map_pool,
                     &mut free_arrays,
@@ -676,18 +660,18 @@ pub fn execute(
                     &mut map_live,
                     &mut obj_gc_stack,
                 );
-                let array_idx = array_id as usize;
+                let array_idx = output_array_id as usize;
                 unsafe {
                     let array_pool_ptr = obj_pool.as_mut_ptr();
-                    let arr_a = &*array_pool_ptr.add(arr_a_id);
-                    let arr_b = &*array_pool_ptr.add(arr_b_id);
+                    let arr_a = &*array_pool_ptr.add(array1_id);
+                    let arr_b = &*array_pool_ptr.add(array2_id);
                     let combined = &mut *array_pool_ptr.add(array_idx);
 
                     combined.reserve(arr_a.len() + arr_b.len());
                     combined.extend_from_slice(arr_a);
                     combined.extend_from_slice(arr_b);
                 }
-                r[dest] = Data::array(array_id);
+                r[dest] = Data::array(output_array_id);
             }
             Instr::MulFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() * r[o2].as_float()).into();
@@ -895,9 +879,8 @@ pub fn execute(
             }
             Instr::StoreFuncArg(id) => args.push(id),
             Instr::ObjElemMov(new_elem_reg_id, array_id, idx) => unsafe {
-                *obj_pool
-                    .get_mut(array_id as usize)
-                    .get_unchecked_mut(idx as usize) = r[new_elem_reg_id];
+                *obj_pool.get_mut(array_id as usize).get_unchecked_mut(idx as usize) =
+                    r[new_elem_reg_id];
             },
             Instr::SetElementObj(array_reg_id, new_elem_reg_id, idx) => {
                 let array = obj_pool.get_mut(r[array_reg_id].as_array());
@@ -1017,9 +1000,7 @@ pub fn execute(
                 } else {
                     cold_path();
                     error_with_catch!(ErrType::UnknownMapKey(
-                        r[key_reg_id]
-                            .format(obj_pool, str_pool, map_pool, structs, false)
-                            .as_str()
+                        r[key_reg_id].format(obj_pool, str_pool, map_pool, structs, false).as_str()
                     ));
                 };
             }
@@ -1069,9 +1050,7 @@ pub fn execute(
                     let temp_arg = r[args.pop_unchecked()];
                     let arg = temp_arg.as_str(str_pool);
                     // r[dest] = str.contains(arg).into();
-                    r[dest] = memmem::find(str.as_bytes(), arg.as_bytes())
-                        .is_some()
-                        .into();
+                    r[dest] = memmem::find(str.as_bytes(), arg.as_bytes()).is_some().into();
                 } else if reg.is_array() {
                     let arg = r[args.pop_unchecked()];
                     r[dest] = obj_pool[reg.as_array()].contains(&arg).into();
@@ -1216,11 +1195,7 @@ pub fn execute(
                 } else if value.is_string() {
                     value
                 } else {
-                    string!(
-                        value
-                            .format(obj_pool, str_pool, map_pool, structs, false)
-                            .as_str()
-                    )
+                    string!(value.format(obj_pool, str_pool, map_pool, structs, false).as_str())
                 };
             }
             Instr::CallLibFunc(LibFunc::Bool, tgt, dest) => {
@@ -1416,13 +1391,9 @@ pub fn execute(
                 let temp_separator: Option<Data> = args.pop().map(|arg| r[arg]);
                 let separator = temp_separator.as_ref().map_or("", |d| d.as_str(str_pool));
                 let array = &obj_pool[r[tgt].as_array()];
-                let total_len: usize = array
-                    .iter()
-                    .map(|x| x.as_str(str_pool).len())
-                    .sum::<usize>()
-                    + separator
-                        .len()
-                        .saturating_mul(array.len().saturating_sub(1));
+                let total_len: usize =
+                    array.iter().map(|x| x.as_str(str_pool).len()).sum::<usize>()
+                        + separator.len().saturating_mul(array.len().saturating_sub(1));
                 let mut output = String::with_capacity(total_len);
                 for (i, x) in array.iter().enumerate() {
                     if i > 0 {
@@ -1460,10 +1431,7 @@ pub fn execute(
             }
             // Appends to a file, will create if it doesn't exist
             Instr::CallLibFuncVoid(LibFuncVoid::FsAppend, path, contents) => {
-                match fs::OpenOptions::new()
-                    .append(true)
-                    .open(r[path].as_str(str_pool))
-                {
+                match fs::OpenOptions::new().append(true).open(r[path].as_str(str_pool)) {
                     Ok(mut f) => {
                         if let Err(e) = f.write_all(r[contents].as_str(str_pool).as_bytes()) {
                             error_with_catch!(ErrType::from(e.kind()));
@@ -1513,10 +1481,8 @@ pub fn execute(
                     &mut map_live,
                     &mut obj_gc_stack,
                 );
-                obj_pool[array_id as usize] = std::env::args()
-                    .skip(2)
-                    .map(|s| string!(s))
-                    .collect::<Vec<Data>>();
+                obj_pool[array_id as usize] =
+                    std::env::args().skip(2).map(|s| string!(s)).collect::<Vec<Data>>();
                 r[dest] = Data::array(array_id);
             }
             Instr::CallLibFuncVoid(LibFuncVoid::Sort, tgt, _) => {

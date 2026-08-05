@@ -38,10 +38,8 @@ pub fn parse_condition_block(parser: &mut Parser<'_>, start: u32) -> Expr {
             parser.next_token();
             let else_if_condition = parse_expr_no_struct(parser);
             let else_if_code = parse_block(parser);
-            output_code.push(Expr::ElseIfBlock(
-                Box::new(else_if_condition),
-                Box::from(else_if_code),
-            ));
+            output_code
+                .push(Expr::ElseIfBlock(Box::new(else_if_condition), Box::from(else_if_code)));
         } else if next_token == Some(Token::LBrace) {
             let else_code = parse_block(parser);
             output_code.push(Expr::ElseBlock(Box::from(else_code)));
@@ -57,7 +55,7 @@ pub fn parse_condition_block(parser: &mut Parser<'_>, start: u32) -> Expr {
     })
 }
 
-/// LBrace Code RBrace
+/// `LBrace Code RBrace`
 #[inline(always)]
 pub fn parse_block(parser: &mut Parser<'_>) -> Vec<Expr> {
     let opener_token_span =
@@ -67,7 +65,7 @@ pub fn parse_block(parser: &mut Parser<'_>) -> Vec<Expr> {
     code
 }
 
-/// LBrace Expr RBrace
+/// `LBrace Expr RBrace`
 #[inline(always)]
 pub fn parse_block_expr(parser: &mut Parser<'_>) -> Expr {
     let opener_token_span =
@@ -85,10 +83,7 @@ pub fn parse_while_block(input: &mut Parser<'_>) -> Expr {
     Expr::WhileBlock(Box::new(while_condition), Box::from(while_code))
 }
 
-/// Parses ForLoop and IntForLoop
-/// for Identifier in Expr LBrace Code RBrace
-/// for Identifier in Expr RangeDot Expr LBrace Code Rbrace
-/// for Identifier in RangeDot Expr LBrace Code RBrace
+/// Parses `ForLoop` and `IntForLoop`
 pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
     let t = parser.next_token();
     debug_assert_eq!(t.0, Token::For);
@@ -97,10 +92,7 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
         SmolStr::new(id)
     } else {
         cold_path();
-        parser.error(
-            span,
-            ParserErr::UnexpectedToken(Token::Identifier(""), i_token, ""),
-        );
+        parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), i_token, ""));
     };
     parser.next_token_expect(Token::In, "");
     let start = parser.peek_token_span().start;
@@ -182,10 +174,7 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
             ParserErr::UnexpectedToken(Token::Identifier(""), t_fn_id, "Invalid function name."),
         );
     };
-    parser.next_token_expect(
-        Token::LParen,
-        "Function arguments must be delimited by parentheses",
-    );
+    parser.next_token_expect(Token::LParen, "Function arguments must be delimited by parentheses");
     let mut args: Vec<FunctionDeclarationArgumentExpr> = Vec::with_capacity(4);
     loop {
         if parser.peek_token() == Token::RParen {
@@ -322,10 +311,7 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
         SmolStr::new(id)
     } else {
         cold_path();
-        parser.error(
-            span,
-            ParserErr::UnexpectedToken(Token::Identifier(""), next_token, ""),
-        );
+        parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, ""));
     };
     parser.next_token_expect(Token::LBrace, "Expected '{'");
     let mut fields: Vec<(SmolStr, TypeExpr, Span)> = Vec::with_capacity(4);
@@ -348,11 +334,7 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
         let field_type_start = parser.peek_token_span().start;
         let field_type = parse_type(parser);
         let field_type_end = parser.peek_token_span().end;
-        fields.push((
-            field_name,
-            field_type,
-            (field_type_start, field_type_end).into(),
-        ));
+        fields.push((field_name, field_type, (field_type_start, field_type_end).into()));
         let (next_token, span) = parser.next_token();
         if next_token == Token::RBrace {
             break;

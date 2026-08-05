@@ -30,14 +30,7 @@ pub fn parse_expr_with_precedence(
         let rhs_start = input.peek_token_span().start;
         let rhs = parse_expr_with_precedence(input, op_precedence, allow_struct);
         let rhs_end = input.last_token_end as u32;
-        lhs = add_op(
-            input,
-            op,
-            lhs,
-            rhs,
-            (lhs_start, lhs_end).into(),
-            (rhs_start, rhs_end).into(),
-        );
+        lhs = add_op(input, op, lhs, rhs, (lhs_start, lhs_end).into(), (rhs_start, rhs_end).into());
         lhs_end = rhs_end;
     }
     lhs

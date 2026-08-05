@@ -5,7 +5,6 @@ use super::type_system::fn_matches_signature;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
-use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type_multiple;
@@ -30,7 +29,6 @@ use crate::errors::wasm_error;
 
 pub fn check_arg_type(
     fn_name: &str,
-    v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     args: &[Expr],
@@ -38,7 +36,7 @@ pub fn check_arg_type(
     arg_idx: usize,
     expected: &[DataType],
 ) {
-    let inferred = args[arg_idx].infer_type(v, ctx, state);
+    let inferred = args[arg_idx].infer_type(ctx, state);
     let matches = if let DataType::Union(polytype) = &inferred {
         polytype.iter().all(|x| expected.contains(x))
     } else {
@@ -62,7 +60,6 @@ pub fn check_user_fn_arg_types(
     fn_name: &str,
     inferred_arg_types: &[DataType],
     args_indexes: &[Span],
-    v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
 ) {
@@ -73,7 +70,7 @@ pub fn check_user_fn_arg_types(
             && if let (DataType::FnSignature(expected_sig), DataType::Fn(concrete_id)) =
                 (t, &inferred_arg_types[i])
             {
-                !fn_matches_signature(*concrete_id as usize, expected_sig, v, ctx, state)
+                !fn_matches_signature(*concrete_id as usize, expected_sig, ctx, state)
             } else {
                 inferred_arg_types[i] != *t
             }
@@ -94,28 +91,23 @@ pub fn check_user_fn_arg_types(
 pub fn compile_function_call(
     function_call: &FunctionCallExpr,
     output: &mut Vec<Instr>,
-    v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
 ) -> Option<u16> {
     let namespace = function_call.qualified_name.get_namespace();
     if namespace.is_empty() {
-        builtin_functions(output, v, ctx, state, tgt_id, function_call)
+        builtin_functions(output, ctx, state, tgt_id, function_call)
     } else if namespace == ["fs"] {
         #[cfg(target_arch = "wasm32")]
         wasm_error("WASM does not support the file system library");
 
-        fs_lib_functions(output, v, ctx, state, tgt_id, function_call)
+        fs_lib_functions(output, ctx, state, tgt_id, function_call)
     } else if let Some((fn_args, returns_null, dyn_id)) = state
         .dyn_libs
         .iter()
         .find(|l| l.name == namespace[0])
-        .and_then(|lib| {
-            lib.fns
-                .iter()
-                .find(|x| &x.name == function_call.qualified_name.get_name())
-        })
+        .and_then(|lib| lib.fns.iter().find(|x| &x.name == function_call.qualified_name.get_name()))
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
         check_args(
@@ -129,7 +121,6 @@ pub fn compile_function_call(
         for (i, a) in fn_args.iter().enumerate() {
             check_arg_type(
                 function_call.qualified_name.get_name(),
-                v,
                 ctx,
                 state,
                 &function_call.args,
@@ -141,25 +132,15 @@ pub fn compile_function_call(
 
         *state.allocated_arg_count = (*state.allocated_arg_count).max(function_call.args.len());
         for arg in &function_call.args {
-            let arg_id = arg
-                .compile(v, ctx, state, output, None, false, true)
-                .unwrap_id();
+            let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
             output.push(Instr::StoreFuncArg(arg_id));
-            state.free_reg(arg_id, v);
+            state.free_reg(arg_id);
         }
 
-        let register_id = if returns_null {
-            0
-        } else {
-            state.alloc_reg_tgt(tgt_id)
-        };
+        let register_id = if returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
         state.add_to_src(ctx, output, function_call.span);
-        if returns_null {
-            None
-        } else {
-            Some(register_id)
-        }
+        if returns_null { None } else { Some(register_id) }
     } else if let Some(fn_id) = state.scope.find_function(
         namespace,
         function_call.qualified_name.get_name(),
@@ -167,7 +148,7 @@ pub fn compile_function_call(
         ctx.file_idx,
         state.sources,
     ) {
-        handle_user_function(function_call, fn_id, output, v, ctx, state, tgt_id)
+        handle_user_function(function_call, fn_id, output, ctx, state, tgt_id)
     } else {
         error_unknown_function_in_namespace(
             function_call.qualified_name.get_name(),

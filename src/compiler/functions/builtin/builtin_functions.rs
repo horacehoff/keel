@@ -8,7 +8,6 @@ use super::user_functions::handle_user_function;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
-use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args;
 use crate::compiler::compiler_errors::check_args_range;
 use crate::compiler::compiler_errors::error_expected_function;
@@ -22,7 +21,6 @@ use std::rc::Rc;
 
 pub fn builtin_functions(
     output: &mut Vec<Instr>,
-    v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     tgt_id: Option<u16>,
@@ -35,28 +33,23 @@ pub fn builtin_functions(
     match name {
         "print" => {
             for arg in args {
-                let id = arg
-                    .compile(v, ctx, state, output, None, false, true)
-                    .unwrap_id();
+                let id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
                 output.push(Instr::Print(id));
-                state.free_reg(id, v);
+                state.free_reg(id);
             }
             None
         }
         "type" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            let infered = args[0].infer_type(v, ctx, state);
-            state.registers.push(Data::p_str(
-                infered.format_detailed(state).as_str(),
-                &mut state.pools.str_pool,
-            ));
-            Some((state.registers.len() - 1) as u16)
+            let infered = args[0].infer_type(ctx, state);
+            let arg_type =
+                Data::p_str(infered.format_detailed(state).as_str(), &mut state.pools.str_pool);
+            Some(state.new_reg(arg_type))
         }
         "float" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(
                 name,
-                v,
                 ctx,
                 state,
                 args,
@@ -64,10 +57,8 @@ pub fn builtin_functions(
                 0,
                 &[DataType::String, DataType::Int],
             );
-            let id = args[0]
-                .compile(v, ctx, state, output, None, false, true)
-                .unwrap_id();
-            state.free_reg(id, v);
+            let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+            state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Float, id, output_id));
             state.add_to_src(ctx, output, span);
@@ -77,7 +68,6 @@ pub fn builtin_functions(
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(
                 name,
-                v,
                 ctx,
                 state,
                 args,
@@ -85,10 +75,8 @@ pub fn builtin_functions(
                 0,
                 &[DataType::String, DataType::Float],
             );
-            let id = args[0]
-                .compile(v, ctx, state, output, None, false, true)
-                .unwrap_id();
-            state.free_reg(id, v);
+            let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+            state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Int, id, output_id));
             state.add_to_src(ctx, output, span);
@@ -96,84 +84,55 @@ pub fn builtin_functions(
         }
         "str" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            let id = args[0]
-                .compile(v, ctx, state, output, None, false, true)
-                .unwrap_id();
-            state.free_reg(id, v);
+            let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+            state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Str, id, output_id));
             Some(output_id)
         }
         "bool" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
-            let id = args[0]
-                .compile(v, ctx, state, output, None, false, true)
-                .unwrap_id();
-            state.free_reg(id, v);
+            check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
+            let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+            state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Bool, id, output_id));
             state.add_to_src(ctx, output, span);
             Some(output_id)
         }
         "input" => {
-            check_args_range(
-                args,
-                0,
-                1,
-                name,
-                arg_spans,
-                ctx.file_idx,
-                state.sources,
-                span,
-            );
+            check_args_range(args, 0, 1, name, arg_spans, ctx.file_idx, state.sources, span);
             let id = if args.is_empty() {
-                state
-                    .registers
-                    .push(Data::p_str("", &mut state.pools.str_pool));
-                (state.registers.len() - 1) as u16
+                let data = Data::p_str("", &mut state.pools.str_pool);
+                state.new_reg(data)
             } else {
-                check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
-                args[0]
-                    .compile(v, ctx, state, output, None, false, true)
-                    .unwrap_id()
+                check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
+                args[0].compile(ctx, state, output, None, false, true).unwrap_id()
             };
-            state.free_reg(id, v);
+            state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Input, id, output_id));
             Some(output_id)
         }
         "range" => {
-            check_args_range(
-                args,
-                1,
-                2,
-                name,
-                arg_spans,
-                ctx.file_idx,
-                state.sources,
-                span,
-            );
-            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::Int]);
+            check_args_range(args, 1, 2, name, arg_spans, ctx.file_idx, state.sources, span);
+            check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::Int]);
             if args.len() != 1 {
-                check_arg_type(name, v, ctx, state, args, arg_spans, 1, &[DataType::Int]);
+                check_arg_type(name, ctx, state, args, arg_spans, 1, &[DataType::Int]);
             }
 
-            let id_first_arg = args[0]
-                .compile(v, ctx, state, output, None, false, true)
-                .unwrap_id();
+            let id_first_arg = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             let source_reg_id = if args.len() == 1 {
                 id_first_arg
             } else {
-                let id_second_arg = args[1]
-                    .compile(v, ctx, state, output, None, false, true)
-                    .unwrap_id();
+                let id_second_arg =
+                    args[1].compile(ctx, state, output, None, false, true).unwrap_id();
                 output.push(Instr::StoreFuncArg(id_first_arg));
                 *state.allocated_arg_count = (*state.allocated_arg_count).max(1);
                 id_second_arg
             };
-            state.free_reg(id_first_arg, v);
-            state.free_reg(source_reg_id, v);
+            state.free_reg(id_first_arg);
+            state.free_reg(source_reg_id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Range, source_reg_id, output_id));
             Some(output_id)
@@ -191,39 +150,26 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "exit" => {
-            check_args_range(
-                args,
-                0,
-                1,
-                name,
-                arg_spans,
-                ctx.file_idx,
-                state.sources,
-                span,
-            );
+            check_args_range(args, 0, 1, name, arg_spans, ctx.file_idx, state.sources, span);
             let halt_code = if args.is_empty() {
                 0
             } else {
-                check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::Int]);
-                args[0]
-                    .compile(v, ctx, state, output, None, false, true)
-                    .unwrap_id()
+                check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::Int]);
+                args[0].compile(ctx, state, output, None, false, true).unwrap_id()
             };
             output.push(Instr::Halt(halt_code));
             None
         }
         "throw" => {
             check_args(args, 1, name, span, state.sources, ctx.file_idx);
-            check_arg_type(name, v, ctx, state, args, arg_spans, 0, &[DataType::String]);
-            let err_reg_id = args[0]
-                .compile(v, ctx, state, output, None, false, true)
-                .unwrap_id();
+            check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
+            let err_reg_id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             output.push(Instr::ThrowError(err_reg_id));
             state.add_to_src(ctx, output, span);
             None
         }
         fn_name => {
-            if let Some(var) = v.iter().rfind(|var| var.name.as_str() == fn_name) {
+            if let Some(var) = state.find_var(fn_name) {
                 let fn_reg = var.register_id;
                 let fn_id = if let DataType::Fn(id) = var.var_type {
                     id as usize
@@ -231,20 +177,10 @@ pub fn builtin_functions(
                     error_expected_function(&var.var_type, span, ctx.file_idx, state.sources)
                 };
 
-                let inferred_arg_types = args
-                    .iter()
-                    .map(|arg| arg.infer_type(v, ctx, state))
-                    .collect::<Vec<DataType>>();
+                let inferred_arg_types =
+                    args.iter().map(|arg| arg.infer_type(ctx, state)).collect::<Vec<DataType>>();
 
-                check_user_fn_arg_types(
-                    fn_id,
-                    fn_name,
-                    &inferred_arg_types,
-                    arg_spans,
-                    v,
-                    ctx,
-                    state,
-                );
+                check_user_fn_arg_types(fn_id, fn_name, &inferred_arg_types, arg_spans, ctx, state);
 
                 let fn_impl_idx = state.fns[fn_id]
                     .impls
@@ -263,7 +199,6 @@ pub fn builtin_functions(
                     let closure_name = state.fns[fn_id].name.clone();
                     compile_function(
                         output,
-                        v,
                         ctx,
                         state,
                         fn_id,
@@ -284,9 +219,8 @@ pub fn builtin_functions(
                 for (i, arg_expr) in args.iter().enumerate() {
                     let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
                     let start_len = output.len();
-                    let arg_id = arg_expr
-                        .compile(v, ctx, state, output, Some(tgt_id), false, true)
-                        .unwrap_id();
+                    let arg_id =
+                        arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
                     if output.len() == start_len {
                         output.push(Instr::Mov(arg_id, tgt_id));
                     } else {
@@ -298,11 +232,9 @@ pub fn builtin_functions(
                 output.push(Instr::CallFuncDynamic(fn_reg, return_register_id));
                 Some(return_register_id)
             } else if let Some(fn_id) =
-                state
-                    .scope
-                    .find_function(&[], fn_name, span, ctx.file_idx, state.sources)
+                state.scope.find_function(&[], fn_name, span, ctx.file_idx, state.sources)
             {
-                handle_user_function(function_call, fn_id, output, v, ctx, state, tgt_id)
+                handle_user_function(function_call, fn_id, output, ctx, state, tgt_id)
             } else {
                 error_unknown_function(fn_name, span, state.scope, ctx.file_idx, state.sources);
             }

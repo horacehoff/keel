@@ -12,10 +12,8 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     {
         return;
     }
-    let matching_elem_index = x
-        .iter()
-        .rposition(|w| w.get_tgt_id().is_some())
-        .unwrap_or(x.len() - 1);
+    let matching_elem_index =
+        x.iter().rposition(|w| w.get_tgt_id().is_some()).unwrap_or(x.len() - 1);
     let matching_elem = x.get_mut(matching_elem_index).unwrap();
     match matching_elem {
         Instr::Mov(_, y)

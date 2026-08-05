@@ -58,14 +58,7 @@ pub fn map_gc(
     map_live.resize(map_pool.len(), false);
     for data in registers.0.iter().chain(recursion_stack.0.iter()) {
         if data.is_map() {
-            track_maps(
-                data.as_map(),
-                map_pool,
-                obj_pool,
-                live,
-                map_live,
-                obj_gc_stack,
-            );
+            track_maps(data.as_map(), map_pool, obj_pool, live, map_live, obj_gc_stack);
         } else if data.is_array() || data.is_struct() {
             track(*data, obj_pool, map_pool, live, map_live, obj_gc_stack);
         }

@@ -19,9 +19,12 @@ use crate::compiler::compiler_errors::error_unknown_namespace;
 use crate::compiler::expr::DylibFnExpr;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::expr::DylibImportExpr;
+use crate::compiler::expr::FunctionDeclarationArgumentExpr;
+use crate::compiler::expr::FunctionDeclarationExpr;
 use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::IntForLoopExpr;
 use crate::compiler::expr::QualifiedName;
+use crate::compiler::expr::StructFieldAssignmentExpr;
 use crate::compiler::expr::StructFieldExpr;
 use crate::compiler::functions::user_functions::compile_function;
 use crate::data::NULL;
@@ -1460,17 +1463,18 @@ fn compile_array_index_assignment(
 }
 
 fn compile_struct_field_assignment(
-    struct_expr: &Expr,
-    field: &SmolStr,
-    new_val: &Expr,
-    struct_span: Span,
-    field_span: Span,
-    value_span: Span,
+    struct_field_assignment: &StructFieldAssignmentExpr,
     v: &mut Vec<Variable>,
     ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
+    let struct_expr = &struct_field_assignment.struct_expr;
+    let new_val = &struct_field_assignment.field_value;
+    let struct_span = struct_field_assignment.struct_span;
+    let field = &struct_field_assignment.field;
+    let value_span = struct_field_assignment.value_span;
+    let field_span = struct_field_assignment.field_span;
     let t = struct_expr.infer_type(v, ctx, state);
     let new_val_type = new_val.infer_type(v, ctx, state);
     let DataType::Struct(struct_id) = t else {
@@ -1771,12 +1775,10 @@ fn compile_int_for_loop(
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
-    let start_elem = int_for_loop.get_lower_bound();
-    let end_elem = int_for_loop.get_upper_bound();
-    let span1 = int_for_loop.lower_bound_span;
-    let span2 = int_for_loop.upper_bound_span;
-    let var_name = &int_for_loop.var_name;
+    let lower_bound = int_for_loop.get_lower_bound();
+    let upper_bound = int_for_loop.get_upper_bound();
     let code = int_for_loop.get_loop_code();
+
     // IntForLoop is compiled to:
     // ----
     // (1) if i >= end_elem jump out
@@ -1787,20 +1789,30 @@ fn compile_int_for_loop(
     //
     //
     // Check start and elem type
-    let t1 = start_elem.infer_type(v, ctx, state);
-    let t2 = end_elem.infer_type(v, ctx, state);
+    let t1 = lower_bound.infer_type(v, ctx, state);
+    let t2 = upper_bound.infer_type(v, ctx, state);
     if t1 != DataType::Int {
-        error_range_invalid_type(span1, &t1, ctx.file_idx, state.sources);
+        error_range_invalid_type(
+            int_for_loop.lower_bound_span,
+            &t1,
+            ctx.file_idx,
+            state.sources,
+        );
     }
     if t2 != DataType::Int {
-        error_range_invalid_type(span2, &t2, ctx.file_idx, state.sources);
+        error_range_invalid_type(
+            int_for_loop.upper_bound_span,
+            &t2,
+            ctx.file_idx,
+            state.sources,
+        );
     }
     let elem_id = if ctx.single_run {
-        start_elem
+        lower_bound
             .compile(v, ctx, state, output, None, false, true)
             .unwrap_id()
     } else {
-        let start_elem_id = start_elem
+        let start_elem_id = lower_bound
             .compile(v, ctx, state, output, None, false, true)
             .unwrap_id();
         let start_val = state.registers[start_elem_id as usize];
@@ -1812,7 +1824,7 @@ fn compile_int_for_loop(
         }
         elem_id
     };
-    let end_elem_id = end_elem
+    let end_elem_id = upper_bound
         .compile(v, ctx, state, output, None, false, true)
         .unwrap_id();
 
@@ -1821,7 +1833,7 @@ fn compile_int_for_loop(
 
     let v_len = v.len();
     v.push(Variable {
-        name: var_name.clone(),
+        name: int_for_loop.var_name.clone(),
         register_id: elem_id,
         var_type: DataType::Int,
     });
@@ -2088,13 +2100,14 @@ fn compile_struct_definition(
 }
 
 fn compile_function_definition(
-    fn_name: &SmolStr,
-    fn_args: &[(SmolStr, Option<TypeExpr>)],
-    fn_code: &Rc<[Expr]>,
-    span: Span,
+    function_declaration: &FunctionDeclarationExpr,
     ctx: Ctx,
     state: &mut State<'_>,
 ) {
+    let fn_name = &function_declaration.name;
+    let span = function_declaration.span;
+    let fn_code = &function_declaration.code;
+    let fn_args = &function_declaration.args;
     if let Some(func) = state.fns.iter().find(|func| &func.name == fn_name) {
         compiler_errors::error_function_already_defined(func, span, ctx.file_idx, state.sources);
     }
@@ -2106,10 +2119,11 @@ fn compile_function_definition(
         .push((fn_name.clone(), SymbolKind::Fn(state.fns.len() as u16)));
     state.fns.push(Function {
         name: fn_name.clone(),
-        args: Box::from(fn_args.iter().map(|(a, t)| {
+        args: Box::from(fn_args.iter().map(|arg| {
             (
-                a.clone(),
-                t.as_ref()
+                arg.name.clone(),
+                arg.enforced_type
+                    .as_ref()
                     .map(|t_e| t_e.to_datatype(ctx.file_idx, state.scope, state.sources)),
             )
         }))
@@ -2674,27 +2688,9 @@ impl Expr {
                 );
                 None
             }
-            Self::SetStructField(
-                struct_expr,
-                field,
-                new_val,
-                struct_span,
-                field_span,
-                value_span,
-            ) => {
+            Self::SetStructField(struct_field_assignment) => {
                 debug_assert!(!uses_id);
-                compile_struct_field_assignment(
-                    struct_expr,
-                    field,
-                    new_val,
-                    *struct_span,
-                    *field_span,
-                    *value_span,
-                    v,
-                    ctx,
-                    state,
-                    output,
-                );
+                compile_struct_field_assignment(struct_field_assignment, v, ctx, state, output);
                 None
             }
             Self::IfBlock(if_block) => {
@@ -2770,9 +2766,9 @@ impl Expr {
                     },
                 ),
             ),
-            Self::FunctionDecl(fn_name, fn_args, fn_code, span) => {
+            Self::FunctionDecl(function_declaration) => {
                 debug_assert!(!uses_id);
-                compile_function_definition(fn_name, fn_args, fn_code, *span, ctx, state);
+                compile_function_definition(function_declaration, ctx, state);
                 None
             }
             Self::ReturnVal(return_value) => {
@@ -2917,7 +2913,7 @@ fn parse_toplevel(
     files: &mut FxHashMap<PathBuf, Scope>,
     file_scopes: &mut FxHashMap<u16, Scope>,
     pending_structs: &mut Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
-    pending_fns: &mut Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)>,
+    pending_fns: &mut Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr]>)>,
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: &mut Vec<(
         u16,
         u16,
@@ -2929,7 +2925,11 @@ fn parse_toplevel(
     let mut imports = Vec::new();
     for expr in code {
         match expr {
-            Expr::FunctionDecl(fn_name, fn_args, fn_code, span) => {
+            Expr::FunctionDecl(function_declaration) => {
+                let fn_name = function_declaration.name;
+                let span = function_declaration.span;
+                let fn_code = function_declaration.code;
+                let fn_args = function_declaration.args;
                 if let Some((_, SymbolKind::Fn(func_id))) =
                     scope.symbols.iter().rfind(|(f, _)| f == &fn_name)
                 {
@@ -3122,7 +3122,7 @@ fn resolve_types(
     structs: &mut [Struct],
     fns: &mut [Function],
     pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
-    pending_fns: Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)>,
+    pending_fns: Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr]>)>,
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: Vec<(
         u16,
         u16,
@@ -3153,10 +3153,10 @@ fn resolve_types(
     for (fn_id, src_file_idx, args) in pending_fns {
         let resolved_args = args
             .iter()
-            .map(|(arg_name, arg_type)| {
+            .map(|arg| {
                 (
-                    arg_name.clone(),
-                    arg_type.clone().map(|t_e| {
+                    arg.name.clone(),
+                    arg.enforced_type.clone().map(|t_e| {
                         t_e.to_datatype(src_file_idx, &file_namespaces[&src_file_idx], sources)
                     }),
                 )
@@ -3294,7 +3294,7 @@ pub fn compile(
     let mut files: FxHashMap<PathBuf, Scope> = FxHashMap::default();
     let mut file_scopes: FxHashMap<u16, Scope> = FxHashMap::default();
     let mut pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)> = Vec::new();
-    let mut pending_fns: Vec<(u16, u16, Box<[(SmolStr, Option<TypeExpr>)]>)> =
+    let mut pending_fns: Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr]>)> =
         Vec::with_capacity(2);
     #[cfg(not(target_arch = "wasm32"))]
     let mut pending_dylibs: Vec<(u16, u16, Box<[DylibFnExpr]>, Rc<Library>, Span)> = Vec::new();

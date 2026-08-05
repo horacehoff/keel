@@ -393,7 +393,9 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                     expr_stack.push(code);
                 }
             }
-            Expr::FunctionDecl(_, _, x, _) => expr_stack.extend(x.iter()),
+            Expr::FunctionDecl(function_declaration) => {
+                expr_stack.extend(function_declaration.code.iter())
+            }
             Expr::ArrayGetSlice(x, y, z, _) => {
                 expr_stack.push(x);
                 expr_stack.push(y);
@@ -419,9 +421,9 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 expr_stack.extend(fields.iter().map(|field| &field.value));
             }
             Expr::GetStructField(expr, _, _, _) => expr_stack.push(expr),
-            Expr::SetStructField(expr, _, value, _, _, _) => {
-                expr_stack.push(expr);
-                expr_stack.push(value);
+            Expr::SetStructField(struct_field_assignment) => {
+                expr_stack.push(&struct_field_assignment.struct_expr);
+                expr_stack.push(&struct_field_assignment.field_value);
             }
             Expr::TryCatchBlock(try_code, _, catch_code) => {
                 expr_stack.extend(try_code);

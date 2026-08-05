@@ -50,8 +50,7 @@ fn main() {
 }
 ```
 
-## Benchmarks
-![Keel benchmarks](docs/docs/images/keel-benchmarks.jpg)
+
 
 ## Installation
 
@@ -71,14 +70,8 @@ Run the following command in a PowerShell terminal. Administrator privileges are
 irm https://raw.githubusercontent.com/horacehoff/keel/main/install.ps1 | iex
 ```
 
-### Build from source (without PGO)
-
-Make sure [Rust](https://rustup.rs/) is installed.
-
-```sh
-git clone https://github.com/horacehoff/keel && cd keel && cargo build --release
-./target/release/keel myfile.kl
-```
+## Benchmarks
+![Keel benchmarks](docs/docs/images/keel-benchmarks.jpg)
 
 ## Usage
 
@@ -87,6 +80,15 @@ keel program.kl    # Run a file
 keel               # Start the REPL
 keel -v/--version  # Print version
 keel -h/--help     # Print help
+```
+
+### Build from source (without PGO)
+
+Make sure [Rust](https://rustup.rs/) is installed.
+
+```sh
+git clone https://github.com/horacehoff/keel && cd keel && cargo build --release
+./target/release/keel myfile.kl
 ```
 
 ## Near-future roadmap

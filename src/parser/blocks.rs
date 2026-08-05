@@ -6,6 +6,8 @@ use super::parser_expr::parse_expr_no_struct;
 use crate::cold_path;
 use crate::compiler::expr::Expr;
 use crate::compiler::expr::FunctionCallExpr;
+use crate::compiler::expr::FunctionDeclarationArgumentExpr;
+use crate::compiler::expr::FunctionDeclarationExpr;
 use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::IntForLoopExpr;
 use crate::compiler::expr::QualifiedName;
@@ -184,7 +186,7 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
         Token::LParen,
         "Function arguments must be delimited by parentheses",
     );
-    let mut args: Vec<(SmolStr, Option<TypeExpr>)> = Vec::with_capacity(4);
+    let mut args: Vec<FunctionDeclarationArgumentExpr> = Vec::with_capacity(4);
     loop {
         if parser.peek_token() == Token::RParen {
             parser.next_token();
@@ -192,15 +194,15 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
         }
         let (arg, span) = parser.next_token();
         if let Token::Identifier(arg) = arg {
-            args.push((
-                SmolStr::new(arg),
-                if parser.peek_token() == Token::Colon {
+            args.push(FunctionDeclarationArgumentExpr {
+                name: SmolStr::new(arg),
+                enforced_type: if parser.peek_token() == Token::Colon {
                     parser.next_token();
                     Some(parse_type(parser))
                 } else {
                     None
                 },
-            ));
+            });
         } else {
             cold_path();
             parser.error(
@@ -221,7 +223,12 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
         }
     }
     let fn_code = parse_block(parser);
-    Expr::FunctionDecl(fn_name, Box::from(args), std::rc::Rc::from(fn_code), span)
+    Expr::FunctionDecl(FunctionDeclarationExpr {
+        name: fn_name,
+        args: Box::from(args),
+        code: std::rc::Rc::from(fn_code),
+        span,
+    })
 }
 
 pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {

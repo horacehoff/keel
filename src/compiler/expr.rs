@@ -74,6 +74,30 @@ impl IntForLoopExpr {
     }
 }
 
+#[derive(PartialEq, Clone, Debug)]
+pub struct FunctionDeclarationArgumentExpr {
+    pub name: SmolStr,
+    pub enforced_type: Option<TypeExpr>,
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct FunctionDeclarationExpr {
+    pub name: SmolStr,
+    pub args: Box<[FunctionDeclarationArgumentExpr]>,
+    pub code: Rc<[Expr]>,
+    pub span: Span,
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct StructFieldAssignmentExpr {
+    pub struct_expr: Box<Expr>,
+    pub field: SmolStr,
+    pub field_value: Box<Expr>,
+    pub struct_span: Span,
+    pub field_span: Span,
+    pub value_span: Span,
+}
+
 /// A fully-qualified symbol name.
 /// Invariant:
 /// - len > 0
@@ -110,6 +134,9 @@ pub enum Expr {
     Null,
     String(SmolStr),
     Var(SmolStr, Span),
+
+    ConstDeclare(SmolStr, Box<Expr>),
+
     /// Array(contents, [entire_array, elem_spans...])
     Array(Box<[Self]>, Box<[Span]>),
     /// Map(key-value pairs, span)
@@ -120,8 +147,7 @@ pub enum Expr {
     StructDeclare(SmolStr, Box<[(SmolStr, TypeExpr, Span)]>, Span),
     /// GetStructField(struct_expr, field, struct_span, field_span, value_span)
     GetStructField(Box<Self>, SmolStr, Span, Span),
-    /// SetStructField(struct_expr, field, new_expr, struct_span, field_span, value_span)
-    SetStructField(Box<Self>, SmolStr, Box<Self>, Span, Span, Span),
+    SetStructField(StructFieldAssignmentExpr),
     /// VarDeclare(name, value),
     VarDeclare(SmolStr, Box<Self>),
     /// VarDeclare(name, value, start, end)
@@ -137,13 +163,7 @@ pub enum Expr {
     WhileBlock(Box<Self>, Box<[Self]>),
     FunctionCall(FunctionCallExpr),
     ObjFunctionCall(FunctionCallExpr),
-    /// FunctionDecl(name, args, code, span)
-    FunctionDecl(
-        SmolStr,
-        Box<[(SmolStr, Option<TypeExpr>)]>,
-        Rc<[Self]>,
-        Span,
-    ),
+    FunctionDecl(FunctionDeclarationExpr),
 
     ReturnVal(Box<Option<Self>>),
 
@@ -230,15 +250,15 @@ pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) 
         Expr::VarAssign(n, Box::from(value), s)
     } else if let Expr::ArrayGetIndex(base, idx, _) = target {
         Expr::ArrayModify(base, idx, Box::from(value), expr_span, value_span)
-    } else if let Expr::GetStructField(obj, field, obj_span, field_span) = target {
-        Expr::SetStructField(
-            obj,
+    } else if let Expr::GetStructField(struct_expr, field, struct_span, field_span) = target {
+        Expr::SetStructField(StructFieldAssignmentExpr {
+            struct_expr,
             field,
-            Box::from(value),
-            obj_span,
+            field_value: Box::from(value),
+            struct_span,
             field_span,
             value_span,
-        )
+        })
     } else {
         unsafe { unreachable_unchecked() }
     }

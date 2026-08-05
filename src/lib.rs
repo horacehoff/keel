@@ -145,7 +145,7 @@ pub fn main() {
     if next_arg == "--help" || next_arg == "-h" {
         cold_path();
         println!(
-            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel myfile.kl\n  keel [-v | --version]",
+            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel\n  keel myfile.kl\n  keel [-v | --version]\n  keel [-h | --help]\n\nDocumentation: https://docs.keel-lang.com\nWebsite: https://keel-lang.com",
             util::KEEL_LOGO
         );
         return;
@@ -155,7 +155,7 @@ pub fn main() {
         cold_path();
         if args.len() > 1 {
             eprintln!(
-                "{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n  keel myfile.kl\n  keel [-v | --version]"
+                "{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n  keel\n  keel myfile.kl\n  keel [-v | --version]\n  keel [-h | --help]"
             );
             return;
         }
@@ -167,9 +167,7 @@ pub fn main() {
 
     let contents = fs::read_to_string(filename).unwrap_or_else(|_| {
         cold_path();
-        eprintln!(
-            "--------------\n{RED}KEEL RUNTIME ERROR:{RESET}\nCannot read {RED}{BOLD}{filename}{RESET}\n--------------",
-        );
+        eprintln!("{RED}[KEEL]{RESET} Cannot read {RED}{BOLD}{filename}{RESET}");
         std::process::exit(1);
     });
 

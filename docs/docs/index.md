@@ -25,6 +25,8 @@ The goal of this documentation / tutorial is to show Keel's syntax and how it wo
 
 ## Installation
 
+You can install Keel manually by downloading the desired version from the [releases page](https://github.com/horacehoff/keel/releases/latest), or use one of the following installation commands.
+
 ### On macOS / Linux
 
 Keel provides a macOS / Linux installer, which you can use to download and install Keel by running the following command in your terminal:<br/>
@@ -34,7 +36,11 @@ This will install the latest Keel version in `Library/Keel` on macOS, and in `/u
 
 ### On Windows
 
-Keel doesn't provide a Windows installer yet. You must manually download it from [the latest release on GitHub](https://github.com/horacehoff/keel/releases/latest).
+Run the following command in a PowerShell terminal. Administrator privileges are not required to run this command or the installation script.
+
+`#!powershell irm https://raw.githubusercontent.com/horacehoff/keel/main/install.ps1 | iex`
+
+This will install the latest Keel version for the current user in `AppData\Local`.
 
 ## Usage
 

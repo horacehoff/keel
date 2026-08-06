@@ -368,9 +368,13 @@ fn compile_struct_literal(
 ) -> u16 {
     let struct_name = name.get_name();
     let namespace = name.get_namespace();
-    let Some(expected_struct_idx) =
-        state.scope.find_struct(namespace, struct_name, span, ctx.file_idx, state.sources)
-    else {
+    let Some(expected_struct_idx) = state.scope(ctx.file_idx).find_struct(
+        namespace,
+        struct_name,
+        span,
+        ctx.file_idx,
+        state.sources,
+    ) else {
         compiler_errors::error_unknown_struct(struct_name, span, state.sources, ctx.file_idx);
     };
     let type_id = state.structs[expected_struct_idx].id;
@@ -1680,13 +1684,14 @@ fn compile_var_declaration(
     };
 
     if let DataType::Fn(fn_id) = &var_type {
-        state.scope.symbols.push((name.clone(), SymbolKind::Fn(*fn_id)));
+        state.scope_mut(ctx.file_idx).symbols.push((name.clone(), SymbolKind::Fn(*fn_id)));
     }
     state.free_registers.retain(|&id| id != var_id);
     state.new_var(name.clone(), var_id, var_type);
 }
 
 fn compile_var_assignment(
+    path: &[SmolStr],
     name: &SmolStr,
     value: &Expr,
     span: Span,
@@ -1695,14 +1700,30 @@ fn compile_var_assignment(
     output: &mut Vec<Instr>,
 ) {
     let var_type = value.infer_type(ctx, state);
-    let var_pos = state.find_var_idx(name).unwrap_or_else(|| {
+
+    let local_var_idx = if path.is_empty() { state.find_var_idx(name) } else { None };
+    let global_var_idx = if local_var_idx.is_some() {
+        None
+    } else if let Some(global_id) =
+        state.scope(ctx.file_idx).find_global(path, name, span, ctx.file_idx, state.sources)
+    {
+        if state.globals[global_id].var_type != var_type {
+            panic!("Static variables cannot have their type modified")
+        }
+        Some(global_id)
+    } else {
         compiler_errors::error_unknown_variable(name, span, state.v, ctx.file_idx, state.sources);
-    });
-    let id = state.v[var_pos].register_id;
+    };
+
+    let reg_id = if let Some(pos) = local_var_idx {
+        state.v[pos].register_id
+    } else {
+        state.globals[unsafe { global_var_idx.unwrap_unchecked() }].register_id
+    };
 
     if var_type == DataType::Int {
-        // (is_inc, src_var_name)
-        let inc_dec: Option<(bool, &str)> = match value {
+        // (is_inc, src_register_id)
+        let inc_dec: Option<(bool, u16)> = match value {
             // var+1/1+var use the dedicated IncInt/IncIntTo instructions
             Expr::Add(l, r, _, _) => {
                 let src = if matches!(r.as_ref(), Expr::Int(1)) {
@@ -1712,58 +1733,72 @@ fn compile_var_assignment(
                 } else {
                     None
                 };
-                src.and_then(|e| {
-                    if let Expr::Var(src_name, _) = e {
-                        state
-                            .find_var(src_name)
-                            .filter(|x| x.var_type == DataType::Int)
-                            .map(|_| (true, src_name.as_str()))
-                    } else {
-                        None
-                    }
-                })
+                src.and_then(|e| int_var_register(e, ctx, state)).map(|src_id| (true, src_id))
             }
             // var-1 uses the dedicated DecInt/DecIntTo instructions
             Expr::Sub(l, r, _, _) => {
                 if matches!(r.as_ref(), Expr::Int(1)) {
-                    if let Expr::Var(src_name, _) = l.as_ref() {
-                        state
-                            .find_var(src_name)
-                            .filter(|x| x.var_type == DataType::Int)
-                            .map(|_| (false, src_name.as_str()))
-                    } else {
-                        None
-                    }
+                    int_var_register(l.as_ref(), ctx, state).map(|src_id| (false, src_id))
                 } else {
                     None
                 }
             }
             _ => None,
         };
-        if let Some((is_inc, src_name)) = inc_dec {
-            let src_id = state.find_var(src_name).unwrap().register_id;
-            output.push(if src_id == id {
-                if is_inc { Instr::IncInt(id) } else { Instr::DecInt(id) }
+        if let Some((is_inc, src_id)) = inc_dec {
+            output.push(if src_id == reg_id {
+                if is_inc { Instr::IncInt(reg_id) } else { Instr::DecInt(reg_id) }
             } else {
-                if is_inc { Instr::IncIntTo(src_id, id) } else { Instr::DecIntTo(src_id, id) }
+                if is_inc {
+                    Instr::IncIntTo(src_id, reg_id)
+                } else {
+                    Instr::DecIntTo(src_id, reg_id)
+                }
             });
             return;
         }
     }
 
     let output_len = output.len();
-    let obj_id = value.compile(ctx, state, output, Some(id), false, true).unwrap_id();
+    let obj_id = value.compile(ctx, state, output, Some(reg_id), false, true).unwrap_id();
     if output.len() != output_len {
-        move_to_id(output, id);
+        move_to_id(output, reg_id);
     } else if state.const_registers.values().any(|&v| v == obj_id) {
-        move_reg_to_reg(output, obj_id, id, state.registers[obj_id as usize]);
+        move_reg_to_reg(output, obj_id, reg_id, state.registers[obj_id as usize]);
     } else {
-        output.push(Instr::Mov(obj_id, id));
+        output.push(Instr::Mov(obj_id, reg_id));
     }
     if !state.v.iter().any(|var| &var.name != name && var.register_id == obj_id) {
         state.free_reg(obj_id);
     }
-    state.v[var_pos].var_type = var_type;
+    if let Some(pos) = local_var_idx {
+        state.v[pos].var_type = var_type;
+    } else if let Some(pos) = global_var_idx
+        && matches!(state.globals[pos].var_type, DataType::Array(None) | DataType::Unknown)
+    {
+        state.globals[pos].var_type = var_type;
+    }
+}
+
+fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_>) -> Option<u16> {
+    let (namespace, name, span): (&[SmolStr], &SmolStr, Span) = match e {
+        Expr::Var(n, s) => (&[], n, *s),
+        Expr::NamespacedVar(n, s) => (n.get_namespace(), n.get_name(), *s),
+        _ => return None,
+    };
+    if namespace.is_empty()
+        && let Some(var) = state.find_var(name)
+    {
+        return (var.var_type == DataType::Int).then_some(var.register_id);
+    }
+    let global_var = &state.globals[state.scope(ctx.file_idx).find_global(
+        namespace,
+        name,
+        span,
+        ctx.file_idx,
+        state.sources,
+    )?];
+    (global_var.var_type == DataType::Int).then_some(global_var.register_id)
 }
 
 fn compile_struct_definition(
@@ -1781,12 +1816,17 @@ fn compile_struct_definition(
         id: struct_id,
         name_span: span,
     });
-    state.scope.symbols.push((name.clone(), SymbolKind::Struct((state.structs.len() - 1) as u16)));
+    let symbol = SymbolKind::Struct((state.structs.len() - 1) as u16);
+    state.scope_mut(ctx.file_idx).symbols.push((name.clone(), symbol));
     let parsed_fields = fields
         .iter()
         .map(|(field_name, field_type, field_span)| StructField {
             name: field_name.clone(),
-            field_type: field_type.to_datatype(ctx.file_idx, state.scope, state.sources),
+            field_type: field_type.to_datatype(
+                ctx.file_idx,
+                state.scope(ctx.file_idx),
+                state.sources,
+            ),
             span: *field_span,
         })
         .collect();
@@ -1807,15 +1847,16 @@ fn compile_function_definition(
     }
     let mut callees = Vec::new();
     collect_direct_fn_calls(fn_code, &mut callees);
-    state.scope.symbols.push((fn_name.clone(), SymbolKind::Fn(state.fns.len() as u16)));
+    let symbol = SymbolKind::Fn(state.fns.len() as u16);
+    state.scope_mut(ctx.file_idx).symbols.push((fn_name.clone(), symbol));
     state.fns.push(Function {
         name: fn_name.clone(),
         args: Box::from(fn_args.iter().map(|arg| {
             (
                 arg.name.clone(),
-                arg.enforced_type
-                    .as_ref()
-                    .map(|t_e| t_e.to_datatype(ctx.file_idx, state.scope, state.sources)),
+                arg.enforced_type.as_ref().map(|t_e| {
+                    t_e.to_datatype(ctx.file_idx, state.scope(ctx.file_idx), state.sources)
+                }),
             )
         }))
         .collect(),
@@ -1859,13 +1900,13 @@ fn compile_loop_continue(ctx: Ctx, output: &mut Vec<Instr>) {
 
 #[inline]
 fn compile_eval_block(code: &[Expr], ctx: Ctx, state: &mut State<'_>, output: &mut Vec<Instr>) {
-    output.extend(compile_expr(code, ctx.set_offset(output.len() as u16), state));
+    output.extend(compile_expr(code, ctx.with_offset(output.len() as u16), state));
 }
 
 pub fn compile_expr(input: &[Expr], ctx: Ctx, state: &mut State<'_>) -> Vec<Instr> {
     let v_len = state.v.len();
     let fn_len = state.fns.len();
-    let symbols_len = state.scope.symbols.len();
+    let symbols_len = state.scope(ctx.file_idx).symbols.len();
     let mut output: Vec<Instr> = Vec::with_capacity(input.len());
     for (idx, x) in input.iter().enumerate() {
         if let Some(id) = x.compile_with_code_context(
@@ -1885,7 +1926,7 @@ pub fn compile_expr(input: &[Expr], ctx: Ctx, state: &mut State<'_>) -> Vec<Inst
     }
     state.v.truncate(v_len);
     state.fns.truncate(fn_len);
-    state.scope.symbols.truncate(symbols_len);
+    state.scope_mut(ctx.file_idx).symbols.truncate(symbols_len);
     output
 }
 
@@ -1957,11 +1998,83 @@ impl Expr {
             }
             Self::Var(name, span) => {
                 debug_assert!(uses_id);
-                if let Some(Variable { name: _, register_id, var_type: _ }) = state.find_var(name) {
+                if let Some(Variable { register_id, .. }) = state.find_var(name) {
                     Some(*register_id)
-                } else if let Some(fn_id) =
-                    state.scope.find_function(&[], name, *span, ctx.file_idx, state.sources)
-                {
+                } else if let Some(idx) = state.scope(ctx.file_idx).find_global(
+                    &[],
+                    name,
+                    *span,
+                    ctx.file_idx,
+                    state.sources,
+                ) {
+                    Some(state.globals[idx].register_id)
+                } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
+                    &[],
+                    name,
+                    *span,
+                    ctx.file_idx,
+                    state.sources,
+                ) {
+                    let arg_types: Vec<DataType> =
+                        state.fns[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
+
+                    let fn_impl_idx =
+                        state.fns[fn_id].impls.iter().position(|imp| *imp.arg_types == arg_types);
+                    if fn_impl_idx.is_none() {
+                        let fn_args = state.fns[fn_id]
+                            .args
+                            .iter()
+                            .map(|(a, _)| a.clone())
+                            .collect::<Vec<SmolStr>>();
+                        let fn_code = Rc::clone(&state.fns[fn_id].code);
+                        compile_function(
+                            output,
+                            ctx,
+                            state,
+                            fn_id,
+                            &fn_args,
+                            name,
+                            &arg_types,
+                            &fn_code,
+                            fn_id as u16,
+                            false,
+                            state.fns[fn_id].src_file,
+                        );
+                    }
+                    let fn_impl_idx =
+                        fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
+                    let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+
+                    Some(state.new_reg(Data::function(loc)))
+                } else {
+                    compiler_errors::error_unknown_variable(
+                        name,
+                        *span,
+                        state.v,
+                        ctx.file_idx,
+                        state.sources,
+                    );
+                }
+            }
+            Self::NamespacedVar(qualified_name, span) => {
+                debug_assert!(uses_id);
+                let name = qualified_name.get_name();
+                let namespace = qualified_name.get_namespace();
+                if let Some(idx) = state.scope(ctx.file_idx).find_global(
+                    namespace,
+                    name,
+                    *span,
+                    ctx.file_idx,
+                    state.sources,
+                ) {
+                    Some(state.globals[idx].register_id)
+                } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
+                    namespace,
+                    name,
+                    *span,
+                    ctx.file_idx,
+                    state.sources,
+                ) {
                     let arg_types: Vec<DataType> =
                         state.fns[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
 
@@ -2292,7 +2405,20 @@ impl Expr {
             }
             Self::VarAssign(name, value, span) => {
                 debug_assert!(!uses_id);
-                compile_var_assignment(name, value, *span, ctx, state, output);
+                compile_var_assignment(&[], name, value, *span, ctx, state, output);
+                None
+            }
+            Self::NamespacedVarAssign(qualified_name, value, span) => {
+                debug_assert!(!uses_id);
+                compile_var_assignment(
+                    qualified_name.get_namespace(),
+                    qualified_name.get_name(),
+                    value,
+                    *span,
+                    ctx,
+                    state,
+                    output,
+                );
                 None
             }
             Self::StructDeclare(name, fields, span) => {
@@ -2366,6 +2492,7 @@ const ARCH_SUFFIX: &str = "";
 pub enum SymbolKind {
     Fn(u16),
     Struct(u16),
+    Global(u16),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2424,6 +2551,27 @@ impl Scope {
         )
     }
     #[must_use]
+    pub fn find_global(
+        &self,
+        path: &[SmolStr],
+        var_name: &str,
+        span: Span,
+        file_idx: u16,
+        sources: &[Source],
+    ) -> Option<usize> {
+        self.walk_to_namespace(path, span, file_idx, sources).symbols.iter().find_map(
+            |(name, kind)| {
+                if name.as_str() == var_name
+                    && let SymbolKind::Global(var_id) = kind
+                {
+                    Some(*var_id as usize)
+                } else {
+                    None
+                }
+            },
+        )
+    }
+    #[must_use]
     pub fn walk_to_namespace(
         &self,
         path: &[SmolStr],
@@ -2467,10 +2615,13 @@ fn parse_toplevel(
         Rc<Library>,
         Span,
     )>,
+    pending_globals: &mut Vec<(SmolStr, Expr, u16)>,
 ) {
     let mut imports = Vec::new();
+    let mut file_globals: Vec<(SmolStr, Expr)> = Vec::new();
     for expr in code {
         match expr {
+            Expr::VarDeclare(name, value) => file_globals.push((name, *value)),
             Expr::FunctionDecl(function_declaration) => {
                 let fn_name = function_declaration.name;
                 let span = function_declaration.span;
@@ -2641,6 +2792,7 @@ fn parse_toplevel(
                     pending_fns,
                     #[cfg(not(target_arch = "wasm32"))]
                     pending_dylibs,
+                    pending_globals,
                 );
                 files.insert(file_path, child_scope.clone());
                 scope.children.push((child_name, child_scope));
@@ -2648,6 +2800,12 @@ fn parse_toplevel(
             _ => unsafe { unreachable_unchecked() },
         }
     }
+
+    for (name, value) in file_globals {
+        scope.symbols.push((name.clone(), SymbolKind::Global(pending_globals.len() as u16)));
+        pending_globals.push((name, value, src_file_idx));
+    }
+
     file_scopes.insert(src_file_idx, scope.clone());
 }
 
@@ -2802,6 +2960,7 @@ pub fn compile(
     }
 
     let mut variables: Vec<Variable> = Vec::new();
+    let mut globals: Vec<Variable> = Vec::new();
     let mut registers: Vec<Data> = Vec::new();
     let mut pools: Pools = Pools {
         obj_pool: Pool::with_capacity(5),
@@ -2831,6 +2990,7 @@ pub fn compile(
         Vec::with_capacity(2);
     #[cfg(not(target_arch = "wasm32"))]
     let mut pending_dylibs: Vec<(u16, u16, Box<[DylibFnExpr]>, Rc<Library>, Span)> = Vec::new();
+    let mut pending_globals: Vec<(SmolStr, Expr, u16)> = Vec::new();
 
     parse_toplevel(
         code,
@@ -2848,6 +3008,7 @@ pub fn compile(
         &mut pending_fns,
         #[cfg(not(target_arch = "wasm32"))]
         &mut pending_dylibs,
+        &mut pending_globals,
     );
     resolve_types(
         &mut structs,
@@ -2871,6 +3032,7 @@ pub fn compile(
     };
     let mut state = State {
         v: &mut variables,
+        globals: &mut globals,
         registers: &mut registers,
         fns: &mut functions,
         structs: &mut structs,
@@ -2884,9 +3046,18 @@ pub fn compile(
         free_registers: &mut free_registers,
         sources: &mut sources,
         reserved_registers: FxHashSet::default(),
-        scope: &mut scope,
+        file_scopes: &mut file_scopes,
     };
-    let mut instructions = compile_expr(
+    let mut instructions: Vec<Instr> = Vec::with_capacity(4);
+    for (name, value, file_idx) in pending_globals {
+        let var_ctx = ctx.with_file_idx(file_idx);
+        let var_type = value.infer_type(var_ctx, &mut state);
+        let register_id =
+            value.compile(var_ctx, &mut state, &mut instructions, None, true, true).unwrap_id();
+        state.reserved_registers.insert(register_id);
+        state.globals.push(Variable { name, register_id, var_type });
+    }
+    let program_instructions = compile_expr(
         &state.fns
             .iter()
             .find(|func| func.name == "main" && func.src_file == 0)
@@ -2902,9 +3073,11 @@ pub fn compile(
             .code
             .clone(),
         // &mut variables,
-        ctx,
+        ctx.with_offset(instructions.len() as u16),
         &mut state,
     );
+    instructions.reserve_exact(program_instructions.len());
+    instructions.extend(program_instructions);
     instructions.push(Instr::Halt(0));
 
     #[cfg(debug_assertions)]

@@ -130,8 +130,7 @@ pub enum Expr {
     Null,
     String(SmolStr),
     Var(SmolStr, Span),
-
-    ConstDeclare(SmolStr, Box<Self>),
+    NamespacedVar(QualifiedName, Span),
 
     /// Array(contents, [entire_array, elem_spans...])
     Array(Box<[Self]>, Box<[Span]>),
@@ -148,6 +147,7 @@ pub enum Expr {
     VarDeclare(SmolStr, Box<Self>),
     /// VarDeclare(name, value, start, end)
     VarAssign(SmolStr, Box<Self>, Span),
+    NamespacedVarAssign(QualifiedName, Box<Self>, Span),
     IfBlock(IfBlockExpr),
     /// InlineCondition - expression-form if/else, always produces a value, must have an else branch
     InlineCondition(Box<Self>, Box<[Self]>, Span),
@@ -255,6 +255,8 @@ pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) 
             field_span,
             value_span,
         })
+    } else if let Expr::NamespacedVar(n, s) = target {
+        Expr::NamespacedVarAssign(n, Box::from(value), s)
     } else {
         unsafe { unreachable_unchecked() }
     }

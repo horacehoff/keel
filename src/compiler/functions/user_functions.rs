@@ -264,15 +264,15 @@ pub fn compile_function(
     let mut anon_fns: Vec<usize> = Vec::new();
     infered_arg_types.iter().enumerate().for_each(|(i, infered_type)| {
         if let DataType::Fn(fn_id) = infered_type {
-            anon_fns.push(state.scope.symbols.len());
-            state.scope.symbols.push((fn_args[i].clone(), SymbolKind::Fn(*fn_id)));
+            anon_fns.push(state.scope(fn_file_idx).symbols.len());
+            state.scope_mut(fn_file_idx).symbols.push((fn_args[i].clone(), SymbolKind::Fn(*fn_id)));
             state.new_var(fn_args[i].clone(), 0, DataType::Fn(*fn_id));
         } else {
             // 0 => placeholder id, it's never used
             state.new_var(fn_args[i].clone(), 0, infered_type.clone());
         }
     });
-    let fn_type = track_returns(fn_code, ctx, state, fn_name);
+    let fn_type = track_returns(fn_code, ctx.with_file_idx(fn_file_idx), state, fn_name);
     let return_type = if fn_type.is_empty() {
         // If function doesn't return anything, return nothing
         DataType::Null
@@ -312,7 +312,7 @@ pub fn compile_function(
     std::mem::swap(state.v, &mut v_temp);
 
     for i in anon_fns.into_iter().rev() {
-        state.scope.symbols.remove(i);
+        state.scope_mut(fn_file_idx).symbols.swap_remove(i);
     }
 
     let mut reserved_registers = get_tgt_ids(&parsed);

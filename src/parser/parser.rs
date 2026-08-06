@@ -195,11 +195,15 @@ impl<'a> Parser<'a> {
     }
     #[inline(always)]
     fn next_token_expect(&mut self, expected: Token, msg: &'static str) -> Span {
-        let (next_token, span) = self.next_token();
-        if next_token != expected {
-            self.error(span, ParserErr::UnexpectedToken(expected, next_token, msg));
+        if self.peek_token() != expected {
+            if expected == Token::SemiColon {
+                error_missing_semicolon(self);
+            } else {
+                let (next_token, span) = self.next_token();
+                self.error(span, ParserErr::UnexpectedToken(expected, next_token, msg));
+            }
         }
-        span
+        self.next_token().1
     }
     #[inline(always)]
     fn next_token_expect_closer(
@@ -328,7 +332,7 @@ fn parse_statement(parser: &mut Parser<'_>) -> Option<Expr> {
 
 fn parse_var_declare(parser: &mut Parser<'_>) -> Expr {
     let (t, _) = parser.next_token();
-    debug_assert_eq!(t, Token::Let);
+    debug_assert!(t == Token::Let || t == Token::Static);
     let (t, span) = parser.next_token();
     let var_name = if let Token::Identifier(id) = t {
         SmolStr::new(id)
@@ -742,6 +746,11 @@ fn parse_file(parser: &mut Parser<'_>) -> Vec<Expr> {
             Token::Import => parse_file_import(parser),
             Token::Struct => parse_struct_declare(parser),
             Token::Dylib => parse_dylib_import(parser),
+            Token::Static => {
+                let e = parse_var_declare(parser);
+                parser.next_token_expect(Token::SemiColon, "Lines must end with a semicolon");
+                e
+            },
             unexpected => {
                 cold_path();
                 let span = parser.peek_token_span();

@@ -540,7 +540,7 @@ pub fn resolve_function_return_type(
 
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().insert(fn_id));
 
-    let fn_ctx = Ctx { file_idx: fn_src_file, ..ctx };
+    let fn_ctx = ctx.with_file_idx(fn_src_file);
     let fn_type = track_returns(&fn_code, fn_ctx, state, fn_name);
 
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(&fn_id));
@@ -735,31 +735,54 @@ fn track_return_flow(
     FnReturnFlow { types: return_types, always_returns: false }
 }
 
+fn infer_symbol_type(
+    namespace: &[SmolStr],
+    name: &SmolStr,
+    span: Span,
+    ctx: Ctx,
+    state: &State<'_>,
+) -> DataType {
+    if let Some(idx) =
+        state.scope(ctx.file_idx).find_global(namespace, name, span, ctx.file_idx, state.sources)
+    {
+        state.globals[idx].var_type.clone()
+    } else if let Some(fn_id) =
+        state.scope(ctx.file_idx).find_function(namespace, name, span, ctx.file_idx, state.sources)
+    {
+        // When a function is referenced by name, there's no call site to infer argument types from
+        // As such, functions refereced by name need to have all of their arguments typed
+        if state.fns[fn_id].args.iter().any(|(_, t)| t.is_none()) {
+            error_function_needs_args_typed(
+                name,
+                span,
+                (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
+                ctx.file_idx,
+                state.sources,
+            );
+        }
+        DataType::Fn(fn_id as u16)
+    } else {
+        error_unknown_variable(name, span, state.v, ctx.file_idx, state.sources);
+    }
+}
+
 impl Expr {
     pub fn infer_type(&self, ctx: Ctx, state: &mut State<'_>) -> DataType {
         match self {
             Self::Var(name, span) => {
                 if let Some(var) = state.find_var(name) {
                     var.var_type.clone()
-                } else if let Some(fn_id) =
-                    state.scope.find_function(&[], name, *span, ctx.file_idx, state.sources)
-                {
-                    // When a function is referenced by name, there's no call site to infer argument types from
-                    // As such, functions refereced by name need to have all of their arguments typed
-                    if state.fns[fn_id].args.iter().any(|(_, t)| t.is_none()) {
-                        error_function_needs_args_typed(
-                            name,
-                            *span,
-                            (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
-                            ctx.file_idx,
-                            state.sources,
-                        );
-                    }
-                    DataType::Fn(fn_id as u16)
                 } else {
-                    error_unknown_variable(name, *span, state.v, ctx.file_idx, state.sources);
+                    infer_symbol_type(&[], name, *span, ctx, state)
                 }
             }
+            Self::NamespacedVar(qualified_name, span) => infer_symbol_type(
+                qualified_name.get_namespace(),
+                qualified_name.get_name(),
+                *span,
+                ctx,
+                state,
+            ),
             Self::Float(_) => DataType::Float,
             Self::Int(_) => DataType::Int,
             Self::String(_) => DataType::String,
@@ -983,14 +1006,14 @@ impl Expr {
                                         error_unknown_function(
                                             function_name,
                                             *span,
-                                            state.scope,
+                                            state.scope(ctx.file_idx),
                                             ctx.file_idx,
                                             state.sources,
                                         );
                                     } else {
                                         error_unknown_function_in_namespace(
                                             function_name,
-                                            state.scope,
+                                            state.scope(ctx.file_idx),
                                             qualified_name.get_namespace(),
                                             *span,
                                             ctx.file_idx,
@@ -1136,7 +1159,7 @@ impl Expr {
                 let namespace = name.get_namespace();
                 DataType::Struct(
                     state
-                        .scope
+                        .scope(ctx.file_idx)
                         .find_struct(namespace, struct_name, *span, ctx.file_idx, state.sources)
                         .unwrap_or_else(|| {
                             error_unknown_struct(struct_name, *span, state.sources, ctx.file_idx);
@@ -1158,7 +1181,11 @@ impl Expr {
                             (
                                 name.clone(),
                                 t.as_ref().map(|t| {
-                                    t.to_datatype(ctx.file_idx, state.scope, state.sources)
+                                    t.to_datatype(
+                                        ctx.file_idx,
+                                        state.scope(ctx.file_idx),
+                                        state.sources,
+                                    )
                                 }),
                             )
                         })

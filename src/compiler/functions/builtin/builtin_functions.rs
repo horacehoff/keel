@@ -231,12 +231,22 @@ pub fn builtin_functions(
                 let return_register_id = state.alloc_reg_tgt(tgt_id);
                 output.push(Instr::CallFuncDynamic(fn_reg, return_register_id));
                 Some(return_register_id)
-            } else if let Some(fn_id) =
-                state.scope.find_function(&[], fn_name, span, ctx.file_idx, state.sources)
-            {
+            } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
+                &[],
+                fn_name,
+                span,
+                ctx.file_idx,
+                state.sources,
+            ) {
                 handle_user_function(function_call, fn_id, output, ctx, state, tgt_id)
             } else {
-                error_unknown_function(fn_name, span, state.scope, ctx.file_idx, state.sources);
+                error_unknown_function(
+                    fn_name,
+                    span,
+                    state.scope(ctx.file_idx),
+                    ctx.file_idx,
+                    state.sources,
+                );
             }
         }
     }

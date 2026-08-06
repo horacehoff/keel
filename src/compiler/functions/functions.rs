@@ -141,7 +141,7 @@ pub fn compile_function_call(
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
         state.add_to_src(ctx, output, function_call.span);
         if returns_null { None } else { Some(register_id) }
-    } else if let Some(fn_id) = state.scope.find_function(
+    } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
         namespace,
         function_call.qualified_name.get_name(),
         function_call.span,
@@ -152,7 +152,7 @@ pub fn compile_function_call(
     } else {
         error_unknown_function_in_namespace(
             function_call.qualified_name.get_name(),
-            state.scope,
+            state.scope(ctx.file_idx),
             namespace,
             function_call.span,
             ctx.file_idx,

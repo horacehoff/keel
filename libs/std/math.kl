@@ -55,3 +55,7 @@ fn cbrt(x) { return math::keel_cbrt(x); }
 fn hypot(x, y) { return math::keel_hypot(x, y); }
 fn erf(x) { return math::keel_erf(x); }
 fn erfc(x) { return math::keel_erfc(x); }
+
+static PI   = 3.141592653589793;
+static E    = 2.718281828459045;
+static TAU  = 6.283185307179586;

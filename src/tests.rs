@@ -15,7 +15,7 @@ macro_rules! run_and_check_registers {
             allocated_arg_count,
             allocated_call_depth,
             _,
-        ) = compile(String::from($contents), filename, true);
+        ) = compile(String::from($contents), filename, false);
         crate::vm::execute(
             &instructions,
             &mut registers,
@@ -46,7 +46,7 @@ macro_rules! run {
             allocated_arg_count,
             allocated_call_depth,
             _,
-        ) = compile(String::from($contents), filename, true);
+        ) = compile(String::from($contents), filename, false);
         crate::vm::execute(
             &instructions,
             &mut registers,
@@ -3583,5 +3583,146 @@ pub fn map_loop() {
             print(sum);
         }",
         Data::int(500)
+    );
+}
+
+#[test]
+pub fn static_declare_read() {
+    run_and_check_registers!(
+        "
+        static x = 42;
+        fn main() {
+            print(x);
+        }",
+        Data::int(42)
+    );
+}
+
+#[test]
+pub fn static_assign() {
+    run_and_check_registers!(
+        "
+        static x = 42;
+        fn main() {
+            x = 67;
+            print(x);
+        }",
+        Data::int(67)
+    );
+}
+
+#[test]
+pub fn static_read_in_funn() {
+    run_and_check_registers!(
+        "
+        static x = 42;
+        fn idk() {
+            return x;
+        }
+        fn main() {
+            print(idk());
+        }",
+        Data::int(42)
+    );
+}
+
+#[test]
+pub fn static_write_in_func() {
+    run_and_check_registers!(
+        "
+        static my_var = 0;
+        fn plus_five() {
+            my_var = my_var + 5;
+        }
+        fn main() {
+            plus_five();
+            plus_five();
+            print(my_var);
+        }",
+        Data::int(10)
+    );
+}
+
+#[test]
+pub fn static_arg_shadowed() {
+    run_and_check_registers!(
+        "
+        static x = 100;
+        fn f(x) {
+            return x;
+        }
+        fn main() {
+            print(f(3) + x);
+        }",
+        Data::int(103)
+    );
+}
+
+#[test]
+pub fn static_declare_from_static() {
+    run_and_check_registers!(
+        "
+        static a = 42;
+        static b = a + 1;
+        fn main() {
+            print(b);
+        }",
+        Data::int(43)
+    );
+}
+
+#[test]
+pub fn static_initialized_by_fn() {
+    run_and_check_registers!(
+        "
+        fn the_answer() {
+            return 42;
+        }
+        static v = the_answer();
+        fn main() {
+            print(v);
+        }",
+        Data::int(42)
+    );
+}
+
+#[test]
+pub fn static_union_type_assign() {
+    run_and_check_registers!(
+        "
+        static x = if true {42} else {\"magrathea\"};
+        fn main() {
+            x = 67;
+            x = \"zaphod\";
+            print(x);
+        }",
+        Data::small_str("zaphod")
+    );
+}
+
+#[test]
+#[should_panic]
+pub fn static_type_change() {
+    run!(
+        "
+        static x = 5;
+        fn main() {
+            x = \"Hello, world!\";
+            print(x);
+        }"
+    );
+}
+
+#[test]
+pub fn static_inc_to_from_other_static() {
+    run_and_check_registers!(
+        "
+        static x = 42;
+        static y = 0;
+        fn main() {
+            y = x + 1;
+            print(y);
+        }",
+        Data::int(43)
     );
 }

@@ -117,6 +117,8 @@ pub enum Token<'a> {
     Loop,
     #[token("let")]
     Let,
+    #[token("static")]
+    Static,
     #[token("(")]
     LParen,
     #[token(")")]

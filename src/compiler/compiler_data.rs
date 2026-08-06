@@ -162,19 +162,19 @@ pub struct State<'a> {
     pub free_registers: &'a mut Vec<u16>,
     pub sources: &'a mut Vec<Source>,
     pub reserved_registers: FxHashSet<u16>,
-    pub file_scopes: &'a mut FxHashMap<u16, Scope>,
+    pub file_scopes: &'a mut Vec<Scope>,
 }
 
 impl State<'_> {
     #[must_use]
     #[inline(always)]
     pub fn scope(&self, file_idx: u16) -> &Scope {
-        unsafe { self.file_scopes.get(&file_idx).unwrap_unchecked() }
+        unsafe { self.file_scopes.get_unchecked(file_idx as usize) }
     }
     #[must_use]
     #[inline(always)]
     pub fn scope_mut(&mut self, file_idx: u16) -> &mut Scope {
-        unsafe { self.file_scopes.get_mut(&file_idx).unwrap_unchecked() }
+        unsafe { self.file_scopes.get_unchecked_mut(file_idx as usize) }
     }
     #[must_use]
     pub fn find_var(&self, var_name: &str) -> Option<&Variable> {

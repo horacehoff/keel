@@ -2605,7 +2605,7 @@ fn parse_toplevel(
     sources: &mut Vec<Source>,
     scope: &mut Scope,
     files: &mut FxHashMap<PathBuf, Scope>,
-    file_scopes: &mut FxHashMap<u16, Scope>,
+    file_scopes: &mut Vec<Scope>,
     pending_structs: &mut Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
     pending_fns: &mut Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr]>)>,
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: &mut Vec<(
@@ -2806,7 +2806,10 @@ fn parse_toplevel(
         pending_globals.push((name, value, src_file_idx));
     }
 
-    file_scopes.insert(src_file_idx, scope.clone());
+    if file_scopes.len() <= src_file_idx as usize {
+        file_scopes.resize_with(src_file_idx as usize + 1, Scope::default);
+    }
+    file_scopes[src_file_idx as usize] = scope.clone();
 }
 
 fn resolve_types(
@@ -2821,7 +2824,7 @@ fn resolve_types(
         Rc<Library>,
         Span,
     )>,
-    file_namespaces: &FxHashMap<u16, Scope>,
+    file_namespaces: &[Scope],
     dynamic_libs_fns: &mut Vec<DylibFn>,
     dynamic_libs: &mut [Dylib],
     sources: &[Source],
@@ -2833,7 +2836,7 @@ fn resolve_types(
                 name: field_name.clone(),
                 field_type: field_type.to_datatype(
                     src_file_idx,
-                    &file_namespaces[&src_file_idx],
+                    &file_namespaces[src_file_idx as usize],
                     sources,
                 ),
                 span: *field_span,
@@ -2848,7 +2851,11 @@ fn resolve_types(
                 (
                     arg.name.clone(),
                     arg.enforced_type.clone().map(|t_e| {
-                        t_e.to_datatype(src_file_idx, &file_namespaces[&src_file_idx], sources)
+                        t_e.to_datatype(
+                            src_file_idx,
+                            &file_namespaces[src_file_idx as usize],
+                            sources,
+                        )
                     }),
                 )
             })
@@ -2857,7 +2864,7 @@ fn resolve_types(
     }
     #[cfg(not(target_arch = "wasm32"))]
     for (src_file_idx, dynlib_id, fn_signatures, lib, span) in pending_dylibs {
-        let namespace = &file_namespaces[&src_file_idx];
+        let namespace = &file_namespaces[src_file_idx as usize];
         let fns = fn_signatures
             .iter()
             .map(|DylibFnExpr { name, args, name_span }| {
@@ -2984,7 +2991,7 @@ pub fn compile(
     let mut scope = Scope::default();
 
     let mut files: FxHashMap<PathBuf, Scope> = FxHashMap::default();
-    let mut file_scopes: FxHashMap<u16, Scope> = FxHashMap::default();
+    let mut file_scopes: Vec<Scope> = Vec::new();
     let mut pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)> = Vec::new();
     let mut pending_fns: Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr]>)> =
         Vec::with_capacity(2);

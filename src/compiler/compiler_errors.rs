@@ -508,7 +508,7 @@ pub fn error_struct_missing_fields(
     );
 }
 
-pub fn check_args(
+pub fn check_args_length(
     args: &[Expr],
     expected_args_len: usize,
     fn_name: &str,

@@ -4,7 +4,7 @@ use crate::compiler::Scope;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
-use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::check_args_length;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::instr::Instr;
@@ -24,7 +24,7 @@ pub fn fs_lib_functions(
     let name = function_call.qualified_name.get_name().as_str();
     match name {
         "read" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(id);
@@ -34,7 +34,7 @@ pub fn fs_lib_functions(
             return Some(output_id);
         }
         "exists" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(id);
@@ -44,7 +44,7 @@ pub fn fs_lib_functions(
             return Some(output_id);
         }
         "write" => {
-            check_args(args, 2, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 2, name, span, state.sources, ctx.file_idx);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             check_arg_type(name, ctx, state, args, arg_spans, 1, &[DataType::String]);
             let filepath = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
@@ -55,7 +55,7 @@ pub fn fs_lib_functions(
             state.add_to_src(ctx, output, span);
         }
         "append" => {
-            check_args(args, 2, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 2, name, span, state.sources, ctx.file_idx);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             check_arg_type(name, ctx, state, args, arg_spans, 1, &[DataType::String]);
             let filepath = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
@@ -66,7 +66,7 @@ pub fn fs_lib_functions(
             state.add_to_src(ctx, output, span);
         }
         "delete" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let path = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(path);
@@ -74,7 +74,7 @@ pub fn fs_lib_functions(
             state.add_to_src(ctx, output, span);
         }
         "delete_dir" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let path = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(path);

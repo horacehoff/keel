@@ -6,8 +6,9 @@ use super::super::type_system::fn_matches_signature;
 use crate::compiler::Scope;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
+use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::State;
-use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::check_args_length;
 use crate::compiler::compiler_errors::check_args_range;
 use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
@@ -21,6 +22,52 @@ use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
 use std::hint::unreachable_unchecked;
+
+fn check(
+    expected_receiver_type: &[DataType],
+    arg_count: usize,
+    receiver_type: &DataType,
+    function_call: &FunctionCallExpr,
+    ctx: Ctx,
+    sources: &[Source],
+) {
+    let name = function_call.qualified_name.get_name().as_str();
+    let arg_spans = &function_call.arg_spans;
+    if match receiver_type {
+        DataType::Union(types) => types.iter().any(|t| !expected_receiver_type.contains(t)),
+        other => !expected_receiver_type.contains(other),
+    } {
+        error_invalid_obj_type(
+            expected_receiver_type,
+            receiver_type,
+            name,
+            arg_spans[0],
+            sources,
+            ctx.file_idx,
+        );
+    }
+    check_args_length(
+        &function_call.args[1..],
+        arg_count,
+        name,
+        if arg_spans.is_empty() {
+            function_call.span
+        } else {
+            Span { start: arg_spans[0].start, end: arg_spans.last().unwrap().end }
+        },
+        sources,
+        ctx.file_idx,
+    );
+}
+
+fn add_args(args: &[Expr], output: &mut Vec<Instr>, ctx: Ctx, state: &mut State<'_>) {
+    *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
+    for arg in args.iter().rev() {
+        let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
+        output.push(Instr::StoreFuncArg(arg_id));
+        state.free_reg(arg_id);
+    }
+}
 
 pub fn builtin_methods(
     receiver_id: u16,
@@ -37,151 +84,96 @@ pub fn builtin_methods(
     let receiver_span = function_call.arg_spans[0];
     let span = function_call.span;
     let receiver = &function_call.args[0];
-    macro_rules! add_args {
-        () => {
-            *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
-            for arg in args.iter().rev() {
-                let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
-                output.push(Instr::StoreFuncArg(arg_id));
-                state.free_reg(arg_id);
-            }
-        };
-    }
 
-    macro_rules! check_type {
-        ($expected:pat,$expected_list:expr,$name:expr) => {
-            if !{
-                if let DataType::Union(polytype) = &receiver_type {
-                    polytype.iter().all(|x| matches!(x, $expected))
-                } else {
-                    matches!(receiver_type, $expected)
-                }
-            } {
-                error_invalid_obj_type(
-                    $expected_list,
-                    &receiver_type,
-                    $name,
-                    receiver_span,
-                    state.sources,
-                    ctx.file_idx,
-                );
-            }
-        };
-    }
-
-    macro_rules! check {
-        ($expected:pat,$expected_str:expr,$name:expr,$args:expr) => {
-            check_type!($expected, $expected_str, $name);
-            check_args(
-                args,
-                $args,
-                name,
-                if arg_spans.is_empty() {
-                    span
-                } else {
-                    Span { start: arg_spans[0].start, end: arg_spans.last().unwrap().end }
-                },
-                state.sources,
-                ctx.file_idx,
-            )
-        };
-        ($expected:pat,$expected_str:expr,$name:expr, $args_min:expr,$args_max:expr) => {
-            check_type!($expected, $expected_str, $name);
-            check_args_range(
-                args,
-                $args_min,
-                $args_max,
-                name,
-                args_indexes,
-                ctx.file_idx,
-                state.sources,
-                fn_span,
-            )
-        };
-    }
     match name {
         "uppercase" => {
-            check!(DataType::String, &[DataType::String], name, 0);
+            check(&[DataType::String], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Uppercase, receiver_id, output_id));
             Some(output_id)
         }
         "lowercase" => {
-            check!(DataType::String, &[DataType::String], name, 0);
+            check(&[DataType::String], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Lowercase, receiver_id, output_id));
             Some(output_id)
         }
         "starts_with" => {
-            check!(DataType::String, &[DataType::String], name, 1);
-            add_args!();
+            check(&[DataType::String], 1, &receiver_type, function_call, ctx, state.sources);
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::StartsWith, receiver_id, output_id));
             Some(output_id)
         }
         "ends_with" => {
-            check!(DataType::String, &[DataType::String], name, 1);
-            add_args!();
+            check(&[DataType::String], 1, &receiver_type, function_call, ctx, state.sources);
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::EndsWith, receiver_id, output_id));
             Some(output_id)
         }
         "replace" => {
-            check!(DataType::String, &[DataType::String], name, 2);
-            add_args!();
+            check(&[DataType::String], 2, &receiver_type, function_call, ctx, state.sources);
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Replace, receiver_id, output_id));
             Some(output_id)
         }
         "len" => {
-            check!(
-                DataType::Array(_) | DataType::String | DataType::Map(_),
+            check(
                 &[DataType::String, DataType::Array(None), DataType::Map(Box::from((None, None)))],
-                name,
-                0
+                0,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
             );
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Len, receiver_id, output_id));
             Some(output_id)
         }
         "contains" => {
-            check!(
-                DataType::Array(_) | DataType::String,
+            check(
                 &[DataType::String, DataType::Array(None)],
-                name,
-                1
+                1,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
             );
 
             if receiver_type == DataType::String {
                 check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             }
 
-            add_args!();
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Contains, receiver_id, output_id));
             Some(output_id)
         }
         "trim" => {
-            check!(DataType::String, &[DataType::String], name, 0);
+            check(&[DataType::String], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Trim, receiver_id, output_id));
             Some(output_id)
         }
         "trim_sequence" => {
-            check!(DataType::String, &[DataType::String], name, 1);
+            check(&[DataType::String], 1, &receiver_type, function_call, ctx, state.sources);
 
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
-            add_args!();
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimSequence, receiver_id, output_id));
             Some(output_id)
         }
         "find" => {
-            check!(
-                DataType::String | DataType::Array(_),
+            check(
                 &[DataType::String, DataType::Array(None)],
-                name,
-                1
+                1,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
             );
 
             if let DataType::Array(Some(array_elem_type)) = &receiver_type {
@@ -198,73 +190,75 @@ pub fn builtin_methods(
                 check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             }
 
-            add_args!();
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Find, receiver_id, output_id));
             state.add_to_src(ctx, output, span);
             Some(output_id)
         }
         "is_float" => {
-            check!(DataType::String, &[DataType::String], name, 0);
+            check(&[DataType::String], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::IsFloat, receiver_id, output_id));
             Some(output_id)
         }
         "is_int" => {
-            check!(DataType::String, &[DataType::String], name, 0);
+            check(&[DataType::String], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::IsInt, receiver_id, output_id));
             Some(output_id)
         }
         "trim_left" => {
-            check!(DataType::String, &[DataType::String], name, 0);
+            check(&[DataType::String], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimLeft, receiver_id, output_id));
             Some(output_id)
         }
         "trim_right" => {
-            check!(DataType::String, &[DataType::String], name, 0);
+            check(&[DataType::String], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimRight, receiver_id, output_id));
             Some(output_id)
         }
         "trim_sequence_left" => {
-            check!(DataType::String, &[DataType::String], name, 1);
+            check(&[DataType::String], 1, &receiver_type, function_call, ctx, state.sources);
 
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
 
-            add_args!();
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimSequenceLeft, receiver_id, output_id));
             Some(output_id)
         }
         "trim_sequence_right" => {
-            check!(DataType::String, &[DataType::String], name, 1);
+            check(&[DataType::String], 1, &receiver_type, function_call, ctx, state.sources);
 
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
 
-            add_args!();
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimSequenceRight, receiver_id, output_id));
             Some(output_id)
         }
         "repeat" => {
-            check!(
-                DataType::String | DataType::Array(_),
+            check(
                 &[DataType::String, DataType::Array(None)],
-                name,
-                1
+                1,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
             );
 
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::Int]);
 
-            add_args!();
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Repeat, receiver_id, output_id));
             Some(output_id)
         }
         "push" => {
-            check!(DataType::Array(_), &[DataType::Array(None)], name, 1);
+            check(&[DataType::Array(None)], 1, &receiver_type, function_call, ctx, state.sources);
 
             let arg_type = args[0].infer_type(ctx, state);
             if let DataType::Array(Some(array_elem_type)) = &receiver_type {
@@ -293,35 +287,44 @@ pub fn builtin_methods(
             None
         }
         "sqrt" => {
-            check!(DataType::Float, &[DataType::Float], name, 0);
+            check(&[DataType::Float], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::SqrtFloat, receiver_id, output_id));
             Some(output_id)
         }
         "round" => {
-            check!(DataType::Float, &[DataType::Float], name, 0);
+            check(&[DataType::Float], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Round, receiver_id, output_id));
             Some(output_id)
         }
         "floor" => {
-            check!(DataType::Float, &[DataType::Float], name, 0);
+            check(&[DataType::Float], 0, &receiver_type, function_call, ctx, state.sources);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Floor, receiver_id, output_id));
             Some(output_id)
         }
         "abs" => {
-            check!(DataType::Float | DataType::Int, &[DataType::Int, DataType::Float], name, 0);
+            check(
+                &[DataType::Int, DataType::Float],
+                0,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
+            );
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Abs, receiver_id, output_id));
             Some(output_id)
         }
         "reverse" => {
-            check!(
-                DataType::Array(_) | DataType::String,
+            check(
                 &[DataType::String, DataType::Array(None)],
-                name,
-                0
+                0,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
             );
             if receiver_type == DataType::String {
                 let output_id = state.alloc_reg_tgt(tgt_id);
@@ -333,15 +336,15 @@ pub fn builtin_methods(
             }
         }
         "split" => {
-            check!(DataType::String, &[DataType::String], name, 1);
+            check(&[DataType::String], 1, &receiver_type, function_call, ctx, state.sources);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[receiver_type]);
-            add_args!();
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Split, receiver_id, output_id));
             Some(output_id)
         }
         "partition" => {
-            check!(DataType::Array(_), &[DataType::Array(None)], name, 1);
+            check(&[DataType::Array(None)], 1, &receiver_type, function_call, ctx, state.sources);
 
             if let DataType::Array(Some(array_elem_type)) = receiver_type {
                 check_arg_type(
@@ -354,7 +357,7 @@ pub fn builtin_methods(
                     std::slice::from_ref(&array_elem_type),
                 );
             }
-            add_args!();
+            add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Split, receiver_id, output_id));
             Some(output_id)
@@ -380,14 +383,14 @@ pub fn builtin_methods(
             check_args_range(args, 0, 1, "join", arg_spans, ctx.file_idx, state.sources, span);
             if !args.is_empty() {
                 check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
-                add_args!();
+                add_args(args, output, ctx, state);
             }
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::JoinStringArray, receiver_id, output_id));
             Some(output_id)
         }
         "remove" => {
-            check!(DataType::Array(_), &[DataType::Array(None)], name, 1);
+            check(&[DataType::Array(None)], 1, &receiver_type, function_call, ctx, state.sources);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::Int]);
             let arg_id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(arg_id);
@@ -396,12 +399,19 @@ pub fn builtin_methods(
             None
         }
         "sort" => {
-            check!(DataType::Array(_), &[DataType::Array(None)], name, 0);
+            check(&[DataType::Array(None)], 0, &receiver_type, function_call, ctx, state.sources);
             output.push(Instr::CallLibFuncVoid(LibFuncVoid::Sort, receiver_id, 0));
             None
         }
         "get" => {
-            check!(DataType::Map(_), &[DataType::Map(Box::from((None, None)))], name, 1);
+            check(
+                &[DataType::Map(Box::from((None, None)))],
+                1,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
+            );
 
             if let DataType::Map(t) = receiver_type
                 && let Some(key_type) = t.0
@@ -415,7 +425,14 @@ pub fn builtin_methods(
             Some(output_id)
         }
         "insert" => {
-            check!(DataType::Map(_), &[DataType::Map(Box::from((None, None)))], name, 2);
+            check(
+                &[DataType::Map(Box::from((None, None)))],
+                2,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
+            );
             if let DataType::Map(m) = receiver_type {
                 if let Some(t) = m.0 {
                     check_arg_type(name, ctx, state, args, arg_spans, 0, &[t]);
@@ -430,11 +447,13 @@ pub fn builtin_methods(
             None
         }
         "map" => {
-            check!(
-                DataType::Array(_) | DataType::String,
+            check(
                 &[DataType::String, DataType::Array(None)],
-                name,
-                1
+                1,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
             );
 
             let fn_type = args[0].infer_type(ctx, state);
@@ -541,11 +560,13 @@ pub fn builtin_methods(
             Some(result_id)
         }
         "filter" => {
-            check!(
-                DataType::Array(_) | DataType::String,
+            check(
                 &[DataType::String, DataType::Array(None)],
-                name,
-                1
+                1,
+                &receiver_type,
+                function_call,
+                ctx,
+                state.sources,
             );
 
             let fn_type = args[0].infer_type(ctx, state);

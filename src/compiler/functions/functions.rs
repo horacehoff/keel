@@ -5,7 +5,7 @@ use super::type_system::fn_matches_signature;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
-use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::check_args_length;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type_multiple;
 use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
@@ -110,7 +110,7 @@ pub fn compile_function_call(
         .and_then(|lib| lib.fns.iter().find(|x| &x.name == function_call.qualified_name.get_name()))
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
-        check_args(
+        check_args_length(
             &function_call.args,
             fn_args.len(),
             function_call.qualified_name.get_name(),

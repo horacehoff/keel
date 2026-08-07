@@ -8,7 +8,7 @@ use super::user_functions::handle_user_function;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
-use crate::compiler::compiler_errors::check_args;
+use crate::compiler::compiler_errors::check_args_length;
 use crate::compiler::compiler_errors::check_args_range;
 use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_unknown_function;
@@ -40,14 +40,14 @@ pub fn builtin_functions(
             None
         }
         "type" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             let infered = args[0].infer_type(ctx, state);
             let arg_type =
                 Data::p_str(infered.format_detailed(state).as_str(), &mut state.pools.str_pool);
             Some(state.new_reg(arg_type))
         }
         "float" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(
                 name,
                 ctx,
@@ -65,7 +65,7 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "int" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(
                 name,
                 ctx,
@@ -83,7 +83,7 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "str" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
@@ -91,7 +91,7 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "bool" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(id);
@@ -138,13 +138,13 @@ pub fn builtin_functions(
             Some(output_id)
         }
         "the_answer" => {
-            check_args(args, 0, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 0, name, span, state.sources, ctx.file_idx);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TheAnswer, 0, output_id));
             Some(output_id)
         }
         "argv" => {
-            check_args(args, 0, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 0, name, span, state.sources, ctx.file_idx);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Argv, 0, output_id));
             Some(output_id)
@@ -161,7 +161,7 @@ pub fn builtin_functions(
             None
         }
         "throw" => {
-            check_args(args, 1, name, span, state.sources, ctx.file_idx);
+            check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             let err_reg_id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             output.push(Instr::ThrowError(err_reg_id));

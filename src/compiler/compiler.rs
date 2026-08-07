@@ -1271,13 +1271,11 @@ fn compile_struct_field_assignment(
 ) {
     let struct_expr = &struct_field_assignment.struct_expr;
     let new_val = &struct_field_assignment.field_value;
-    let struct_span = struct_field_assignment.struct_span;
     let field = &struct_field_assignment.field;
-    let value_span = struct_field_assignment.value_span;
-    let field_span = struct_field_assignment.field_span;
     let t = struct_expr.infer_type(ctx, state);
     let new_val_type = new_val.infer_type(ctx, state);
     let DataType::Struct(struct_id) = t else {
+        let struct_span = unsafe { *struct_field_assignment.spans.get_unchecked(0) };
         error_invalid_type(
             &DataType::Struct(0),
             &t,
@@ -1302,6 +1300,7 @@ fn compile_struct_field_assignment(
     {
         if expected_field_name == field {
             if !struct_field_type_matches(expected_field_type, &new_val_type) {
+                let value_span = unsafe { *struct_field_assignment.spans.get_unchecked(2) };
                 compiler_errors::error_struct_field_invalid_type(
                     ctx.file_idx,
                     struct_name,
@@ -1318,6 +1317,7 @@ fn compile_struct_field_assignment(
         }
     }
     let Some(field_index) = field_index else {
+        let field_span = unsafe { *struct_field_assignment.spans.get_unchecked(1) };
         compiler_errors::error_struct_unknown_field(
             ctx.file_idx,
             field_span,
@@ -1842,14 +1842,14 @@ fn compile_function_definition(
     let span = function_declaration.span;
     let fn_code = &function_declaration.code;
     let fn_args = &function_declaration.args;
-    if let Some(func) = state.fns.iter().find(|func| &func.name == fn_name) {
+    if let Some(func) = state.functions.iter().find(|func| &func.name == fn_name) {
         compiler_errors::error_function_already_defined(func, span, ctx.file_idx, state.sources);
     }
     let mut callees = Vec::new();
     collect_direct_fn_calls(fn_code, &mut callees);
-    let symbol = SymbolKind::Fn(state.fns.len() as u16);
+    let symbol = SymbolKind::Fn(state.functions.len() as u16);
     state.scope_mut(ctx.file_idx).symbols.push((fn_name.clone(), symbol));
-    state.fns.push(Function {
+    state.functions.push(Function {
         name: fn_name.clone(),
         args: Box::from(fn_args.iter().map(|arg| {
             (
@@ -1905,7 +1905,7 @@ fn compile_eval_block(code: &[Expr], ctx: Ctx, state: &mut State<'_>, output: &m
 
 pub fn compile_expr(input: &[Expr], ctx: Ctx, state: &mut State<'_>) -> Vec<Instr> {
     let v_len = state.v.len();
-    let fn_len = state.fns.len();
+    let fn_len = state.functions.len();
     let symbols_len = state.scope(ctx.file_idx).symbols.len();
     let mut output: Vec<Instr> = Vec::with_capacity(input.len());
     for (idx, x) in input.iter().enumerate() {
@@ -1925,7 +1925,7 @@ pub fn compile_expr(input: &[Expr], ctx: Ctx, state: &mut State<'_>) -> Vec<Inst
         state.free_reg(state.v[var_idx].register_id);
     }
     state.v.truncate(v_len);
-    state.fns.truncate(fn_len);
+    state.functions.truncate(fn_len);
     state.scope_mut(ctx.file_idx).symbols.truncate(symbols_len);
     output
 }
@@ -2015,18 +2015,23 @@ impl Expr {
                     ctx.file_idx,
                     state.sources,
                 ) {
-                    let arg_types: Vec<DataType> =
-                        state.fns[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
+                    let arg_types: Vec<DataType> = state.functions[fn_id]
+                        .args
+                        .iter()
+                        .map(|(_, t)| t.clone().unwrap())
+                        .collect();
 
-                    let fn_impl_idx =
-                        state.fns[fn_id].impls.iter().position(|imp| *imp.arg_types == arg_types);
+                    let fn_impl_idx = state.functions[fn_id]
+                        .impls
+                        .iter()
+                        .position(|imp| *imp.arg_types == arg_types);
                     if fn_impl_idx.is_none() {
-                        let fn_args = state.fns[fn_id]
+                        let fn_args = state.functions[fn_id]
                             .args
                             .iter()
                             .map(|(a, _)| a.clone())
                             .collect::<Vec<SmolStr>>();
-                        let fn_code = Rc::clone(&state.fns[fn_id].code);
+                        let fn_code = Rc::clone(&state.functions[fn_id].code);
                         compile_function(
                             output,
                             ctx,
@@ -2038,12 +2043,12 @@ impl Expr {
                             &fn_code,
                             fn_id as u16,
                             false,
-                            state.fns[fn_id].src_file,
+                            state.functions[fn_id].src_file,
                         );
                     }
                     let fn_impl_idx =
-                        fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
-                    let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+                        fn_impl_idx.unwrap_or_else(|| state.functions[fn_id].impls.len() - 1);
+                    let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
 
                     Some(state.new_reg(Data::function(loc)))
                 } else {
@@ -2075,18 +2080,23 @@ impl Expr {
                     ctx.file_idx,
                     state.sources,
                 ) {
-                    let arg_types: Vec<DataType> =
-                        state.fns[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
+                    let arg_types: Vec<DataType> = state.functions[fn_id]
+                        .args
+                        .iter()
+                        .map(|(_, t)| t.clone().unwrap())
+                        .collect();
 
-                    let fn_impl_idx =
-                        state.fns[fn_id].impls.iter().position(|imp| *imp.arg_types == arg_types);
+                    let fn_impl_idx = state.functions[fn_id]
+                        .impls
+                        .iter()
+                        .position(|imp| *imp.arg_types == arg_types);
                     if fn_impl_idx.is_none() {
-                        let fn_args = state.fns[fn_id]
+                        let fn_args = state.functions[fn_id]
                             .args
                             .iter()
                             .map(|(a, _)| a.clone())
                             .collect::<Vec<SmolStr>>();
-                        let fn_code = Rc::clone(&state.fns[fn_id].code);
+                        let fn_code = Rc::clone(&state.functions[fn_id].code);
                         compile_function(
                             output,
                             ctx,
@@ -2098,12 +2108,12 @@ impl Expr {
                             &fn_code,
                             fn_id as u16,
                             false,
-                            state.fns[fn_id].src_file,
+                            state.functions[fn_id].src_file,
                         );
                     }
                     let fn_impl_idx =
-                        fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
-                    let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+                        fn_impl_idx.unwrap_or_else(|| state.functions[fn_id].impls.len() - 1);
+                    let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
 
                     Some(state.new_reg(Data::function(loc)))
                 } else {
@@ -2627,10 +2637,10 @@ fn parse_toplevel(
                 let span = function_declaration.span;
                 let fn_code = function_declaration.code;
                 let fn_args = function_declaration.args;
-                if let Some((_, SymbolKind::Fn(func_id))) =
-                    scope.symbols.iter().rfind(|(f, _)| f == &fn_name)
+                if let Some(func_idx) =
+                    scope.find_function(&[], &fn_name, span, src_file_idx, sources)
                 {
-                    let func = &fns[*func_id as usize];
+                    let func = &fns[func_idx as usize];
                     compiler_errors::error_function_already_defined(
                         func,
                         span,
@@ -3041,12 +3051,12 @@ pub fn compile(
         v: &mut variables,
         globals: &mut globals,
         registers: &mut registers,
-        fns: &mut functions,
+        functions: &mut functions,
         structs: &mut structs,
         pools: &mut pools,
         instr_src: &mut instr_src,
         fn_registers: &mut fn_registers,
-        dyn_libs: &mut dyn_libs,
+        dylibs: &mut dyn_libs,
         allocated_arg_count: &mut allocated_arg_count,
         allocated_call_depth: &mut allocated_call_depth,
         const_registers: &mut const_registers,
@@ -3065,7 +3075,7 @@ pub fn compile(
         state.globals.push(Variable { name, register_id, var_type });
     }
     let program_instructions = compile_expr(
-        &state.fns
+        &state.functions
             .iter()
             .find(|func| func.name == "main" && func.src_file == 0)
             .unwrap_or_else(|| {

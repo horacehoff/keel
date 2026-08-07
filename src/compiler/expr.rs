@@ -47,9 +47,9 @@ pub struct FunctionCallExpr {
 pub struct IntForLoopExpr {
     pub var_name: SmolStr,
     /// Invariant:
-    /// - code.len() >= 2
-    /// - code[0] is the lower bound
-    /// - code[1] is the lower bound
+    /// - `code.len() >= 2`
+    /// - `code[0]` is the lower bound
+    /// - `code[1]` is the lower bound
     pub code: Box<[Expr]>,
     pub lower_bound_span: Span,
     pub upper_bound_span: Span,
@@ -89,9 +89,12 @@ pub struct StructFieldAssignmentExpr {
     pub struct_expr: Box<Expr>,
     pub field: SmolStr,
     pub field_value: Box<Expr>,
-    pub struct_span: Span,
-    pub field_span: Span,
-    pub value_span: Span,
+    /// Invariant:
+    /// - `spans.len() == 3`
+    /// - `spans[0]` = struct_span
+    /// - `spans[1]` = field_span
+    /// - `spans[2]` = value_span
+    pub spans: Box<[Span]>,
 }
 
 /// A fully-qualified symbol name.
@@ -251,9 +254,7 @@ pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) 
             struct_expr,
             field,
             field_value: Box::from(value),
-            struct_span,
-            field_span,
-            value_span,
+            spans: Box::new([struct_span, field_span, value_span]),
         })
     } else if let Expr::NamespacedVar(n, s) = target {
         Expr::NamespacedVarAssign(n, Box::from(value), s)

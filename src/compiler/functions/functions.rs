@@ -63,9 +63,9 @@ pub fn check_user_fn_arg_types(
     ctx: Ctx,
     state: &mut State<'_>,
 ) {
-    let args_len = state.fns[fn_id].args.len();
+    let args_len = state.functions[fn_id].args.len();
     for i in 0..args_len {
-        let t = state.fns[fn_id].args[i].1.clone();
+        let t = state.functions[fn_id].args[i].1.clone();
         if let Some(t) = &t
             && if let (DataType::FnSignature(expected_sig), DataType::Fn(concrete_id)) =
                 (t, &inferred_arg_types[i])
@@ -80,7 +80,7 @@ pub fn check_user_fn_arg_types(
                 t,
                 args_indexes[i],
                 fn_name,
-                Some((state.fns[fn_id].name_span, state.fns[fn_id].src_file)),
+                Some((state.functions[fn_id].name_span, state.functions[fn_id].src_file)),
                 ctx.file_idx,
                 state.sources,
             );
@@ -104,7 +104,7 @@ pub fn compile_function_call(
 
         fs_lib_functions(output, ctx, state, tgt_id, function_call)
     } else if let Some((fn_args, returns_null, dyn_id)) = state
-        .dyn_libs
+        .dylibs
         .iter()
         .find(|l| l.name == namespace[0])
         .and_then(|lib| lib.fns.iter().find(|x| &x.name == function_call.qualified_name.get_name()))

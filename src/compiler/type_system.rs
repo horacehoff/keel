@@ -216,7 +216,7 @@ impl DataType {
             )
             .to_smolstr(),
             Self::Fn(id) => {
-                let f = &state.fns[*id as usize];
+                let f = &state.functions[*id as usize];
                 format_args!(
                     "fn ({})",
                     f.args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>().join(", ")
@@ -515,14 +515,14 @@ pub fn resolve_function_return_type(
     state: &mut State<'_>,
 ) -> DataType {
     if let Some((_, ret)) =
-        state.fns[fn_id].return_type_cache.iter().find(|(args, _)| **args == *infered_arg_types)
+        state.functions[fn_id].return_type_cache.iter().find(|(args, _)| **args == *infered_arg_types)
     {
         return ret.clone();
     }
 
-    let fn_args = state.fns[fn_id].args.clone();
-    let fn_code = state.fns[fn_id].code.clone();
-    let fn_src_file = state.fns[fn_id].src_file;
+    let fn_args = state.functions[fn_id].args.clone();
+    let fn_code = state.functions[fn_id].code.clone();
+    let fn_src_file = state.functions[fn_id].src_file;
 
     let v_len_before_args = state.v.len();
     for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
@@ -556,14 +556,14 @@ pub fn resolve_function_return_type(
     state.v.truncate(v_len_before_args);
 
     // Cache the result
-    state.fns[fn_id].return_type_cache.push((Box::from(infered_arg_types), to_return.clone()));
+    state.functions[fn_id].return_type_cache.push((Box::from(infered_arg_types), to_return.clone()));
 
     to_return
 }
 
 pub fn fn_args_match(fn_id: usize, expected_args: &[DataType], state: &State<'_>) -> bool {
-    state.fns[fn_id].args.len() == expected_args.len()
-        && !state.fns[fn_id]
+    state.functions[fn_id].args.len() == expected_args.len()
+        && !state.functions[fn_id]
             .args
             .iter()
             .zip(expected_args)
@@ -582,7 +582,7 @@ pub fn fn_matches_signature(
     if !fn_args_match(fn_id, expected_arg_types, state) {
         return false;
     }
-    let fn_name = state.fns[fn_id].name.clone();
+    let fn_name = state.functions[fn_id].name.clone();
     resolve_function_return_type(fn_id, expected_arg_types, &fn_name, ctx, state)
         == *expected_return_type
 }
@@ -751,11 +751,11 @@ fn infer_symbol_type(
     {
         // When a function is referenced by name, there's no call site to infer argument types from
         // As such, functions refereced by name need to have all of their arguments typed
-        if state.fns[fn_id].args.iter().any(|(_, t)| t.is_none()) {
+        if state.functions[fn_id].args.iter().any(|(_, t)| t.is_none()) {
             error_function_needs_args_typed(
                 name,
                 span,
-                (state.fns[fn_id].name_span, state.fns[fn_id].src_file),
+                (state.functions[fn_id].name_span, state.functions[fn_id].src_file),
                 ctx.file_idx,
                 state.sources,
             );
@@ -965,7 +965,7 @@ impl Expr {
                     "argv" => DataType::Array(Some(Box::from(DataType::String))),
                     function_name => {
                         if let Some(lib) = state
-                            .dyn_libs
+                            .dylibs
                             .iter()
                             .find(|l| &l.name == qualified_name.get_namespace().last().unwrap())
                             && let Some(FnSignature {
@@ -998,7 +998,7 @@ impl Expr {
                             }
                         } else {
                             state
-                                .fns
+                                .functions
                                 .iter()
                                 .rposition(|func| func.name == function_name)
                                 .unwrap_or_else(|| {
@@ -1105,7 +1105,7 @@ impl Expr {
                         } else if let DataType::Array(elem_type) = obj_type {
                             let elem_type = match elem_type {
                                 Some(t) => *t,
-                                None => state.fns[fn_id as usize].args[0]
+                                None => state.functions[fn_id as usize].args[0]
                                     .1
                                     .clone()
                                     .unwrap_or(DataType::Unknown),
@@ -1172,8 +1172,8 @@ impl Expr {
                 let returns_null = check_if_returns_void(code);
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(code, &mut callees);
-                let id = state.fns.len() as u16;
-                state.fns.push(Function {
+                let id = state.functions.len() as u16;
+                state.functions.push(Function {
                     name: fn_name,
                     args: args
                         .iter()

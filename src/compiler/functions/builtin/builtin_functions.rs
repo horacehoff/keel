@@ -182,7 +182,7 @@ pub fn builtin_functions(
 
                 check_user_fn_arg_types(fn_id, fn_name, &inferred_arg_types, arg_spans, ctx, state);
 
-                let fn_impl_idx = state.fns[fn_id]
+                let fn_impl_idx = state.functions[fn_id]
                     .impls
                     .iter()
                     .position(|fn_impl| *fn_impl.arg_types == inferred_arg_types);
@@ -190,13 +190,13 @@ pub fn builtin_functions(
                 if fn_impl_idx.is_none() {
                     // If it hasn't already been compiled for these argument types,
                     // compile it (which adds it to the function's implementation list)
-                    let fn_args = state.fns[fn_id]
+                    let fn_args = state.functions[fn_id]
                         .args
                         .iter()
                         .map(|(a, _)| a.clone())
                         .collect::<Vec<SmolStr>>();
-                    let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[fn_id].code);
-                    let closure_name = state.fns[fn_id].name.clone();
+                    let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
+                    let closure_name = state.functions[fn_id].name.clone();
                     compile_function(
                         output,
                         ctx,
@@ -208,16 +208,16 @@ pub fn builtin_functions(
                         &fn_code,
                         fn_id as u16,
                         false,
-                        state.fns[fn_id].src_file,
+                        state.functions[fn_id].src_file,
                     );
                 }
-                let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.fns[fn_id].impls.len() - 1);
+                let fn_impl_idx = fn_impl_idx.unwrap_or_else(|| state.functions[fn_id].impls.len() - 1);
 
-                let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
+                let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
                 state.registers[fn_reg as usize] = Data::function(loc);
 
                 for (i, arg_expr) in args.iter().enumerate() {
-                    let tgt_id = state.fns[fn_id].impls[fn_impl_idx].args_loc[i];
+                    let tgt_id = state.functions[fn_id].impls[fn_impl_idx].args_loc[i];
                     let start_len = output.len();
                     let arg_id =
                         arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();

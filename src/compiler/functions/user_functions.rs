@@ -25,14 +25,14 @@ use std::rc::Rc;
 /// Computes whether the function `state.fns[fn_id]` is recursive.
 /// This is only computed once per function.
 pub fn is_function_recursive(fn_id: usize, state: &mut State<'_>) -> bool {
-    if let Some(is_recursive) = state.fns[fn_id].is_recursive {
+    if let Some(is_recursive) = state.functions[fn_id].is_recursive {
         is_recursive
     } else {
-        let name = state.fns[fn_id].name.clone();
+        let name = state.functions[fn_id].name.clone();
         let mut visited = HashSet::new();
         visited.insert(name.clone());
-        let is_recursive = can_reach(&name, &name, state.fns, &mut visited);
-        state.fns[fn_id].is_recursive = Some(is_recursive);
+        let is_recursive = can_reach(&name, &name, state.functions, &mut visited);
+        state.functions[fn_id].is_recursive = Some(is_recursive);
         is_recursive
     }
 }
@@ -47,7 +47,7 @@ pub fn compile_function_impl(
     inferred_arg_types: &[DataType],
 ) -> usize {
     // Try to check if function has already been compiled for these specific arg types
-    if let Some(idx) = state.fns[fn_id]
+    if let Some(idx) = state.functions[fn_id]
         .impls
         .iter()
         .position(|fn_impl| fn_impl.arg_types.as_ref() == inferred_arg_types)
@@ -56,9 +56,10 @@ pub fn compile_function_impl(
     }
     // If it hasn't, compile a new specialization of this function
     let is_recursive = is_function_recursive(fn_id, state);
-    let fn_args = state.fns[fn_id].args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>();
-    let fn_code: Rc<[Expr]> = Rc::clone(&state.fns[fn_id].code);
-    let fn_name = &state.fns[fn_id].name.clone();
+    let fn_args =
+        state.functions[fn_id].args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>();
+    let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
+    let fn_name = &state.functions[fn_id].name.clone();
     compile_function(
         output,
         ctx,
@@ -70,9 +71,9 @@ pub fn compile_function_impl(
         &fn_code,
         fn_id as u16,
         is_recursive,
-        state.fns[fn_id].src_file,
+        state.functions[fn_id].src_file,
     );
-    state.fns[fn_id].impls.len() - 1
+    state.functions[fn_id].impls.len() - 1
 }
 
 pub fn handle_user_function(
@@ -89,25 +90,25 @@ pub fn handle_user_function(
     let args_indexes = &function_call.arg_spans;
     let is_recursive = is_function_recursive(function_idx, state);
 
-    let fn_returns_null = state.fns[function_idx].returns_null;
+    let fn_returns_null = state.functions[function_idx].returns_null;
 
     // Check if the arguments are correct
-    let args_len = state.fns[function_idx].args.len();
+    let args_len = state.functions[function_idx].args.len();
     check_args_user_fn(
         args,
         args_len,
         fn_name,
         ctx.file_idx,
         span,
-        (state.fns[function_idx].name_span, state.fns[function_idx].src_file),
+        (state.functions[function_idx].name_span, state.functions[function_idx].src_file),
         state,
         args_indexes,
     );
 
     //This inlines dylib wrappers
     // Actual general function inlining is coming soon
-    if state.fns[function_idx].code.len() == 1
-        && let Expr::ReturnVal(ret) = &state.fns[function_idx].code[0]
+    if state.functions[function_idx].code.len() == 1
+        && let Expr::ReturnVal(ret) = &state.functions[function_idx].code[0]
         && let Some(Expr::FunctionCall(FunctionCallExpr {
             qualified_name, args: call_args, ..
         })) = &**ret
@@ -115,10 +116,10 @@ pub fn handle_user_function(
         && call_args.len() == args_len
         && call_args
             .iter()
-            .zip(state.fns[function_idx].args.iter())
+            .zip(state.functions[function_idx].args.iter())
             .all(|(e, (p, _))| matches!(e, Expr::Var(n, _) if n == p))
         && let Some(fn_sig) = state
-            .dyn_libs
+            .dylibs
             .iter()
             .find(|lib| &lib.name == qualified_name.get_namespace().last().unwrap())
             .and_then(|lib| lib.fns.iter().find(|f| &f.name == qualified_name.get_name()))
@@ -134,7 +135,10 @@ pub fn handle_user_function(
                     &expected_arg_types[i],
                     args_indexes[i],
                     fn_name,
-                    Some((state.fns[function_idx].name_span, state.fns[function_idx].src_file)),
+                    Some((
+                        state.functions[function_idx].name_span,
+                        state.functions[function_idx].src_file,
+                    )),
                     ctx.file_idx,
                     state.sources,
                 )
@@ -161,7 +165,7 @@ pub fn handle_user_function(
     check_user_fn_arg_types(function_idx, fn_name, &inferred_arg_types, args_indexes, ctx, state);
 
     let fn_impl_idx = compile_function_impl(output, ctx, state, function_idx, &inferred_arg_types);
-    let loc = state.fns[function_idx].impls[fn_impl_idx].loc;
+    let loc = state.functions[function_idx].impls[fn_impl_idx].loc;
 
     let saveframe_loc = output.len();
     let callsite_id = if is_recursive {
@@ -175,10 +179,10 @@ pub fn handle_user_function(
     };
     // Move evaluated call args into the expected arg slots
     for (i, arg_expr) in args.iter().enumerate() {
-        let tgt_id = state.fns[function_idx].impls[fn_impl_idx].args_loc[i];
+        let tgt_id = state.functions[function_idx].impls[fn_impl_idx].args_loc[i];
 
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
-            let loc = state.fns[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.loc);
+            let loc = state.functions[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.loc);
             let fn_reg_id = state.new_reg(Data::function(loc));
             output.push(Instr::Mov(fn_reg_id, tgt_id));
             continue;
@@ -284,7 +288,7 @@ pub fn compile_function(
     state.v.truncate(v_len_before_args);
 
     // Add this func specialization to the func's metadata
-    let func = state.fns.get_mut(function_id).unwrap();
+    let func = state.functions.get_mut(function_id).unwrap();
     func.impls.push(FunctionImpl {
         loc,
         args_loc: Box::from(args_loc.as_slice()),

@@ -452,7 +452,7 @@ pub fn builtin_methods(
                 match &receiver_type {
                     DataType::Array(Some(t)) => (**t).clone(),
                     DataType::Array(None) => {
-                        state.fns[fn_id].args[0].1.clone().unwrap_or(DataType::Unknown)
+                        state.functions[fn_id].args[0].1.clone().unwrap_or(DataType::Unknown)
                     }
                     _ => unsafe { unreachable_unchecked() },
                 }
@@ -482,8 +482,8 @@ pub fn builtin_methods(
 
             let fn_impl_idx =
                 compile_function_impl(output, ctx, state, fn_id, std::slice::from_ref(&elem_type));
-            let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
-            let arg_reg = state.fns[fn_id].impls[fn_impl_idx].args_loc[0];
+            let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
+            let arg_reg = state.functions[fn_id].impls[fn_impl_idx].args_loc[0];
 
             let fn_value_reg = state.new_reg(Data::function(loc));
 
@@ -563,7 +563,7 @@ pub fn builtin_methods(
                 match &receiver_type {
                     DataType::Array(Some(t)) => (**t).clone(),
                     DataType::Array(None) => {
-                        state.fns[fn_id].args[0].1.clone().unwrap_or(DataType::Unknown)
+                        state.functions[fn_id].args[0].1.clone().unwrap_or(DataType::Unknown)
                     }
                     _ => unsafe { unreachable_unchecked() },
                 }
@@ -585,8 +585,8 @@ pub fn builtin_methods(
 
             let fn_impl_idx =
                 compile_function_impl(output, ctx, state, fn_id, std::slice::from_ref(&elem_type));
-            let loc = state.fns[fn_id].impls[fn_impl_idx].loc;
-            let arg_reg = state.fns[fn_id].impls[fn_impl_idx].args_loc[0];
+            let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
+            let arg_reg = state.functions[fn_id].impls[fn_impl_idx].args_loc[0];
 
             let fn_value_reg = state.new_reg(Data::function(loc));
 

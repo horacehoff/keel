@@ -21,9 +21,9 @@ THIS SOFTWARE.
 --------
 MIT License
 Used by:
-- cc 1.4.0 - https://github.com/rust-lang/cc-rs
+- cc 1.4.1 - https://github.com/rust-lang/cc-rs
 - cfg-if 1.0.4 - https://github.com/rust-lang/cfg-if
-- find-msvc-tools 0.1.9 - https://github.com/rust-lang/cc-rs
+- find-msvc-tools 0.1.10 - https://github.com/rust-lang/cc-rs
 - js-sys 0.3.103 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys
 - wasm-bindgen-macro-support 0.2.126 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support
 - wasm-bindgen-macro 0.2.126 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro

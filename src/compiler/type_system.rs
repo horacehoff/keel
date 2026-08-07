@@ -514,8 +514,10 @@ pub fn resolve_function_return_type(
     ctx: Ctx,
     state: &mut State<'_>,
 ) -> DataType {
-    if let Some((_, ret)) =
-        state.functions[fn_id].return_type_cache.iter().find(|(args, _)| **args == *infered_arg_types)
+    if let Some((_, ret)) = state.functions[fn_id]
+        .return_type_cache
+        .iter()
+        .find(|(args, _)| **args == *infered_arg_types)
     {
         return ret.clone();
     }
@@ -556,7 +558,9 @@ pub fn resolve_function_return_type(
     state.v.truncate(v_len_before_args);
 
     // Cache the result
-    state.functions[fn_id].return_type_cache.push((Box::from(infered_arg_types), to_return.clone()));
+    state.functions[fn_id]
+        .return_type_cache
+        .push((Box::from(infered_arg_types), to_return.clone()));
 
     to_return
 }

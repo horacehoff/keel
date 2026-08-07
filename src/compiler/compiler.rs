@@ -189,6 +189,7 @@ const fn set_jmp_size(instr: &mut Instr, size: u16) {
 /// bool_or_mode false emits false jumps
 /// Returns (true_jump_idxs, false_jump_idxs)
 #[allow(clippy::too_many_arguments)]
+#[must_use]
 fn compile_short_circuit_condition(
     expr: &Expr,
     ctx: Ctx,
@@ -272,7 +273,7 @@ fn parse_loop_flow_control(
     });
 }
 
-#[inline(always)]
+#[must_use]
 fn compile_array_literal(
     array_items: &[Expr],
     spans: &[Span],
@@ -358,6 +359,7 @@ fn compile_array_literal(
     }
 }
 
+#[must_use]
 fn compile_struct_literal(
     name: &QualifiedName,
     fields: &[StructFieldExpr],
@@ -508,6 +510,7 @@ fn compile_struct_literal(
     }
 }
 
+#[must_use]
 fn compile_map_literal(
     kv_pairs: &[(Expr, Span, Expr, Span)],
     map_span: Span,
@@ -651,6 +654,7 @@ fn compile_map_literal(
     }
 }
 
+#[must_use]
 fn compile_struct_field_access(
     struct_expr: &Expr,
     field: &SmolStr,
@@ -690,6 +694,7 @@ fn compile_struct_field_access(
     }
 }
 
+#[must_use]
 fn compile_array_indexing(
     array: &Expr,
     index: &Expr,
@@ -723,6 +728,7 @@ fn compile_array_indexing(
     dest_reg_id
 }
 
+#[must_use]
 fn compile_array_slice(
     array: &Expr,
     idx_start: &Expr,
@@ -762,6 +768,7 @@ fn compile_array_slice(
     dest_reg_id
 }
 
+#[must_use]
 fn uniform_op(
     instr: fn(u16, u16, u16) -> Instr,
     symbol: &'static str,
@@ -790,6 +797,7 @@ fn uniform_op(
 }
 
 #[inline]
+#[must_use]
 fn uniform_op2(
     instr: fn(u16, u16, u16) -> Instr,
     t_1: &'static DataType,
@@ -818,6 +826,7 @@ fn uniform_op2(
     id
 }
 
+#[must_use]
 fn compile_div_op(
     l: &Expr,
     r: &Expr,
@@ -854,6 +863,7 @@ fn compile_div_op(
     id
 }
 
+#[must_use]
 fn compile_add_op(
     l: &Expr,
     r: &Expr,
@@ -906,6 +916,7 @@ fn compile_add_op(
     id
 }
 
+#[must_use]
 fn compile_sub_op(
     l: &Expr,
     r: &Expr,
@@ -947,6 +958,7 @@ fn compile_sub_op(
     id
 }
 
+#[must_use]
 fn compile_mod_op(
     l: &Expr,
     r: &Expr,
@@ -983,6 +995,7 @@ fn compile_mod_op(
     id
 }
 
+#[must_use]
 fn compile_eq_op(
     l: &Expr,
     r: &Expr,
@@ -1011,6 +1024,7 @@ fn compile_eq_op(
     id
 }
 
+#[must_use]
 fn compile_neq_op(
     l: &Expr,
     r: &Expr,
@@ -1039,6 +1053,7 @@ fn compile_neq_op(
     id
 }
 
+#[must_use]
 fn compile_neg_op(
     l: &Expr,
     span_l: Span,
@@ -1070,6 +1085,7 @@ fn compile_neg_op(
     id
 }
 
+#[must_use]
 fn compile_bool_neg_op(
     l: &Expr,
     span_l: Span,
@@ -1121,6 +1137,7 @@ fn compile_inline_condition_branch(
     }
 }
 
+#[must_use]
 fn compile_inline_condition(
     main_condition: &Expr,
     code: &[Expr],
@@ -1780,6 +1797,7 @@ fn compile_var_assignment(
     }
 }
 
+#[must_use]
 fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_>) -> Option<u16> {
     let (namespace, name, span): (&[SmolStr], &SmolStr, Span) = match e {
         Expr::Var(n, s) => (&[], n, *s),
@@ -1799,6 +1817,64 @@ fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_>) -> Option<u16> {
         state.sources,
     )?];
     (global_var.var_type == DataType::Int).then_some(global_var.register_id)
+}
+
+#[must_use]
+fn compile_var_access(
+    path: &[SmolStr],
+    name: &SmolStr,
+    span: Span,
+    ctx: Ctx,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    // Local variable
+    if path.is_empty()
+        && let Some(Variable { register_id, .. }) = state.find_var(name)
+    {
+        return *register_id;
+    }
+    // Global variable
+    if let Some(idx) =
+        state.scope(ctx.file_idx).find_global(path, name, span, ctx.file_idx, state.sources)
+    {
+        return state.globals[idx].register_id;
+    }
+
+    // Function referenced by name
+    let Some(fn_id) =
+        state.scope(ctx.file_idx).find_function(path, name, span, ctx.file_idx, state.sources)
+    else {
+        compiler_errors::error_unknown_variable(name, span, state.v, ctx.file_idx, state.sources);
+    };
+
+    let arg_types: Vec<DataType> =
+        state.functions[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
+
+    let fn_impl_idx =
+        state.functions[fn_id].impls.iter().position(|imp| *imp.arg_types == arg_types);
+
+    if fn_impl_idx.is_none() {
+        let fn_args =
+            state.functions[fn_id].args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>();
+        let fn_code = Rc::clone(&state.functions[fn_id].code);
+        compile_function(
+            output,
+            ctx,
+            state,
+            fn_id,
+            &fn_args,
+            name,
+            &arg_types,
+            &fn_code,
+            fn_id as u16,
+            false,
+            state.functions[fn_id].src_file,
+        );
+    }
+
+    let loc = state.functions[fn_id].impls[unsafe { fn_impl_idx.unwrap_unchecked() }].loc;
+    state.new_reg(Data::function(loc))
 }
 
 fn compile_struct_definition(
@@ -1998,133 +2074,18 @@ impl Expr {
             }
             Self::Var(name, span) => {
                 debug_assert!(uses_id);
-                if let Some(Variable { register_id, .. }) = state.find_var(name) {
-                    Some(*register_id)
-                } else if let Some(idx) = state.scope(ctx.file_idx).find_global(
-                    &[],
-                    name,
-                    *span,
-                    ctx.file_idx,
-                    state.sources,
-                ) {
-                    Some(state.globals[idx].register_id)
-                } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
-                    &[],
-                    name,
-                    *span,
-                    ctx.file_idx,
-                    state.sources,
-                ) {
-                    let arg_types: Vec<DataType> = state.functions[fn_id]
-                        .args
-                        .iter()
-                        .map(|(_, t)| t.clone().unwrap())
-                        .collect();
-
-                    let fn_impl_idx = state.functions[fn_id]
-                        .impls
-                        .iter()
-                        .position(|imp| *imp.arg_types == arg_types);
-                    if fn_impl_idx.is_none() {
-                        let fn_args = state.functions[fn_id]
-                            .args
-                            .iter()
-                            .map(|(a, _)| a.clone())
-                            .collect::<Vec<SmolStr>>();
-                        let fn_code = Rc::clone(&state.functions[fn_id].code);
-                        compile_function(
-                            output,
-                            ctx,
-                            state,
-                            fn_id,
-                            &fn_args,
-                            name,
-                            &arg_types,
-                            &fn_code,
-                            fn_id as u16,
-                            false,
-                            state.functions[fn_id].src_file,
-                        );
-                    }
-                    let fn_impl_idx =
-                        fn_impl_idx.unwrap_or_else(|| state.functions[fn_id].impls.len() - 1);
-                    let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
-
-                    Some(state.new_reg(Data::function(loc)))
-                } else {
-                    compiler_errors::error_unknown_variable(
-                        name,
-                        *span,
-                        state.v,
-                        ctx.file_idx,
-                        state.sources,
-                    );
-                }
+                Some(compile_var_access(&[], name, *span, ctx, state, output))
             }
             Self::NamespacedVar(qualified_name, span) => {
                 debug_assert!(uses_id);
-                let name = qualified_name.get_name();
-                let namespace = qualified_name.get_namespace();
-                if let Some(idx) = state.scope(ctx.file_idx).find_global(
-                    namespace,
-                    name,
+                Some(compile_var_access(
+                    qualified_name.get_namespace(),
+                    qualified_name.get_name(),
                     *span,
-                    ctx.file_idx,
-                    state.sources,
-                ) {
-                    Some(state.globals[idx].register_id)
-                } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
-                    namespace,
-                    name,
-                    *span,
-                    ctx.file_idx,
-                    state.sources,
-                ) {
-                    let arg_types: Vec<DataType> = state.functions[fn_id]
-                        .args
-                        .iter()
-                        .map(|(_, t)| t.clone().unwrap())
-                        .collect();
-
-                    let fn_impl_idx = state.functions[fn_id]
-                        .impls
-                        .iter()
-                        .position(|imp| *imp.arg_types == arg_types);
-                    if fn_impl_idx.is_none() {
-                        let fn_args = state.functions[fn_id]
-                            .args
-                            .iter()
-                            .map(|(a, _)| a.clone())
-                            .collect::<Vec<SmolStr>>();
-                        let fn_code = Rc::clone(&state.functions[fn_id].code);
-                        compile_function(
-                            output,
-                            ctx,
-                            state,
-                            fn_id,
-                            &fn_args,
-                            name,
-                            &arg_types,
-                            &fn_code,
-                            fn_id as u16,
-                            false,
-                            state.functions[fn_id].src_file,
-                        );
-                    }
-                    let fn_impl_idx =
-                        fn_impl_idx.unwrap_or_else(|| state.functions[fn_id].impls.len() - 1);
-                    let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
-
-                    Some(state.new_reg(Data::function(loc)))
-                } else {
-                    compiler_errors::error_unknown_variable(
-                        name,
-                        *span,
-                        state.v,
-                        ctx.file_idx,
-                        state.sources,
-                    );
-                }
+                    ctx,
+                    state,
+                    output,
+                ))
             }
             Self::Array(array_items, spans) => {
                 debug_assert!(uses_id);
@@ -2640,7 +2601,7 @@ fn parse_toplevel(
                 if let Some(func_idx) =
                     scope.find_function(&[], &fn_name, span, src_file_idx, sources)
                 {
-                    let func = &fns[func_idx as usize];
+                    let func = &fns[func_idx];
                     compiler_errors::error_function_already_defined(
                         func,
                         span,
@@ -2937,17 +2898,17 @@ fn resolve_types(
     }
 }
 
-pub struct VmData {
-    pub instructions: Vec<Instr>,
-    pub registers: RegisterFile,
-    pub pools: Pools,
-    pub err_ctx: ErrorCtx,
-    pub fn_registers: Vec<Vec<u16>>,
-    pub dylib_fns: Vec<DylibFn>,
-    pub allocated_arg_count: usize,
-    pub allocated_call_depth: usize,
-    pub structs: Vec<Struct>,
-}
+// pub struct VmData {
+//     pub instructions: Vec<Instr>,
+//     pub registers: RegisterFile,
+//     pub pools: Pools,
+//     pub err_ctx: ErrorCtx,
+//     pub fn_registers: Vec<Vec<u16>>,
+//     pub dylib_fns: Vec<DylibFn>,
+//     pub allocated_arg_count: usize,
+//     pub allocated_call_depth: usize,
+//     pub structs: Vec<Struct>,
+// }
 
 pub fn compile(
     contents: String,

@@ -1,6 +1,5 @@
 /target
 /.zed
-/.idea
 test.kl
 docs/benchmarks.py
 /lib_testing

@@ -1,5 +1,14 @@
 # Keel Changelog
 
+## 0.5.0
+- Several critical bugs have been fixed
+- Lowered the memory footprint of the compiler
+- There's now a Windows install script
+- Formatting/Printing performance has been immensely improved
+- The `str` function has been renamed to `string`
+- The `check` CLI command has been added to check if a program is correct without running it
+- Global mutable variables have been added and can be declared wth `static var = value`.
+
 ## 0.4.0 (07/30/2026)
 - Function arguments can now be typed with the syntax `arg: T`
 - Structs and bools can now be passed and returned through FFI functions

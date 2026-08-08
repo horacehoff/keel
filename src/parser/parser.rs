@@ -568,6 +568,16 @@ fn parse_type(parser: &mut Parser<'_>) -> TypeExpr {
     }
 }
 
+pub const fn get_primitive_type_name(t: Token<'_>) -> Option<&'static str> {
+    match t {
+        Token::TypeInt => Some("int"),
+        Token::TypeFloat => Some("float"),
+        Token::TypeBool => Some("bool"),
+        Token::TypeString => Some("string"),
+        _ => None,
+    }
+}
+
 fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
     let (next_token, span) = parser.next_token();
     let mut t = if next_token == Token::LBrace {
@@ -614,6 +624,8 @@ fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
         } else {
             TypeExpr::Identifier(SmolStr::new(i), span)
         }
+    } else if let Some(name) = get_primitive_type_name(next_token) {
+        TypeExpr::Identifier(SmolStr::new_static(name), span)
     } else if Token::Null == next_token {
         TypeExpr::Null
     } else {

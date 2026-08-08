@@ -82,7 +82,7 @@ pub fn builtin_functions(
             state.add_to_src(ctx, output, span);
             Some(output_id)
         }
-        "str" => {
+        "string" => {
             check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(id);

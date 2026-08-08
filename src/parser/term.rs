@@ -80,6 +80,15 @@ fn parse_struct(parser: &mut Parser<'_>, name: QualifiedName, start: u32) -> Exp
     Expr::Struct(name, Box::from(fields), (start, end).into())
 }
 
+fn parse_type_conversion_fn(parser: &mut Parser<'_>, name: &'static str, span: Span) -> Expr {
+    parser.next_token_expect(
+        Token::LParen,
+        "Type names are only valid here as a function, like int(x), float(x), string(x), or bool(x).",
+    );
+
+    parse_fn_call(parser, QualifiedName::new([SmolStr::new_static(name)]), span)
+}
+
 pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
     let (t, t_span) = parser.next_token();
     match t {
@@ -89,6 +98,10 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
         Token::True => Expr::Bool(true),
         Token::False => Expr::Bool(false),
         Token::Null => Expr::Null,
+        Token::TypeInt => parse_type_conversion_fn(parser, "int", t_span),
+        Token::TypeFloat => parse_type_conversion_fn(parser, "float", t_span),
+        Token::TypeBool => parse_type_conversion_fn(parser, "bool", t_span),
+        Token::TypeString => parse_type_conversion_fn(parser, "string", t_span),
         Token::Identifier(s) => {
             let start = t_span.start;
             match parser.peek_token_opt() {

@@ -1,6 +1,7 @@
 use crate::compiler::compiler_data::Struct;
+use crate::vm::ObjectPool;
+use crate::vm::gc::Gc;
 use crate::vm::{MapPool, RegisterFile, StringPool};
-use crate::{string_gc::raise_string_gc_threshold, string_gc::string_gc, vm::ObjectPool};
 use lexical_core::FormattedSize;
 use std::hash::Hasher;
 use std::hint::unreachable_unchecked;
@@ -197,29 +198,26 @@ impl Data {
     /// Allocates a string, storing it directly inside the u64 if it's <= 6 characters or inside string_pool if it's bigger
     pub fn string<S: PoolString>(
         s: S,
-        array_pool: &ObjectPool,
+        obj_pool: &ObjectPool,
+        map_pool: &MapPool,
         str_pool: &mut StringPool,
         registers: &RegisterFile,
         recursion_stack: &RegisterFile,
-        free_strings: &mut Vec<u16>,
-        gc_string_threshold: &mut u32,
-        string_live: &mut Vec<bool>,
+        gc: &mut Gc,
     ) -> Self {
         if s.str_len() <= 6 {
             Self::small_str(s.pool_as_str())
         } else {
-            if str_pool.len() >= (*gc_string_threshold as usize) && free_strings.is_empty() {
-                raise_string_gc_threshold(gc_string_threshold, str_pool.len());
-                string_gc(
-                    array_pool,
-                    str_pool,
-                    free_strings,
+            if gc.str_pool_needs_gc(str_pool.len()) {
+                gc.collect_free_strings(
+                    obj_pool,
+                    map_pool,
+                    str_pool.len(),
                     registers,
                     recursion_stack,
-                    string_live,
                 );
             }
-            if let Some(id) = free_strings.pop() {
+            if let Some(id) = gc.free_strings.pop() {
                 s.move_to_slot(str_pool.get_mut(id as usize));
                 Self(NAN_STRING_LARGE | (id as u64))
             } else {

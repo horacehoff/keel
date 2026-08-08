@@ -92,7 +92,7 @@ git clone https://github.com/horacehoff/keel && cd keel && cargo build --release
 ```
 
 ## Near-future roadmap
-- Global constants
+- Match (a better one) & Type guards
 - Structured errors
 - Struct methods
 - Better embedding API with limits

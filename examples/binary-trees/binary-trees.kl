@@ -22,9 +22,9 @@ fn main() {
 
     print(
         "stretch tree of depth "
-        + str(stretch_depth)
+        + string(stretch_depth)
         + "\t check:"
-        + str(check_tree(make_tree(stretch_depth)))
+        + string(check_tree(make_tree(stretch_depth)))
     );
 
     let long_lived_tree = make_tree(max_depth);
@@ -39,19 +39,19 @@ fn main() {
         }
 
         print(
-            str(iterations)
+            string(iterations)
             + "\t trees of depth "
-            + str(depth)
+            + string(depth)
             + "\t check:"
-            + str(check)
+            + string(check)
         );
         iterations /= 4;
     }
 
     print(
         "long lived tree of depth"
-        + str(max_depth)
+        + string(max_depth)
         + "\t check:"
-        + str(check_tree(long_lived_tree))
+        + string(check_tree(long_lived_tree))
     );
 }

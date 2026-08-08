@@ -60,6 +60,10 @@ str(42); // Returns "42"
 str([0,1,2,3]); // Returns "[0,1,2,3]"
 ```
 
+!!! note
+
+    In Keel 0.5.0, this function will be renamed to `string`.
+
 ## Bool
 
 `bool(s: string) -> bool`<br/>

@@ -254,7 +254,13 @@ impl DataType {
         match self {
             Self::Int => libffi::middle::Type::i32(),
             Self::Float => libffi::middle::Type::f64(),
-            Self::String | Self::Array(_) => libffi::middle::Type::pointer(),
+            Self::String => libffi::middle::Type::pointer(),
+            Self::Array(elem_type) => {
+                if let Some(elem_type) = elem_type {
+                    elem_type.to_c_type(false, span, structs, file_idx, sources);
+                }
+                libffi::middle::Type::pointer()
+            }
             Self::Bool => libffi::middle::Type::u8(),
             Self::Null if is_return_type => libffi::middle::Type::void(),
             Self::Struct(id) => {
@@ -286,9 +292,11 @@ impl PartialEq for DataType {
             | (Self::Array(_), Self::Array(None))
             | (Self::Array(None), Self::Array(_)) => true,
             (Self::Array(Some(a)), Self::Array(Some(b))) => a == b,
-            (Self::Union(a), Self::Union(b)) | (Self::FnSignature(a), Self::FnSignature(b)) => {
-                a == b
+            #[allow(clippy::suspicious_operation_groupings)]
+            (Self::Union(a), Self::Union(b)) => {
+                a == b || (a.iter().all(|x| b.contains(x)) && b.iter().all(|x| a.contains(x)))
             }
+            (Self::FnSignature(a), Self::FnSignature(b)) => a == b,
             (Self::Struct(a), Self::Struct(b)) => a == b,
             (Self::Fn(fn_id), Self::Fn(fn_id_2)) => fn_id == fn_id_2,
             (Self::Map(a), Self::Map(b)) => {
@@ -346,11 +354,9 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
     let mut expr_stack: Vec<&Expr> = content.iter().collect();
     while let Some(expression) = expr_stack.pop() {
         match expression {
-            Expr::FunctionCall(FunctionCallExpr { qualified_name, args, .. }) => {
+            Expr::FunctionCall(FunctionCallExpr { qualified_name, args, .. })
+            | Expr::ObjFunctionCall(FunctionCallExpr { qualified_name, args, .. }) => {
                 calls.push(qualified_name.get_name().clone());
-                expr_stack.extend(args);
-            }
-            Expr::ObjFunctionCall(FunctionCallExpr { args, .. }) => {
                 expr_stack.extend(args);
             }
             Expr::IfBlock(IfBlockExpr { condition: x, code: y, .. })
@@ -961,7 +967,7 @@ impl Expr {
             Self::FunctionCall(FunctionCallExpr { qualified_name, args, span, arg_spans: _ }) => {
                 match qualified_name.get_name().as_str() {
                     "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
-                    "type" | "str" | "input" | "read" => DataType::String,
+                    "type" | "string" | "input" | "read" => DataType::String,
                     "float" => DataType::Float,
                     "int" | "the_answer" => DataType::Int,
                     "bool" | "exists" => DataType::Bool,

@@ -3,7 +3,6 @@ use crate::errors::BOLD;
 use crate::errors::RED;
 use crate::errors::RESET;
 use crate::repl::repl;
-use crate::vm::RegisterFile;
 #[cfg(feature = "embed")]
 use std::ffi::{CStr, CString, c_char};
 use std::fs;
@@ -13,8 +12,6 @@ use std::panic::catch_unwind;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-#[path = "./vm/gc/array_gc.rs"]
-mod array_gc;
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
 #[path = "./compiler/compiler.rs"]
@@ -25,13 +22,9 @@ mod data;
 mod errors;
 #[path = "./instr.rs"]
 mod instr;
-#[path = "./vm/gc/map_gc.rs"]
-mod map_gc;
 #[path = "./parser/parser.rs"]
 mod parser;
 mod repl;
-#[path = "./vm/gc/string_gc.rs"]
-mod string_gc;
 #[path = "./tests.rs"]
 #[cfg(test)]
 mod tests;
@@ -121,6 +114,9 @@ pub unsafe extern "C" fn keel_free_output(output: *mut c_char) {
     }
 }
 
+const ARGS: &str =
+    "  keel\n  keel file.kl\n  keel check file.kl\n  keel [-v | --version]\n  keel [-h | --help]";
+
 pub fn main() {
     #[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|info| {
@@ -140,7 +136,7 @@ pub fn main() {
     if next_arg == "--help" || next_arg == "-h" {
         cold_path();
         println!(
-            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n  keel\n  keel myfile.kl\n  keel [-v | --version]\n  keel [-h | --help]\n\nDocumentation: https://docs.keel-lang.com\nWebsite: https://keel-lang.com",
+            "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n{ARGS}",
             util::KEEL_LOGO
         );
         return;
@@ -149,12 +145,29 @@ pub fn main() {
     if next_arg == "--version" || next_arg == "-v" {
         cold_path();
         if args.len() > 1 {
-            eprintln!(
-                "{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n  keel\n  keel myfile.kl\n  keel [-v | --version]\n  keel [-h | --help]"
-            );
+            cold_path();
+            eprintln!("{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n{ARGS}");
             return;
         }
         println!("Keel {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
+    if next_arg == "check" {
+        cold_path();
+        if args.len() == 0 {
+            cold_path();
+            eprintln!("{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n{ARGS}");
+            return;
+        }
+        let next_arg = unsafe { args.next().unwrap_unchecked() };
+        let filename = &next_arg;
+        let contents = fs::read_to_string(filename).unwrap_or_else(|_| {
+            cold_path();
+            eprintln!("{RED}[KEEL]{RESET} Cannot read {RED}{BOLD}{filename}{RESET}");
+            std::process::exit(1);
+        });
+        compile(contents, filename, false);
         return;
     }
 

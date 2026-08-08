@@ -458,7 +458,7 @@ pub fn int_to_str_conversion() {
     run_and_check_registers!(
         r#"
         fn main() {
-            let x = str(42);
+            let x = string(42);
             print(x.len());
         }
         "#,

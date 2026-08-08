@@ -174,6 +174,9 @@ pub enum Instr {
     MapInsertReg(u16, u16, u16),
     CloneMap(u16, u16),
 
+    /// IsType(data_reg_id, type_code, output_reg_id)
+    // IsType(u16, u16, u16),
+
     /// Exits the program with the i32 code if it's != 0
     Halt(u16),
 }

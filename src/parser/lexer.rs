@@ -17,6 +17,10 @@ impl std::fmt::Display for Token<'_> {
             Token::LBracket => write!(f, "'['"),
             Token::RBracket => write!(f, "']'"),
             Token::FatArrow => write!(f, "'=>'"),
+            Token::TypeInt => write!(f, "'int'"),
+            Token::TypeFloat => write!(f, "'float'"),
+            Token::TypeBool => write!(f, "'bool'"),
+            Token::TypeString => write!(f, "'string'"),
             other => write!(f, "{other:?}"),
         }
     }
@@ -119,6 +123,14 @@ pub enum Token<'a> {
     Let,
     #[token("static")]
     Static,
+    #[token("int")]
+    TypeInt,
+    #[token("float")]
+    TypeFloat,
+    #[token("bool")]
+    TypeBool,
+    #[token("string")]
+    TypeString,
     #[token("(")]
     LParen,
     #[token(")")]

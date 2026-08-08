@@ -1,4 +1,3 @@
-use crate::array_gc::alloc_array;
 use crate::compiler::compiler_data::DylibFn;
 use crate::compiler::compiler_data::ErrorCatch;
 use crate::compiler::compiler_data::Pools;
@@ -16,7 +15,7 @@ use crate::fs;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use crate::map_gc::alloc_map;
+use gc::Gc;
 use lexical_core::FormattedSize;
 use memchr::memmem;
 use smol_strc::ToSmolStr;
@@ -29,12 +28,13 @@ use std::ops::Index;
 use std::ops::IndexMut;
 
 #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-use std::io::IsTerminal;
+use std::io::{IsTerminal, StdoutLock};
 
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
 
 mod ffi;
+pub mod gc;
 
 pub type ObjectPool = Pool<Vec<Data>>;
 pub type MapPool = Pool<HashMap<Data, Data, BuildHasherDefault<DataHash>>>;
@@ -227,19 +227,24 @@ fn error_with_catch(
     err: ErrType,
     r: &mut RegisterFile,
     obj_pool: &ObjectPool,
+    map_pool: &MapPool,
     string_pool: &mut StringPool,
     recursion_stack: &RegisterFile,
-    free_strings: &mut Vec<u16>,
-    gc_string_threshold: &mut u32,
-    string_live: &mut Vec<bool>,
+    gc: &mut Gc,
     args: &mut Vec<u16>,
     call_frames: &mut Vec<CallFrame>,
     error_handles: &mut Vec<ErrorCatch>,
     err_ctx: &ErrorCtx,
     instructions: &[Instr],
     i: usize,
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))] handle: &mut std::io::BufWriter<
+        StdoutLock,
+    >,
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+    handle: &mut crate::captured_output::CapturedOutputWriter,
 ) -> usize {
     if error_handles.is_empty() {
+        handle.flush().unwrap();
         throw_error(err_ctx, unsafe { *instructions.get_unchecked(i) }, err);
     } else {
         let err_handle = error_handles.pop_unchecked();
@@ -248,16 +253,8 @@ fn error_with_catch(
             call_frames.set_len(err_handle.call_frames_len as usize);
         }
 
-        r[err_handle.error_reg] = Data::string(
-            err.kind(),
-            obj_pool,
-            string_pool,
-            r,
-            recursion_stack,
-            free_strings,
-            gc_string_threshold,
-            string_live,
-        );
+        r[err_handle.error_reg] =
+            Data::string(err.kind(), obj_pool, map_pool, string_pool, r, recursion_stack, gc);
         err_handle.catch_loc as usize
     }
 }
@@ -297,38 +294,19 @@ pub fn execute(
 
     let mut output = String::with_capacity(256);
 
-    let mut free_arrays: Vec<u32> = Vec::with_capacity(obj_pool.len());
-    let mut free_maps: Vec<u32> = Vec::with_capacity(map_pool.len());
-    let mut free_strings: Vec<u16> = Vec::with_capacity(str_pool.len());
-    let mut array_live: Vec<bool> = Vec::new();
-    let mut map_live: Vec<bool> = Vec::new();
-    let mut string_live: Vec<bool> = Vec::new();
+    let mut gc = Gc::new(obj_pool, map_pool, str_pool);
 
     // Args converted from Data to libffi args are stored here
     #[cfg(not(target_arch = "wasm32"))]
     let mut ffi_args: Vec<libffi::middle::Arg> = Vec::new();
     let mut dyn_lib_args: Vec<u64> = Vec::new();
     let mut keep_alive: Vec<Box<[u8]>> = Vec::new();
-    let mut obj_gc_stack: Vec<Data> = Vec::with_capacity(obj_pool.len());
-
-    let mut gc_string_threshold: u32 = 256;
-    let mut gc_array_threshold: u32 = 256;
-    let mut gc_map_threshold: u32 = 256;
 
     let mut error_handles: Vec<ErrorCatch> = Vec::new();
 
     macro_rules! string {
         ($e: expr) => {
-            Data::string(
-                $e,
-                obj_pool,
-                str_pool,
-                r,
-                &recursion_stack,
-                &mut free_strings,
-                &mut gc_string_threshold,
-                &mut string_live,
-            )
+            Data::string($e, obj_pool, map_pool, str_pool, r, &recursion_stack, &mut gc)
         };
     }
 
@@ -339,17 +317,17 @@ pub fn execute(
                 $err,
                 r,
                 obj_pool,
+                map_pool,
                 str_pool,
                 &mut recursion_stack,
-                &mut free_strings,
-                &mut gc_string_threshold,
-                &mut string_live,
+                &mut gc,
                 &mut args,
                 &mut call_frames,
                 &mut error_handles,
                 err_ctx,
                 instructions,
                 i,
+                &mut handle,
             );
             continue;
         };
@@ -359,17 +337,17 @@ pub fn execute(
                 $err,
                 r,
                 obj_pool,
+                map_pool,
                 str_pool,
                 &mut recursion_stack,
-                &mut free_strings,
-                &mut gc_string_threshold,
-                &mut string_live,
+                &mut gc,
                 &mut args,
                 &mut call_frames,
                 &mut error_handles,
                 err_ctx,
                 instructions,
                 i,
+                &mut handle
             );
             continue $label;
         };
@@ -550,13 +528,12 @@ pub fn execute(
                                 &return_buf,
                                 &field_offsets,
                                 obj_pool,
+                                map_pool,
                                 str_pool,
                                 struct_fields,
                                 r,
                                 &recursion_stack,
-                                &mut free_strings,
-                                &mut gc_string_threshold,
-                                &mut string_live,
+                                &mut gc,
                                 structs,
                             );
                             let new_id = obj_pool.len();
@@ -587,32 +564,13 @@ pub fn execute(
                 r[dest] = string!(s);
             }
             Instr::EmptyArray(arr_reg_id) => {
-                let array_id = alloc_array(
-                    obj_pool,
-                    map_pool,
-                    &mut free_arrays,
-                    r,
-                    &recursion_stack,
-                    &mut gc_array_threshold,
-                    &mut array_live,
-                    &mut map_live,
-                    &mut obj_gc_stack,
-                );
+                let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                 r[arr_reg_id] = Data::array(array_id);
             }
             Instr::CloneArray(src_reg, dest_reg, len) => {
                 let src_id = r[src_reg].as_array();
-                let new_id = alloc_array(
-                    obj_pool,
-                    map_pool,
-                    &mut free_arrays,
-                    r,
-                    &recursion_stack,
-                    &mut gc_array_threshold,
-                    &mut array_live,
-                    &mut map_live,
-                    &mut obj_gc_stack,
-                ) as usize;
+                let new_id =
+                    gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack) as usize;
                 let src_ptr = obj_pool[src_id].as_ptr();
                 let dst = obj_pool.get_mut(new_id);
                 dst.reserve_exact(len as usize);
@@ -623,17 +581,8 @@ pub fn execute(
                 r[dest_reg] = Data::array(new_id as u32);
             }
             Instr::CloneStruct(src_reg, dest_reg) => {
-                let new_id = alloc_array(
-                    obj_pool,
-                    map_pool,
-                    &mut free_arrays,
-                    r,
-                    &recursion_stack,
-                    &mut gc_array_threshold,
-                    &mut array_live,
-                    &mut map_live,
-                    &mut obj_gc_stack,
-                ) as usize;
+                let new_id =
+                    gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack) as usize;
                 let src_reg = r[src_reg];
                 let src = &obj_pool[src_reg.as_struct()];
                 let len = src.len();
@@ -649,17 +598,8 @@ pub fn execute(
             Instr::AddArray(o1, o2, dest) => {
                 let array1_id = r[o1].as_array();
                 let array2_id = r[o2].as_array();
-                let output_array_id = alloc_array(
-                    obj_pool,
-                    map_pool,
-                    &mut free_arrays,
-                    r,
-                    &recursion_stack,
-                    &mut gc_array_threshold,
-                    &mut array_live,
-                    &mut map_live,
-                    &mut obj_gc_stack,
-                );
+                let output_array_id =
+                    gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                 let array_idx = output_array_id as usize;
                 unsafe {
                     let array_pool_ptr = obj_pool.as_mut_ptr();
@@ -935,17 +875,8 @@ pub fn execute(
                 {
                     error_with_catch!(ErrType::SliceOutOfBounds(array.len(), idx_start, idx_end));
                 }
-                let new_array_id = alloc_array(
-                    obj_pool,
-                    map_pool,
-                    &mut free_arrays,
-                    r,
-                    &recursion_stack,
-                    &mut gc_array_threshold,
-                    &mut array_live,
-                    &mut map_live,
-                    &mut obj_gc_stack,
-                );
+                let new_array_id =
+                    gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                 obj_pool.extend_within(
                     arr_id,
                     new_array_id as usize,
@@ -1012,17 +943,7 @@ pub fn execute(
             },
             Instr::CloneMap(src_reg, dest_reg) => {
                 let new_map = map_pool[r[src_reg].as_map()].clone();
-                let new_id = alloc_map(
-                    map_pool,
-                    obj_pool,
-                    &mut free_maps,
-                    r,
-                    &recursion_stack,
-                    &mut gc_map_threshold,
-                    &mut map_live,
-                    &mut array_live,
-                    &mut obj_gc_stack,
-                );
+                let new_id = gc.alloc_map(map_pool, obj_pool, str_pool, r, &recursion_stack);
                 unsafe {
                     map_pool[new_id as usize] = new_map;
                 }
@@ -1119,17 +1040,8 @@ pub fn execute(
                     r[dest] = string!(str.repeat(repeat_count as usize));
                 } else if reg.is_array() {
                     let repeat_count = r[args.pop_unchecked()].as_int();
-                    let array_id = alloc_array(
-                        obj_pool,
-                        map_pool,
-                        &mut free_arrays,
-                        r,
-                        &recursion_stack,
-                        &mut gc_array_threshold,
-                        &mut array_live,
-                        &mut map_live,
-                        &mut obj_gc_stack,
-                    );
+                    let array_id =
+                        gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                     obj_pool[array_id as usize] =
                         obj_pool[reg.as_array()].repeat(repeat_count as usize);
                     r[dest] = Data::array(array_id);
@@ -1269,17 +1181,8 @@ pub fn execute(
                 let source = r[source_register];
                 let separator = unsafe { args.pop_unchecked() };
                 if source.is_string() {
-                    let output_str_reg_id = alloc_array(
-                        obj_pool,
-                        map_pool,
-                        &mut free_arrays,
-                        r,
-                        &recursion_stack,
-                        &mut gc_array_threshold,
-                        &mut array_live,
-                        &mut map_live,
-                        &mut obj_gc_stack,
-                    );
+                    let output_str_reg_id =
+                        gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                     let source = source.as_str(str_pool);
                     let separator_data = r[separator];
                     let separator = separator_data.as_str(str_pool);
@@ -1293,7 +1196,7 @@ pub fn execute(
                         output.push({
                             if part.len() <= 6 {
                                 Data::small_str(part)
-                            } else if let Some(id) = free_strings.pop() {
+                            } else if let Some(id) = gc.free_strings.pop() {
                                 part.clone_into(&mut str_pool[id as usize]);
                                 Data::large_str_id(id as u64)
                             } else {
@@ -1308,7 +1211,7 @@ pub fn execute(
                     output.push({
                         if part.len() <= 6 {
                             Data::small_str(part)
-                        } else if let Some(id) = free_strings.pop() {
+                        } else if let Some(id) = gc.free_strings.pop() {
                             part.clone_into(&mut str_pool[id as usize]);
                             Data::large_str_id(id as u64)
                         } else {
@@ -1338,32 +1241,15 @@ pub fn execute(
                     // alloc one array per range
                     let mut sub_arrays: Vec<Data> = Vec::with_capacity(split_ranges.len());
                     for (start, end) in split_ranges {
-                        let dest_array_id = alloc_array(
-                            obj_pool,
-                            map_pool,
-                            &mut free_arrays,
-                            r,
-                            &recursion_stack,
-                            &mut gc_array_threshold,
-                            &mut array_live,
-                            &mut map_live,
-                            &mut obj_gc_stack,
-                        ) as usize;
+                        let dest_array_id =
+                            gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack)
+                                as usize;
                         obj_pool.extend_within(source_array_id, dest_array_id, start, end);
                         sub_arrays.push(Data::array(dest_array_id as u32));
                     }
 
-                    let array_id = alloc_array(
-                        obj_pool,
-                        map_pool,
-                        &mut free_arrays,
-                        r,
-                        &recursion_stack,
-                        &mut gc_array_threshold,
-                        &mut array_live,
-                        &mut map_live,
-                        &mut obj_gc_stack,
-                    );
+                    let array_id =
+                        gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                     obj_pool[array_id as usize] = sub_arrays;
 
                     r[dest_register] = Data::array(array_id);
@@ -1372,17 +1258,8 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Range, max, dest) => {
                 let min = args.pop().map_or(0, |reg_id| r[reg_id].as_int());
                 let max = r[max].as_int();
-                let output_array_id = alloc_array(
-                    obj_pool,
-                    map_pool,
-                    &mut free_arrays,
-                    r,
-                    &recursion_stack,
-                    &mut gc_array_threshold,
-                    &mut array_live,
-                    &mut map_live,
-                    &mut obj_gc_stack,
-                );
+                let output_array_id =
+                    gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                 let range_arr = obj_pool.get_mut(output_array_id as usize);
                 range_arr.extend((min..max).map(Data::int));
                 r[dest] = Data::array(output_array_id);
@@ -1456,31 +1333,12 @@ pub fn execute(
             }
             #[cfg(target_arch = "wasm32")]
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
-                r[dest] = Data::array(alloc_array(
-                    obj_pool,
-                    map_pool,
-                    &mut free_arrays,
-                    r,
-                    &recursion_stack,
-                    &mut gc_array_threshold,
-                    &mut array_live,
-                    &mut map_live,
-                    &mut obj_gc_stack,
-                ))
+                r[dest] =
+                    Data::array(gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack))
             }
             #[cfg(not(target_arch = "wasm32"))]
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
-                let array_id = alloc_array(
-                    obj_pool,
-                    map_pool,
-                    &mut free_arrays,
-                    r,
-                    &recursion_stack,
-                    &mut gc_array_threshold,
-                    &mut array_live,
-                    &mut map_live,
-                    &mut obj_gc_stack,
-                );
+                let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                 obj_pool[array_id as usize] =
                     std::env::args().skip(2).map(|s| string!(s)).collect::<Vec<Data>>();
                 r[dest] = Data::array(array_id);

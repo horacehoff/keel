@@ -17,12 +17,15 @@ pub struct Gc {
 
 #[inline(always)]
 fn mark_data(d: Data, string_live: &mut [bool], stack: &mut Vec<Data>) {
-    if d.is_large_str() {
-        unsafe {
-            *string_live.get_unchecked_mut(d.get_str_pool_id()) = true;
+    if d.is_heap() {
+        if d.is_large_str() {
+            unsafe {
+                *string_live.get_unchecked_mut(d.get_str_pool_id()) = true;
+            }
+        } else if !d.is_function() {
+            // ARRAY, STRUCT, MAP
+            stack.push(d);
         }
-    } else if d.is_array() || d.is_struct() || d.is_map() {
-        stack.push(d);
     }
 }
 
@@ -158,7 +161,7 @@ impl Gc {
         registers: &RegisterFile,
         recursion_stack: &RegisterFile,
     ) {
-        self.string_threshold = str_pool_len.next_power_of_two().min(u32::MAX as usize) as u32;
+        self.string_threshold *= 2;
         self.mark(obj_pool, map_pool, str_pool_len, registers, recursion_stack);
         self.free_strings.clear();
         for (i, is_str_alive) in self.string_live.iter().enumerate() {

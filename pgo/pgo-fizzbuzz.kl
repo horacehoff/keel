@@ -8,7 +8,7 @@ fn main() {
         } else if i % 5 == 0 {
             last = "Buzz";
         } else {
-            last = str(i);
+            last = string(i);
         }
     }
     print(last);

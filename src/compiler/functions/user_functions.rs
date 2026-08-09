@@ -2,6 +2,7 @@ use super::super::expr::Expr;
 use super::super::registers::get_tgt_ids;
 use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
+use super::super::type_system::c_arg_matches;
 use super::super::type_system::can_reach;
 use super::super::type_system::track_returns;
 use super::check_user_fn_arg_types;
@@ -129,7 +130,7 @@ pub fn handle_user_function(
         let expected_arg_types = fn_sig.args.clone();
         for (i, arg) in args.iter().enumerate() {
             let inferred = arg.infer_type(ctx, state);
-            if inferred != expected_arg_types[i] {
+            if !c_arg_matches(&inferred, &expected_arg_types[i]) {
                 error_function_arg_invalid_type(
                     &inferred,
                     &expected_arg_types[i],

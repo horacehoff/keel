@@ -10,11 +10,11 @@ const NAN_BASE: u64 =
     0b1111_1111_1111_1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
 const PAYLOAD_MASK: u64 = 0b1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111;
 const NAN_BOOL: u64 = NAN_BASE | (1 << 48);
-const NAN_STRING_SMALL: u64 = NAN_BASE | (2 << 48);
-const NAN_STRING_LARGE: u64 = NAN_BASE | (3 << 48);
-const NAN_ARRAY: u64 = NAN_BASE | (4 << 48);
-const NAN_NULL: u64 = NAN_BASE | (5 << 48);
-const NAN_INT: u64 = NAN_BASE | (6 << 48);
+const NAN_NULL: u64 = NAN_BASE | (2 << 48);
+const NAN_INT: u64 = NAN_BASE | (3 << 48);
+const NAN_STRING_SMALL: u64 = NAN_BASE | (4 << 48);
+const NAN_STRING_LARGE: u64 = NAN_BASE | (5 << 48);
+const NAN_ARRAY: u64 = NAN_BASE | (6 << 48);
 const NAN_STRUCT: u64 = NAN_BASE | (7 << 48);
 const NAN_MAP: u64 = NAN_STRUCT | (1 << 47);
 const NAN_FUNCTION: u64 = NAN_MAP | (1 << 46);
@@ -29,11 +29,11 @@ pub const TRUE: Data = Data(NAN_BOOL | 1);
 ///
 /// ### Data type:
 /// - BOOL = 001
-/// - STRING_SMALL = 010
-/// - STRING_LARGE = 011
-/// - ARRAY = 100
-/// - NULL = 101
-/// - INT = 110
+/// - NULL = 010
+/// - INT = 011
+/// - STRING_SMALL = 100
+/// - STRING_LARGE = 101
+/// - ARRAY = 110
 /// - STRUCT = 111
 /// - MAP = 1111
 ///
@@ -321,6 +321,11 @@ impl Data {
     pub const fn as_function(self) -> usize {
         debug_assert!(self.is_function());
         (self.0 & 0xFFFF) as usize
+    }
+    /// True for STRING_LARGE, ARRAY, STRUCT, MAP, and FUNCTION.
+    #[inline(always)]
+    pub const fn is_heap(self) -> bool {
+        (self.0 & !PAYLOAD_MASK) >= NAN_STRING_LARGE
     }
     #[inline(always)]
     pub const fn is_function(self) -> bool {

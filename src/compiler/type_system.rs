@@ -433,6 +433,15 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
     }
 }
 
+pub fn c_arg_matches(inferred: &DataType, declared: &DataType) -> bool {
+    match (inferred, declared) {
+        (DataType::Union(_), _) => false,
+        (DataType::Array(None), DataType::Array(_)) => true,
+        (DataType::Array(Some(a)), DataType::Array(Some(b))) => c_arg_matches(a, b),
+        _ => inferred == declared,
+    }
+}
+
 /// Check if the function src_fn can call target_fn
 pub fn can_reach(
     src_fn: &str,

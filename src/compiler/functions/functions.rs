@@ -1,6 +1,7 @@
 use super::expr::Expr;
 use super::expr::Span;
 use super::type_system::DataType;
+use super::type_system::c_arg_matches;
 use super::type_system::fn_matches_signature;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
@@ -13,7 +14,6 @@ use crate::compiler::expr::FunctionCallExpr;
 use crate::instr::Instr;
 use builtin_functions::builtin_functions;
 use fs_lib_functions::fs_lib_functions;
-use std::slice;
 use user_functions::handle_user_function;
 
 pub mod user_functions;
@@ -119,15 +119,18 @@ pub fn compile_function_call(
             ctx.file_idx,
         );
         for (i, a) in fn_args.iter().enumerate() {
-            check_arg_type(
-                function_call.qualified_name.get_name(),
-                ctx,
-                state,
-                &function_call.args,
-                &function_call.arg_spans,
-                i,
-                slice::from_ref(a),
-            );
+            let inferred_arg_type = function_call.args[i].infer_type(ctx, state);
+            if !c_arg_matches(&inferred_arg_type, a) {
+                error_function_arg_invalid_type(
+                    &inferred_arg_type,
+                    a,
+                    function_call.arg_spans[i],
+                    function_call.qualified_name.get_name(),
+                    None,
+                    ctx.file_idx,
+                    state.sources,
+                );
+            }
         }
 
         *state.allocated_arg_count = (*state.allocated_arg_count).max(function_call.args.len());

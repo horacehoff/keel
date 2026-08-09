@@ -166,8 +166,8 @@ impl Data {
         (self.0 & !PAYLOAD_MASK) == NAN_ARRAY
     }
     /// This will create a new inlined string.
-    /// In debug it'll panic (just in case).
     /// The caller guarantees that `s` is never longer than 6 bytes.
+    /// In debug it'll panic if it's too big (just in case).
     #[inline(always)]
     pub fn small_str(s: &str) -> Self {
         debug_assert!(s.len() <= 6);
@@ -225,6 +225,19 @@ impl Data {
                 s.push_to_pool(str_pool);
                 Self(NAN_STRING_LARGE | string_pool_id)
             }
+        }
+    }
+    #[inline(always)]
+    pub fn string_no_gc(s: &str, str_pool: &mut StringPool, gc: &mut Gc) -> Self {
+        if s.len() <= 6 {
+            Self::small_str(s)
+        } else if let Some(id) = gc.free_strings.pop() {
+            s.clone_into(str_pool.get_mut(id as usize));
+            Self(NAN_STRING_LARGE | (id as u64))
+        } else {
+            let string_pool_id = str_pool.len() as u64;
+            str_pool.push(s.to_owned());
+            Self(NAN_STRING_LARGE | string_pool_id)
         }
     }
     #[inline(always)]

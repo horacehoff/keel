@@ -1034,16 +1034,13 @@ pub fn execute(
             }
             Instr::CallLibFunc(LibFunc::Repeat, tgt, dest) => {
                 let reg = r[tgt];
+                let repeat_count = r[args.pop_unchecked()].as_int() as usize;
                 if reg.is_string() {
-                    let str = reg.as_str(str_pool);
-                    let repeat_count = r[args.pop_unchecked()].as_int();
-                    r[dest] = string!(str.repeat(repeat_count as usize));
+                    r[dest] = string!(reg.as_str(str_pool).repeat(repeat_count));
                 } else if reg.is_array() {
-                    let repeat_count = r[args.pop_unchecked()].as_int();
                     let array_id =
                         gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
-                    obj_pool[array_id as usize] =
-                        obj_pool[reg.as_array()].repeat(repeat_count as usize);
+                    obj_pool[array_id as usize] = obj_pool[reg.as_array()].repeat(repeat_count);
                     r[dest] = Data::array(array_id);
                 }
             }
@@ -1193,33 +1190,11 @@ pub fn execute(
                     let mut i = 0;
                     for part_i in memmem::find_iter(source.as_bytes(), separator.as_bytes()) {
                         let part = unsafe { source.get_unchecked(i..part_i) };
-                        output.push({
-                            if part.len() <= 6 {
-                                Data::small_str(part)
-                            } else if let Some(id) = gc.free_strings.pop() {
-                                part.clone_into(&mut str_pool[id as usize]);
-                                Data::large_str_id(id as u64)
-                            } else {
-                                let id = str_pool.len() as u64;
-                                str_pool.push(part.to_owned());
-                                Data::large_str_id(id)
-                            }
-                        });
+                        output.push(Data::string_no_gc(part, str_pool, &mut gc));
                         i = part_i + separator_len;
                     }
                     let part = unsafe { source.get_unchecked(i..) };
-                    output.push({
-                        if part.len() <= 6 {
-                            Data::small_str(part)
-                        } else if let Some(id) = gc.free_strings.pop() {
-                            part.clone_into(&mut str_pool[id as usize]);
-                            Data::large_str_id(id as u64)
-                        } else {
-                            let id = str_pool.len() as u64;
-                            str_pool.push(part.to_owned());
-                            Data::large_str_id(id)
-                        }
-                    });
+                    output.push(Data::string_no_gc(part, str_pool, &mut gc));
                     r[dest_register] = Data::array(output_str_reg_id);
                 } else if source.is_array() {
                     let source_array_id = source.as_array();

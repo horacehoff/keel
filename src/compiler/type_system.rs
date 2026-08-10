@@ -13,6 +13,7 @@ use crate::compiler::compiler_errors::error_invalid_c_type;
 use crate::compiler::compiler_errors::error_invalid_type;
 use crate::compiler::compiler_errors::error_op;
 use crate::compiler::compiler_errors::error_struct_unknown_field;
+use crate::compiler::compiler_errors::error_type_not_indexable;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
 use crate::compiler::compiler_errors::error_unknown_struct;
@@ -805,7 +806,9 @@ impl Expr {
             Self::Float(_) => DataType::Float,
             Self::Int(_) => DataType::Int,
             Self::String(_) => DataType::String,
-            Self::Bool(_) | Self::Eq(_, _) | Self::NotEq(_, _) => DataType::Bool,
+            Self::Bool(_) | Self::Eq(_, _) | Self::NotEq(_, _) | Self::TypeEq(_, _, _) => {
+                DataType::Bool
+            }
             Self::Null => DataType::Null,
             Self::Array(x, _) => DataType::Array(if x.is_empty() {
                 None
@@ -929,11 +932,11 @@ impl Expr {
                     state.sources,
                 ),
             },
-            Self::ArrayGetIndex(array, _, _) => match array.infer_type(ctx, state) {
+            Self::ArrayGetIndex(array, _, span) => match array.infer_type(ctx, state) {
                 DataType::Array(array_type) => array_type.map_or(DataType::Null, |t| *t),
                 DataType::String => DataType::String,
                 DataType::Unknown => DataType::Unknown,
-                _ => unsafe { unreachable_unchecked() },
+                t => error_type_not_indexable(&t, *span, false, ctx.file_idx, state.sources),
             },
             Self::GetStructField(s, field_name, struct_span, field_span) => {
                 let s = s.infer_type(ctx, state);
@@ -983,10 +986,11 @@ impl Expr {
                     "range" => DataType::Array(Some(Box::from(DataType::Int))),
                     "argv" => DataType::Array(Some(Box::from(DataType::String))),
                     function_name => {
-                        if let Some(lib) = state
-                            .dylibs
-                            .iter()
-                            .find(|l| &l.name == qualified_name.get_namespace().last().unwrap())
+                        if !qualified_name.is_namespace_empty()
+                            && let Some(lib) = state
+                                .dylibs
+                                .iter()
+                                .find(|l| &l.name == qualified_name.get_namespace().last().unwrap())
                             && let Some(FnSignature {
                                 name: _,
                                 args: _,

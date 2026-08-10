@@ -1114,6 +1114,33 @@ fn compile_bool_neg_op(
     id
 }
 
+fn compile_type_eq_op(
+    value: &Expr,
+    type_candidate: &TypeExpr,
+    span: Span,
+    tgt_id: Option<u16>,
+    ctx: Ctx,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let type_candidate =
+        type_candidate.to_datatype(ctx.file_idx, state.scope(ctx.file_idx), state.sources);
+
+    let value_type = value.infer_type(ctx, state);
+
+    if matches!(value_type, DataType::Union(_) | DataType::Unknown) {
+        let val_reg_id = value.compile(ctx, state, output, None, false, true).unwrap_id();
+        state.free_reg(val_reg_id);
+        let type_idx = state.compile_type(type_candidate);
+        let dest_reg_id = state.alloc_reg_tgt(tgt_id);
+        output.push(Instr::IsType(val_reg_id, type_idx, dest_reg_id));
+        state.add_to_src(ctx, output, span);
+        dest_reg_id
+    } else {
+        state.new_const_reg(Data::bool(value_type == type_candidate))
+    }
+}
+
 fn compile_inline_condition_branch(
     branch: &[Expr],
     ctx: Ctx,
@@ -2087,6 +2114,10 @@ impl Expr {
                     output,
                 ))
             }
+            Self::TypeEq(value, type_candidate, span) => {
+                debug_assert!(uses_id);
+                Some(compile_type_eq_op(value, type_candidate, *span, tgt_id, ctx, state, output))
+            }
             Self::Array(array_items, spans) => {
                 debug_assert!(uses_id);
                 Some(compile_array_literal(array_items, spans, ctx, state, output))
@@ -2924,6 +2955,7 @@ pub fn compile(
     usize,
     usize,
     Vec<Struct>,
+    Vec<DataType>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
@@ -2955,6 +2987,7 @@ pub fn compile(
     let mut allocated_call_depth = 0;
     let mut const_registers: FxHashMap<Data, u16> = FxHashMap::default();
     let mut free_registers = Vec::new();
+    let mut types: Vec<DataType> = Vec::new();
 
     let mut sources: Vec<Source> = vec![main_src];
     let main_path =
@@ -3025,6 +3058,7 @@ pub fn compile(
         sources: &mut sources,
         reserved_registers: FxHashSet::default(),
         file_scopes: &mut file_scopes,
+        types: &mut types,
     };
     let mut instructions: Vec<Instr> = Vec::with_capacity(4);
     for (name, value, file_idx) in pending_globals {
@@ -3093,6 +3127,7 @@ pub fn compile(
         allocated_arg_count,
         allocated_call_depth,
         structs,
+        types,
     )
 
     // VmData {

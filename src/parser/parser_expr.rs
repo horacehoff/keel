@@ -1,13 +1,14 @@
+use super::Parser;
 use super::ParserErr;
 use super::lexer::Token;
+use super::parse_args;
+use super::parse_type;
 use super::term::parse_term;
 use crate::cold_path;
 use crate::compiler::expr::Expr;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
-use crate::parser::Parser;
-use crate::parser::parse_args;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::hint::unreachable_unchecked;
@@ -21,6 +22,11 @@ pub fn parse_expr_with_precedence(
     let mut lhs = parse_term(input, allow_struct);
     let end = input.last_token_end as u32;
     lhs = parse_postfix_op(input, lhs, (lhs_start, end).into());
+    if input.peek_token_opt() == Some(Token::Colon) {
+        input.next_token();
+        let t = parse_type(input);
+        lhs = Expr::TypeEq(Box::new(lhs), t, (lhs_start, input.last_token_end as u32).into());
+    }
     let mut lhs_end = input.last_token_end as u32;
     while let Some(peek) = input.peek_token_opt() {
         let Some((op, op_precedence)) = check_op(peek, min_precedence) else {

@@ -53,6 +53,7 @@ pub fn run(code: String) {
         allocated_arg_count,
         allocated_call_depth,
         struct_fields,
+        types,
     ) = compile(code, "playground.kl", false);
     vm::execute(
         &instructions,
@@ -62,6 +63,7 @@ pub fn run(code: String) {
         &fn_registers,
         &fn_dyn_libs,
         &struct_fields,
+        &types,
         allocated_arg_count,
         allocated_call_depth,
     );
@@ -85,6 +87,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
             allocated_arg_count,
             allocated_call_depth,
             struct_fields,
+            types,
         ) = compile(code, "embedded.kl", false);
         vm::execute(
             &instructions,
@@ -94,6 +97,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
             &fn_registers,
             &fn_dyn_libs,
             &struct_fields,
+            &types,
             allocated_arg_count,
             allocated_call_depth,
         );
@@ -194,6 +198,7 @@ pub fn main() {
                 allocated_arg_count,
                 allocated_call_depth,
                 struct_fields,
+                types,
             ) = compile(contents, filename, true);
             println!("COMPILATION TIME: {:.2?}", now.elapsed());
             let now = std::time::Instant::now();
@@ -205,6 +210,7 @@ pub fn main() {
                 &fn_registers,
                 &fn_dyn_libs,
                 &struct_fields,
+                &types,
                 allocated_arg_count,
                 allocated_call_depth,
             );
@@ -226,6 +232,7 @@ pub fn main() {
         allocated_arg_count,
         allocated_call_depth,
         struct_fields,
+        types,
     ) = compile(contents, filename, false);
     vm::execute(
         &instructions,
@@ -235,6 +242,7 @@ pub fn main() {
         &fn_registers,
         &fn_dyn_libs,
         &struct_fields,
+        &types,
         allocated_arg_count,
         allocated_call_depth,
     );

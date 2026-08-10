@@ -163,6 +163,7 @@ pub struct State<'a> {
     pub sources: &'a mut Vec<Source>,
     pub reserved_registers: FxHashSet<u16>,
     pub file_scopes: &'a mut Vec<Scope>,
+    pub types: &'a mut Vec<DataType>,
 }
 
 impl State<'_> {
@@ -175,6 +176,15 @@ impl State<'_> {
     #[inline(always)]
     pub fn scope_mut(&mut self, file_idx: u16) -> &mut Scope {
         unsafe { self.file_scopes.get_unchecked_mut(file_idx as usize) }
+    }
+    #[must_use]
+    pub fn compile_type(&mut self, t: DataType) -> u16 {
+        if let Some(i) = self.types.iter().position(|x| *x == t) {
+            i as u16
+        } else {
+            self.types.push(t);
+            (self.types.len() - 1) as u16
+        }
     }
     #[must_use]
     pub fn find_var(&self, var_name: &str) -> Option<&Variable> {

@@ -188,6 +188,9 @@ pub enum Expr {
     /// TryCatchBlock(try_code, err_var, catch_code)
     TryCatchBlock(Box<[Self]>, SmolStr, Box<[Self]>),
 
+    /// TypeEq(value, type, span)
+    TypeEq(Box<Self>, TypeExpr, Span),
+
     Mul(Box<Self>, Box<Self>, Span, Span),
     Div(Box<Self>, Box<Self>, Span, Span),
     Add(Box<Self>, Box<Self>, Span, Span),

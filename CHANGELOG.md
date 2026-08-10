@@ -8,6 +8,7 @@
 - The `str` function has been renamed to `string`
 - The `check` CLI command has been added to check if a program is correct without running it
 - Global mutable variables have been added and can be declared wth `static var = value`.
+- Added type guards, with the syntax `value : type`
 
 ## 0.4.0 (07/30/2026)
 - Function arguments can now be typed with the syntax `arg: T`

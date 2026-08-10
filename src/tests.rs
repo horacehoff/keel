@@ -15,6 +15,7 @@ macro_rules! run_and_check_registers {
             allocated_arg_count,
             allocated_call_depth,
             _,
+            types,
         ) = compile(String::from($contents), filename, false);
         crate::vm::execute(
             &instructions,
@@ -24,6 +25,7 @@ macro_rules! run_and_check_registers {
             &fn_registers,
             &[],
             &[],
+            &types,
             allocated_arg_count,
             allocated_call_depth,
         );
@@ -46,6 +48,7 @@ macro_rules! run {
             allocated_arg_count,
             allocated_call_depth,
             _,
+            types,
         ) = compile(String::from($contents), filename, false);
         crate::vm::execute(
             &instructions,
@@ -55,6 +58,7 @@ macro_rules! run {
             &fn_registers,
             &[],
             &[],
+            &types,
             allocated_arg_count,
             allocated_call_depth,
         );

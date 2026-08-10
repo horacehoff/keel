@@ -8,7 +8,6 @@ use super::RegisterFile;
 use super::StringPool;
 use super::Struct;
 use super::UncheckedSliceOps;
-use std::hint::unreachable_unchecked;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::compiler_data::StructField;
@@ -58,6 +57,15 @@ pub fn array_to_c_ptr(
             }
         }
         keep_buffer_alive(bytes, keep_alive)
+    } else if first_array_element.is_bool() {
+        // C expects a single byte for bools
+        let mut bytes = Box::new_uninit_slice(elems.len());
+        for (i, e) in elems.iter().enumerate() {
+            unsafe {
+                write_bytes_at_offset(&mut bytes, i, &[e.as_bool() as u8]);
+            }
+        }
+        keep_buffer_alive(bytes, keep_alive)
     } else if first_array_element.is_float() {
         // C expects [u8; 8] for doubles
         let mut bytes = Box::new_uninit_slice(elems.len() * 8);
@@ -82,7 +90,8 @@ pub fn array_to_c_ptr(
             }
         }
         keep_buffer_alive(ptr_bytes, keep_alive)
-    } else if first_array_element.is_array() {
+    } else {
+        // Can only be an array atp
         let mut ptr_bytes = Box::new_uninit_slice(elems.len() * 8);
         for (i, e) in elems.iter().enumerate() {
             let ptr = array_to_c_ptr(*e, obj_pool, string_pool, keep_alive);
@@ -91,10 +100,6 @@ pub fn array_to_c_ptr(
             }
         }
         keep_buffer_alive(ptr_bytes, keep_alive)
-    }
-    // Any other element type has no C equivalent
-    else {
-        unsafe { unreachable_unchecked() }
     }
 }
 
@@ -112,14 +117,16 @@ fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usi
         if field.is_int() {
             elem_size = 4;
             elem_alignment = 4;
+        } else if field.is_bool() {
+            elem_size = 1;
+            elem_alignment = 1;
         } else if field.is_float() || field.is_array() || field.is_string() {
             elem_size = 8;
             elem_alignment = 8;
-        } else if field.is_struct() {
+        } else {
+            // can only be a struct here
             (elem_size, elem_alignment, _) =
                 get_struct_size(&obj_pool[field.as_struct()], obj_pool);
-        } else {
-            unsafe { unreachable_unchecked() }
         }
         let field_offset = offset.next_multiple_of(elem_alignment);
         offset = field_offset + elem_size;
@@ -144,13 +151,13 @@ pub fn get_struct_size_datatype(
         let elem_size: usize;
         let elem_alignment: usize;
         match field_type {
-            DataType::Int => {
-                elem_size = 4;
-                elem_alignment = 4;
-            }
             DataType::Float | DataType::Array(_) | DataType::String => {
                 elem_size = 8;
                 elem_alignment = 8;
+            }
+            DataType::Bool => {
+                elem_size = 1;
+                elem_alignment = 1;
             }
             DataType::Struct(struct_id) => {
                 (elem_size, elem_alignment, _) = get_struct_size_datatype(
@@ -158,7 +165,11 @@ pub fn get_struct_size_datatype(
                     structs,
                 );
             }
-            _ => unsafe { unreachable_unchecked() },
+            _ => {
+                // can only be an int
+                elem_size = 4;
+                elem_alignment = 4;
+            }
         }
         let field_offset = offset.next_multiple_of(elem_alignment);
         offset = field_offset + elem_size;
@@ -184,6 +195,9 @@ pub fn keel_struct_to_c_struct(
             if field.is_int() {
                 let bytes = field.as_int().to_ne_bytes();
                 buf.get_unchecked_mut(offset..offset + 4).copy_from_slice_unchecked(&bytes);
+            } else if field.is_bool() {
+                buf.get_unchecked_mut(offset..offset + 1)
+                    .copy_from_slice_unchecked(&[field.as_bool() as u8]);
             } else if field.is_float() {
                 let bytes = field.as_float().to_ne_bytes();
                 buf.get_unchecked_mut(offset..offset + 8).copy_from_slice_unchecked(&bytes);
@@ -198,12 +212,11 @@ pub fn keel_struct_to_c_struct(
             } else if field.is_array() {
                 let ptr = array_to_c_ptr(*field, obj_pool, string_pool, keep_alive).to_ne_bytes();
                 buf.get_unchecked_mut(offset..offset + 8).copy_from_slice_unchecked(&ptr);
-            } else if field.is_struct() {
+            } else {
+                // can only be a struct here
                 let b =
                     keel_struct_to_c_struct(field.as_struct(), obj_pool, string_pool, keep_alive);
                 buf.get_unchecked_mut(offset..offset + b.len()).copy_from_slice_unchecked(&b);
-            } else {
-                unreachable_unchecked()
             }
         }
     }
@@ -228,19 +241,15 @@ pub fn c_struct_to_keel_struct(
     for (i, StructField { name: _, field_type, span: _ }) in struct_fields.iter().enumerate() {
         let field_offset = *unsafe { field_offsets.get_unchecked(i) };
         match field_type {
-            DataType::Int => {
-                let mut bytes: [u8; 4] = [0; 4];
-                unsafe {
-                    bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 4)]);
-                }
-                buf.push(Data::int(i32::from_ne_bytes(bytes)));
-            }
             DataType::Float => {
                 let mut bytes: [u8; 8] = [0; 8];
                 unsafe {
                     bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 8)]);
                 }
                 buf.push(Data::float(f64::from_ne_bytes(bytes)));
+            }
+            DataType::Bool => {
+                buf.push(Data::bool(c_struct[field_offset] != 0));
             }
             DataType::String => {
                 let mut bytes: [u8; 8] = [0; 8];
@@ -281,7 +290,14 @@ pub fn c_struct_to_keel_struct(
                 obj_pool.push(nested_data_fields);
                 buf.push(Data::struct_instance(*nested_struct_id, new_struct_id as u32));
             }
-            _ => unsafe { unreachable_unchecked() },
+            _ => {
+                // can only be an int here
+                let mut bytes: [u8; 4] = [0; 4];
+                unsafe {
+                    bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 4)]);
+                }
+                buf.push(Data::int(i32::from_ne_bytes(bytes)));
+            }
         }
     }
     buf

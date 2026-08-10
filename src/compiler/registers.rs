@@ -64,6 +64,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::CallDynamicLibFunc(_, y)
         | Instr::MapGet(_, _, y)
         | Instr::IncIntTo(_, y)
+        | Instr::IsType(_, _, y)
         | Instr::DecIntTo(_, y) => *y = tgt_id,
         Instr::CallFuncRecursive(_, y_func) => {
             *y_func = tgt_id;
@@ -165,6 +166,7 @@ impl Instr {
             | Self::NegFloat(_, y)
             | Self::NegInt(_, y)
             | Self::CallLibFunc(_, _, y)
+            | Self::IsType(_, _, y)
             | Self::GetIndexArray(_, _, y)
             | Self::GetFieldStruct(_, _, y)
             | Self::MapGet(_, _, y)
@@ -260,6 +262,7 @@ impl Instr {
             | Self::NegFloat(a, _)
             | Self::NegInt(a, _)
             | Self::CallLibFunc(_, a, _)
+            | Self::IsType(a, _, _)
             | Self::Print(a)
             | Self::StoreFuncArg(a)
             | Self::Return(a)

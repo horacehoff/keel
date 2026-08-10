@@ -1,6 +1,6 @@
 use crate::compiler::compiler_data::{InstrSrc, Source};
 use crate::compiler::expr::Span;
-use crate::{compiler::type_system::DataType, instr::Instr};
+use crate::instr::Instr;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use smol_strc::{SmolStr, ToSmolStr};
@@ -94,7 +94,6 @@ pub enum ErrType<'a> {
     SliceOutOfBounds(usize, i32, i32),
     UnknownMapKey(&'a str),
     NullByteInString,
-    InvalidReturnType(&'a DataType),
     DivisionByZero,
     ModuloByZero,
 }
@@ -125,7 +124,6 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
             ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
-            ErrType::InvalidReturnType(t) => format_args!("Invalid return type: {RED}{BOLD}{t}{RESET}").to_smolstr(),
             ErrType::UnknownMapKey(key) => format_args!("Unknown key {RED}{BOLD}{key}{RESET}").to_smolstr(),
         }
     }
@@ -157,7 +155,6 @@ impl ErrType<'_> {
             ErrType::DivisionByZero => "division_by_zero",
             ErrType::ModuloByZero => "modulo_by_zero",
             ErrType::NullByteInString => "null_byte_in_string",
-            ErrType::InvalidReturnType(_) => "invalid_return_type",
             ErrType::UnknownMapKey(_) => "unknown_map_key",
         }
     }

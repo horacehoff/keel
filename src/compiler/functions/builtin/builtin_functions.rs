@@ -43,7 +43,7 @@ pub fn builtin_functions(
             check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             let infered = args[0].infer_type(ctx, state);
             let arg_type =
-                Data::p_str(infered.format_detailed(state).as_str(), &mut state.pools.str_pool);
+                Data::comp_str(infered.format_detailed(state).as_str(), &mut state.pools.str_pool);
             Some(state.new_reg(arg_type))
         }
         "float" => {
@@ -103,7 +103,7 @@ pub fn builtin_functions(
         "input" => {
             check_args_range(args, 0, 1, name, arg_spans, ctx.file_idx, state.sources, span);
             let id = if args.is_empty() {
-                let data = Data::p_str("", &mut state.pools.str_pool);
+                let data = Data::comp_str("", &mut state.pools.str_pool);
                 state.new_reg(data)
             } else {
                 check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);

@@ -2062,42 +2062,27 @@ impl Expr {
         match self {
             Self::Int(num) => {
                 debug_assert!(uses_id);
-                let data = Data::int(*num);
-                if var_assignment {
-                    return Some(state.new_reg(data));
-                }
-                Some(state.new_const_reg(data))
+                let int = Data::int(*num);
+                Some(if var_assignment { state.new_reg(int) } else { state.new_const_reg(int) })
             }
             Self::Float(num) => {
                 debug_assert!(uses_id);
-                if var_assignment {
-                    return Some(state.new_reg((*num).into()));
-                }
-                Some(state.new_const_reg((*num).into()))
+                let float = Data::float(*num);
+                Some(if var_assignment { state.new_reg(float) } else { state.new_const_reg(float) })
             }
             Self::String(str) => {
                 debug_assert!(uses_id);
-                if var_assignment {
-                    let data = Data::p_str(str, &mut state.pools.str_pool);
-                    return Some(state.new_reg(data));
-                }
-                let data = Data::p_str(str, &mut state.pools.str_pool);
-                Some(state.new_const_reg(data))
+                let s = Data::comp_str(str, &mut state.pools.str_pool);
+                Some(if var_assignment { state.new_reg(s) } else { state.new_const_reg(s) })
             }
             Self::Null => {
                 debug_assert!(uses_id);
-                if var_assignment {
-                    return Some(state.new_reg(NULL));
-                }
-                Some(state.new_const_reg(NULL))
+                Some(if var_assignment { state.new_reg(NULL) } else { state.new_const_reg(NULL) })
             }
             Self::Bool(bool) => {
                 debug_assert!(uses_id);
-                if var_assignment {
-                    return Some(state.new_reg((*bool).into()));
-                }
-                let data: Data = (*bool).into();
-                Some(state.new_const_reg(data))
+                let b = Data::bool(*bool);
+                Some(if var_assignment { state.new_reg(b) } else { state.new_const_reg(b) })
             }
             Self::Var(name, span) => {
                 debug_assert!(uses_id);

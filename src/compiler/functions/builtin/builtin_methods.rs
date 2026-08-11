@@ -508,7 +508,7 @@ pub fn builtin_methods(
 
             let result_id = state.alloc_reg_tgt(tgt_id);
             if is_str {
-                let data = Data::p_str("", &mut state.pools.str_pool);
+                let data = Data::comp_str("", &mut state.pools.str_pool);
                 let empty_str_id = state.new_reg(data);
                 output.push(Instr::Mov(empty_str_id, result_id));
             } else {
@@ -613,7 +613,7 @@ pub fn builtin_methods(
 
             let result_id = state.alloc_reg_tgt(tgt_id);
             if is_str {
-                let data = Data::p_str("", &mut state.pools.str_pool);
+                let data = Data::comp_str("", &mut state.pools.str_pool);
                 let empty_str_id = state.new_reg(data);
                 output.push(Instr::Mov(empty_str_id, result_id));
             } else {

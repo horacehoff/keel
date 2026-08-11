@@ -4,7 +4,6 @@ use crate::vm::gc::Gc;
 use crate::vm::{MapPool, RegisterFile, StringPool};
 use lexical_core::FormattedSize;
 use std::hash::Hasher;
-use std::hint::unreachable_unchecked;
 
 const NAN_BASE: u64 =
     0b1111_1111_1111_1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
@@ -51,7 +50,7 @@ impl Hasher for DataHash {
         self.0
     }
     fn write(&mut self, _bytes: &[u8]) {
-        unsafe { unreachable_unchecked() }
+        unsafe { std::hint::unreachable_unchecked() }
     }
     fn write_u64(&mut self, i: u64) {
         self.0 = i;
@@ -169,14 +168,13 @@ impl Data {
     /// The caller guarantees that `s` is never longer than 6 bytes.
     /// In debug it'll panic if it's too big (just in case).
     #[inline(always)]
-    pub fn small_str(s: &str) -> Self {
+    pub const fn small_str(s: &str) -> Self {
         debug_assert!(s.len() <= 6);
-        let mut payload: u64 = 0;
-        // Packs 6 bytes into the payload, filling up the 48 payload bits
-        for (i, byte) in s.as_bytes().iter().enumerate() {
-            payload |= (*byte as u64) << (i * 8);
+        let mut payload = [0u8; 8];
+        unsafe {
+            std::ptr::copy_nonoverlapping(s.as_ptr(), payload.as_mut_ptr(), s.len());
         }
-        Self(NAN_STRING_SMALL | (payload & PAYLOAD_MASK))
+        Self(NAN_STRING_SMALL | (u64::from_le_bytes(payload) & PAYLOAD_MASK))
     }
     #[inline(always)]
     pub const fn large_str_id(id: u64) -> Self {
@@ -184,7 +182,7 @@ impl Data {
     }
     /// Same as str(), except this never runs the GC because this function is called by the compiler
     #[inline(always)]
-    pub fn p_str(s: &str, str_pool: &mut StringPool) -> Self {
+    pub fn comp_str(s: &str, str_pool: &mut StringPool) -> Self {
         if s.len() <= 6 {
             Self::small_str(s)
         } else if let Some(id) = str_pool.iter().position(|existing| existing == s) {
@@ -243,23 +241,19 @@ impl Data {
     #[inline(always)]
     pub fn as_str(&self, str_pool: &StringPool) -> &str {
         debug_assert!(self.is_string());
+        let payload = self.0 & PAYLOAD_MASK;
         if (self.0 & !PAYLOAD_MASK) == NAN_STRING_SMALL {
-            let payload = self.0 & PAYLOAD_MASK;
-            let len = ((64 - payload.leading_zeros()) as usize + 7) >> 3;
+            let len = 8 - (payload.leading_zeros() as usize >> 3);
             let ptr = std::ptr::from_ref::<Self>(self).cast::<u8>();
-            unsafe {
-                let slice = std::slice::from_raw_parts(ptr, len);
-                std::str::from_utf8_unchecked(slice)
-            }
+            unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) }
         } else {
-            let string_pool_idx = (self.0 & PAYLOAD_MASK) as usize;
-            unsafe { &*std::ptr::from_ref::<str>(str_pool[string_pool_idx].as_str()) }
+            unsafe { &*std::ptr::from_ref::<str>(str_pool[payload as usize].as_str()) }
         }
     }
     #[inline(always)]
     pub const fn is_string(self) -> bool {
         // this works because NAN_TAG_STRING_LARGE == NAN_TAG_STRING_SMALL + (1 << 48)
-        (self.0 & !PAYLOAD_MASK).wrapping_sub(NAN_STRING_SMALL) <= const { 1u64 << 48 }
+        (self.0 & !PAYLOAD_MASK).wrapping_sub(NAN_STRING_SMALL) <= const { 1 << 48 }
     }
     /// Increments the integer stored in this Data in-place. Wraps.
     #[inline(always)]
@@ -402,8 +396,6 @@ impl Data {
                 value.format_to(output, obj_pool, str_pool, map_pool, structs, true);
             }
             output.push(']');
-        } else if self.is_null() {
-            output.push_str("null");
         } else if self.is_struct() {
             let s_name = unsafe { &structs.get_unchecked(self.struct_type_id() as usize).name };
             output.push_str(s_name);
@@ -435,7 +427,8 @@ impl Data {
         } else if self.is_function() {
             output.push_str("function");
         } else {
-            unsafe { unreachable_unchecked() }
+            debug_assert!(self.is_null());
+            output.push_str("null");
         }
     }
 }

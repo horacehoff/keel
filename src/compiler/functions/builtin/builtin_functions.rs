@@ -27,8 +27,8 @@ pub fn builtin_functions(
     function_call: &FunctionCallExpr,
 ) -> Option<u16> {
     let args = &function_call.args;
-    let span = function_call.span;
-    let arg_spans = &function_call.arg_spans;
+    let span = function_call.get_call_span();
+    let arg_spans = function_call.get_arg_spans();
     let name = function_call.qualified_name.get_name().as_str();
     match name {
         "print" => {

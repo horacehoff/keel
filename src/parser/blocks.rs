@@ -19,38 +19,25 @@ use crate::parser::parse_type;
 use smol_strc::SmolStr;
 
 // call right after peeking Token::If
-pub fn parse_condition_block(parser: &mut Parser<'_>, start: u32) -> Expr {
+pub fn parse_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
     let t = parser.next_token();
     debug_assert_eq!(t.0, Token::If);
     let condition = parse_expr_no_struct(parser);
-    let mut output_code = parse_block(parser);
-    loop {
-        let next_token = parser.peek_token_opt();
-        if next_token != Some(Token::Else) {
-            break;
-        }
+    let output_code = parse_block(parser);
+    let otherwise: Box<[Expr]> = if parser.peek_token_opt() == Some(Token::Else) {
         parser.next_token();
-        // if -> else if
-        // lbrace -> else
-        // else -> end
-        let next_token = parser.peek_token_opt();
-        if next_token == Some(Token::If) {
-            parser.next_token();
-            let else_if_condition = parse_expr_no_struct(parser);
-            let else_if_code = parse_block(parser);
-            output_code
-                .push(Expr::ElseIfBlock(Box::new(else_if_condition), Box::from(else_if_code)));
-        } else if next_token == Some(Token::LBrace) {
-            let else_code = parse_block(parser);
-            output_code.push(Expr::ElseBlock(Box::from(else_code)));
-            break;
-        } else {
-            break;
+        match parser.peek_token_opt() {
+            Some(Token::If) => Box::new([parse_if_block(parser, start)]),
+            Some(Token::LBrace) => parse_block(parser).into_boxed_slice(),
+            _ => Box::new([]),
         }
-    }
+    } else {
+        Box::new([])
+    };
     Expr::IfBlock(IfBlockExpr {
         condition: Box::new(condition),
-        code: Box::from(output_code),
+        then: output_code.into_boxed_slice(),
+        otherwise,
         span: (start, parser.last_token_end as u32).into(),
     })
 }
@@ -260,8 +247,7 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
         Box::from([Expr::FunctionCall(FunctionCallExpr {
             qualified_name: QualifiedName::new([SmolStr::new("throw")]),
             args: Box::new([usr_var]),
-            span: (start, end).into(),
-            arg_spans: Box::new([]),
+            spans: Box::from([(start, end).into()]),
         })])
     };
 
@@ -270,34 +256,39 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
     }
 
     let mut output_code: Vec<Expr> = Vec::with_capacity(2);
+    let mut otherwise_branches: Vec<(Expr, Box<[Expr]>)> = Vec::with_capacity(2);
     let mut main_condition = Expr::Null;
 
     let mut first = true;
     for (e, c) in catch_blocks {
+        let condition = Expr::Eq(
+            Box::new(Expr::String(e)),
+            Box::new(Expr::Var(catch_all_var.clone(), (start, end).into())),
+        );
         if first {
             first = false;
-            main_condition = Expr::Eq(
-                Box::new(Expr::String(e)),
-                Box::new(Expr::Var(catch_all_var.clone(), (start, end).into())),
-            );
+            main_condition = condition;
             output_code.extend(c);
         } else {
-            output_code.push(Expr::ElseIfBlock(
-                Box::new(Expr::Eq(
-                    Box::new(Expr::String(e)),
-                    Box::new(Expr::Var(catch_all_var.clone(), (start, end).into())),
-                )),
-                Box::from(c),
-            ));
+            otherwise_branches.push((condition, c.into_boxed_slice()));
         }
     }
-    output_code.push(Expr::ElseBlock(else_code));
+    let mut otherwise = else_code;
+    for (condition, code) in otherwise_branches.into_iter().rev() {
+        otherwise = Box::new([Expr::IfBlock(IfBlockExpr {
+            condition: Box::new(condition),
+            then: code,
+            otherwise,
+            span: (start, end).into(),
+        })]);
+    }
     Expr::TryCatchBlock(
         Box::from(try_code),
         catch_all_var,
         Box::from([Expr::IfBlock(IfBlockExpr {
             condition: Box::from(main_condition),
-            code: Box::from(output_code),
+            then: output_code.into_boxed_slice(),
+            otherwise,
             span: (start, end).into(),
         })]),
     )
@@ -370,6 +361,8 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
     parser.next_token_expect(Token::LBrace, "Blocks must be delimited by braces");
     let mut first_condition: Option<Expr> = None;
     let mut output_code: Vec<Expr> = Vec::with_capacity(2);
+    let mut match_arms: Vec<(Expr, Box<[Expr]>)> = Vec::with_capacity(2);
+    let mut wildcard: Box<[Expr]> = Box::new([]);
     let end: u32;
     loop {
         let peek_token = parser.peek_token();
@@ -387,7 +380,7 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
                 Token::RBrace,
                 "The wildcard must be the last statement in a match",
             );
-            output_code.push(Expr::ElseBlock(Box::from(code)));
+            wildcard = Box::from(code);
             break;
         } else if peek_token == Token::RBrace {
             if first_condition.is_none() {
@@ -407,15 +400,24 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
                 first_condition = Some(condition);
                 output_code.extend(code);
             } else {
-                output_code.push(Expr::ElseIfBlock(
-                    Box::new(Expr::Eq(
+                match_arms.push((
+                    Expr::Eq(
                         Box::new(Expr::Var(obj_var.clone(), (start, end).into())),
                         Box::new(condition),
-                    )),
+                    ),
                     Box::from(code),
                 ));
             }
         }
+    }
+    let mut otherwise: Box<[Expr]> = wildcard;
+    for (condition, code) in match_arms.into_iter().rev() {
+        otherwise = Box::new([Expr::IfBlock(IfBlockExpr {
+            condition: Box::new(condition),
+            then: code,
+            otherwise,
+            span: (start, end).into(),
+        })]);
     }
     Expr::EvalBlock(Box::from([
         Expr::VarDeclare(obj_var.clone(), Box::new(match_obj)),
@@ -424,7 +426,8 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
                 Box::new(Expr::Var(obj_var, (start, end).into())),
                 Box::from(first_condition.unwrap()),
             )),
-            code: Box::from(output_code),
+            then: output_code.into_boxed_slice(),
+            otherwise,
             span: (start, end).into(),
         }),
     ]))

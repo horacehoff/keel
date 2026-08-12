@@ -14,10 +14,10 @@ use ariadne::Color;
 use ariadne::Label;
 use ariadne::Report;
 use ariadne::ReportKind;
-use blocks::parse_condition_block;
 use blocks::parse_eval_block;
 use blocks::parse_for_loop;
 use blocks::parse_function;
+use blocks::parse_if_block;
 use blocks::parse_loop_block;
 use blocks::parse_match;
 use blocks::parse_struct_declare;
@@ -316,7 +316,7 @@ fn parse_statement(parser: &mut Parser<'_>) -> Option<Expr> {
     let token = parser.peek_token_opt()?;
     let t_span = parser.peek_token_span();
     match token {
-        Token::If => Some(parse_condition_block(parser, t_span.start)),
+        Token::If => Some(parse_if_block(parser, t_span.start)),
         Token::While => Some(parse_while_block(parser)),
         Token::For => Some(parse_for_loop(parser)),
         Token::Match => Some(parse_match(parser)),

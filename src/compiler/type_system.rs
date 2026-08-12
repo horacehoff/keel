@@ -360,14 +360,16 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 calls.push(qualified_name.get_name().clone());
                 expr_stack.extend(args);
             }
-            Expr::IfBlock(IfBlockExpr { condition: x, code: y, .. })
-            | Expr::InlineCondition(x, y, _)
-            | Expr::ElseIfBlock(x, y)
-            | Expr::WhileBlock(x, y) => {
-                expr_stack.push(x);
-                expr_stack.extend(y);
+            Expr::IfBlock(if_block) => {
+                expr_stack.push(&if_block.condition);
+                expr_stack.extend(&if_block.then);
+                expr_stack.extend(&if_block.otherwise);
             }
-            Expr::ElseBlock(x) | Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
+            Expr::WhileBlock(condition, code) => {
+                expr_stack.push(condition);
+                expr_stack.extend(code);
+            }
+            Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
                 expr_stack.extend(x);
             }
             Expr::ReturnVal(code) => {
@@ -466,11 +468,14 @@ pub fn can_reach(
 pub fn check_if_returns_void(content: &[Expr]) -> bool {
     for content in content {
         match content {
-            Expr::ElseIfBlock(_, code)
-            | Expr::ElseBlock(code)
-            | Expr::IfBlock(IfBlockExpr { code, .. })
-            | Expr::InlineCondition(_, code, _)
-            | Expr::WhileBlock(_, code)
+            Expr::IfBlock(if_block) => {
+                if !check_if_returns_void(&if_block.then)
+                    || !check_if_returns_void(&if_block.otherwise)
+                {
+                    return false;
+                }
+            }
+            Expr::WhileBlock(_, code)
             | Expr::ForLoop(_, _, code, _)
             | Expr::EvalBlock(code)
             | Expr::LoopBlock(code) => {
@@ -625,40 +630,26 @@ fn track_scoped_returns(
 }
 
 fn track_condition_returns(
-    code: &[Expr],
+    if_block: &IfBlockExpr,
+    fn_name: &str,
     ctx: Ctx,
     state: &mut State<'_>,
-    fn_name: &str,
 ) -> FnReturnFlow {
     let mut return_types = Vec::new();
-    let first_branch_end = code
-        .iter()
-        .position(|expr| matches!(expr, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
-        .unwrap_or(code.len());
+    let then_flow = track_scoped_returns(&if_block.then, ctx, state, fn_name);
+    extend_return_types!(&mut return_types, then_flow.types);
 
-    let first_flow = track_scoped_returns(&code[..first_branch_end], ctx, state, fn_name);
-    let mut all_branches_return = first_flow.always_returns;
-    let mut has_else = false;
-    extend_return_types!(&mut return_types, first_flow.types);
+    if if_block.otherwise.is_empty() {
+        FnReturnFlow { types: return_types, always_returns: false }
+    } else {
+        let otherwise_flow = track_scoped_returns(&if_block.otherwise, ctx, state, fn_name);
+        extend_return_types!(&mut return_types, otherwise_flow.types);
 
-    for expr in &code[first_branch_end..] {
-        match expr {
-            Expr::ElseIfBlock(_, branch_code) => {
-                let flow = track_scoped_returns(branch_code, ctx, state, fn_name);
-                all_branches_return &= flow.always_returns;
-                extend_return_types!(&mut return_types, flow.types);
-            }
-            Expr::ElseBlock(branch_code) => {
-                has_else = true;
-                let flow = track_scoped_returns(branch_code, ctx, state, fn_name);
-                all_branches_return &= flow.always_returns;
-                extend_return_types!(&mut return_types, flow.types);
-            }
-            _ => {}
+        FnReturnFlow {
+            types: return_types,
+            always_returns: then_flow.always_returns && otherwise_flow.always_returns,
         }
     }
-
-    FnReturnFlow { types: return_types, always_returns: has_else && all_branches_return }
 }
 
 fn track_return_flow(
@@ -670,17 +661,14 @@ fn track_return_flow(
     let mut return_types: Vec<DataType> = Vec::new();
     for expr in content {
         match expr {
-            Expr::IfBlock(IfBlockExpr { code, .. }) | Expr::InlineCondition(_, code, _) => {
-                let flow = track_condition_returns(code, ctx, state, fn_name);
+            Expr::IfBlock(if_block) => {
+                let flow = track_condition_returns(if_block, fn_name, ctx, state);
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
                     return FnReturnFlow { types: return_types, always_returns: true };
                 }
             }
-            Expr::ElseIfBlock(_, code)
-            | Expr::ElseBlock(code)
-            | Expr::EvalBlock(code)
-            | Expr::LoopBlock(code) => {
+            Expr::EvalBlock(code) | Expr::LoopBlock(code) => {
                 let flow = track_scoped_returns(code, ctx, state, fn_name);
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
@@ -976,7 +964,9 @@ impl Expr {
                 DataType::Unknown => DataType::Unknown,
                 _ => unsafe { unreachable_unchecked() },
             },
-            Self::FunctionCall(FunctionCallExpr { qualified_name, args, span, arg_spans: _ }) => {
+            Self::FunctionCall(function_call) => {
+                let qualified_name = &function_call.qualified_name;
+                let args = &function_call.args;
                 match qualified_name.get_name().as_str() {
                     "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
                     "type" | "string" | "input" | "read" => DataType::String,
@@ -1014,7 +1004,7 @@ impl Expr {
                             } else {
                                 error_expected_function(
                                     &var.var_type,
-                                    *span,
+                                    function_call.get_call_span(),
                                     ctx.file_idx,
                                     state.sources,
                                 )
@@ -1028,7 +1018,7 @@ impl Expr {
                                     if qualified_name.is_namespace_empty() {
                                         error_unknown_function(
                                             function_name,
-                                            *span,
+                                            function_call.get_call_span(),
                                             state.scope(ctx.file_idx),
                                             ctx.file_idx,
                                             state.sources,
@@ -1038,7 +1028,7 @@ impl Expr {
                                             function_name,
                                             state.scope(ctx.file_idx),
                                             qualified_name.get_namespace(),
-                                            *span,
+                                            function_call.get_call_span(),
                                             ctx.file_idx,
                                             state.sources,
                                         );
@@ -1118,7 +1108,7 @@ impl Expr {
                         let DataType::Fn(fn_id) = fn_type else {
                             error_expected_function(
                                 &fn_type,
-                                function_call.arg_spans[0],
+                                function_call.get_nth_arg_span(0),
                                 ctx.file_idx,
                                 state.sources,
                             );
@@ -1149,7 +1139,7 @@ impl Expr {
                         if !matches!(fn_type, DataType::Fn(_)) {
                             error_expected_function(
                                 &fn_type,
-                                function_call.arg_spans[0],
+                                function_call.get_nth_arg_span(0),
                                 ctx.file_idx,
                                 state.sources,
                             );
@@ -1159,19 +1149,18 @@ impl Expr {
                     _ => unsafe { unreachable_unchecked() },
                 }
             }
-            Self::InlineCondition(_, code, _) => {
-                let mut types: Vec<DataType> = Vec::with_capacity(code.len());
-                types.push(code[0].infer_type(ctx, state));
-                for t in &code[0..] {
-                    if let Self::ElseIfBlock(_, code) = t {
-                        let infered = code[0].infer_type(ctx, state);
-                        if !types.contains(&infered) {
-                            types.push(infered);
-                        }
-                    } else if let Self::ElseBlock(code) = t {
-                        let infered = code[0].infer_type(ctx, state);
-                        if !types.contains(&infered) {
-                            types.push(infered);
+            Self::IfBlock(if_block) => {
+                let mut types: Vec<DataType> = Vec::with_capacity(2);
+                if let Some(then) = if_block.then.last() {
+                    types.push(then.infer_type(ctx, state));
+                }
+                if let Some(otherwise) = if_block.otherwise.last() {
+                    match otherwise.infer_type(ctx, state) {
+                        DataType::Union(t) => types.extend(t),
+                        t => {
+                            if !types.contains(&t) {
+                                types.push(t);
+                            }
                         }
                     }
                 }

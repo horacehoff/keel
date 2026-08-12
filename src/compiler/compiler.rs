@@ -5,7 +5,6 @@ use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
 use crate::compiler::compiler_errors::error_cannot_load_dynlib;
 use crate::compiler::compiler_errors::error_cannot_push_type_to_array;
 use crate::compiler::compiler_errors::error_cannot_read_file;
-use crate::compiler::compiler_errors::error_conditional_expression_without_else;
 use crate::compiler::compiler_errors::error_division_by_zero;
 use crate::compiler::compiler_errors::error_duplicate_map_key;
 use crate::compiler::compiler_errors::error_invalid_index_type;
@@ -27,7 +26,9 @@ use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::StructFieldAssignmentExpr;
 use crate::compiler::expr::StructFieldExpr;
 use crate::compiler::functions::user_functions::compile_function;
+use crate::data::FALSE;
 use crate::data::NULL;
+use crate::data::TRUE;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
 use crate::errors::ErrorCtx;
@@ -188,16 +189,15 @@ const fn set_jmp_size(instr: &mut Instr, size: u16) {
 /// bool_or_mode true indicates left side of ||, emits true jumps
 /// bool_or_mode false emits false jumps
 /// Returns (true_jump_idxs, false_jump_idxs)
-#[allow(clippy::too_many_arguments)]
 #[must_use]
 fn compile_short_circuit_condition(
-    expr: &Expr,
+    condition: &Expr,
     ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
     bool_or_mode: bool,
 ) -> (Vec<usize>, Vec<usize>) {
-    match expr {
+    match condition {
         Expr::BoolOr(left, right, _, _) => {
             // left side of || always uses true jump mode
             let (mut true_jumps, _) =
@@ -242,6 +242,43 @@ fn compile_short_circuit_condition(
             }
         }
     }
+}
+
+#[must_use]
+fn compile_const_condition(condition: &Expr) -> Option<bool> {
+    match condition {
+        Expr::Bool(b) => Some(*b),
+        Expr::BoolNeg(b, _, _) => compile_const_condition(b).map(|b| !b),
+        _ => None,
+    }
+}
+
+#[must_use]
+fn compile_condition(
+    condition: &Expr,
+    ctx: Ctx,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) -> (Option<bool>, Vec<usize>, Vec<usize>) {
+    if let Some(b) = compile_const_condition(condition) {
+        return (Some(b), Vec::new(), Vec::new());
+    }
+
+    if matches!(condition, Expr::BoolAnd(_, _, _, _) | Expr::BoolOr(_, _, _, _)) {
+        let (true_jump_idxs, false_jmp_idxes) =
+            compile_short_circuit_condition(condition, ctx, state, output, false);
+        return (None, true_jump_idxs, false_jmp_idxes);
+    }
+
+    let cond_id = condition.compile(ctx, state, output, None, false, true).unwrap_id();
+    if state.const_registers.get(&TRUE) == Some(&cond_id) {
+        return (Some(true), Vec::new(), Vec::new());
+    } else if state.const_registers.get(&FALSE) == Some(&cond_id) {
+        return (Some(false), Vec::new(), Vec::new());
+    }
+    add_cmp_false(cond_id, &mut 0, output, false);
+    state.free_reg(cond_id);
+    (None, Vec::new(), vec![output.len() - 1])
 }
 
 fn parse_loop_flow_control(
@@ -1141,120 +1178,6 @@ fn compile_type_eq_op(
     }
 }
 
-fn compile_inline_condition_branch(
-    branch: &[Expr],
-    ctx: Ctx,
-    state: &mut State<'_>,
-    output: &mut Vec<Instr>,
-    tgt_id: u16,
-) {
-    let regs_before = state.registers.len() as u16;
-    let output_len = output.len();
-    output.extend(compile_expr(
-        &branch[..branch.len() - 1],
-        ctx.advance_offset(output.len() as u16),
-        state,
-    ));
-    let val_id = branch[branch.len() - 1]
-        .compile(ctx.advance_offset(output.len() as u16), state, output, Some(tgt_id), false, true)
-        .unwrap_id();
-    state.free_scope_registers(regs_before, &output[output_len..]);
-    if val_id != tgt_id {
-        output.push(Instr::Mov(val_id, tgt_id));
-    }
-}
-
-#[must_use]
-fn compile_inline_condition(
-    main_condition: &Expr,
-    code: &[Expr],
-    span: Span,
-    ctx: Ctx,
-    state: &mut State<'_>,
-    output: &mut Vec<Instr>,
-    tgt_id: Option<u16>,
-) -> u16 {
-    let return_id = state.alloc_reg_tgt(tgt_id);
-
-    // get first code limit (after which there are only else(if) blocks)
-    let main_code_limit = code
-        .iter()
-        .position(|x| matches!(x, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
-        .unwrap_or(code.len());
-
-    let condition_blocks_count = code.len() - main_code_limit;
-    let mut cmp_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-    let mut jmp_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-    let mut condition_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-
-    // parse the main condition
-    let condition_id = main_condition.compile(ctx, state, output, None, false, true).unwrap_id();
-    add_cmp_false(condition_id, &mut 0, output, false);
-    cmp_markers.push(output.len() - 1);
-
-    compile_inline_condition_branch(&code[..main_code_limit], ctx, state, output, return_id);
-    if main_code_limit != code.len() {
-        output.push(Instr::Jmp(0));
-        jmp_markers.push(output.len() - 1);
-    }
-
-    let mut else_exists = false;
-    for elem in &code[main_code_limit..] {
-        if let Expr::ElseIfBlock(condition, code) = elem {
-            condition_markers.push(output.len());
-            let condition_id = condition.compile(ctx, state, output, None, false, true).unwrap_id();
-            add_cmp_false(condition_id, &mut 0, output, false);
-            state.free_reg(condition_id);
-            cmp_markers.push(output.len() - 1);
-            compile_inline_condition_branch(code, ctx, state, output, return_id);
-            output.push(Instr::Jmp(0));
-            jmp_markers.push(output.len() - 1);
-        } else if let Expr::ElseBlock(code) = elem {
-            else_exists = true;
-            condition_markers.push(output.len());
-            compile_inline_condition_branch(code, ctx, state, output, return_id);
-        }
-    }
-    if !else_exists {
-        error_conditional_expression_without_else(span, ctx.file_idx, state.sources);
-    }
-
-    for y in jmp_markers {
-        let diff = output.len() - y;
-        output[y] = Instr::Jmp(diff as u16);
-    }
-    for (i, y) in cmp_markers.iter().enumerate() {
-        let diff = if i >= condition_markers.len() {
-            output.len() - 1 - y
-        } else {
-            condition_markers[i] - y
-        };
-        if let Some(
-            Instr::IsFalseJmp(_, jump_size)
-            | Instr::IsTrueJmp(_, jump_size)
-            | Instr::SupEqFloatJmp(_, _, jump_size)
-            | Instr::SupEqIntJmp(_, _, jump_size)
-            | Instr::SupFloatJmp(_, _, jump_size)
-            | Instr::SupIntJmp(_, _, jump_size)
-            | Instr::InfEqFloatJmp(_, _, jump_size)
-            | Instr::InfEqIntJmp(_, _, jump_size)
-            | Instr::InfFloatJmp(_, _, jump_size)
-            | Instr::InfIntJmp(_, _, jump_size)
-            | Instr::NotEqJmp(_, _, jump_size)
-            | Instr::EqJmp(_, _, jump_size)
-            | Instr::ObjNotEqJmp(_, _, jump_size)
-            | Instr::ObjEqJmp(_, _, jump_size)
-            | Instr::StrNotEqJmp(_, _, jump_size)
-            | Instr::StrEqJmp(_, _, jump_size),
-        ) = output.get_mut(*y)
-        {
-            *jump_size = diff as u16;
-        }
-    }
-    state.free_reg(condition_id);
-    return_id
-}
-
 fn compile_array_index_assignment(
     array: &Expr,
     index: &Expr,
@@ -1376,29 +1299,64 @@ fn compile_struct_field_assignment(
     output.push(Instr::SetFieldStruct(id, new_elem_reg_id, field_index));
 }
 
-fn compile_condition(
-    IfBlockExpr { condition, code, span: _ }: &IfBlockExpr,
+fn compile_if_block_branch(
+    branch: &[Expr],
+    tgt_id: Option<u16>,
     ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
-    // get first code limit (after which there are only else(if) blocks)
-    let main_code_limit = code
-        .iter()
-        .position(|x| matches!(x, Expr::ElseIfBlock(_, _) | Expr::ElseBlock(_)))
-        .unwrap_or(code.len());
+    if let Some(tgt_id) = tgt_id {
+        let regs_len = state.registers.len() as u16;
+        let output_len = output.len();
+        output.extend(compile_expr(
+            &branch[..branch.len() - 1],
+            ctx.advance_offset(output.len() as u16),
+            state,
+        ));
+        let val_id = branch[branch.len() - 1]
+            .compile(
+                ctx.advance_offset(output.len() as u16),
+                state,
+                output,
+                Some(tgt_id),
+                false,
+                true,
+            )
+            .unwrap_id();
+        state.free_scope_registers(regs_len, &output[output_len..]);
+        if val_id != tgt_id {
+            output.push(Instr::Mov(val_id, tgt_id));
+        }
+    } else {
+        output.extend(compile_expr(branch, ctx.advance_offset(output.len() as u16), state));
+    }
+}
 
-    let condition_blocks_count = code.len() - main_code_limit;
-    // Each entry is the list of false-jump instruction indices for one condition block.
-    let mut conditional_false_jmp_idxs: Vec<Vec<usize>> =
-        Vec::with_capacity(condition_blocks_count + 1);
-    let mut jmp_instr_idx: Vec<usize> = Vec::with_capacity(condition_blocks_count);
-    let mut condition_markers: Vec<usize> = Vec::with_capacity(condition_blocks_count);
+fn compile_if_block(
+    IfBlockExpr { condition, then, otherwise, span: _ }: &IfBlockExpr,
+    previous_jumps: Vec<usize>,
+    tgt_id: Option<u16>,
+    ctx: Ctx,
+    state: &mut State<'_>,
+    output: &mut Vec<Instr>,
+) {
+    let condition_start = output.len();
+    for j in previous_jumps {
+        set_jmp_size(&mut output[j], (condition_start - j) as u16);
+    }
 
-    // Compile the main condition
-    let (true_jump_idxs, false_jump_idxs) =
-        compile_short_circuit_condition(condition, ctx, state, output, false);
-    conditional_false_jmp_idxs.push(false_jump_idxs);
+    let (b, true_jump_idxs, false_jump_idxs) = compile_condition(condition, ctx, state, output);
+    if let Some(const_bool) = b {
+        if const_bool {
+            compile_if_block_branch(then, tgt_id, ctx, state, output);
+        } else if let [Expr::IfBlock(if_block)] = otherwise.as_ref() {
+            compile_if_block(if_block, Vec::new(), tgt_id, ctx, state, output);
+        } else if !otherwise.is_empty() {
+            compile_if_block_branch(otherwise, tgt_id, ctx, state, output);
+        }
+        return;
+    }
 
     // Modify true jump instructions to point to body_start
     let body_start = output.len();
@@ -1406,44 +1364,33 @@ fn compile_condition(
         set_jmp_size(&mut output[j], (body_start - j) as u16);
     }
 
-    // parse the main code block
-    let cond_code =
-        compile_expr(&code[0..main_code_limit], ctx.advance_offset(output.len() as u16), state);
-    output.extend(cond_code);
-    if main_code_limit != code.len() {
+    compile_if_block_branch(then, tgt_id, ctx, state, output);
+
+    let jump_over_instr_idx = if otherwise.is_empty() {
+        0
+    } else {
         output.push(Instr::Jmp(0));
-        jmp_instr_idx.push(output.len() - 1);
+        output.len() - 1
+    };
+
+    let branch_start = output.len();
+    if otherwise.is_empty() {
+        // single if block
+        for j in false_jump_idxs {
+            set_jmp_size(&mut output[j], (branch_start - j) as u16);
+        }
+    } else if let [Expr::IfBlock(if_block)] = otherwise.as_ref() {
+        compile_if_block(if_block, false_jump_idxs, tgt_id, ctx, state, output);
+    } else {
+        for j in false_jump_idxs {
+            set_jmp_size(&mut output[j], (branch_start - j) as u16);
+        }
+        compile_if_block_branch(otherwise, tgt_id, ctx, state, output);
     }
 
-    for elem in &code[main_code_limit..] {
-        if let Expr::ElseIfBlock(condition, code) = elem {
-            condition_markers.push(output.len());
-            let condition_id = condition.compile(ctx, state, output, None, false, true).unwrap_id();
-            state.free_reg(condition_id);
-            add_cmp_false(condition_id, &mut 0, output, false);
-            conditional_false_jmp_idxs.push(vec![output.len() - 1]);
-            let cond_code = compile_expr(code, ctx.advance_offset(output.len() as u16), state);
-            output.extend(cond_code);
-            output.push(Instr::Jmp(0));
-            jmp_instr_idx.push(output.len() - 1);
-        } else if let Expr::ElseBlock(code) = elem {
-            condition_markers.push(output.len());
-            let cond_code = compile_expr(code, ctx.advance_offset(output.len() as u16), state);
-            output.extend(cond_code);
-        }
-    }
-
-    for y in jmp_instr_idx {
-        let diff = output.len() - y;
-        output[y] = Instr::Jmp(diff as u16);
-    }
-    // Fix all false-jump instructions for each condition block
-    for (cm_idx, false_idxs) in conditional_false_jmp_idxs.iter().enumerate() {
-        let target =
-            if cm_idx < condition_markers.len() { condition_markers[cm_idx] } else { output.len() };
-        for &y in false_idxs {
-            set_jmp_size(&mut output[y], (target - y) as u16);
-        }
+    if !otherwise.is_empty() {
+        let output_len = output.len();
+        set_jmp_size(&mut output[jump_over_instr_idx], (output_len - jump_over_instr_idx) as u16);
     }
 }
 
@@ -2309,22 +2256,28 @@ impl Expr {
                 debug_assert!(uses_id);
                 Some(compile_bool_neg_op(l, *span1, *span2, tgt_id, ctx, state, output))
             }
-            Self::InlineCondition(main_condition, code, span) => {
-                debug_assert!(uses_id);
-                Some(compile_inline_condition(
-                    main_condition,
-                    code,
-                    *span,
-                    ctx,
-                    state,
-                    output,
-                    tgt_id,
-                ))
+            Self::FunctionCall(function_call) => {
+                let output_id = compile_function_call(function_call, output, ctx, state, tgt_id);
+                if uses_id {
+                    Some(output_id.unwrap_or_else(|| state.new_const_reg(NULL)))
+                } else {
+                    if let Some(id) = output_id {
+                        state.free_reg(id);
+                    }
+                    None
+                }
             }
-            Self::FunctionCall(function_call) if uses_id => Some(
-                compile_function_call(function_call, output, ctx, state, tgt_id)
-                    .unwrap_or_else(|| state.new_const_reg(NULL)),
-            ),
+            Self::ObjFunctionCall(function_call) => {
+                let output_id = compile_method_call(output, ctx, state, tgt_id, function_call);
+                if uses_id {
+                    Some(output_id.unwrap_or_else(|| state.new_const_reg(NULL)))
+                } else {
+                    if let Some(id) = output_id {
+                        state.free_reg(id);
+                    }
+                    None
+                }
+            }
             Self::AnonymousFunction(_, _, _) => {
                 debug_assert!(uses_id);
                 // This is replaced later on by `builtin_functions` when it's called
@@ -2356,9 +2309,10 @@ impl Expr {
                 None
             }
             Self::IfBlock(if_block) => {
-                debug_assert!(!uses_id);
-                compile_condition(if_block, ctx, state, output);
-                None
+                let condition_return_id =
+                    if uses_id { Some(state.alloc_reg_tgt(tgt_id)) } else { None };
+                compile_if_block(if_block, Vec::new(), condition_return_id, ctx, state, output);
+                condition_return_id
             }
             Self::WhileBlock(condition, code) => {
                 debug_assert!(!uses_id);
@@ -2413,24 +2367,6 @@ impl Expr {
                 compile_struct_definition(name, fields, *span, ctx, state);
                 None
             }
-            Self::FunctionCall(function_call) if !uses_id => {
-                let output_id = compile_function_call(function_call, output, ctx, state, tgt_id);
-                if let Some(id) = output_id {
-                    state.free_reg(id);
-                }
-                None
-            }
-            Self::ObjFunctionCall(function_call) if !uses_id => {
-                let output_id = compile_method_call(output, ctx, state, tgt_id, function_call);
-                if let Some(id) = output_id {
-                    state.free_reg(id);
-                }
-                None
-            }
-            Self::ObjFunctionCall(function_call) if uses_id => Some(
-                compile_method_call(output, ctx, state, tgt_id, function_call)
-                    .unwrap_or_else(|| state.new_const_reg(NULL)),
-            ),
             Self::FunctionDecl(function_declaration) => {
                 debug_assert!(!uses_id);
                 compile_function_definition(function_declaration, ctx, state);
@@ -2456,7 +2392,7 @@ impl Expr {
                 compile_eval_block(code, ctx, state, output);
                 None
             }
-            _ => unsafe { unreachable_unchecked() },
+            Self::ImportDylib(..) | Self::ImportFile(..) => unsafe { unreachable_unchecked() },
         }
     }
 }

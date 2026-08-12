@@ -87,8 +87,8 @@ pub fn handle_user_function(
 ) -> Option<u16> {
     let args = &function_call.args;
     let fn_name = function_call.qualified_name.get_name();
-    let span = function_call.span;
-    let args_indexes = &function_call.arg_spans;
+    let span = function_call.get_call_span();
+    let args_indexes = &function_call.get_arg_spans();
     let is_recursive = is_function_recursive(function_idx, state);
 
     let fn_returns_null = state.functions[function_idx].returns_null;

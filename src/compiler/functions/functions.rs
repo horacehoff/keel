@@ -114,7 +114,7 @@ pub fn compile_function_call(
             &function_call.args,
             fn_args.len(),
             function_call.qualified_name.get_name(),
-            function_call.span,
+            function_call.get_call_span(),
             state.sources,
             ctx.file_idx,
         );
@@ -124,7 +124,7 @@ pub fn compile_function_call(
                 error_function_arg_invalid_type(
                     &inferred_arg_type,
                     a,
-                    function_call.arg_spans[i],
+                    function_call.get_nth_arg_span(i),
                     function_call.qualified_name.get_name(),
                     None,
                     ctx.file_idx,
@@ -142,12 +142,12 @@ pub fn compile_function_call(
 
         let register_id = if returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
         output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
-        state.add_to_src(ctx, output, function_call.span);
+        state.add_to_src(ctx, output, function_call.get_call_span());
         if returns_null { None } else { Some(register_id) }
     } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
         namespace,
         function_call.qualified_name.get_name(),
-        function_call.span,
+        function_call.get_call_span(),
         ctx.file_idx,
         state.sources,
     ) {
@@ -157,7 +157,7 @@ pub fn compile_function_call(
             function_call.qualified_name.get_name(),
             state.scope(ctx.file_idx),
             namespace,
-            function_call.span,
+            function_call.get_call_span(),
             ctx.file_idx,
             state.sources,
         );

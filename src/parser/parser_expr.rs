@@ -214,19 +214,19 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                     let mut args: Vec<Expr> = Vec::with_capacity(2);
                     args.push(base);
 
-                    let mut arg_spans: Vec<Span> = Vec::with_capacity(2);
-                    arg_spans.push(base_span);
-
                     let (fn_args, fn_arg_spans, end) = parse_args(parser);
 
+                    let mut spans: Vec<Span> = Vec::with_capacity(2);
+                    spans.push((id_span.start, end).into());
+                    spans.push(base_span);
+
                     args.extend(fn_args);
-                    arg_spans.extend(fn_arg_spans);
+                    spans.extend(fn_arg_spans);
 
                     let obj_function_call = Expr::ObjFunctionCall(FunctionCallExpr {
                         qualified_name: QualifiedName::new([SmolStr::new(id)]),
                         args: args.into_boxed_slice(),
-                        span: (id_span.start, end).into(),
-                        arg_spans: arg_spans.into_boxed_slice(),
+                        spans: spans.into_boxed_slice(),
                     });
                     base_span.end = end;
                     base = obj_function_call;
@@ -264,19 +264,19 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                     let mut args: Vec<Expr> = Vec::with_capacity(2);
                     args.push(base);
 
-                    let mut arg_spans: Vec<Span> = Vec::with_capacity(2);
-                    arg_spans.push(base_span);
-
                     let (fn_args, fn_arg_spans, end) = parse_args(parser);
 
+                    let mut spans: Vec<Span> = Vec::with_capacity(2);
+                    spans.push((id_span.start, end).into());
+                    spans.push(base_span);
+
                     args.extend(fn_args);
-                    arg_spans.extend(fn_arg_spans);
+                    spans.extend(fn_arg_spans);
 
                     let obj_function_call = Expr::ObjFunctionCall(FunctionCallExpr {
                         qualified_name: QualifiedName::new(namespace),
                         args: args.into_boxed_slice(),
-                        span: (id_span.start, end).into(),
-                        arg_spans: arg_spans.into_boxed_slice(),
+                        spans: spans.into_boxed_slice(),
                     });
                     base_span.end = end;
                     base = obj_function_call;

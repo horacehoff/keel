@@ -32,7 +32,7 @@ fn check(
     sources: &[Source],
 ) {
     let name = function_call.qualified_name.get_name().as_str();
-    let arg_spans = &function_call.arg_spans;
+    let arg_spans = &function_call.get_arg_spans();
     if match receiver_type {
         DataType::Union(types) => types.iter().any(|t| !expected_receiver_type.contains(t)),
         other => !expected_receiver_type.contains(other),
@@ -51,7 +51,7 @@ fn check(
         arg_count,
         name,
         if arg_spans.is_empty() {
-            function_call.span
+            function_call.get_call_span()
         } else {
             Span { start: arg_spans[0].start, end: arg_spans.last().unwrap().end }
         },
@@ -80,9 +80,9 @@ pub fn builtin_methods(
 ) -> Option<u16> {
     let args = &function_call.args[1..];
     let name = function_call.qualified_name.get_name().as_str();
-    let arg_spans = &function_call.arg_spans;
-    let receiver_span = function_call.arg_spans[0];
-    let span = function_call.span;
+    let arg_spans = &function_call.get_arg_spans()[1..];
+    let receiver_span = function_call.get_nth_arg_span(0);
+    let span = function_call.get_call_span();
     let receiver = &function_call.args[0];
 
     match name {
@@ -100,6 +100,7 @@ pub fn builtin_methods(
         }
         "starts_with" => {
             check(&[DataType::String], 1, &receiver_type, function_call, ctx, state.sources);
+            check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::StartsWith, receiver_id, output_id));
@@ -107,6 +108,7 @@ pub fn builtin_methods(
         }
         "ends_with" => {
             check(&[DataType::String], 1, &receiver_type, function_call, ctx, state.sources);
+            check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::EndsWith, receiver_id, output_id));
@@ -114,6 +116,8 @@ pub fn builtin_methods(
         }
         "replace" => {
             check(&[DataType::String], 2, &receiver_type, function_call, ctx, state.sources);
+            check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
+            check_arg_type(name, ctx, state, args, arg_spans, 1, &[DataType::String]);
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Replace, receiver_id, output_id));

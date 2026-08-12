@@ -5,8 +5,10 @@ use std::{hint::unreachable_unchecked, rc::Rc};
 #[derive(PartialEq, Clone, Debug)]
 pub struct IfBlockExpr {
     pub condition: Box<Expr>,
-    /// Contains any else_if_blocks / else_block
-    pub code: Box<[Expr]>,
+    /// if .. { <THEN> }
+    pub then: Box<[Expr]>,
+    /// if .. {..} else { <OTHERWISE> }
+    pub otherwise: Box<[Expr]>,
     pub span: Span,
 }
 
@@ -39,8 +41,26 @@ pub struct StructFieldExpr {
 pub struct FunctionCallExpr {
     pub qualified_name: QualifiedName,
     pub args: Box<[Expr]>,
-    pub span: Span,
-    pub arg_spans: Box<[Span]>,
+    /// Invariant
+    /// - `spans.len() >= 1`
+    /// - `spans[0]` is the span for the whole function call
+    pub spans: Box<[Span]>,
+}
+
+impl FunctionCallExpr {
+    #[inline(always)]
+    pub fn get_call_span(&self) -> Span {
+        unsafe { *self.spans.get_unchecked(0) }
+    }
+    #[inline(always)]
+    pub fn get_arg_spans(&self) -> &[Span] {
+        if self.spans.len() > 1 { unsafe { self.spans.get_unchecked(1..) } } else { &[] }
+    }
+    #[inline(always)]
+    pub fn get_nth_arg_span(&self, idx: usize) -> Span {
+        debug_assert!(self.spans.len() > idx + 1);
+        unsafe { *self.spans.get_unchecked(idx + 1) }
+    }
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -99,7 +119,7 @@ pub struct StructFieldAssignmentExpr {
 
 /// A fully-qualified symbol name.
 /// Invariant:
-/// - len > 0
+/// - `len > 0`
 /// - last element is the symbol's name
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct QualifiedName(Box<[SmolStr]>);
@@ -152,10 +172,6 @@ pub enum Expr {
     VarAssign(SmolStr, Box<Self>, Span),
     NamespacedVarAssign(QualifiedName, Box<Self>, Span),
     IfBlock(IfBlockExpr),
-    /// InlineCondition - expression-form if/else, always produces a value, must have an else branch
-    InlineCondition(Box<Self>, Box<[Self]>, Span),
-    ElseIfBlock(Box<Self>, Box<[Self]>),
-    ElseBlock(Box<[Self]>),
 
     /// AnonymousFunction(args, code, span)
     AnonymousFunction(Box<[(SmolStr, Option<TypeExpr>)]>, Box<[Self]>, Span),
@@ -234,13 +250,13 @@ pub const fn symbol_of_expr(expr: &Expr) -> &'static str {
 pub fn code_modifies_variable(var_name: &SmolStr, code: &[Expr]) -> bool {
     code.iter().any(|expr| match expr {
         Expr::VarAssign(n, _, _) => n == var_name,
-        Expr::IfBlock(IfBlockExpr { code, .. })
-        | Expr::WhileBlock(_, code)
+        Expr::IfBlock(if_block) => {
+            code_modifies_variable(var_name, &if_block.then)
+                || code_modifies_variable(var_name, &if_block.otherwise)
+        }
+        Expr::WhileBlock(_, code)
         | Expr::EvalBlock(code)
         | Expr::LoopBlock(code)
-        | Expr::InlineCondition(_, code, _)
-        | Expr::ElseIfBlock(_, code)
-        | Expr::ElseBlock(code)
         | Expr::ForLoop(_, _, code, _) => code_modifies_variable(var_name, code),
         Expr::IntForLoop(for_loop) => code_modifies_variable(var_name, for_loop.get_loop_code()),
         _ => false,

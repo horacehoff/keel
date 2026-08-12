@@ -8,6 +8,7 @@ use super::parser_expr::parse_expr_with_precedence;
 use crate::cold_path;
 use crate::compiler::expr::Expr;
 use crate::compiler::expr::FunctionCallExpr;
+use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
 use crate::compiler::expr::StructFieldExpr;
@@ -26,7 +27,9 @@ use smol_strc::ToSmolStr;
 // Parses: Expr RParen
 fn parse_fn_call(parser: &mut Parser<'_>, qualified_name: QualifiedName, span: Span) -> Expr {
     let (args, arg_spans, _) = parse_args(parser);
-    Expr::FunctionCall(FunctionCallExpr { qualified_name, args, span, arg_spans })
+    let mut spans: Vec<Span> = arg_spans.into_vec();
+    spans.insert(0, span);
+    Expr::FunctionCall(FunctionCallExpr { qualified_name, args, spans: spans.into_boxed_slice() })
 }
 
 // Must be called right after LParen is skipped
@@ -87,6 +90,38 @@ fn parse_type_conversion_fn(parser: &mut Parser<'_>, name: &'static str, span: S
     );
 
     parse_fn_call(parser, QualifiedName::new([SmolStr::new_static(name)]), span)
+}
+
+// Call after IF is skipped
+fn parse_inline_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
+    let condition = parse_expr_no_struct(parser);
+    let then: Box<[Expr]> = Box::new([parse_block_expr(parser)]);
+    let mut otherwise: Vec<Expr> = Vec::with_capacity(2);
+
+    let (next_token, _) = parser.next_token();
+    if next_token != Token::Else {
+        cold_path();
+        parser.error(
+            (start, parser.last_token_end as u32).into(),
+            ParserErr::InlineConditionNoElseBlock,
+        );
+    }
+    let peek_token = parser.peek_token();
+    if peek_token == Token::If {
+        // else if
+        parser.next_token();
+        otherwise.push(parse_inline_if_block(parser, start));
+    } else {
+        // else
+        otherwise.push(parse_block_expr(parser));
+    }
+
+    Expr::IfBlock(IfBlockExpr {
+        condition: Box::new(condition),
+        then,
+        otherwise: otherwise.into_boxed_slice(),
+        span: (start, parser.last_token_end as u32).into(),
+    })
 }
 
 pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
@@ -194,53 +229,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
             }
         }
         // Inline condition
-        Token::If => {
-            let condition = parse_expr_no_struct(parser);
-            let mut output_code: Vec<Expr> = Vec::with_capacity(2);
-            output_code.push(parse_block_expr(parser));
-            loop {
-                let next_token = parser.peek_token_opt();
-                if next_token != Some(Token::Else) {
-                    break;
-                }
-                parser.next_token();
-                // if -> else if
-                // lbrace -> else
-                // else -> end
-                let next_token = parser.peek_token_opt();
-                if next_token == Some(Token::If) {
-                    parser.next_token();
-                    let else_if_condition = parse_expr_no_struct(parser);
-                    parser.next_token_expect(Token::LBrace, "Blocks must begin with a '{'.");
-                    let else_if_value = parse_expr(parser);
-                    parser.next_token_expect(Token::RBrace, "Unmatched '}'");
-                    output_code.push(Expr::ElseIfBlock(
-                        Box::new(else_if_condition),
-                        Box::new([else_if_value]),
-                    ));
-                } else if next_token == Some(Token::LBrace) {
-                    parser.next_token();
-                    let else_value = parse_expr(parser);
-                    parser.next_token_expect(Token::RBrace, "Unmatched '}'");
-                    output_code.push(Expr::ElseBlock(Box::new([else_value])));
-                    break;
-                } else {
-                    break;
-                }
-            }
-            if !matches!(output_code.last().unwrap(), Expr::ElseBlock(_)) {
-                cold_path();
-                parser.error(
-                    (t_span.start, parser.last_token_end as u32).into(),
-                    ParserErr::InlineConditionNoElseBlock,
-                );
-            }
-            Expr::InlineCondition(
-                Box::new(condition),
-                Box::from(output_code),
-                (t_span.start, parser.last_token_end as u32).into(),
-            )
-        }
+        Token::If => parse_inline_if_block(parser, t_span.start),
         // anonymous function
         Token::Function => {
             let start = t_span.start;

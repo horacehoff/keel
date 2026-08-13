@@ -25,7 +25,9 @@ use crate::compiler::expr::IntForLoopExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::StructFieldAssignmentExpr;
 use crate::compiler::expr::StructFieldExpr;
+use crate::compiler::expr::VariableDeclarationExpr;
 use crate::compiler::functions::user_functions::compile_function;
+use crate::compiler::type_system::var_type_is_compatible;
 use crate::data::FALSE;
 use crate::data::NULL;
 use crate::data::TRUE;
@@ -1350,6 +1352,8 @@ fn compile_if_block(
     if let Some(const_bool) = b {
         if const_bool {
             compile_if_block_branch(then, tgt_id, ctx, state, output);
+            // This is just to make it so that the branch that's thrown away is still type-checked
+            compile_if_block_branch(otherwise, tgt_id, ctx, state, &mut Vec::new());
         } else if let [Expr::IfBlock(if_block)] = otherwise.as_ref() {
             compile_if_block(if_block, Vec::new(), tgt_id, ctx, state, output);
         } else if !otherwise.is_empty() {
@@ -1652,14 +1656,34 @@ fn compile_try_catch_block(
 }
 
 fn compile_var_declaration(
-    name: &SmolStr,
-    value: &Expr,
+    var_declaration: &VariableDeclarationExpr,
     remaining_code: &[Expr],
     ctx: Ctx,
     state: &mut State<'_>,
     output: &mut Vec<Instr>,
 ) {
-    let var_type = value.infer_type(ctx, state);
+    let name = &var_declaration.name;
+    let value = &var_declaration.value;
+    let value_type = value.infer_type(ctx, state);
+
+    let declared_type = if let Some(v_t) = &var_declaration.var_type {
+        let declared_var_type =
+            v_t.0.to_datatype(ctx.file_idx, state.scope(ctx.file_idx), state.sources);
+        if !var_type_is_compatible(&declared_var_type, &value_type) {
+            error_invalid_type(
+                &declared_var_type,
+                &value_type,
+                v_t.1,
+                None,
+                None,
+                ctx.file_idx,
+                state.sources,
+            );
+        }
+        declared_var_type
+    } else {
+        value_type.clone()
+    };
 
     let var_id = if ctx.single_run {
         value.compile(ctx, state, output, None, true, true).unwrap_id()
@@ -1674,11 +1698,11 @@ fn compile_var_declaration(
         }
     };
 
-    if let DataType::Fn(fn_id) = &var_type {
-        state.scope_mut(ctx.file_idx).symbols.push((name.clone(), SymbolKind::Fn(*fn_id)));
+    if let DataType::Fn(fn_id) = value_type {
+        state.scope_mut(ctx.file_idx).symbols.push((name.clone(), SymbolKind::Fn(fn_id)));
     }
     state.free_registers.retain(|&id| id != var_id);
-    state.new_var(name.clone(), var_id, var_type);
+    state.new_var_with_type(name.clone(), var_id, value_type, declared_type);
 }
 
 fn compile_var_assignment(
@@ -1698,13 +1722,28 @@ fn compile_var_assignment(
     } else if let Some(global_id) =
         state.scope(ctx.file_idx).find_global(path, name, span, ctx.file_idx, state.sources)
     {
-        if state.globals[global_id].var_type != var_type {
-            panic!("Static variables cannot have their type modified")
-        }
         Some(global_id)
     } else {
         compiler_errors::error_unknown_variable(name, span, state.v, ctx.file_idx, state.sources);
     };
+
+    let declared_var_type = if let Some(idx) = local_var_idx {
+        &state.v[idx].declared_type
+    } else {
+        &state.globals[unsafe { global_var_idx.unwrap_unchecked() }].declared_type
+    };
+
+    if !var_type_is_compatible(declared_var_type, &var_type) {
+        error_invalid_type(
+            declared_var_type,
+            &var_type,
+            span,
+            None,
+            None,
+            ctx.file_idx,
+            state.sources,
+        )
+    }
 
     let reg_id = if let Some(pos) = local_var_idx {
         state.v[pos].register_id
@@ -1764,9 +1803,7 @@ fn compile_var_assignment(
     }
     if let Some(pos) = local_var_idx {
         state.v[pos].var_type = var_type;
-    } else if let Some(pos) = global_var_idx
-        && matches!(state.globals[pos].var_type, DataType::Array(None) | DataType::Unknown)
-    {
+    } else if let Some(pos) = global_var_idx {
         state.globals[pos].var_type = var_type;
     }
 }
@@ -2339,9 +2376,9 @@ impl Expr {
                 compile_try_catch_block(e, err_var, catch_code, ctx, state, output);
                 None
             }
-            Self::VarDeclare(name, value) => {
+            Self::VarDeclare(var_declaration) => {
                 debug_assert!(!uses_id);
-                compile_var_declaration(name, value, remaining_code, ctx, state, output);
+                compile_var_declaration(var_declaration, remaining_code, ctx, state, output);
                 None
             }
             Self::VarAssign(name, value, span) => {
@@ -2538,13 +2575,13 @@ fn parse_toplevel(
         Rc<Library>,
         Span,
     )>,
-    pending_globals: &mut Vec<(SmolStr, Expr, u16)>,
+    pending_globals: &mut Vec<(VariableDeclarationExpr, u16)>,
 ) {
     let mut imports = Vec::new();
-    let mut file_globals: Vec<(SmolStr, Expr)> = Vec::new();
+    let mut file_globals: Vec<VariableDeclarationExpr> = Vec::new();
     for expr in code {
         match expr {
-            Expr::VarDeclare(name, value) => file_globals.push((name, *value)),
+            Expr::VarDeclare(var_declaration) => file_globals.push(var_declaration),
             Expr::FunctionDecl(function_declaration) => {
                 let fn_name = function_declaration.name;
                 let span = function_declaration.span;
@@ -2724,9 +2761,11 @@ fn parse_toplevel(
         }
     }
 
-    for (name, value) in file_globals {
-        scope.symbols.push((name.clone(), SymbolKind::Global(pending_globals.len() as u16)));
-        pending_globals.push((name, value, src_file_idx));
+    for var_declaration in file_globals {
+        scope
+            .symbols
+            .push((var_declaration.name.clone(), SymbolKind::Global(pending_globals.len() as u16)));
+        pending_globals.push((var_declaration, src_file_idx));
     }
 
     if file_scopes.len() <= src_file_idx as usize {
@@ -2922,7 +2961,7 @@ pub fn compile(
         Vec::with_capacity(2);
     #[cfg(not(target_arch = "wasm32"))]
     let mut pending_dylibs: Vec<(u16, u16, Box<[DylibFnExpr]>, Rc<Library>, Span)> = Vec::new();
-    let mut pending_globals: Vec<(SmolStr, Expr, u16)> = Vec::new();
+    let mut pending_globals: Vec<(VariableDeclarationExpr, u16)> = Vec::new();
 
     parse_toplevel(
         code,
@@ -2982,13 +3021,38 @@ pub fn compile(
         types: &mut types,
     };
     let mut instructions: Vec<Instr> = Vec::with_capacity(4);
-    for (name, value, file_idx) in pending_globals {
+    for (var_declaration, file_idx) in pending_globals {
         let var_ctx = ctx.with_file_idx(file_idx);
-        let var_type = value.infer_type(var_ctx, &mut state);
-        let register_id =
-            value.compile(var_ctx, &mut state, &mut instructions, None, true, true).unwrap_id();
+        let value_type = var_declaration.value.infer_type(var_ctx, &mut state);
+        let declared_type = if let Some(v_t) = var_declaration.var_type {
+            let declared_var_type =
+                v_t.0.to_datatype(file_idx, state.scope(file_idx), state.sources);
+            if !var_type_is_compatible(&declared_var_type, &value_type) {
+                error_invalid_type(
+                    &declared_var_type,
+                    &value_type,
+                    v_t.1,
+                    None,
+                    None,
+                    file_idx,
+                    &sources,
+                );
+            }
+            declared_var_type
+        } else {
+            value_type.clone()
+        };
+        let register_id = var_declaration
+            .value
+            .compile(var_ctx, &mut state, &mut instructions, None, true, true)
+            .unwrap_id();
         state.reserved_registers.insert(register_id);
-        state.globals.push(Variable { name, register_id, var_type });
+        state.globals.push(Variable {
+            name: var_declaration.name,
+            register_id,
+            declared_type,
+            var_type: value_type,
+        });
     }
     let program_instructions = compile_expr(
         &state.functions

@@ -5,6 +5,7 @@ use crate::compiler::compiler_data::Source;
 use crate::compiler::expr::DylibFnExpr;
 use crate::compiler::expr::DylibImportExpr;
 use crate::compiler::expr::QualifiedName;
+use crate::compiler::expr::VariableDeclarationExpr;
 use crate::compiler::expr::{Expr, Span, var_assign};
 use crate::compiler::type_system::TypeExpr;
 use crate::errors::BLUE;
@@ -48,7 +49,7 @@ struct ParserCtx<'a> {
 struct Parser<'a> {
     input: TokenIter<'a>,
     ctx: ParserCtx<'a>,
-    last_token_end: usize,
+    last_token_end: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -137,7 +138,7 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
 impl<'a> Parser<'a> {
     #[inline(always)]
     fn eof_span(&self) -> Span {
-        let end = self.ctx.src.contents.len();
+        let end = self.ctx.src.contents.len() as u32;
         (end, end).into()
     }
     #[cold]
@@ -153,7 +154,7 @@ impl<'a> Parser<'a> {
                 self.error(self.eof_span(), ParserErr::UnexpectedEOF);
             },
         );
-        self.last_token_end = t.1.end;
+        self.last_token_end = t.1.end as u32;
         (
             t.0.unwrap_or_else(
                 #[cold]
@@ -347,12 +348,24 @@ fn parse_var_declare(parser: &mut Parser<'_>) -> Expr {
             ),
         );
     };
+    let var_type = if parser.peek_token_opt() == Some(Token::Colon) {
+        // typed
+        parser.next_token();
+        let type_start = parser.peek_token_span().start;
+        Some(Box::new((parse_type(parser), (type_start, parser.last_token_end).into())))
+    } else {
+        None
+    };
     parser.next_token_expect(
         Token::Equals,
         "Variable declarations need a '=' to separate the name from the value.",
     );
     let var_value = parse_expr(parser);
-    Expr::VarDeclare(var_name, Box::new(var_value))
+    Expr::VarDeclare(VariableDeclarationExpr {
+        name: var_name,
+        value: Box::new(var_value),
+        var_type,
+    })
 }
 
 fn parse_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32) -> Expr {
@@ -366,13 +379,13 @@ fn parse_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32) -> Expr {
 }
 
 fn parse_op_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32, op: Token<'_>) -> Expr {
-    let operand_end = input.last_token_end as u32;
+    let operand_end = input.last_token_end;
     let (t, _) = input.next_token();
     debug_assert_eq!(t, op);
     let e_end = input.peek_token_span().end;
     let v_start = input.peek_token_span().start;
     let v = parse_expr(input);
-    let v_end = input.last_token_end as u32;
+    let v_end = input.last_token_end;
     let op = match op {
         Token::AssignOpAdd => Token::OpAdd,
         Token::AssignOpSub => Token::OpSub,
@@ -490,13 +503,16 @@ fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
     parser.throw_parser_err(|| {
         Report::build(
             ariadne::ReportKind::Error,
-            (parser.ctx.src.filename.as_str(), (parser.last_token_end..parser.last_token_end)),
+            (
+                parser.ctx.src.filename.as_str(),
+                (parser.last_token_end as usize..parser.last_token_end as usize),
+            ),
         )
         .with_message("Missing semicolon")
         .with_label(
             Label::new((
                 parser.ctx.src.filename.as_str(),
-                (parser.last_token_end..parser.last_token_end),
+                (parser.last_token_end as usize..parser.last_token_end as usize),
             ))
             .with_message(format_args!("Add a {} here", blue(';')))
             .with_color(ariadne::Color::Blue),
@@ -709,7 +725,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
                     ),
                 );
             };
-            args.push((first, (type_start_span, type_end_span as u32).into()));
+            args.push((first, (type_start_span, type_end_span).into()));
             fn_name
         };
         parser.next_token_expect(
@@ -722,7 +738,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
             }
             let type_span_start = parser.peek_token_span().start;
             let t = parse_type(parser);
-            let type_span_end = parser.last_token_end as u32;
+            let type_span_end = parser.last_token_end;
             args.push((t, (type_span_start, type_span_end).into()));
             if parser.peek_token() == Token::Comma {
                 parser.next_token();

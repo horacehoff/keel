@@ -247,6 +247,7 @@ pub fn compile_function(
             Variable {
                 name: x.clone(),
                 register_id: (state.registers.len() - 1) as u16,
+                declared_type: infered_arg_types[i].clone(),
                 var_type: infered_arg_types[i].clone(),
             }
         })

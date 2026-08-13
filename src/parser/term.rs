@@ -101,10 +101,7 @@ fn parse_inline_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
     let (next_token, _) = parser.next_token();
     if next_token != Token::Else {
         cold_path();
-        parser.error(
-            (start, parser.last_token_end as u32).into(),
-            ParserErr::InlineConditionNoElseBlock,
-        );
+        parser.error((start, parser.last_token_end).into(), ParserErr::InlineConditionNoElseBlock);
     }
     let peek_token = parser.peek_token();
     if peek_token == Token::If {
@@ -120,7 +117,7 @@ fn parse_inline_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
         condition: Box::new(condition),
         then,
         otherwise: otherwise.into_boxed_slice(),
-        span: (start, parser.last_token_end as u32).into(),
+        span: (start, parser.last_token_end).into(),
     })
 }
 
@@ -288,7 +285,7 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 Expr::AnonymousFunction(
                     Box::from(args),
                     Box::from(fn_code),
-                    (start, parser.last_token_end as u32).into(),
+                    (start, parser.last_token_end).into(),
                 )
             } else {
                 let span = parser.peek_token_span();
@@ -309,14 +306,14 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
             loop {
                 let key_start = parser.peek_token_span().start;
                 let key = parse_term(parser, allow_struct);
-                let key_end = parser.last_token_end as u32;
+                let key_end = parser.last_token_end;
                 parser.next_token_expect(
                     Token::Colon,
                     "Key-value pairs must be separated by a colon",
                 );
                 let value_start = parser.peek_token_span().start;
                 let value = parser_expr::parse_expr(parser);
-                let value_end = parser.last_token_end as u32;
+                let value_end = parser.last_token_end;
                 kv_pairs.push((
                     key,
                     (key_start, key_end).into(),

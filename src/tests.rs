@@ -1573,20 +1573,6 @@ pub fn null_literal_store_and_compare() {
 }
 
 #[test]
-pub fn null_literal_as_default() {
-    run_and_check_registers!(
-        "
-        fn main() {
-            let result = null;
-            result = 42;
-            print(result);
-        }
-        ",
-        Data::int(42)
-    );
-}
-
-#[test]
 pub fn array_push_type_inference_propagation() {
     run_and_check_registers!(
         "

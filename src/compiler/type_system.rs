@@ -23,6 +23,7 @@ use crate::compiler::compiler_errors::error_unknown_variable;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::QualifiedName;
+use crate::compiler::expr::VariableDeclarationExpr;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
@@ -385,7 +386,7 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 expr_stack.push(y);
                 expr_stack.push(z);
             }
-            Expr::VarDeclare(_, x)
+            Expr::VarDeclare(VariableDeclarationExpr { value: x, .. })
             | Expr::VarAssign(_, x, _)
             | Expr::Neg(x, _, _)
             | Expr::BoolNeg(x, _, _) => expr_stack.push(x),
@@ -675,8 +676,8 @@ fn track_return_flow(
                     return FnReturnFlow { types: return_types, always_returns: true };
                 }
             }
-            Expr::VarDeclare(name, expr) => {
-                let var_type = expr.infer_type(ctx, state);
+            Expr::VarDeclare(VariableDeclarationExpr { name, value, var_type: _ }) => {
+                let var_type = value.infer_type(ctx, state);
                 state.new_var(name.clone(), 0, var_type);
             }
             Expr::VarAssign(name, expr, _) => {
@@ -771,6 +772,15 @@ fn infer_symbol_type(
         DataType::Fn(fn_id as u16)
     } else {
         error_unknown_variable(name, span, state.v, ctx.file_idx, state.sources);
+    }
+}
+
+pub fn var_type_is_compatible(declared: &DataType, candidate: &DataType) -> bool {
+    match (declared, candidate) {
+        (DataType::Unknown, _) => true,
+        (_, DataType::Union(types)) => types.iter().all(|t| var_type_is_compatible(declared, t)),
+        (DataType::Union(types), _) => types.iter().any(|t| var_type_is_compatible(t, candidate)),
+        _ => declared == candidate,
     }
 }
 

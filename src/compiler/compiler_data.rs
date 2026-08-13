@@ -200,7 +200,17 @@ impl State<'_> {
     }
     #[inline(always)]
     pub fn new_var(&mut self, name: SmolStr, register_id: u16, var_type: DataType) {
-        self.v.push(Variable { name, register_id, var_type });
+        self.v.push(Variable { name, register_id, declared_type: var_type.clone(), var_type });
+    }
+    #[inline(always)]
+    pub fn new_var_with_type(
+        &mut self,
+        name: SmolStr,
+        register_id: u16,
+        var_type: DataType,
+        declared_type: DataType,
+    ) {
+        self.v.push(Variable { name, register_id, declared_type, var_type });
     }
     /// Creates a brand new register containing `data` and returns its index.
     #[must_use]
@@ -290,5 +300,8 @@ impl State<'_> {
 pub struct Variable {
     pub name: SmolStr,
     pub register_id: u16,
+    /// Fixed at var declaration and never changes
+    pub declared_type: DataType,
+    /// Can change as long as it's compatible with `declared_type`
     pub var_type: DataType,
 }

@@ -146,6 +146,13 @@ impl QualifiedName {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct VariableDeclarationExpr {
+    pub name: SmolStr,
+    pub value: Box<Expr>,
+    pub var_type: Option<Box<(TypeExpr, Span)>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Float(f64),
     Int(i32),
@@ -167,7 +174,7 @@ pub enum Expr {
     GetStructField(Box<Self>, SmolStr, Span, Span),
     SetStructField(StructFieldAssignmentExpr),
     /// VarDeclare(name, value),
-    VarDeclare(SmolStr, Box<Self>),
+    VarDeclare(VariableDeclarationExpr),
     /// VarDeclare(name, value, start, end)
     VarAssign(SmolStr, Box<Self>, Span),
     NamespacedVarAssign(QualifiedName, Box<Self>, Span),
@@ -283,7 +290,7 @@ pub fn var_assign(target: Expr, value: Expr, expr_span: Span, value_span: Span) 
 }
 
 /// A span of code in a `Source`'s `contents`
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
     pub start: u32,
     pub end: u32,

@@ -12,6 +12,7 @@ use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::IntForLoopExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
+use crate::compiler::expr::VariableDeclarationExpr;
 use crate::parser::Parser;
 use crate::parser::TypeExpr;
 use crate::parser::parse_code;
@@ -38,7 +39,7 @@ pub fn parse_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
         condition: Box::new(condition),
         then: output_code.into_boxed_slice(),
         otherwise,
-        span: (start, parser.last_token_end as u32).into(),
+        span: (start, parser.last_token_end).into(),
     })
 }
 
@@ -96,7 +97,7 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
         let upper_bound = parse_expr_no_struct(parser);
         code.push(upper_bound);
 
-        let end2 = parser.last_token_end as u32;
+        let end2 = parser.last_token_end;
 
         let for_loop_code = parse_block(parser);
         code.extend(for_loop_code);
@@ -109,7 +110,7 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
         })
     } else {
         let for_collection = parse_expr_no_struct(parser);
-        let end = parser.last_token_end as u32;
+        let end = parser.last_token_end;
         let peek_token = parser.peek_token();
         if peek_token == Token::RangeDot {
             parser.next_token();
@@ -121,7 +122,7 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
             let upper_bound = parse_expr_no_struct(parser);
             code.push(upper_bound);
 
-            let end2 = parser.last_token_end as u32;
+            let end2 = parser.last_token_end;
             let for_loop_code = parse_block(parser);
             code.extend(for_loop_code);
 
@@ -420,7 +421,11 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
         })]);
     }
     Expr::EvalBlock(Box::from([
-        Expr::VarDeclare(obj_var.clone(), Box::new(match_obj)),
+        Expr::VarDeclare(VariableDeclarationExpr {
+            name: obj_var.clone(),
+            value: Box::new(match_obj),
+            var_type: None,
+        }),
         Expr::IfBlock(IfBlockExpr {
             condition: Box::from(Expr::Eq(
                 Box::new(Expr::Var(obj_var, (start, end).into())),

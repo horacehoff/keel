@@ -20,14 +20,14 @@ pub fn parse_expr_with_precedence(
 ) -> Expr {
     let lhs_start = input.peek_token_span().start;
     let mut lhs = parse_term(input, allow_struct);
-    let end = input.last_token_end as u32;
+    let end = input.last_token_end;
     lhs = parse_postfix_op(input, lhs, (lhs_start, end).into());
     if input.peek_token_opt() == Some(Token::Colon) {
         input.next_token();
         let t = parse_type(input);
-        lhs = Expr::TypeEq(Box::new(lhs), t, (lhs_start, input.last_token_end as u32).into());
+        lhs = Expr::TypeEq(Box::new(lhs), t, (lhs_start, input.last_token_end).into());
     }
-    let mut lhs_end = input.last_token_end as u32;
+    let mut lhs_end = input.last_token_end;
     while let Some(peek) = input.peek_token_opt() {
         let Some((op, op_precedence)) = check_op(peek, min_precedence) else {
             break;
@@ -35,7 +35,7 @@ pub fn parse_expr_with_precedence(
         input.next_token();
         let rhs_start = input.peek_token_span().start;
         let rhs = parse_expr_with_precedence(input, op_precedence, allow_struct);
-        let rhs_end = input.last_token_end as u32;
+        let rhs_end = input.last_token_end;
         lhs = add_op(input, op, lhs, rhs, (lhs_start, lhs_end).into(), (rhs_start, rhs_end).into());
         lhs_end = rhs_end;
     }
@@ -53,11 +53,11 @@ pub fn add_op(
     match op {
         Token::OpOr => match (lhs, rhs) {
             (Expr::Bool(false), c) | (c, Expr::Bool(false)) => c,
-            (Expr::Bool(true), _) | (_, Expr::Bool(true)) => Expr::Bool(true),
+            (Expr::Bool(true), _) => Expr::Bool(true),
             (lhs, rhs) => Expr::BoolOr(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
         Token::OpAnd => match (lhs, rhs) {
-            (Expr::Bool(false), _) | (_, Expr::Bool(false)) => Expr::Bool(false),
+            (Expr::Bool(false), _) => Expr::Bool(false),
             (Expr::Bool(true), c) | (c, Expr::Bool(true)) => c,
             (lhs, rhs) => Expr::BoolAnd(Box::new(lhs), Box::new(rhs), span_l, span_r),
         },
@@ -164,7 +164,7 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                     parser.next_token();
                     let upper_bound = parse_expr(parser);
                     parser.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
-                    let end = parser.last_token_end as u32;
+                    let end = parser.last_token_end;
                     base_span.end = end;
                     base = Expr::ArrayGetSlice(
                         Box::new(base),
@@ -183,7 +183,7 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                     } else {
                         let upper_bound = parse_expr(parser);
                         parser.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
-                        let end = parser.last_token_end as u32;
+                        let end = parser.last_token_end;
                         base_span.end = end;
                         base = Expr::ArrayGetSlice(
                             Box::new(base),

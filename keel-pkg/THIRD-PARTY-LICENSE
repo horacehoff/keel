@@ -113,14 +113,14 @@ TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
 PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
 LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
 
 --------
 BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License
 Used by:
 - aws-lc-sys 0.44.0 - https://github.com/aws/aws-lc-rs
 
-Copyright (c) <year> <owner>.
+Copyright (c) <year> <owner>. 
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
@@ -517,14 +517,14 @@ DEALINGS IN THE SOFTWARE.
 --------
 MIT License
 Used by:
-- cc 1.4.2 - https://github.com/rust-lang/cc-rs
+- cc 1.4.3 - https://github.com/rust-lang/cc-rs
 - cfg-if 1.0.4 - https://github.com/rust-lang/cfg-if
 - cmake 0.1.58 - https://github.com/rust-lang/cmake-rs
-- find-msvc-tools 0.1.10 - https://github.com/rust-lang/cc-rs
+- find-msvc-tools 0.1.11 - https://github.com/rust-lang/cc-rs
 - jobserver 0.1.35 - https://github.com/rust-lang/jobserver-rs
 - js-sys 0.3.104 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys
 - openssl-probe 0.2.1 - https://github.com/rustls/openssl-probe
-- pkg-config 0.3.33 - https://github.com/rust-lang/pkg-config-rs
+- pkg-config 0.3.34 - https://github.com/rust-lang/pkg-config-rs
 - socket2 0.6.5 - https://github.com/rust-lang/socket2
 - wasm-bindgen-futures 0.4.77 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures
 - wasm-bindgen-macro-support 0.2.127 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support
@@ -2169,6 +2169,7 @@ Used by:
 - serde 1.0.229 - https://github.com/serde-rs/serde
 - serde_core 1.0.229 - https://github.com/serde-rs/serde
 - serde_derive 1.0.229 - https://github.com/serde-rs/serde
+- serde_json 1.0.151 - https://github.com/serde-rs/json
 - simd_cesu8 1.2.0 - https://github.com/seancroach/simd_cesu8
 - syn 2.0.119 - https://github.com/dtolnay/syn
 - syn 3.0.3 - https://github.com/dtolnay/syn
@@ -2177,6 +2178,7 @@ Used by:
 - unicode-ident 1.0.24 - https://github.com/dtolnay/unicode-ident
 - wasi 0.11.1+wasi-snapshot-preview1 - https://github.com/bytecodealliance/wasi
 - wasm-streams 0.5.0 - https://github.com/MattiasBuelens/wasm-streams/
+- zmij 1.0.23 - https://github.com/dtolnay/zmij
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -2224,6 +2226,29 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE
+
+--------
+MIT License
+Used by:
+- constcat 0.6.1 - https://github.com/rossmacarthur/constcat
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --------
 MIT License
@@ -2524,24 +2549,24 @@ authorization of the copyright holder.
 --------
 Unicode License v3
 Used by:
-- icu_collections 2.2.0 - https://github.com/unicode-org/icu4x
-- icu_locale_core 2.2.0 - https://github.com/unicode-org/icu4x
-- icu_normalizer 2.2.0 - https://github.com/unicode-org/icu4x
-- icu_normalizer_data 2.2.0 - https://github.com/unicode-org/icu4x
-- icu_properties 2.2.0 - https://github.com/unicode-org/icu4x
-- icu_properties_data 2.2.0 - https://github.com/unicode-org/icu4x
-- icu_provider 2.2.0 - https://github.com/unicode-org/icu4x
-- litemap 0.8.2 - https://github.com/unicode-org/icu4x
-- potential_utf 0.1.5 - https://github.com/unicode-org/icu4x
-- tinystr 0.8.3 - https://github.com/unicode-org/icu4x
-- writeable 0.6.3 - https://github.com/unicode-org/icu4x
+- icu_collections 2.3.0 - https://github.com/unicode-org/icu4x
+- icu_locale_core 2.3.0 - https://github.com/unicode-org/icu4x
+- icu_normalizer 2.3.0 - https://github.com/unicode-org/icu4x
+- icu_normalizer_data 2.3.0 - https://github.com/unicode-org/icu4x
+- icu_properties 2.3.0 - https://github.com/unicode-org/icu4x
+- icu_properties_data 2.3.0 - https://github.com/unicode-org/icu4x
+- icu_provider 2.3.0 - https://github.com/unicode-org/icu4x
+- litemap 0.8.3 - https://github.com/unicode-org/icu4x
+- potential_utf 0.1.6 - https://github.com/unicode-org/icu4x
+- tinystr 0.8.4 - https://github.com/unicode-org/icu4x
+- writeable 0.6.4 - https://github.com/unicode-org/icu4x
 - yoke-derive 0.8.2 - https://github.com/unicode-org/icu4x
 - yoke 0.8.3 - https://github.com/unicode-org/icu4x
 - zerofrom-derive 0.1.7 - https://github.com/unicode-org/icu4x
 - zerofrom 0.1.8 - https://github.com/unicode-org/icu4x
-- zerotrie 0.2.4 - https://github.com/unicode-org/icu4x
-- zerovec-derive 0.11.3 - https://github.com/unicode-org/icu4x
-- zerovec 0.11.6 - https://github.com/unicode-org/icu4x
+- zerotrie 0.2.5 - https://github.com/unicode-org/icu4x
+- zerovec-derive 0.11.4 - https://github.com/unicode-org/icu4x
+- zerovec 0.11.7 - https://github.com/unicode-org/icu4x
 
 UNICODE LICENSE V3
 

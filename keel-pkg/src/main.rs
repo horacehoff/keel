@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
+use constcat::concat;
 use futures_util::stream::StreamExt;
 use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use owo_colors::colors::css::Gray;
 use reqwest::Client;
+use reqwest::header::ACCEPT;
 use std::cmp::min;
 use std::fs::File;
 use std::io::Write;
@@ -70,10 +72,16 @@ pub async fn download_lib_from_github(
     );
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 struct GithubReleaseAsset {
     name: String,
     browser_download_url: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct GithubRelease {
+    assets: Vec<GithubReleaseAsset>,
+    tarball_url: String,
 }
 
 #[cfg(target_os = "macos")]
@@ -90,7 +98,9 @@ const ARCH_SUFFIX: &str = "-x86_64";
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 const ARCH_SUFFIX: &str = "";
 
-const ARCHIVE_EXT: [&str; 2] = [".tar.gz", "zip"];
+const ARCHIVE_EXTENSIONS: [&str; 2] = [".tar.gz", ".zip"];
+
+const SUFFIXES: [&str; 3] = [concat!(OS_SUFFIX, ARCH_SUFFIX), OS_SUFFIX, ARCH_SUFFIX];
 
 fn parse_repository(repo: &str) -> (&str, &str, Option<&str>) {
     let (author_and_repo, tag) = match repo.split_once('@') {
@@ -100,6 +110,33 @@ fn parse_repository(repo: &str) -> (&str, &str, Option<&str>) {
     let (author, repo_name) =
         author_and_repo.split_once('/').expect("Expected author/repo[@tag], got idk");
     (author, repo_name, tag)
+}
+
+async fn get_github_release(url: &str, client: &Client) -> GithubRelease {
+    let request = client.get(url).header(ACCEPT, "application/vnd.github.v3+json");
+    let result = request.send().await.expect("Failed to access GitHub's API");
+    let release: GithubRelease = result.json().await.expect("Filed");
+    release
+}
+
+fn get_github_release_asset(github_release: GithubRelease, repo_name: &str) -> GithubReleaseAsset {
+    github_release
+        .assets
+        .into_iter()
+        .find(|asset| {
+            for suffix in SUFFIXES {
+                for extension in ARCHIVE_EXTENSIONS {
+                    if asset.name == format!("{repo_name}{suffix}{extension}") {
+                        return true;
+                    }
+                }
+            }
+            false
+        })
+        .unwrap_or(GithubReleaseAsset {
+            name: String::from("Source code (tar.gz)"),
+            browser_download_url: github_release.tarball_url,
+        })
 }
 
 #[tokio::main]
@@ -116,12 +153,27 @@ async fn main() {
 
     let args = Cli::parse();
     match args.command {
-        Some(Commands::Install { repository: repo }) => {
+        Some(Commands::Install { repository }) => {
+            let client = user_agent.build().unwrap();
+            let (author, repo_name, tag) = parse_repository(&repository);
+            let github_api_url = if let Some(release_tag) = tag {
+                format!(
+                    "https://api.github.com/repos/{author}/{repo_name}/releases/tags/{release_tag}"
+                )
+            } else {
+                format!("https://api.github.com/repos/{author}/{repo_name}/releases/latest")
+            };
+            print!("[1/2] Querying the GitHub API...");
+            std::io::stdout().flush().unwrap();
+            let github_release = get_github_release(&github_api_url, &client).await;
+            let github_asset = get_github_release_asset(github_release, repo_name);
+            print!("\r[1/2] Found a suitable release asset: {}\n", github_asset.name);
+            std::io::stdout().flush().unwrap();
             download_lib_from_github(
-                &user_agent.build().unwrap(),
-                &repo,
-                "https://ash-speed.hetzner.com/100MB.bin",
-                "keel.tar.gz",
+                &client,
+                &repository,
+                &github_asset.browser_download_url,
+                &github_asset.name,
             )
             .await;
         }

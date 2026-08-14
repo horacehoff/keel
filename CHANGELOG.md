@@ -11,6 +11,7 @@
 - Added type guards, with the syntax `value: type`
 - Variables now have their type fixed at declaration
 - Variables can now be optionally typed with `let var: type = value` and `static var: type = value`
+- The standard library and future files are now stored in `$HOME/.keel/`
 
 ## 0.4.0 (07/30/2026)
 - Function arguments can now be typed with the syntax `arg: T`

@@ -1,0 +1,14 @@
+KEEL-PKG depends on the following third-party libraries.
+
+{{#each licenses}}
+{{#unless (and (eq (len used_by) 1) (eq used_by.[0].crate.name "keel-pkg"))}}
+--------
+{{name}}
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}} - {{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}
+{{/each}}
+
+{{{text}}}
+{{/unless}}
+{{/each}}

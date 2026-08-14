@@ -61,6 +61,7 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
+use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::hint::unreachable_unchecked;
@@ -2576,6 +2577,7 @@ fn parse_toplevel(
         Span,
     )>,
     pending_globals: &mut Vec<(VariableDeclarationExpr, u16)>,
+    keel_home_libs_path: &LazyCell<Option<PathBuf>, impl FnOnce() -> Option<PathBuf>>,
 ) {
     let mut imports = Vec::new();
     let mut file_globals: Vec<VariableDeclarationExpr> = Vec::new();
@@ -2693,19 +2695,13 @@ fn parse_toplevel(
                     .join(path.as_str())
                     .canonicalize()
                     .unwrap_or_else(|_| {
-                        std::env::current_exe().map_or_else(
-                            |_| {
-                                error_cannot_read_file(span, src_file_idx, sources);
-                            },
-                            |p| {
-                                p.canonicalize()
-                                    .unwrap_or(p)
-                                    .parent()
-                                    .unwrap_or_else(|| Path::new("."))
-                                    .join("libs/")
-                                    .join(path.clone())
-                            },
-                        )
+                        keel_home_libs_path
+                            .as_ref()
+                            .unwrap_or_else(
+                                #[cold]
+                                || error_cannot_read_file(span, src_file_idx, sources),
+                            )
+                            .join(path.clone())
                     });
 
                 let child_name = alias.unwrap_or_else(|| {
@@ -2753,6 +2749,7 @@ fn parse_toplevel(
                     #[cfg(not(target_arch = "wasm32"))]
                     pending_dylibs,
                     pending_globals,
+                    keel_home_libs_path,
                 );
                 files.insert(file_path, child_scope.clone());
                 scope.children.push((child_name, child_scope));
@@ -2950,8 +2947,6 @@ pub fn compile(
     let mut types: Vec<DataType> = Vec::new();
 
     let mut sources: Vec<Source> = vec![main_src];
-    let main_path =
-        PathBuf::from(filename).canonicalize().unwrap_or_else(|_| PathBuf::from(filename));
     let mut scope = Scope::default();
 
     let mut files: FxHashMap<PathBuf, Scope> = FxHashMap::default();
@@ -2963,9 +2958,12 @@ pub fn compile(
     let mut pending_dylibs: Vec<(u16, u16, Box<[DylibFnExpr]>, Rc<Library>, Span)> = Vec::new();
     let mut pending_globals: Vec<(VariableDeclarationExpr, u16)> = Vec::new();
 
+    let keel_home_libs =
+        LazyCell::new(|| std::env::home_dir().map(|p| p.join(".keel").join("libs/")));
+
     parse_toplevel(
         code,
-        &main_path,
+        &PathBuf::from(filename),
         0,
         &mut functions,
         &mut structs,
@@ -2980,6 +2978,7 @@ pub fn compile(
         #[cfg(not(target_arch = "wasm32"))]
         &mut pending_dylibs,
         &mut pending_globals,
+        &keel_home_libs,
     );
     resolve_types(
         &mut structs,

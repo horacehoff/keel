@@ -1,0 +1,4 @@
+/target
+/.zed
+.DS_Store
+/.cargo

@@ -81,7 +81,6 @@ struct GithubReleaseAsset {
 #[derive(serde::Deserialize, Debug)]
 struct GithubRelease {
     assets: Vec<GithubReleaseAsset>,
-    tarball_url: String,
 }
 
 #[cfg(target_os = "macos")]
@@ -133,10 +132,7 @@ fn get_github_release_asset(github_release: GithubRelease, repo_name: &str) -> G
             }
             false
         })
-        .unwrap_or(GithubReleaseAsset {
-            name: String::from("Source code (tar.gz)"),
-            browser_download_url: github_release.tarball_url,
-        })
+        .expect("Couldn't find a valid asset")
 }
 
 #[tokio::main]

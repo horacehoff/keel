@@ -40,8 +40,8 @@ enum CliError {
         #[source]
         source: reqwest::Error,
     },
-    #[error("{TAB}Failed to create a temporary folder at {}.\n{TAB}Check permissions.", path.display())]
-    CannotCreateTemporaryFolder { path: PathBuf },
+    #[error("{TAB}Failed to create temporary folder: {}.\n{TAB}Check permissions.", path.display())]
+    CannotCreateFolder { path: PathBuf },
     #[error(
         "{TAB}Internal error.\n{TAB}Please file a bug report at https://github.com/horacehoff/keel/issues.\n{TAB}Details: {details}."
     )]
@@ -60,9 +60,9 @@ async fn download_lib_from_github(
     client: &Client,
     name: &str,
     download_url: &str,
-    file_path: &str,
     repo_name: &str,
     repo_tag: &str,
+    keel_home: PathBuf,
     keel_home_libs: PathBuf,
 ) -> Result<(), CliError> {
     let github_response = client.get(download_url).send().await.map_err(|e| {
@@ -92,15 +92,16 @@ async fn download_lib_from_github(
         download_url.italic().fg::<Gray>()
     ));
 
-    let temp_folder = std::path::PathBuf::from(format!("{repo_name}@{repo_tag}"));
-    std::fs::create_dir_all(&temp_folder)
-        .map_err(|_| CliError::CannotCreateTemporaryFolder { path: temp_folder.clone() })?;
+    let lib_folder_name = format!("{repo_name}@{repo_tag}");
+    let temp_lib_folder = keel_home.join("tmp/").join(&lib_folder_name);
+    std::fs::create_dir_all(&temp_lib_folder)
+        .map_err(|_| CliError::CannotCreateFolder { path: temp_lib_folder.clone() })?;
     let bytes_stream = github_response.bytes_stream().map_err(std::io::Error::other);
     let stream_reader = StreamReader::new(bytes_stream);
 
     let bytes_reader = SyncIoBridge::new(progress_bar.wrap_async_read(stream_reader));
 
-    let temp_folder_unpack_dest = temp_folder.clone();
+    let temp_folder_unpack_dest = temp_lib_folder.clone();
     let extraction_process = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
         let gzip_decompressor = GzDecoder::new(bytes_reader);
         Archive::new(gzip_decompressor).unpack(&temp_folder_unpack_dest)
@@ -111,8 +112,7 @@ async fn download_lib_from_github(
     let downloaded = progress_bar.position();
 
     if let Err(e) = extraction_process {
-        #[allow(unused_must_use)]
-        std::fs::remove_dir_all(temp_folder);
+        let _ = std::fs::remove_dir_all(temp_lib_folder);
         return Err(
             if let Some(len) = content_length
                 && downloaded < len
@@ -131,6 +131,51 @@ async fn download_lib_from_github(
         download_url.italic().fg::<Gray>(),
         HumanBytes(downloaded)
     );
+
+    let lib_folder = keel_home_libs.join(&lib_folder_name);
+
+    let mut lib_entries = std::fs::read_dir(&temp_lib_folder)
+        .map_err(|_| CliError::CannotCreateFolder { path: "./".into() })?;
+
+    let first_lib_entry = lib_entries
+        .next()
+        .ok_or(CliError::CannotCreateFolder { path: "".into() })?
+        .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+
+    let _ = std::fs::remove_dir_all(&lib_folder);
+    // If there's a single entry in the lib's archive (a top-levl folder or a single file), move that instead of the parent folder
+    if lib_entries.next().is_none() {
+        let src = first_lib_entry.path();
+        let dest = if first_lib_entry.file_type().unwrap().is_dir() {
+            lib_folder.clone()
+        } else {
+            std::fs::create_dir_all(&lib_folder)
+                .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+            lib_folder.join(first_lib_entry.file_name())
+        };
+        std::fs::rename(src, dest).map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    } else {
+        std::fs::rename(&temp_lib_folder, &lib_folder)
+            .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    }
+
+    let _ = std::fs::remove_dir_all(temp_lib_folder);
+
+    let folder_symlink_path = keel_home_libs.join(repo_name);
+
+    #[cfg(unix)]
+    {
+        let _ = std::fs::remove_file(&folder_symlink_path);
+        std::os::unix::fs::symlink(lib_folder, folder_symlink_path)
+            .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::fs::remove_dir(&folder_symlink_path);
+        junction::create(lib_folder, folder_symlink_path)
+            .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    }
+
     Ok(())
 }
 
@@ -208,6 +253,8 @@ async fn main() {
 async fn cli() -> Result<(), CliError> {
     // DON'T USE THIS YET!!!!!
     // IT'S VERY WIP!!
+    let keel_home =
+        std::env::home_dir().map(|p| p.join(".keel")).expect("Can't find your home directory!");
     let keel_home_libs = std::env::home_dir()
         .map(|p| p.join(".keel").join("libs/"))
         .expect("Can't find your home directory!");
@@ -238,18 +285,13 @@ async fn cli() -> Result<(), CliError> {
                 github_asset.name.italic().fg::<Gray>()
             );
             std::io::stdout().flush().unwrap();
-            // let github_asset =
-            //     GithubReleaseAsset { name: "test".into(), browser_download_url: "".into() };
-            // let repo_name = "path-utils";
-            // let github_release =
-            //     GithubRelease { assets: Vec::new(), tag_name: String::from("v0.0.1") };
             download_lib_from_github(
                 &client,
                 &repository,
                 &github_asset.browser_download_url,
-                &github_asset.name,
                 repo_name,
                 &github_release.tag_name,
+                keel_home,
                 keel_home_libs,
             )
             .await?;

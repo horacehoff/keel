@@ -1,4 +1,7 @@
-use crate::packages::read_system_packages_manifest;
+use crate::packages::{
+    PkgInstallStatus, add_package_to_manifest, get_system_packages_manifest,
+    is_package_already_installed, write_new_manifest,
+};
 use crate::{CliError, SUFFIXES};
 use console_utils::control::clear_line;
 use flate2::read::GzDecoder;
@@ -7,7 +10,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use owo_colors::colors::css::Gray;
 use reqwest::header::ACCEPT;
-use reqwest::{Client, ClientBuilder};
+use reqwest::{Client, ClientBuilder, StatusCode};
+use semver::Version;
 use serde::Deserialize;
 use std::hint::cold_path;
 use std::io::Write;
@@ -27,14 +31,15 @@ struct GithubRelease {
     tag_name: String,
 }
 
-fn parse_repository(repo: &str) -> (&str, &str, Option<&str>) {
+fn parse_repository(repo: &str) -> Result<(&str, &str, Option<&str>), CliError> {
     let (author_and_repo, tag) = match repo.split_once('@') {
         Some((r, t)) => (r, Some(t)),
         None => (repo, None),
     };
-    let (author, repo_name) =
-        author_and_repo.split_once('/').expect("Expected author/repo[@tag], got idk");
-    (author, repo_name, tag)
+    let (author, repo_name) = author_and_repo
+        .split_once('/')
+        .ok_or(CliError::InvalidRepo { repository: repo.to_string() })?;
+    Ok((author, repo_name, tag))
 }
 
 #[derive(Deserialize)]
@@ -59,11 +64,21 @@ async fn get_github_release(
             .map_err(|_| CliError::InternalBug { details: "Cannot parse release".into() })
     } else {
         cold_path();
-        let error_response =
-            result.text().await.map_err(|_| CliError::InternalBug { details: "".into() })?;
-        let error_json = serde_json::from_str::<GitHubError>(&error_response)
-            .map_err(|_| CliError::GithubError { status_code, message: error_response })?;
-        Err(CliError::GithubError { status_code, message: error_json.message })
+        if status_code == StatusCode::FORBIDDEN || status_code == StatusCode::TOO_MANY_REQUESTS {
+            Err(CliError::GithubTooManyRequests)
+        } else if status_code == StatusCode::NOT_FOUND {
+            Err(CliError::UnknownTagOrRepo {
+                tag: tag.to_string(),
+                repository: format!("{author}/{repo_name}"),
+            })
+        } else {
+            cold_path();
+            let error_response =
+                result.text().await.map_err(|_| CliError::InternalBug { details: "".into() })?;
+            let error_json = serde_json::from_str::<GitHubError>(&error_response)
+                .map_err(|_| CliError::GithubError { status_code, message: error_response })?;
+            Err(CliError::GithubError { status_code, message: error_json.message })
+        }
     }
 }
 
@@ -91,9 +106,10 @@ pub async fn install_library(
     keel_home: &Path,
     keel_home_libs: &Path,
     keel_home_libs_packages_toml: &Path,
+    force: bool,
 ) -> Result<(), CliError> {
     let client = user_agent.build().unwrap();
-    let (author, repo_name, tag) = parse_repository(repository);
+    let (author, repo_name, tag) = parse_repository(repository)?;
     let github_api_url = if let Some(release_tag) = tag {
         format!("https://api.github.com/repos/{author}/{repo_name}/releases/tags/{release_tag}")
     } else {
@@ -104,14 +120,43 @@ pub async fn install_library(
     let github_release =
         get_github_release(&github_api_url, author, repo_name, tag.unwrap_or("latest"), &client)
             .await?;
+    Version::parse(github_release.tag_name.strip_prefix('v').unwrap_or(&github_release.tag_name))
+        .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
     let github_asset = get_github_release_asset(&github_release, repo_name);
     let lib_folder_name = format!("{repo_name}@{}", github_release.tag_name);
     clear_line();
     print!("Found a suitable release asset: {}", github_asset.name.italic().fg::<Gray>());
     std::io::stdout().flush().unwrap();
 
-    let (manifest_contents, manifest_file) =
-        read_system_packages_manifest(keel_home_libs_packages_toml)?;
+    let (mut system_pkg_manifest, mut manifest_file) =
+        get_system_packages_manifest(keel_home_libs_packages_toml)?;
+
+    let pkg_install_status = is_package_already_installed(
+        &system_pkg_manifest,
+        author,
+        repo_name,
+        &github_release.tag_name,
+    );
+    if let PkgInstallStatus::AlreadyInstalled { latest } = pkg_install_status
+        && !force
+    {
+        clear_line();
+        println!(
+            "{} {} is already installed as {}! Ad maiora!",
+            "✓".bright_green().bold(),
+            format!("{author}/{lib_folder_name}").italic(),
+            if latest { repo_name } else { lib_folder_name.as_str() }.bold()
+        );
+
+        return Ok(());
+    } else if let PkgInstallStatus::DifferentRepoExists = pkg_install_status {
+        if !force {
+            return Err(CliError::PkgWithNameAlreadyExists { repo_name: repo_name.to_string() });
+        } else {
+            // uninstall previous one
+            todo!();
+        }
+    }
 
     // let download_url = "http://127.0.0.1:8000/samplearchive.tar.gz";
     let download_url = &github_asset.browser_download_url;
@@ -135,12 +180,10 @@ pub async fn install_library(
         ProgressBar::new_spinner()
     };
     progress_bar.set_style(
-        unsafe {
-            ProgressStyle::default_bar()
-                .template("{msg}\n[{bar:42}] {percent}% ({decimal_bytes}/{total_bytes})")
-                .unwrap_unchecked()
-        }
-        .progress_chars("█▉▊▋▌▍▎▏ "),
+        ProgressStyle::default_bar()
+            .template("{msg}\n[{bar:42}] {percent}% ({decimal_bytes}/{total_bytes})")
+            .unwrap()
+            .progress_chars("█▉▊▋▌▍▎▏ "),
     );
     progress_bar.set_message(format!("Downloading {}", lib_folder_name.bold()));
 
@@ -207,28 +250,37 @@ pub async fn install_library(
 
     let _ = std::fs::remove_dir_all(temp_lib_folder);
 
-    let mut symlink_to_latest_created = true;
-    let folder_symlink_path = keel_home_libs.join(repo_name);
+    let create_symlink = add_package_to_manifest(
+        &mut system_pkg_manifest,
+        author,
+        repo_name,
+        &github_release.tag_name,
+    );
 
-    #[cfg(unix)]
-    {
-        let _ = std::fs::remove_file(&folder_symlink_path);
-        std::os::unix::fs::symlink(&lib_folder, &folder_symlink_path)
-            .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    let folder_symlink_path = keel_home_libs.join(repo_name);
+    if create_symlink {
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(&folder_symlink_path);
+            std::os::unix::fs::symlink(&lib_folder, &folder_symlink_path)
+                .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+        }
+        #[cfg(windows)]
+        {
+            let _ = std::fs::remove_dir(&folder_symlink_path);
+            junction::create(&lib_folder, &folder_symlink_path)
+                .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+        }
     }
-    #[cfg(windows)]
-    {
-        let _ = std::fs::remove_dir(&folder_symlink_path);
-        junction::create(&lib_folder, &folder_symlink_path)
-            .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
-    }
+
+    write_new_manifest(&system_pkg_manifest, &mut manifest_file)?;
 
     clear_line();
     println!(
         "{} Installed {} as {}! Ad maiora!",
         "✓".bright_green().bold(),
         format!("{author}/{lib_folder_name}").italic(),
-        if symlink_to_latest_created { &folder_symlink_path } else { &lib_folder }
+        if create_symlink { &folder_symlink_path } else { &lib_folder }
             .file_name()
             .unwrap()
             .to_string_lossy()

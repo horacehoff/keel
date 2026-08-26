@@ -1938,6 +1938,7 @@ Used by:
 - quote 1.0.47 - https://github.com/dtolnay/quote
 - rustix 1.1.4 - https://github.com/bytecodealliance/rustix
 - rustversion 1.0.23 - https://github.com/dtolnay/rustversion
+- semver 1.0.28 - https://github.com/dtolnay/semver
 - serde 1.0.229 - https://github.com/serde-rs/serde
 - serde_core 1.0.229 - https://github.com/serde-rs/serde
 - serde_derive 1.0.229 - https://github.com/serde-rs/serde

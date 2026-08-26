@@ -1,21 +1,30 @@
-use std::io::Write;
+use std::io::{Seek, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, io::Read, path::Path};
 
 use console_utils::control::clear_line;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::CliError;
 
-#[derive(Deserialize, Default, Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct PackagesManifest {
+    pub version: String,
     pub packages: HashMap<String, Package>,
+}
+
+impl Default for PackagesManifest {
+    fn default() -> Self {
+        PackagesManifest { version: env!("CARGO_PKG_VERSION").into(), packages: HashMap::default() }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct Package {
-    pub repository: String,
+    pub author: String,
     /// Last github query
-    pub updated: toml::value::Datetime,
+    pub updated: u64,
     pub latest: String,
     /// each string is a tag
     pub installed: Vec<String>,
@@ -23,7 +32,7 @@ pub struct Package {
 
 /// Clears the current console line
 /// Returns the current manifest (created if nonexistent) and the file with a lock
-pub fn read_system_packages_manifest(
+pub fn get_system_packages_manifest(
     keel_home_libs_packages_toml: &Path,
 ) -> Result<(PackagesManifest, std::fs::File), CliError> {
     let mut file = std::fs::File::options()
@@ -55,4 +64,115 @@ pub fn read_system_packages_manifest(
     };
 
     Ok((manifest, file))
+}
+
+pub fn read_system_packages_manifest(
+    keel_home_libs_packages_toml: &Path,
+) -> Result<PackagesManifest, CliError> {
+    if let Ok(mut file) = std::fs::File::options().read(true).open(keel_home_libs_packages_toml) {
+        file.lock_shared().map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+        let mut contents = String::with_capacity(file.metadata().unwrap().len() as usize);
+        file.read_to_string(&mut contents)
+            .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+
+        let manifest: PackagesManifest = if contents.is_empty() {
+            PackagesManifest::default()
+        } else {
+            toml::from_str(&contents)
+                .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?
+        };
+
+        Ok(manifest)
+    } else {
+        Ok(PackagesManifest::default())
+    }
+}
+
+#[derive(PartialEq)]
+pub enum PkgInstallStatus {
+    AlreadyInstalled { latest: bool },
+    DifferentRepoExists,
+    NotInstalled,
+}
+
+/// Returns if it's the latest version
+pub fn add_package_to_manifest(
+    system_pkg_manifest: &mut PackagesManifest,
+    author: &str,
+    repo_name: &str,
+    tag: &str,
+) -> bool {
+    if let Some(pkg) = system_pkg_manifest.packages.get_mut(repo_name) {
+        if !pkg.installed.iter().any(|v| v == tag) {
+            pkg.installed.push(tag.to_string());
+            pkg.installed.sort_by(|a, b| {
+                Version::parse(a.strip_prefix('v').unwrap_or(a))
+                    .expect("Shouldn't be possible")
+                    .cmp(
+                        &Version::parse(b.strip_prefix('v').unwrap_or(b))
+                            .expect("Shouldn't be possible"),
+                    )
+            });
+        }
+        pkg.updated = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let latest_tag = Version::parse(pkg.latest.strip_prefix('v').unwrap_or(&pkg.latest))
+            .expect("Shouldn't be possible");
+        let current_tag =
+            Version::parse(tag.strip_prefix('v').unwrap_or(tag)).expect("Shouldn't be possible");
+        if current_tag > latest_tag {
+            pkg.latest = tag.to_string();
+        }
+        pkg.latest == tag
+    } else {
+        system_pkg_manifest.packages.insert(
+            repo_name.to_string(),
+            Package {
+                author: author.to_string(),
+                updated: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                latest: tag.to_string(),
+                installed: vec![tag.to_string()],
+            },
+        );
+        true
+    }
+}
+
+pub fn write_new_manifest(
+    manifest: &PackagesManifest,
+    manifest_file: &mut std::fs::File,
+) -> Result<(), CliError> {
+    manifest_file.set_len(0).map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    manifest_file
+        .seek(std::io::SeekFrom::Start(0))
+        .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    manifest_file
+        .write_all(
+            toml::to_string(manifest)
+                .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?
+                .as_bytes(),
+        )
+        .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    manifest_file.flush().map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    Ok(())
+}
+
+pub fn is_package_already_installed(
+    system_pkg_manifest: &PackagesManifest,
+    author: &str,
+    repo_name: &str,
+    tag: &str,
+) -> PkgInstallStatus {
+    if let Some(pkg) = system_pkg_manifest.packages.get(repo_name) {
+        if pkg.author == author {
+            if pkg.installed.iter().any(|v| v == tag) {
+                PkgInstallStatus::AlreadyInstalled { latest: pkg.latest == tag }
+            } else {
+                PkgInstallStatus::NotInstalled
+            }
+        } else {
+            PkgInstallStatus::DifferentRepoExists
+        }
+    } else {
+        PkgInstallStatus::NotInstalled
+    }
 }

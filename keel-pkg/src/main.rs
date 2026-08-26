@@ -10,8 +10,10 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::install::install_library;
+use crate::list::list_installed_packages;
 
 mod install;
+mod list;
 mod packages;
 
 #[derive(Parser)]
@@ -22,7 +24,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Install { repository: String },
+    /// Install a package system-wide
+    Install {
+        /// The GitHub repository of the package to install. It should be: `author/repository_name`
+        repository: String,
+        /// Force the installation of the package, potentially overwriting a previously-installed package
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// List all installed global packages
+    List,
 }
 
 pub const TAB: &str = "  ";
@@ -55,7 +66,7 @@ pub enum CliError {
         #[source]
         source: std::io::Error,
     },
-    #[error("{TAB}Cannot find tag {} in repository {}.", tag.bold(), repository.bold())]
+    #[error("{TAB}Could not find tag {} in repository {} {}{}{}{}.", tag.bold(), repository.bold(), "(".italic().fg::<Gray>(),"https://github.com/".italic().fg::<Gray>(),repository.italic().fg::<Gray>(),")".italic().fg::<Gray>())]
     UnknownTagOrRepo { tag: String, repository: String },
     #[error(
         "{TAB}GitHub's rate limit has been reached. Try again in a few minutes, this should be resolved in less than an hour."
@@ -63,6 +74,10 @@ pub enum CliError {
     GithubTooManyRequests,
     #[error("{TAB}Request to GitHub failed.\n{TAB}Status code: {}\n{TAB}Message: {}", status_code.bold(), message.bold())]
     GithubError { status_code: StatusCode, message: String },
+    #[error("{TAB}{} is not a valid repository.", repository.bold())]
+    InvalidRepo { repository: String },
+    #[error("{TAB}There is already a package named {} installed.\n{TAB}To override this and uninstall it, use the -f/--force flag.", repo_name.bold())]
+    PkgWithNameAlreadyExists { repo_name: String },
 }
 
 #[cfg(target_os = "macos")]
@@ -105,15 +120,19 @@ async fn cli() -> Result<(), CliError> {
 
     let args = Cli::parse();
     match args.command {
-        Some(Commands::Install { repository }) => {
+        Some(Commands::Install { repository, force }) => {
             install_library(
                 &repository,
                 user_agent,
                 &keel_home,
                 &keel_home_libs,
                 &keel_home_libs_packages_toml,
+                force,
             )
             .await?;
+        }
+        Some(Commands::List) => {
+            list_installed_packages(&keel_home_libs_packages_toml, &keel_home_libs)?;
         }
         None => cold_path(),
     }

@@ -4,7 +4,7 @@ use constcat::concat;
 use indicatif::HumanBytes;
 use owo_colors::OwoColorize;
 use owo_colors::colors::css::Gray;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use std::hint::cold_path;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -55,8 +55,14 @@ pub enum CliError {
         #[source]
         source: std::io::Error,
     },
-    #[error("{TAB}Tag {} could not be found in repository {}.", tag.bold(), repository.bold())]
-    UnknownTag { tag: String, repository: String },
+    #[error("{TAB}Cannot find tag {} in repository {}.", tag.bold(), repository.bold())]
+    UnknownTagOrRepo { tag: String, repository: String },
+    #[error(
+        "{TAB}GitHub's rate limit has been reached. Try again in a few minutes, this should be resolved in less than an hour."
+    )]
+    GithubTooManyRequests,
+    #[error("{TAB}Request to GitHub failed.\n{TAB}Status code: {}\n{TAB}Message: {}", status_code.bold(), message.bold())]
+    GithubError { status_code: StatusCode, message: String },
 }
 
 #[cfg(target_os = "macos")]
@@ -95,8 +101,7 @@ async fn cli() -> Result<(), CliError> {
     std::fs::create_dir_all(&keel_home_libs)
         .expect("Unable to check the existence of ~/.keel/libs");
 
-    let user_agent =
-        Client::builder().user_agent(concat!("keel-pkg@{}", env!("CARGO_PKG_VERSION")));
+    let user_agent = Client::builder().user_agent(concat!("keel-pkg@", env!("CARGO_PKG_VERSION")));
 
     let args = Cli::parse();
     match args.command {

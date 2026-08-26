@@ -9,6 +9,7 @@ use owo_colors::colors::css::Gray;
 use reqwest::header::ACCEPT;
 use reqwest::{Client, ClientBuilder};
 use serde::Deserialize;
+use std::hint::cold_path;
 use std::io::Write;
 use std::path::Path;
 use tar::Archive;
@@ -36,6 +37,11 @@ fn parse_repository(repo: &str) -> (&str, &str, Option<&str>) {
     (author, repo_name, tag)
 }
 
+#[derive(Deserialize)]
+struct GitHubError {
+    message: String,
+}
+
 async fn get_github_release(
     url: &str,
     author: &str,
@@ -45,11 +51,20 @@ async fn get_github_release(
 ) -> Result<GithubRelease, CliError> {
     let request = client.get(url).header(ACCEPT, "application/vnd.github.v3+json");
     let result = request.send().await.expect("Failed to access GitHub's API");
-    let status = result.status();
-    result.json::<GithubRelease>().await.map_err(|e| CliError::UnknownTag {
-        tag: tag.to_string(),
-        repository: format!("{author}/{repo_name}"),
-    })
+    let status_code = result.status();
+    if status_code.is_success() {
+        result
+            .json::<GithubRelease>()
+            .await
+            .map_err(|_| CliError::InternalBug { details: "Cannot parse release".into() })
+    } else {
+        cold_path();
+        let error_response =
+            result.text().await.map_err(|_| CliError::InternalBug { details: "".into() })?;
+        let error_json = serde_json::from_str::<GitHubError>(&error_response)
+            .map_err(|_| CliError::GithubError { status_code, message: error_response })?;
+        Err(CliError::GithubError { status_code, message: error_json.message })
+    }
 }
 
 fn get_github_release_asset<'a>(

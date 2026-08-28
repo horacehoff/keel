@@ -11,17 +11,17 @@ use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
 
-pub fn fs_lib_functions(
+pub fn fs_lib_functions<'arena>(
     output: &mut Vec<Instr>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-    function_call: &FunctionCallExpr,
+    function_call: &'arena FunctionCallExpr,
 ) -> Option<u16> {
     let args = &function_call.args;
     let span = function_call.get_call_span();
     let arg_spans = &function_call.get_arg_spans();
-    let name = function_call.qualified_name.get_name().as_str();
+    let name = function_call.qualified_name.get_name();
     match name {
         "read" => {
             check_args_length(args, 1, name, span, state.sources, ctx.file_idx);

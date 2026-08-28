@@ -31,7 +31,7 @@ fn check(
     ctx: Ctx,
     sources: &[Source],
 ) {
-    let name = function_call.qualified_name.get_name().as_str();
+    let name = function_call.qualified_name.get_name();
     let arg_spans = &function_call.get_arg_spans();
     if match receiver_type {
         DataType::Union(types) => types.iter().any(|t| !expected_receiver_type.contains(t)),
@@ -60,7 +60,12 @@ fn check(
     );
 }
 
-fn add_args(args: &[Expr], output: &mut Vec<Instr>, ctx: Ctx, state: &mut State<'_>) {
+fn add_args<'arena>(
+    args: &'arena [Expr],
+    output: &mut Vec<Instr>,
+    ctx: Ctx,
+    state: &mut State<'arena, '_>,
+) {
     *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
     for arg in args.iter().rev() {
         let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
@@ -69,17 +74,17 @@ fn add_args(args: &[Expr], output: &mut Vec<Instr>, ctx: Ctx, state: &mut State<
     }
 }
 
-pub fn builtin_methods(
+pub fn builtin_methods<'arena>(
     receiver_id: u16,
     receiver_type: DataType,
     output: &mut Vec<Instr>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-    function_call: &FunctionCallExpr,
+    function_call: &'arena FunctionCallExpr,
 ) -> Option<u16> {
     let args = &function_call.args[1..];
-    let name = function_call.qualified_name.get_name().as_str();
+    let name = function_call.qualified_name.get_name();
     let arg_spans = &function_call.get_arg_spans()[1..];
     let receiver_span = function_call.get_nth_arg_span(0);
     let span = function_call.get_call_span();

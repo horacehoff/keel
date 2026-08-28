@@ -47,9 +47,9 @@ thread_local! {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum TypeExpr {
+pub enum TypeExpr<'arena> {
     Identifier(SmolStr, Span),
-    NamespacedIdentifier(QualifiedName, Span),
+    NamespacedIdentifier(QualifiedName<'arena>, Span),
     Array(Box<Self>),
     Map(Box<Self>, Box<Self>),
     Union(Box<[Self]>),
@@ -57,7 +57,7 @@ pub enum TypeExpr {
     Null,
 }
 
-impl TypeExpr {
+impl<'arena> TypeExpr<'arena> {
     pub fn to_datatype(&self, file_idx: u16, scope: &Scope, sources: &[Source]) -> DataType {
         match self {
             Self::Null => DataType::Null,
@@ -170,7 +170,7 @@ impl std::fmt::Display for DataType {
 }
 
 impl DataType {
-    pub fn format_detailed(&self, state: &State<'_>) -> SmolStr {
+    pub fn format_detailed(&self, state: &State<'_, '_>) -> SmolStr {
         match self {
             Self::Float => SmolStr::new_static("float"),
             Self::Int => SmolStr::new_static("int"),
@@ -352,13 +352,13 @@ pub fn struct_field_type_matches(expected: &DataType, received: &DataType) -> bo
 }
 
 /// Collect all the function calls in the given code
-pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
+pub fn collect_direct_fn_calls<'arena>(content: &'arena [Expr], calls: &mut Vec<&'arena str>) {
     let mut expr_stack: Vec<&Expr> = content.iter().collect();
     while let Some(expression) = expr_stack.pop() {
         match expression {
             Expr::FunctionCall(FunctionCallExpr { qualified_name, args, .. })
             | Expr::ObjFunctionCall(FunctionCallExpr { qualified_name, args, .. }) => {
-                calls.push(qualified_name.get_name().clone());
+                calls.push(qualified_name.get_name());
                 expr_stack.extend(args);
             }
             Expr::IfBlock(if_block) => {
@@ -386,10 +386,10 @@ pub fn collect_direct_fn_calls(content: &[Expr], calls: &mut Vec<SmolStr>) {
                 expr_stack.push(y);
                 expr_stack.push(z);
             }
-            Expr::VarDeclare(VariableDeclarationExpr { value: x, .. })
-            | Expr::VarAssign(_, x, _)
-            | Expr::Neg(x, _, _)
-            | Expr::BoolNeg(x, _, _) => expr_stack.push(x),
+            Expr::VarDeclare(VariableDeclarationExpr { value: x, .. }) => expr_stack.push(x),
+            Expr::VarAssign(_, x, _) | Expr::Neg(x, _, _) | Expr::BoolNeg(x, _, _) => {
+                expr_stack.push(x);
+            }
             Expr::ForLoop(_, _, code, _) => expr_stack.extend(code),
             Expr::IntForLoop(int_for_loop) => {
                 expr_stack.push(int_for_loop.get_lower_bound());
@@ -447,18 +447,18 @@ pub fn c_arg_matches(inferred: &DataType, declared: &DataType) -> bool {
 }
 
 /// Check if the function src_fn can call target_fn
-pub fn can_reach(
+pub fn can_reach<'a>(
     src_fn: &str,
     target_fn: &str,
-    fns: &[Function],
-    visited: &mut HashSet<SmolStr>,
+    fns: &'a [Function],
+    visited: &mut HashSet<&'a str>,
 ) -> bool {
     if let Some(from_fn) = fns.iter().find(|f| f.name.as_str() == src_fn) {
         for callee in &from_fn.direct_calls {
-            if callee == target_fn {
+            if callee == &target_fn {
                 return true;
             }
-            if visited.insert(callee.clone()) && can_reach(callee, target_fn, fns, visited) {
+            if visited.insert(callee) && can_reach(callee, target_fn, fns, visited) {
                 return true;
             }
         }
@@ -514,10 +514,10 @@ macro_rules! extend_return_types {
     };
 }
 
-pub fn track_returns(
-    content: &[Expr],
+pub fn track_returns<'arena>(
+    content: &'arena [Expr],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     fn_name: &str,
 ) -> Vec<DataType> {
     let mut flow = track_return_flow(content, ctx, state, fn_name);
@@ -534,7 +534,7 @@ pub fn resolve_function_return_type(
     infered_arg_types: &[DataType],
     fn_name: &str,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'_, '_>,
 ) -> DataType {
     if let Some((_, ret)) = state.functions[fn_id]
         .return_type_cache
@@ -545,7 +545,7 @@ pub fn resolve_function_return_type(
     }
 
     let fn_args = state.functions[fn_id].args.clone();
-    let fn_code = state.functions[fn_id].code.clone();
+    let fn_code = state.functions[fn_id].code;
     let fn_src_file = state.functions[fn_id].src_file;
 
     let v_len_before_args = state.v.len();
@@ -565,7 +565,7 @@ pub fn resolve_function_return_type(
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().insert(fn_id));
 
     let fn_ctx = ctx.with_file_idx(fn_src_file);
-    let fn_type = track_returns(&fn_code, fn_ctx, state, fn_name);
+    let fn_type = track_returns(fn_code, fn_ctx, state, fn_name);
 
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(&fn_id));
 
@@ -587,7 +587,7 @@ pub fn resolve_function_return_type(
     to_return
 }
 
-pub fn fn_args_match(fn_id: usize, expected_args: &[DataType], state: &State<'_>) -> bool {
+pub fn fn_args_match(fn_id: usize, expected_args: &[DataType], state: &State<'_, '_>) -> bool {
     state.functions[fn_id].args.len() == expected_args.len()
         && !state.functions[fn_id]
             .args
@@ -601,7 +601,7 @@ pub fn fn_matches_signature(
     fn_id: usize,
     expected_sig: &[DataType],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'_, '_>,
 ) -> bool {
     let expected_arg_types = &expected_sig[..expected_sig.len() - 1];
     let expected_return_type = &expected_sig[expected_sig.len() - 1];
@@ -618,10 +618,10 @@ struct FnReturnFlow {
     always_returns: bool,
 }
 
-fn track_scoped_returns(
-    code: &[Expr],
+fn track_scoped_returns<'arena>(
+    code: &'arena [Expr],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     fn_name: &str,
 ) -> FnReturnFlow {
     let v_len = state.v.len();
@@ -630,11 +630,11 @@ fn track_scoped_returns(
     flow
 }
 
-fn track_condition_returns(
-    if_block: &IfBlockExpr,
+fn track_condition_returns<'arena>(
+    if_block: &'arena IfBlockExpr,
     fn_name: &str,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
 ) -> FnReturnFlow {
     let mut return_types = Vec::new();
     let then_flow = track_scoped_returns(&if_block.then, ctx, state, fn_name);
@@ -653,10 +653,10 @@ fn track_condition_returns(
     }
 }
 
-fn track_return_flow(
-    content: &[Expr],
+fn track_return_flow<'arena>(
+    content: &'arena [Expr<'arena>],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     fn_name: &str,
 ) -> FnReturnFlow {
     let mut return_types: Vec<DataType> = Vec::new();
@@ -745,11 +745,11 @@ fn track_return_flow(
 }
 
 fn infer_symbol_type(
-    namespace: &[SmolStr],
-    name: &SmolStr,
+    namespace: &[&str],
+    name: &str,
     span: Span,
     ctx: Ctx,
-    state: &State<'_>,
+    state: &State<'_, '_>,
 ) -> DataType {
     if let Some(idx) =
         state.scope(ctx.file_idx).find_global(namespace, name, span, ctx.file_idx, state.sources)
@@ -784,8 +784,8 @@ pub fn var_type_is_compatible(declared: &DataType, candidate: &DataType) -> bool
     }
 }
 
-impl Expr {
-    pub fn infer_type(&self, ctx: Ctx, state: &mut State<'_>) -> DataType {
+impl<'arena> Expr<'arena> {
+    pub fn infer_type(&'arena self, ctx: Ctx, state: &mut State<'arena, '_>) -> DataType {
         match self {
             Self::Var(name, span) => {
                 if let Some(var) = state.find_var(name) {
@@ -977,7 +977,7 @@ impl Expr {
             Self::FunctionCall(function_call) => {
                 let qualified_name = &function_call.qualified_name;
                 let args = &function_call.args;
-                match qualified_name.get_name().as_str() {
+                match qualified_name.get_name() {
                     "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
                     "type" | "string" | "input" | "read" => DataType::String,
                     "float" => DataType::Float,
@@ -1058,7 +1058,7 @@ impl Expr {
             }
             Self::ObjFunctionCall(function_call) => {
                 let obj = &function_call.args[0];
-                match function_call.qualified_name.get_name().as_str() {
+                match function_call.qualified_name.get_name() {
                     "uppercase"
                     | "lowercase"
                     | "replace"
@@ -1212,7 +1212,7 @@ impl Expr {
                             )
                         })
                         .collect(),
-                    code: Rc::from(code.clone()),
+                    code,
                     impls: Vec::new(),
                     is_recursive: None,
                     returns_null,

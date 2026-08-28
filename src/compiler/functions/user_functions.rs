@@ -21,18 +21,17 @@ use crate::data::NULL;
 use crate::instr::Instr;
 use smol_strc::SmolStr;
 use std::collections::HashSet;
-use std::rc::Rc;
 
 /// Computes whether the function `state.fns[fn_id]` is recursive.
 /// This is only computed once per function.
-pub fn is_function_recursive(fn_id: usize, state: &mut State<'_>) -> bool {
+pub fn is_function_recursive(fn_id: usize, state: &mut State<'_, '_>) -> bool {
     if let Some(is_recursive) = state.functions[fn_id].is_recursive {
         is_recursive
     } else {
-        let name = state.functions[fn_id].name.clone();
+        let name = state.functions[fn_id].name.as_str();
         let mut visited = HashSet::new();
-        visited.insert(name.clone());
-        let is_recursive = can_reach(&name, &name, state.functions, &mut visited);
+        visited.insert(name);
+        let is_recursive = can_reach(name, name, state.functions, &mut visited);
         state.functions[fn_id].is_recursive = Some(is_recursive);
         is_recursive
     }
@@ -43,7 +42,7 @@ pub fn is_function_recursive(fn_id: usize, state: &mut State<'_>) -> bool {
 pub fn compile_function_impl(
     output: &mut Vec<Instr>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'_, '_>,
     fn_id: usize,
     inferred_arg_types: &[DataType],
 ) -> usize {
@@ -59,7 +58,7 @@ pub fn compile_function_impl(
     let is_recursive = is_function_recursive(fn_id, state);
     let fn_args =
         state.functions[fn_id].args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>();
-    let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
+    // let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
     let fn_name = &state.functions[fn_id].name.clone();
     compile_function(
         output,
@@ -69,7 +68,7 @@ pub fn compile_function_impl(
         &fn_args,
         fn_name,
         inferred_arg_types,
-        &fn_code,
+        state.functions[fn_id].code,
         fn_id as u16,
         is_recursive,
         state.functions[fn_id].src_file,
@@ -77,12 +76,12 @@ pub fn compile_function_impl(
     state.functions[fn_id].impls.len() - 1
 }
 
-pub fn handle_user_function(
-    function_call: &FunctionCallExpr,
+pub fn handle_user_function<'arena>(
+    function_call: &'arena FunctionCallExpr,
     function_idx: usize,
     output: &mut Vec<Instr>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
 ) -> Option<u16> {
     let args = &function_call.args;
@@ -112,7 +111,7 @@ pub fn handle_user_function(
         && let Expr::ReturnVal(ret) = &state.functions[function_idx].code[0]
         && let Some(Expr::FunctionCall(FunctionCallExpr {
             qualified_name, args: call_args, ..
-        })) = &**ret
+        })) = ret.as_ref()
         && !qualified_name.is_namespace_empty()
         && call_args.len() == args_len
         && call_args
@@ -123,7 +122,7 @@ pub fn handle_user_function(
             .dylibs
             .iter()
             .find(|lib| &lib.name == qualified_name.get_namespace().last().unwrap())
-            .and_then(|lib| lib.fns.iter().find(|f| &f.name == qualified_name.get_name()))
+            .and_then(|lib| lib.fns.iter().find(|f| f.name == qualified_name.get_name()))
     {
         let dyn_id = fn_sig.id;
         let returns_null = fn_sig.return_type == DataType::Null;
@@ -224,15 +223,15 @@ pub fn handle_user_function(
     if fn_returns_null { None } else { Some(return_register_id) }
 }
 
-pub fn compile_function(
+pub fn compile_function<'arena>(
     output: &mut Vec<Instr>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     function_id: usize,
     fn_args: &[SmolStr],
     fn_name: &str,
     infered_arg_types: &[DataType],
-    fn_code: &[Expr],
+    fn_code: &'arena [Expr],
     fn_id: u16,
     is_recursive: bool,
     fn_file_idx: u16,

@@ -19,17 +19,17 @@ use crate::instr::LibFunc;
 use smol_strc::SmolStr;
 use std::rc::Rc;
 
-pub fn builtin_functions(
+pub fn builtin_functions<'arena>(
     output: &mut Vec<Instr>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-    function_call: &FunctionCallExpr,
+    function_call: &'arena FunctionCallExpr,
 ) -> Option<u16> {
     let args = &function_call.args;
     let span = function_call.get_call_span();
     let arg_spans = function_call.get_arg_spans();
-    let name = function_call.qualified_name.get_name().as_str();
+    let name = function_call.qualified_name.get_name();
     match name {
         "print" => {
             for arg in args {
@@ -195,7 +195,7 @@ pub fn builtin_functions(
                         .iter()
                         .map(|(a, _)| a.clone())
                         .collect::<Vec<SmolStr>>();
-                    let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
+                    // let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
                     let closure_name = state.functions[fn_id].name.clone();
                     compile_function(
                         output,
@@ -205,7 +205,7 @@ pub fn builtin_functions(
                         &fn_args,
                         &closure_name,
                         &inferred_arg_types,
-                        &fn_code,
+                        state.functions[fn_id].code,
                         fn_id as u16,
                         false,
                         state.functions[fn_id].src_file,

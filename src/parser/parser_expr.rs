@@ -13,11 +13,11 @@ use smol_strc::SmolStr;
 use smol_strc::ToSmolStr;
 use std::hint::unreachable_unchecked;
 
-pub fn parse_expr_with_precedence(
-    input: &mut Parser<'_>,
+pub fn parse_expr_with_precedence<'arena>(
+    input: &mut Parser<'arena>,
     min_precedence: u8,
     allow_struct: bool,
-) -> Expr {
+) -> Expr<'arena> {
     let lhs_start = input.peek_token_span().start;
     let mut lhs = parse_term(input, allow_struct);
     let end = input.last_token_end;
@@ -42,14 +42,14 @@ pub fn parse_expr_with_precedence(
     lhs
 }
 
-pub fn add_op(
+pub fn add_op<'arena>(
     parser: &Parser<'_>,
     op: Token,
-    lhs: Expr,
-    rhs: Expr,
+    lhs: Expr<'arena>,
+    rhs: Expr<'arena>,
     span_l: Span,
     span_r: Span,
-) -> Expr {
+) -> Expr<'arena> {
     match op {
         Token::OpOr => match (lhs, rhs) {
             (Expr::Bool(false), c) | (c, Expr::Bool(false)) => c,
@@ -153,7 +153,11 @@ const fn check_op(op: Token, min_precedence: u8) -> Option<(Token, u8)> {
     }
 }
 
-fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span) -> Expr {
+fn parse_postfix_op<'arena>(
+    parser: &mut Parser<'arena>,
+    mut base: Expr<'arena>,
+    mut base_span: Span,
+) -> Expr<'arena> {
     loop {
         match parser.peek_token_opt() {
             // Index or slice
@@ -224,7 +228,7 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                     spans.extend(fn_arg_spans);
 
                     let obj_function_call = Expr::ObjFunctionCall(FunctionCallExpr {
-                        qualified_name: QualifiedName::new([SmolStr::new(id)]),
+                        qualified_name: QualifiedName::new(&[id], parser.bump),
                         args: args.into_boxed_slice(),
                         spans: spans.into_boxed_slice(),
                     });
@@ -233,12 +237,12 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                 } else if peek_token == Some(Token::DoubleColon) {
                     // ObjFunctionCall with namespace
                     parser.next_token();
-                    let mut namespace: Vec<SmolStr> = Vec::with_capacity(2);
-                    namespace.push(SmolStr::new(id));
+                    let mut namespace: Vec<&str> = Vec::with_capacity(2);
+                    namespace.push(id);
                     loop {
                         let (next_token, span) = parser.next_token();
                         if let Token::Identifier(i) = next_token {
-                            namespace.push(SmolStr::new(i));
+                            namespace.push(i);
                         } else {
                             cold_path();
                             parser.error(
@@ -274,7 +278,7 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
                     spans.extend(fn_arg_spans);
 
                     let obj_function_call = Expr::ObjFunctionCall(FunctionCallExpr {
-                        qualified_name: QualifiedName::new(namespace),
+                        qualified_name: QualifiedName::new(&namespace, parser.bump),
                         args: args.into_boxed_slice(),
                         spans: spans.into_boxed_slice(),
                     });
@@ -294,11 +298,11 @@ fn parse_postfix_op(parser: &mut Parser<'_>, mut base: Expr, mut base_span: Span
 }
 
 #[inline(always)]
-pub fn parse_expr(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_expr<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     parse_expr_with_precedence(parser, 0, true)
 }
 
 #[inline(always)]
-pub fn parse_expr_no_struct(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_expr_no_struct<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     parse_expr_with_precedence(parser, 0, false)
 }

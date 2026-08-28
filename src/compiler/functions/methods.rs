@@ -7,12 +7,12 @@ use builtin_methods::builtin_methods;
 #[path = "builtin/builtin_methods.rs"]
 mod builtin_methods;
 
-pub fn compile_method_call(
+pub fn compile_method_call<'arena>(
     output: &mut Vec<Instr>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-    function_call: &FunctionCallExpr,
+    function_call: &'arena FunctionCallExpr,
 ) -> Option<u16> {
     let obj_type = function_call.args[0].infer_type(ctx, state);
     let id = function_call.args[0].compile(ctx, state, output, None, false, true).unwrap_id();

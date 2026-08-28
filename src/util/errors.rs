@@ -24,9 +24,9 @@ pub fn green<F: std::fmt::Display>(t: F) -> String {
 }
 pub const RESET: &str = "\x1B[0m\x1B[39m";
 
-pub struct ErrorCtx {
+pub struct ErrorCtx<'a> {
     pub instr_src: Vec<InstrSrc>,
-    pub sources: Vec<Source>,
+    pub sources: Vec<Source<'a>>,
 }
 
 impl From<std::io::ErrorKind> for ErrType<'_> {
@@ -172,19 +172,17 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
     let src = &ctx.sources[*file_id as usize];
     let err_message: SmolStr = t.into();
     eprintln!("{RED}KEEL ERROR{RESET}");
-    let report = Report::build(
-        ReportKind::Error,
-        (src.filename.as_str(), (*start as usize)..(*end as usize)),
-    )
-    .with_label(
-        Label::new((src.filename.as_str(), (*start as usize)..(*end as usize)))
-            .with_message(err_message.as_str())
-            .with_color(Color::Red),
-    )
-    .finish();
+    let report =
+        Report::build(ReportKind::Error, (src.filename, (*start as usize)..(*end as usize)))
+            .with_label(
+                Label::new((src.filename, (*start as usize)..(*end as usize)))
+                    .with_message(err_message.as_str())
+                    .with_color(Color::Red),
+            )
+            .finish();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report.eprint((src.filename.as_str(), ariadne::Source::from(src.contents.as_str()))).unwrap();
+    report.eprint((src.filename, ariadne::Source::from(src.contents))).unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
@@ -221,7 +219,7 @@ pub fn throw_compiler_error<'a>(
                     sources
                         .iter()
                         .map(|Source { filename, contents }| {
-                            (filename.as_str(), ariadne::Source::from(contents.as_str()))
+                            (*filename, ariadne::Source::from(contents))
                         })
                         .collect(),
                 ),

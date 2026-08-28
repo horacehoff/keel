@@ -27,11 +27,11 @@ mod fs_lib_functions;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
 
-pub fn check_arg_type(
+pub fn check_arg_type<'arena>(
     fn_name: &str,
     ctx: Ctx,
-    state: &mut State<'_>,
-    args: &[Expr],
+    state: &mut State<'arena, '_>,
+    args: &'arena [Expr],
     args_indexes: &[Span],
     arg_idx: usize,
     expected: &[DataType],
@@ -61,7 +61,7 @@ pub fn check_user_fn_arg_types(
     inferred_arg_types: &[DataType],
     args_indexes: &[Span],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'_, '_>,
 ) {
     let args_len = state.functions[fn_id].args.len();
     for i in 0..args_len {
@@ -88,11 +88,11 @@ pub fn check_user_fn_arg_types(
     }
 }
 
-pub fn compile_function_call(
-    function_call: &FunctionCallExpr,
+pub fn compile_function_call<'arena>(
+    function_call: &'arena FunctionCallExpr,
     output: &mut Vec<Instr>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
 ) -> Option<u16> {
     let namespace = function_call.qualified_name.get_namespace();
@@ -107,7 +107,7 @@ pub fn compile_function_call(
         .dylibs
         .iter()
         .find(|l| l.name == namespace[0])
-        .and_then(|lib| lib.fns.iter().find(|x| &x.name == function_call.qualified_name.get_name()))
+        .and_then(|lib| lib.fns.iter().find(|x| x.name == function_call.qualified_name.get_name()))
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
         check_args_length(

@@ -3,6 +3,7 @@ use crate::errors::BOLD;
 use crate::errors::RED;
 use crate::errors::RESET;
 use crate::repl::repl;
+use bumpalo::Bump;
 #[cfg(feature = "embed")]
 use std::ffi::{CStr, CString, c_char};
 use std::fs;
@@ -171,7 +172,8 @@ pub fn main() {
             eprintln!("{RED}[KEEL]{RESET} Cannot read {RED}{BOLD}{filename}{RESET}");
             std::process::exit(1);
         });
-        compile(contents, filename, false);
+        let bump = Bump::new();
+        compile(&contents, filename, false, &bump);
         return;
     }
 
@@ -188,6 +190,7 @@ pub fn main() {
         let next = args.next();
         if next == Some(String::from("--debug")) {
             let now = std::time::Instant::now();
+            let bump = Bump::new();
             let (
                 instructions,
                 mut registers,
@@ -199,7 +202,7 @@ pub fn main() {
                 allocated_call_depth,
                 struct_fields,
                 types,
-            ) = compile(contents, filename, true);
+            ) = compile(&contents, filename, true, &bump);
             println!("COMPILATION TIME: {:.2?}", now.elapsed());
             let now = std::time::Instant::now();
             vm::execute(
@@ -217,11 +220,12 @@ pub fn main() {
             println!("EXECUTION TIME: {:.3}ms", now.elapsed().as_nanos() / 1_000_000);
             return;
         } else if next == Some(String::from("--debug-parser")) {
-            compile(contents, filename, false);
+            let bump = Bump::new();
+            compile(&contents, filename, false, &bump);
             return;
         }
     }
-
+    let bump = Bump::new();
     let (
         instructions,
         mut registers,
@@ -233,7 +237,7 @@ pub fn main() {
         allocated_call_depth,
         struct_fields,
         types,
-    ) = compile(contents, filename, false);
+    ) = compile(&contents, filename, false, &bump);
     vm::execute(
         &instructions,
         &mut registers,

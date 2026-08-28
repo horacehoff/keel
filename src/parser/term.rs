@@ -20,12 +20,15 @@ use crate::parser::parse_args;
 use crate::parser::parse_qualified_name;
 use crate::parser::parse_type;
 use smol_strc::SmolStr;
-use smol_strc::ToSmolStr;
 
 // Must be called right after LParen is skipped
 // Identifier LParen Expr RParen
 // Parses: Expr RParen
-fn parse_fn_call(parser: &mut Parser<'_>, qualified_name: QualifiedName, span: Span) -> Expr {
+fn parse_fn_call<'arena>(
+    parser: &mut Parser<'arena>,
+    qualified_name: QualifiedName<'arena>,
+    span: Span,
+) -> Expr<'arena> {
     let (args, arg_spans, _) = parse_args(parser);
     let mut spans: Vec<Span> = arg_spans.into_vec();
     spans.insert(0, span);
@@ -33,7 +36,11 @@ fn parse_fn_call(parser: &mut Parser<'_>, qualified_name: QualifiedName, span: S
 }
 
 // Must be called right after LParen is skipped
-fn parse_struct(parser: &mut Parser<'_>, name: QualifiedName, start: u32) -> Expr {
+fn parse_struct<'arena>(
+    parser: &mut Parser<'arena>,
+    name: QualifiedName<'arena>,
+    start: u32,
+) -> Expr<'arena> {
     let mut fields: Vec<StructFieldExpr> = Vec::with_capacity(4);
     let end: u32;
     loop {
@@ -83,17 +90,21 @@ fn parse_struct(parser: &mut Parser<'_>, name: QualifiedName, start: u32) -> Exp
     Expr::Struct(name, Box::from(fields), (start, end).into())
 }
 
-fn parse_type_conversion_fn(parser: &mut Parser<'_>, name: &'static str, span: Span) -> Expr {
+fn parse_type_conversion_fn<'arena>(
+    parser: &mut Parser<'arena>,
+    name: &'static str,
+    span: Span,
+) -> Expr<'arena> {
     parser.next_token_expect(
         Token::LParen,
         "Type names are only valid here as a function, like int(x), float(x), string(x), or bool(x).",
     );
 
-    parse_fn_call(parser, QualifiedName::new([SmolStr::new_static(name)]), span)
+    parse_fn_call(parser, QualifiedName::new(&[name], parser.bump), span)
 }
 
 // Call after IF is skipped
-fn parse_inline_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
+fn parse_inline_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'arena> {
     let condition = parse_expr_no_struct(parser);
     let then: Box<[Expr]> = Box::new([parse_block_expr(parser)]);
     let mut otherwise: Vec<Expr> = Vec::with_capacity(2);
@@ -121,7 +132,7 @@ fn parse_inline_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
     })
 }
 
-pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
+pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Expr<'arena> {
     let (t, t_span) = parser.next_token();
     match t {
         Token::Int(i) => Expr::Int(i),
@@ -141,17 +152,17 @@ pub fn parse_term(parser: &mut Parser<'_>, allow_struct: bool) -> Expr {
                 // Identifier LParen Expr RParen
                 Some(Token::LParen) => {
                     parser.next_token();
-                    parse_fn_call(parser, QualifiedName::new([s.to_smolstr()]), t_span)
+                    parse_fn_call(parser, QualifiedName::new(&[s], parser.bump), t_span)
                 }
                 // STRUCT
                 Some(Token::LBrace) if allow_struct => {
                     parser.next_token();
-                    parse_struct(parser, QualifiedName::new([SmolStr::new(s)]), start)
+                    parse_struct(parser, QualifiedName::new(&[s], parser.bump), start)
                 }
                 // NAMESPACE
                 Some(Token::DoubleColon) => {
                     parser.next_token();
-                    let (namespace, end) = parse_qualified_name(parser, SmolStr::new(s));
+                    let (namespace, end) = parse_qualified_name(parser, s);
                     match parser.peek_token_opt() {
                         // FUNCTION CALL WITH NAMESPACE:
                         // (Identifier DoubleColon)+ Identifier LParen Expr RParen

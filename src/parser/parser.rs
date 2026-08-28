@@ -24,6 +24,7 @@ use blocks::parse_match;
 use blocks::parse_struct_declare;
 use blocks::parse_try_catch_block;
 use blocks::parse_while_block;
+use bumpalo::Bump;
 use lexer::parse_string;
 use logos::SpannedIter;
 use parser_expr::add_op;
@@ -43,13 +44,14 @@ mod term;
 type TokenIter<'a> = Peekable<SpannedIter<'a, Token<'a>>>;
 
 struct ParserCtx<'a> {
-    src: &'a Source,
+    src: Source<'a>,
 }
 
 struct Parser<'a> {
     input: TokenIter<'a>,
     ctx: ParserCtx<'a>,
     last_token_end: u32,
+    bump: &'a Bump,
 }
 
 #[derive(Clone, Copy)]
@@ -102,17 +104,16 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         }
     };
     eprintln!("{RED}KEEL ERROR{RESET}");
-    let report =
-        Report::build(ReportKind::Error, (src.filename.as_str(), (start as usize)..(end as usize)))
-            .with_label(
-                Label::new((src.filename.as_str(), (start as usize)..(end as usize)))
-                    .with_message(err_message)
-                    .with_color(Color::Red),
-            )
-            .finish();
+    let report = Report::build(ReportKind::Error, (src.filename, (start as usize)..(end as usize)))
+        .with_label(
+            Label::new((src.filename, (start as usize)..(end as usize)))
+                .with_message(err_message)
+                .with_color(Color::Red),
+        )
+        .finish();
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report.eprint((src.filename.as_str(), ariadne::Source::from(src.contents.as_str()))).unwrap();
+    report.eprint((src.filename, ariadne::Source::from(src.contents))).unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
@@ -144,7 +145,7 @@ impl<'a> Parser<'a> {
     #[cold]
     #[inline(never)]
     fn error(&self, span: Span, error: ParserErr) -> ! {
-        throw_parser_error(self.ctx.src, span, error)
+        throw_parser_error(&self.ctx.src, span, error)
     }
     #[inline(always)]
     fn next_token(&mut self) -> (Token<'a>, Span) {
@@ -240,10 +241,7 @@ impl<'a> Parser<'a> {
 
         #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
         report
-            .eprint((
-                self.ctx.src.filename.as_str(),
-                ariadne::Source::from(self.ctx.src.contents.as_str()),
-            ))
+            .eprint((self.ctx.src.filename, ariadne::Source::from(self.ctx.src.contents)))
             .unwrap();
 
         #[cfg(any(target_arch = "wasm32", feature = "embed"))]
@@ -263,14 +261,17 @@ impl<'a> Parser<'a> {
 
 // Call after DoubleColon is skipped
 // Returns end
-fn parse_qualified_name(parser: &mut Parser<'_>, initial: SmolStr) -> (QualifiedName, u32) {
-    let mut qualified_name: Vec<SmolStr> = Vec::with_capacity(2);
+fn parse_qualified_name<'arena>(
+    parser: &mut Parser<'arena>,
+    initial: &'arena str,
+) -> (QualifiedName<'arena>, u32) {
+    let mut qualified_name: Vec<&str> = Vec::with_capacity(2);
     qualified_name.push(initial);
     let mut end: u32;
     loop {
         let (next_token, span) = parser.next_token();
         if let Token::Identifier(i) = next_token {
-            qualified_name.push(SmolStr::new(i));
+            qualified_name.push(i);
             end = span.end;
         } else {
             cold_path();
@@ -287,12 +288,12 @@ fn parse_qualified_name(parser: &mut Parser<'_>, initial: SmolStr) -> (Qualified
         if next_token == Token::DoubleColon {
             continue;
         }
-        return (QualifiedName::new(qualified_name), end);
+        return (QualifiedName::new(&qualified_name, parser.bump), end);
     }
 }
 
 // Must be called after LParen is skipped
-fn parse_args(parser: &mut Parser<'_>) -> (Box<[Expr]>, Box<[Span]>, u32) {
+fn parse_args<'arena>(parser: &mut Parser<'arena>) -> (Box<[Expr<'arena>]>, Box<[Span]>, u32) {
     let mut args = Vec::with_capacity(4);
     let mut arg_spans: Vec<Span> = Vec::with_capacity(4);
     loop {
@@ -313,7 +314,7 @@ fn parse_args(parser: &mut Parser<'_>) -> (Box<[Expr]>, Box<[Span]>, u32) {
     }
 }
 
-fn parse_statement(parser: &mut Parser<'_>) -> Option<Expr> {
+fn parse_statement<'arena>(parser: &mut Parser<'arena>) -> Option<Expr<'arena>> {
     let token = parser.peek_token_opt()?;
     let t_span = parser.peek_token_span();
     match token {
@@ -331,7 +332,7 @@ fn parse_statement(parser: &mut Parser<'_>) -> Option<Expr> {
     }
 }
 
-fn parse_var_declare(parser: &mut Parser<'_>) -> Expr {
+fn parse_var_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, _) = parser.next_token();
     debug_assert!(t == Token::Let || t == Token::Static);
     let (t, span) = parser.next_token();
@@ -363,12 +364,16 @@ fn parse_var_declare(parser: &mut Parser<'_>) -> Expr {
     let var_value = parse_expr(parser);
     Expr::VarDeclare(VariableDeclarationExpr {
         name: var_name,
-        value: Box::new(var_value),
+        value: parser.bump.alloc(var_value),
         var_type,
     })
 }
 
-fn parse_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32) -> Expr {
+fn parse_var_assign<'arena>(
+    input: &mut Parser<'arena>,
+    e: Expr<'arena>,
+    e_start: u32,
+) -> Expr<'arena> {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Equals);
     let e_end = input.peek_token_span().end;
@@ -378,7 +383,12 @@ fn parse_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32) -> Expr {
     var_assign(e, v, (e_start, e_end).into(), (v_start, v_end).into())
 }
 
-fn parse_op_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32, op: Token<'_>) -> Expr {
+fn parse_op_var_assign<'arena>(
+    input: &mut Parser<'arena>,
+    e: Expr<'arena>,
+    e_start: u32,
+    op: Token<'_>,
+) -> Expr<'arena> {
     let operand_end = input.last_token_end;
     let (t, _) = input.next_token();
     debug_assert_eq!(t, op);
@@ -403,7 +413,7 @@ fn parse_op_var_assign(input: &mut Parser<'_>, e: Expr, e_start: u32, op: Token<
     )
 }
 
-fn parse_return(input: &mut Parser<'_>) -> Expr {
+fn parse_return<'arena>(input: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Return);
     if input.peek_token_opt() == Some(Token::SemiColon) {
@@ -414,7 +424,7 @@ fn parse_return(input: &mut Parser<'_>) -> Expr {
     }
 }
 
-fn parse_line(input: &mut Parser<'_>, peek: Token<'_>) -> Expr {
+fn parse_line<'arena>(input: &mut Parser<'arena>, peek: Token<'_>) -> Expr<'arena> {
     let line_code = match peek {
         Token::Let => parse_var_declare(input),
         Token::Return => parse_return(input),
@@ -464,18 +474,18 @@ fn error_unclosed_delimiter(
     parser.throw_parser_err(|| {
         let mut report = Report::build(
             ariadne::ReportKind::Error,
-            (parser.ctx.src.filename.as_str(), opener_span.into()),
+            (parser.ctx.src.filename, opener_span.into()),
         )
         .with_message("Unclosed delimiter")
         .with_label(
-            Label::new((parser.ctx.src.filename.as_str(), opener_span.into()))
+            Label::new((parser.ctx.src.filename, opener_span.into()))
                 .with_message(format_args!("This {opener_token} is never closed"))
                 .with_color(ariadne::Color::Red),
         );
 
         if let Some((actual_closer_token, actual_closer_token_span)) = end {
             report = report.with_label(
-                Label::new((parser.ctx.src.filename.as_str(), actual_closer_token_span.into()))
+                Label::new((parser.ctx.src.filename, actual_closer_token_span.into()))
                     .with_message(format_args!(
                         "Expected {expected_closer_token} but found {actual_closer_token}"
                     ))
@@ -484,7 +494,7 @@ fn error_unclosed_delimiter(
         } else {
             report = report
                 .with_label(
-                    Label::new((parser.ctx.src.filename.as_str(), parser.eof_span().into()))
+                    Label::new((parser.ctx.src.filename, parser.eof_span().into()))
                         .with_message(format_args!(
                             "Expected {expected_closer_token} but the file ends here"
                         ))
@@ -504,14 +514,14 @@ fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
         Report::build(
             ariadne::ReportKind::Error,
             (
-                parser.ctx.src.filename.as_str(),
+                parser.ctx.src.filename,
                 (parser.last_token_end as usize..parser.last_token_end as usize),
             ),
         )
         .with_message("Missing semicolon")
         .with_label(
             Label::new((
-                parser.ctx.src.filename.as_str(),
+                parser.ctx.src.filename,
                 (parser.last_token_end as usize..parser.last_token_end as usize),
             ))
             .with_message(format_args!("Add a {} here", blue(';')))
@@ -522,7 +532,7 @@ fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
     })
 }
 
-fn parse_code(input: &mut Parser<'_>) -> Vec<Expr> {
+fn parse_code<'arena>(input: &mut Parser<'arena>) -> Vec<Expr<'arena>> {
     let mut output: Vec<Expr> = Vec::with_capacity(4);
     while let Some(e) = parse_statement(input) {
         output.push(e);
@@ -530,7 +540,7 @@ fn parse_code(input: &mut Parser<'_>) -> Vec<Expr> {
     output
 }
 
-fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
+fn parse_file_import<'arena>(parser: &mut Parser<'_>) -> Expr<'arena> {
     let (t, Span { start, end: _ }) = parser.next_token();
     debug_assert_eq!(t, Token::Import);
     let (next_token, span) = parser.next_token();
@@ -569,7 +579,7 @@ fn parse_file_import(parser: &mut Parser<'_>) -> Expr {
     }
 }
 
-fn parse_type(parser: &mut Parser<'_>) -> TypeExpr {
+fn parse_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
     let t = parse_atomic_type(parser);
     if parser.peek_token() == Token::Pipe {
         let mut poly = Vec::with_capacity(2);
@@ -594,7 +604,7 @@ pub const fn get_primitive_type_name(t: Token<'_>) -> Option<&'static str> {
     }
 }
 
-fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
+fn parse_atomic_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
     let (next_token, span) = parser.next_token();
     let mut t = if next_token == Token::LBrace {
         let key_t = parse_type(parser);
@@ -635,7 +645,7 @@ fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
     } else if let Token::Identifier(i) = next_token {
         if parser.peek_token() == Token::DoubleColon {
             parser.next_token();
-            let (namespace, end) = parse_qualified_name(parser, SmolStr::new(i));
+            let (namespace, end) = parse_qualified_name(parser, i);
             TypeExpr::NamespacedIdentifier(namespace, (span.start, end).into())
         } else {
             TypeExpr::Identifier(SmolStr::new(i), span)
@@ -663,7 +673,7 @@ fn parse_atomic_type(parser: &mut Parser<'_>) -> TypeExpr {
     t
 }
 
-fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
+fn parse_dylib_import<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, Span { start, end: _ }) = parser.next_token();
     debug_assert_eq!(t, Token::Dylib);
     let (next_token, span) = parser.next_token();
@@ -765,7 +775,7 @@ fn parse_dylib_import(parser: &mut Parser<'_>) -> Expr {
 }
 
 #[inline(always)]
-fn parse_file(parser: &mut Parser<'_>) -> Vec<Expr> {
+fn parse_file<'arena>(parser: &mut Parser<'arena>) -> Vec<Expr<'arena>> {
     let mut output: Vec<Expr> = Vec::with_capacity(2);
     // parse file statements
     while let Some(t) = parser.peek_token_opt() {
@@ -789,10 +799,15 @@ fn parse_file(parser: &mut Parser<'_>) -> Vec<Expr> {
     output
 }
 
-pub fn parse(input: &str, src: &Source) -> Vec<Expr> {
+pub fn parse<'arena>(
+    input: &'arena str,
+    src: Source<'arena>,
+    bump: &'arena Bump,
+) -> Vec<Expr<'arena>> {
     parse_file(&mut Parser {
         input: Token::lexer(input).spanned().peekable(),
         ctx: ParserCtx { src },
         last_token_end: 0,
+        bump,
     })
 }

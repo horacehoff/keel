@@ -26,17 +26,17 @@ pub struct ErrorCatch {
 }
 
 #[derive(Debug)]
-pub struct Function {
+pub struct Function<'arena> {
     pub name: SmolStr,
     pub args: Box<[(SmolStr, Option<DataType>)]>,
-    pub code: Rc<[Expr]>,
+    pub code: &'arena [Expr<'arena>],
     pub impls: Vec<FunctionImpl>,
     pub is_recursive: Option<bool>,
     pub returns_null: bool,
     pub src_file: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
-    pub direct_calls: Box<[SmolStr]>,
+    pub direct_calls: Box<[&'arena str]>,
     pub name_span: Span,
 }
 
@@ -102,9 +102,10 @@ pub struct Pools {
     pub str_pool: StringPool,
 }
 
-pub struct Source {
-    pub filename: SmolStr,
-    pub contents: String,
+#[derive(Copy, Clone)]
+pub struct Source<'a> {
+    pub filename: &'a str,
+    pub contents: &'a str,
 }
 
 #[derive(Clone, Copy)]
@@ -146,27 +147,27 @@ pub struct InstrSrc {
     pub file_id: u16,
 }
 
-pub struct State<'a> {
-    pub v: &'a mut Vec<Variable>,
-    pub globals: &'a mut Vec<Variable>,
-    pub registers: &'a mut Vec<Data>,
-    pub functions: &'a mut Vec<Function>,
-    pub structs: &'a mut Vec<Struct>,
-    pub pools: &'a mut Pools,
-    pub instr_src: &'a mut Vec<InstrSrc>,
-    pub fn_registers: &'a mut Vec<Vec<u16>>,
-    pub dylibs: &'a mut Vec<Dylib>,
-    pub allocated_arg_count: &'a mut usize,
-    pub allocated_call_depth: &'a mut usize,
-    pub const_registers: &'a mut FxHashMap<Data, u16>,
-    pub free_registers: &'a mut Vec<u16>,
-    pub sources: &'a mut Vec<Source>,
+pub struct State<'arena, 'compiler> {
+    pub v: &'compiler mut Vec<Variable>,
+    pub globals: &'compiler mut Vec<Variable>,
+    pub registers: &'compiler mut Vec<Data>,
+    pub functions: &'compiler mut Vec<Function<'arena>>,
+    pub structs: &'compiler mut Vec<Struct>,
+    pub pools: &'compiler mut Pools,
+    pub instr_src: &'compiler mut Vec<InstrSrc>,
+    pub fn_registers: &'compiler mut Vec<Vec<u16>>,
+    pub dylibs: &'compiler mut Vec<Dylib>,
+    pub allocated_arg_count: &'compiler mut usize,
+    pub allocated_call_depth: &'compiler mut usize,
+    pub const_registers: &'compiler mut FxHashMap<Data, u16>,
+    pub free_registers: &'compiler mut Vec<u16>,
+    pub sources: &'compiler mut Vec<Source<'arena>>,
     pub reserved_registers: FxHashSet<u16>,
-    pub file_scopes: &'a mut Vec<Scope>,
-    pub types: &'a mut Vec<DataType>,
+    pub file_scopes: &'compiler mut Vec<Scope>,
+    pub types: &'compiler mut Vec<DataType>,
 }
 
-impl State<'_> {
+impl State<'_, '_> {
     #[must_use]
     #[inline(always)]
     pub fn scope(&self, file_idx: u16) -> &Scope {

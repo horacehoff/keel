@@ -41,6 +41,7 @@ use crate::parser;
 use crate::vm::Pool;
 use crate::vm::RegisterFile;
 use crate::{data::Data, instr::Instr};
+use bumpalo::Bump;
 use compiler_data::Ctx;
 use compiler_data::Dylib;
 use compiler_data::DylibFn;
@@ -193,10 +194,10 @@ const fn set_jmp_size(instr: &mut Instr, size: u16) {
 /// bool_or_mode false emits false jumps
 /// Returns (true_jump_idxs, false_jump_idxs)
 #[must_use]
-fn compile_short_circuit_condition(
-    condition: &Expr,
+fn compile_short_circuit_condition<'arena>(
+    condition: &'arena Expr,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
     bool_or_mode: bool,
 ) -> (Vec<usize>, Vec<usize>) {
@@ -257,10 +258,10 @@ fn compile_const_condition(condition: &Expr) -> Option<bool> {
 }
 
 #[must_use]
-fn compile_condition(
-    condition: &Expr,
+fn compile_condition<'arena>(
+    condition: &'arena Expr,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> (Option<bool>, Vec<usize>, Vec<usize>) {
     if let Some(b) = compile_const_condition(condition) {
@@ -314,11 +315,11 @@ fn parse_loop_flow_control(
 }
 
 #[must_use]
-fn compile_array_literal(
-    array_items: &[Expr],
+fn compile_array_literal<'arena>(
+    array_items: &'arena [Expr],
     spans: &[Span],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     if let Some(first) = array_items.first() {
@@ -400,12 +401,12 @@ fn compile_array_literal(
 }
 
 #[must_use]
-fn compile_struct_literal(
-    name: &QualifiedName,
-    fields: &[StructFieldExpr],
+fn compile_struct_literal<'arena>(
+    name: &'arena QualifiedName,
+    fields: &'arena [StructFieldExpr],
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let struct_name = name.get_name();
@@ -551,11 +552,11 @@ fn compile_struct_literal(
 }
 
 #[must_use]
-fn compile_map_literal(
-    kv_pairs: &[(Expr, Span, Expr, Span)],
+fn compile_map_literal<'arena>(
+    kv_pairs: &'arena [(Expr, Span, Expr, Span)],
     map_span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let mut global_key_type: DataType = DataType::Unknown;
@@ -695,13 +696,13 @@ fn compile_map_literal(
 }
 
 #[must_use]
-fn compile_struct_field_access(
-    struct_expr: &Expr,
+fn compile_struct_field_access<'arena>(
+    struct_expr: &'arena Expr,
     field: &SmolStr,
     struct_span: Span,
     field_span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let t = struct_expr.infer_type(ctx, state);
@@ -735,12 +736,12 @@ fn compile_struct_field_access(
 }
 
 #[must_use]
-fn compile_array_indexing(
-    array: &Expr,
-    index: &Expr,
+fn compile_array_indexing<'arena>(
+    array: &'arena Expr,
+    index: &'arena Expr,
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let inferred = array.infer_type(ctx, state);
@@ -769,13 +770,13 @@ fn compile_array_indexing(
 }
 
 #[must_use]
-fn compile_array_slice(
-    array: &Expr,
-    idx_start: &Expr,
-    idx_end: &Expr,
+fn compile_array_slice<'arena>(
+    array: &'arena Expr,
+    idx_start: &'arena Expr,
+    idx_end: &'arena Expr,
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let inferred = array.infer_type(ctx, state);
@@ -809,17 +810,17 @@ fn compile_array_slice(
 }
 
 #[must_use]
-fn uniform_op(
+fn uniform_op<'arena>(
     instr: fn(u16, u16, u16) -> Instr,
     symbol: &'static str,
-    l: &Expr,
-    r: &Expr,
+    l: &'arena Expr,
+    r: &'arena Expr,
     span_l: Span,
     span_r: Span,
     t: &DataType,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(ctx, state), r.infer_type(ctx, state));
@@ -838,19 +839,19 @@ fn uniform_op(
 
 #[inline]
 #[must_use]
-fn uniform_op2(
+fn uniform_op2<'arena>(
     instr: fn(u16, u16, u16) -> Instr,
     t_1: &'static DataType,
     instr2: fn(u16, u16, u16) -> Instr,
     t_2: &'static DataType,
     symbol: &'static str,
-    l: &Expr,
-    r: &Expr,
+    l: &'arena Expr,
+    r: &'arena Expr,
     span_l: Span,
     span_r: Span,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(ctx, state), r.infer_type(ctx, state));
@@ -867,14 +868,14 @@ fn uniform_op2(
 }
 
 #[must_use]
-fn compile_div_op(
-    l: &Expr,
-    r: &Expr,
+fn compile_div_op<'arena>(
+    l: &'arena Expr,
+    r: &'arena Expr,
     span_l: Span,
     span_r: Span,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     if let Expr::Int(n) = r
@@ -904,14 +905,14 @@ fn compile_div_op(
 }
 
 #[must_use]
-fn compile_add_op(
-    l: &Expr,
-    r: &Expr,
+fn compile_add_op<'arena>(
+    l: &'arena Expr,
+    r: &'arena Expr,
     span_l: Span,
     span_r: Span,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let t_l = l.infer_type(ctx, state);
@@ -957,14 +958,14 @@ fn compile_add_op(
 }
 
 #[must_use]
-fn compile_sub_op(
-    l: &Expr,
-    r: &Expr,
+fn compile_sub_op<'arena>(
+    l: &'arena Expr,
+    r: &'arena Expr,
     span_l: Span,
     span_r: Span,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let t_l = l.infer_type(ctx, state);
@@ -999,14 +1000,14 @@ fn compile_sub_op(
 }
 
 #[must_use]
-fn compile_mod_op(
-    l: &Expr,
-    r: &Expr,
+fn compile_mod_op<'arena>(
+    l: &'arena Expr,
+    r: &'arena Expr,
     span_l: Span,
     span_r: Span,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     if let Expr::Int(n) = r
@@ -1036,12 +1037,12 @@ fn compile_mod_op(
 }
 
 #[must_use]
-fn compile_eq_op(
-    l: &Expr,
-    r: &Expr,
+fn compile_eq_op<'arena>(
+    l: &'arena Expr,
+    r: &'arena Expr,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let l_type = l.infer_type(ctx, state);
@@ -1065,12 +1066,12 @@ fn compile_eq_op(
 }
 
 #[must_use]
-fn compile_neq_op(
-    l: &Expr,
-    r: &Expr,
+fn compile_neq_op<'arena>(
+    l: &'arena Expr,
+    r: &'arena Expr,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let l_type = l.infer_type(ctx, state);
@@ -1094,13 +1095,13 @@ fn compile_neq_op(
 }
 
 #[must_use]
-fn compile_neg_op(
-    l: &Expr,
+fn compile_neg_op<'arena>(
+    l: &'arena Expr,
     span_l: Span,
     span_r: Span,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let operand_type = l.infer_type(ctx, state);
@@ -1126,13 +1127,13 @@ fn compile_neg_op(
 }
 
 #[must_use]
-fn compile_bool_neg_op(
-    l: &Expr,
+fn compile_bool_neg_op<'arena>(
+    l: &'arena Expr,
     span_l: Span,
     span_r: Span,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let operand_type = l.infer_type(ctx, state);
@@ -1154,13 +1155,13 @@ fn compile_bool_neg_op(
     id
 }
 
-fn compile_type_eq_op(
-    value: &Expr,
+fn compile_type_eq_op<'arena>(
+    value: &'arena Expr,
     type_candidate: &TypeExpr,
     span: Span,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let type_candidate =
@@ -1181,14 +1182,14 @@ fn compile_type_eq_op(
     }
 }
 
-fn compile_array_index_assignment(
-    array: &Expr,
-    index: &Expr,
-    value: &Expr,
+fn compile_array_index_assignment<'arena>(
+    array: &'arena Expr,
+    index: &'arena Expr,
+    value: &'arena Expr,
     index_span: Span,
     elem_span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     let array_type = array.infer_type(ctx, state);
@@ -1233,10 +1234,10 @@ fn compile_array_index_assignment(
     state.free_reg(id);
 }
 
-fn compile_struct_field_assignment(
-    struct_field_assignment: &StructFieldAssignmentExpr,
+fn compile_struct_field_assignment<'arena>(
+    struct_field_assignment: &'arena StructFieldAssignmentExpr,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     let struct_expr = &struct_field_assignment.struct_expr;
@@ -1302,11 +1303,11 @@ fn compile_struct_field_assignment(
     output.push(Instr::SetFieldStruct(id, new_elem_reg_id, field_index));
 }
 
-fn compile_if_block_branch(
-    branch: &[Expr],
+fn compile_if_block_branch<'arena>(
+    branch: &'arena [Expr],
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     if let Some(tgt_id) = tgt_id {
@@ -1336,12 +1337,12 @@ fn compile_if_block_branch(
     }
 }
 
-fn compile_if_block(
-    IfBlockExpr { condition, then, otherwise, span: _ }: &IfBlockExpr,
+fn compile_if_block<'arena>(
+    IfBlockExpr { condition, then, otherwise, span: _ }: &'arena IfBlockExpr,
     previous_jumps: Vec<usize>,
     tgt_id: Option<u16>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     let condition_start = output.len();
@@ -1399,11 +1400,11 @@ fn compile_if_block(
     }
 }
 
-fn compile_while_loop(
-    condition: &Expr,
-    code: &[Expr],
+fn compile_while_loop<'arena>(
+    condition: &'arena Expr,
+    code: &'arena [Expr],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     let output_len_before = output.len();
@@ -1436,13 +1437,13 @@ fn compile_while_loop(
     output.push(Instr::JmpBack(len));
 }
 
-fn compile_for_loop(
+fn compile_for_loop<'arena>(
     var_name: &SmolStr,
-    array: &Expr,
-    code: &[Expr],
+    array: &'arena Expr,
+    code: &'arena [Expr],
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     let real_var = var_name.as_str() != "_";
@@ -1535,10 +1536,10 @@ fn compile_for_loop(
     }
 }
 
-fn compile_int_for_loop(
-    int_for_loop: &IntForLoopExpr,
+fn compile_int_for_loop<'arena>(
+    int_for_loop: &'arena IntForLoopExpr,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     let lower_bound = int_for_loop.get_lower_bound();
@@ -1616,7 +1617,12 @@ fn compile_int_for_loop(
     }
 }
 
-fn compile_loop_block(code: &[Expr], ctx: Ctx, state: &mut State<'_>, output: &mut Vec<Instr>) {
+fn compile_loop_block<'arena>(
+    code: &'arena [Expr],
+    ctx: Ctx,
+    state: &mut State<'arena, '_>,
+    output: &mut Vec<Instr>,
+) {
     let loop_id = ctx.block_id + 1;
     let regs_before = state.registers.len() as u16;
     let mut compiled =
@@ -1628,12 +1634,12 @@ fn compile_loop_block(code: &[Expr], ctx: Ctx, state: &mut State<'_>, output: &m
     output.push(Instr::JmpBack(code_length));
 }
 
-fn compile_try_catch_block(
-    e: &[Expr],
+fn compile_try_catch_block<'arena>(
+    e: &'arena [Expr],
     err_var: &SmolStr,
-    catch_code: &[Expr],
+    catch_code: &'arena [Expr],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     output.push(Instr::StartErrorCatch(0, 0)); // patched later on
@@ -1656,11 +1662,11 @@ fn compile_try_catch_block(
     state.free_reg(err_reg_id);
 }
 
-fn compile_var_declaration(
-    var_declaration: &VariableDeclarationExpr,
+fn compile_var_declaration<'arena>(
+    var_declaration: &'arena VariableDeclarationExpr,
     remaining_code: &[Expr],
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     let name = &var_declaration.name;
@@ -1706,13 +1712,13 @@ fn compile_var_declaration(
     state.new_var_with_type(name.clone(), var_id, value_type, declared_type);
 }
 
-fn compile_var_assignment(
-    path: &[SmolStr],
-    name: &SmolStr,
-    value: &Expr,
+fn compile_var_assignment<'arena>(
+    path: &[&str],
+    name: &str,
+    value: &'arena Expr,
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     let var_type = value.infer_type(ctx, state);
@@ -1799,7 +1805,7 @@ fn compile_var_assignment(
     } else {
         output.push(Instr::Mov(obj_id, reg_id));
     }
-    if !state.v.iter().any(|var| &var.name != name && var.register_id == obj_id) {
+    if !state.v.iter().any(|var| var.name != name && var.register_id == obj_id) {
         state.free_reg(obj_id);
     }
     if let Some(pos) = local_var_idx {
@@ -1810,8 +1816,8 @@ fn compile_var_assignment(
 }
 
 #[must_use]
-fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_>) -> Option<u16> {
-    let (namespace, name, span): (&[SmolStr], &SmolStr, Span) = match e {
+fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_, '_>) -> Option<u16> {
+    let (namespace, name, span): (&[&str], &str, Span) = match e {
         Expr::Var(n, s) => (&[], n, *s),
         Expr::NamespacedVar(n, s) => (n.get_namespace(), n.get_name(), *s),
         _ => return None,
@@ -1833,11 +1839,11 @@ fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_>) -> Option<u16> {
 
 #[must_use]
 fn compile_var_access(
-    path: &[SmolStr],
-    name: &SmolStr,
+    path: &[&str],
+    name: &str,
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'_, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     // Local variable
@@ -1869,7 +1875,7 @@ fn compile_var_access(
     if fn_impl_idx.is_none() {
         let fn_args =
             state.functions[fn_id].args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>();
-        let fn_code = Rc::clone(&state.functions[fn_id].code);
+        // let fn_code = Rc::clone(&state.functions[fn_id].code);
         compile_function(
             output,
             ctx,
@@ -1878,7 +1884,7 @@ fn compile_var_access(
             &fn_args,
             name,
             &arg_types,
-            &fn_code,
+            state.functions[fn_id].code,
             fn_id as u16,
             false,
             state.functions[fn_id].src_file,
@@ -1894,7 +1900,7 @@ fn compile_struct_definition(
     fields: &[(SmolStr, TypeExpr, Span)],
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'_, '_>,
 ) {
     let struct_id = state.structs.len() as u16;
     state.structs.push(Struct {
@@ -1921,14 +1927,14 @@ fn compile_struct_definition(
     state.structs[struct_id as usize].fields = parsed_fields;
 }
 
-fn compile_function_definition(
-    function_declaration: &FunctionDeclarationExpr,
+fn compile_function_definition<'arena>(
+    function_declaration: &'arena FunctionDeclarationExpr,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
 ) {
     let fn_name = &function_declaration.name;
     let span = function_declaration.span;
-    let fn_code = &function_declaration.code;
+    let fn_code = function_declaration.code;
     let fn_args = &function_declaration.args;
     if let Some(func) = state.functions.iter().find(|func| &func.name == fn_name) {
         compiler_errors::error_function_already_defined(func, span, ctx.file_idx, state.sources);
@@ -1948,7 +1954,7 @@ fn compile_function_definition(
             )
         }))
         .collect(),
-        code: fn_code.clone(),
+        code: fn_code,
         impls: Vec::new(),
         is_recursive: None,
         returns_null: check_if_returns_void(fn_code),
@@ -1960,10 +1966,10 @@ fn compile_function_definition(
     state.fn_registers.push(Vec::new());
 }
 
-fn compile_return(
-    return_value: Option<&Expr>,
+fn compile_return<'arena>(
+    return_value: Option<&'arena Expr<'arena>>,
     ctx: Ctx,
-    state: &mut State<'_>,
+    state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
     if let Some(x) = return_value {
@@ -1987,11 +1993,20 @@ fn compile_loop_continue(ctx: Ctx, output: &mut Vec<Instr>) {
 }
 
 #[inline]
-fn compile_eval_block(code: &[Expr], ctx: Ctx, state: &mut State<'_>, output: &mut Vec<Instr>) {
+fn compile_eval_block<'arena>(
+    code: &'arena [Expr<'arena>],
+    ctx: Ctx,
+    state: &mut State<'arena, '_>,
+    output: &mut Vec<Instr>,
+) {
     output.extend(compile_expr(code, ctx.with_offset(output.len() as u16), state));
 }
 
-pub fn compile_expr(input: &[Expr], ctx: Ctx, state: &mut State<'_>) -> Vec<Instr> {
+pub fn compile_expr<'arena>(
+    input: &'arena [Expr<'arena>],
+    ctx: Ctx,
+    state: &mut State<'arena, '_>,
+) -> Vec<Instr> {
     let v_len = state.v.len();
     let fn_len = state.functions.len();
     let symbols_len = state.scope(ctx.file_idx).symbols.len();
@@ -2018,15 +2033,15 @@ pub fn compile_expr(input: &[Expr], ctx: Ctx, state: &mut State<'_>) -> Vec<Inst
     output
 }
 
-impl Expr {
+impl<'arena> Expr<'arena> {
     pub const fn is_constant_literal(&self) -> bool {
         matches!(self, Self::Int(_) | Self::Float(_) | Self::String(_) | Self::Bool(_) | Self::Null)
     }
     #[inline(always)]
     pub fn compile(
-        &self,
+        &'arena self,
         ctx: Ctx,
-        state: &mut State<'_>,
+        state: &mut State<'arena, '_>,
         output: &mut Vec<Instr>,
         tgt_id: Option<u16>,
         var_assignment: bool,
@@ -2035,9 +2050,9 @@ impl Expr {
         self.compile_with_code_context(ctx, state, output, tgt_id, var_assignment, &[], uses_id)
     }
     pub fn compile_with_code_context(
-        &self,
+        &'arena self,
         ctx: Ctx,
-        state: &mut State<'_>,
+        state: &mut State<'arena, '_>,
         output: &mut Vec<Instr>,
         tgt_id: Option<u16>,
         var_assignment: bool,
@@ -2472,7 +2487,7 @@ impl Scope {
     #[must_use]
     pub fn find_function(
         &self,
-        path: &[SmolStr],
+        path: &[&str],
         function_name: &str,
         span: Span,
         file_idx: u16,
@@ -2493,7 +2508,7 @@ impl Scope {
     #[must_use]
     pub fn find_struct(
         &self,
-        path: &[SmolStr],
+        path: &[&str],
         struct_name: &str,
         span: Span,
         file_idx: u16,
@@ -2514,7 +2529,7 @@ impl Scope {
     #[must_use]
     pub fn find_global(
         &self,
-        path: &[SmolStr],
+        path: &[&str],
         var_name: &str,
         span: Span,
         file_idx: u16,
@@ -2535,7 +2550,7 @@ impl Scope {
     #[must_use]
     pub fn walk_to_namespace(
         &self,
-        path: &[SmolStr],
+        path: &[&str],
         span: Span,
         file_idx: u16,
         sources: &[Source],
@@ -2555,28 +2570,29 @@ impl Scope {
 }
 
 /// Recursively collects functions, dyn libs, and imported files
-fn parse_toplevel(
-    code: Vec<Expr>,
+fn parse_toplevel<'a>(
+    bump: &'a Bump,
+    code: Vec<Expr<'a>>,
     file_path: &Path,
     src_file_idx: u16,
-    fns: &mut Vec<Function>,
+    fns: &mut Vec<Function<'a>>,
     structs: &mut Vec<Struct>,
     fn_registers: &mut Vec<Vec<u16>>,
     dynamic_libs: &mut Vec<Dylib>,
-    sources: &mut Vec<Source>,
+    sources: &mut Vec<Source<'a>>,
     scope: &mut Scope,
     files: &mut FxHashMap<PathBuf, Scope>,
     file_scopes: &mut Vec<Scope>,
-    pending_structs: &mut Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
-    pending_fns: &mut Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr]>)>,
+    pending_structs: &mut Vec<(u16, u16, Box<[(SmolStr, TypeExpr<'a>, Span)]>)>,
+    pending_fns: &mut Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr<'a>]>)>,
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: &mut Vec<(
         u16,
         u16,
-        Box<[DylibFnExpr]>,
+        Box<[DylibFnExpr<'a>]>,
         Rc<Library>,
         Span,
     )>,
-    pending_globals: &mut Vec<(VariableDeclarationExpr, u16)>,
+    pending_globals: &mut Vec<(VariableDeclarationExpr<'a>, u16)>,
     keel_home_libs_path: &LazyCell<Option<PathBuf>, impl FnOnce() -> Option<PathBuf>>,
 ) {
     let mut imports = Vec::new();
@@ -2601,9 +2617,9 @@ fn parse_toplevel(
                     );
                 }
                 fn_registers.push(Vec::new());
-                let returns_void = check_if_returns_void(&fn_code);
+                let returns_void = check_if_returns_void(fn_code);
                 let mut callees = Vec::new();
-                collect_direct_fn_calls(&fn_code, &mut callees);
+                collect_direct_fn_calls(fn_code, &mut callees);
 
                 let fn_id = fns.len() as u16;
                 fns.push(Function {
@@ -2717,22 +2733,28 @@ fn parse_toplevel(
                     continue;
                 }
 
-                let file_contents = std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
-                    error_cannot_read_file(span, src_file_idx, sources);
-                });
-                let file_name: SmolStr = file_path.to_str().unwrap_or(path.as_str()).into();
+                let file_contents =
+                    bump.alloc_str(&std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
+                        error_cannot_read_file(span, src_file_idx, sources);
+                    }));
+                let file_name = bump.alloc_str(file_path.to_str().unwrap_or(path.as_str()));
 
                 let child_src_idx = sources.len() as u16;
 
-                sources.push(Source { filename: file_name.clone(), contents: file_contents });
+                // bump.alloc_str(&file_contents);
+
+                let src = Source { filename: file_name, contents: file_contents };
+
+                let file_code = parser::parse(src.contents, src, bump);
+
+                sources.push(src);
 
                 // Parse the imported file's contents
-                let file_code =
-                    parser::parse(&sources.last().unwrap().contents, sources.last().unwrap());
 
                 let mut child_scope = Scope { symbols: Vec::new(), children: Vec::new() };
 
                 parse_toplevel(
+                    bump,
                     file_code,
                     &file_path,
                     child_src_idx,
@@ -2898,15 +2920,16 @@ fn resolve_types(
 //     pub structs: Vec<Struct>,
 // }
 
-pub fn compile(
-    contents: String,
-    filename: &str,
+pub fn compile<'arena>(
+    contents: &str,
+    filename: &'arena str,
     debug: bool,
+    bump: &'arena Bump,
 ) -> (
     Vec<Instr>,
     RegisterFile,
     Pools,
-    ErrorCtx,
+    ErrorCtx<'arena>,
     Vec<Vec<u16>>,
     Vec<DylibFn>,
     usize,
@@ -2917,9 +2940,11 @@ pub fn compile(
     #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::Instant::now();
 
-    let main_src = Source { filename: SmolStr::from(filename), contents };
+    let main_src_contents = bump.alloc_str(contents);
 
-    let code = parser::parse(&main_src.contents, &main_src);
+    let main_src = Source { filename, contents: main_src_contents };
+
+    let code = parser::parse(main_src.contents, main_src, bump);
 
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     if debug {
@@ -2962,6 +2987,7 @@ pub fn compile(
         LazyCell::new(|| std::env::home_dir().map(|p| p.join(".keel").join("libs/")));
 
     parse_toplevel(
+        bump,
         code,
         &PathBuf::from(filename),
         0,
@@ -3054,7 +3080,7 @@ pub fn compile(
         });
     }
     let program_instructions = compile_expr(
-        &state.functions
+        state.functions
             .iter()
             .find(|func| func.name == "main" && func.src_file == 0)
             .unwrap_or_else(|| {
@@ -3066,8 +3092,7 @@ pub fn compile(
                 );
                 std::process::exit(1);
             })
-            .code
-            .clone(),
+            .code,
         // &mut variables,
         ctx.with_offset(instructions.len() as u16),
         &mut state,
@@ -3076,30 +3101,30 @@ pub fn compile(
     instructions.extend(program_instructions);
     instructions.push(Instr::Halt(0));
 
-    #[cfg(debug_assertions)]
-    if debug {
-        println!("---- DEBUG ----");
-        if !pools.obj_pool.is_empty() {
-            println!("---  ARRAYS  ---");
-            for (i, data) in pools.obj_pool.iter().enumerate() {
-                println!(" {i} {data:?}");
-            }
-        }
-        println!("-- REGISTERS --");
-        for (i, data) in registers.iter().enumerate() {
-            println!(
-                " [{i}] {}",
-                data.format(&pools.obj_pool, &pools.str_pool, &pools.map_pool, &structs, true)
-            );
-        }
-        if !instructions.is_empty() {
-            println!("-- INSTRUCTIONS --");
-            for (i, instr) in instructions.iter().enumerate() {
-                println!(" {i}: {instr:?}");
-            }
-        }
-        println!("------------------");
-    }
+    // #[cfg(debug_assertions)]
+    // if debug {
+    //     println!("---- DEBUG ----");
+    //     if !pools.obj_pool.is_empty() {
+    //         println!("---  ARRAYS  ---");
+    //         for (i, data) in pools.obj_pool.iter().enumerate() {
+    //             println!(" {i} {data:?}");
+    //         }
+    //     }
+    //     println!("-- REGISTERS --");
+    //     for (i, data) in registers.iter().enumerate() {
+    //         println!(
+    //             " [{i}] {}",
+    //             data.format(&pools.obj_pool, &pools.str_pool, &pools.map_pool, &structs, true)
+    //         );
+    //     }
+    //     if !instructions.is_empty() {
+    //         println!("-- INSTRUCTIONS --");
+    //         for (i, instr) in instructions.iter().enumerate() {
+    //             println!(" {i}: {instr:?}");
+    //         }
+    //     }
+    //     println!("------------------");
+    // }
 
     (
         instructions,

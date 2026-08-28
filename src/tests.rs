@@ -1,10 +1,12 @@
 use crate::compile;
 use crate::data::Data;
 use crate::instr::Instr;
+use bumpalo::Bump;
 
 macro_rules! run_and_check_registers {
     ($contents:expr, $expected:expr) => {
         let filename = "test.kl";
+        let bump = Bump::new();
         let (
             instructions,
             mut registers,
@@ -16,7 +18,7 @@ macro_rules! run_and_check_registers {
             allocated_call_depth,
             _,
             types,
-        ) = compile(String::from($contents), filename, false);
+        ) = compile($contents, filename, false, &bump);
         crate::vm::execute(
             &instructions,
             &mut registers,
@@ -38,6 +40,7 @@ macro_rules! run_and_check_registers {
 macro_rules! run {
     ($contents:expr) => {
         let filename = "test.kl";
+        let bump = Bump::new();
         let (
             instructions,
             mut registers,
@@ -49,7 +52,7 @@ macro_rules! run {
             allocated_call_depth,
             _,
             types,
-        ) = compile(String::from($contents), filename, false);
+        ) = compile($contents, filename, false, &bump);
         crate::vm::execute(
             &instructions,
             &mut registers,

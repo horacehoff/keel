@@ -20,7 +20,7 @@ use crate::parser::parse_type;
 use smol_strc::SmolStr;
 
 // call right after peeking Token::If
-pub fn parse_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
+pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'arena> {
     let t = parser.next_token();
     debug_assert_eq!(t.0, Token::If);
     let condition = parse_expr_no_struct(parser);
@@ -45,7 +45,7 @@ pub fn parse_if_block(parser: &mut Parser<'_>, start: u32) -> Expr {
 
 /// `LBrace Code RBrace`
 #[inline(always)]
-pub fn parse_block(parser: &mut Parser<'_>) -> Vec<Expr> {
+pub fn parse_block<'arena>(parser: &mut Parser<'arena>) -> Vec<Expr<'arena>> {
     let opener_token_span =
         parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
     let code = parse_code(parser);
@@ -55,7 +55,7 @@ pub fn parse_block(parser: &mut Parser<'_>) -> Vec<Expr> {
 
 /// `LBrace Expr RBrace`
 #[inline(always)]
-pub fn parse_block_expr(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_block_expr<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let opener_token_span =
         parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
     let code = parse_expr(parser);
@@ -63,7 +63,7 @@ pub fn parse_block_expr(parser: &mut Parser<'_>) -> Expr {
     code
 }
 
-pub fn parse_while_block(input: &mut Parser<'_>) -> Expr {
+pub fn parse_while_block<'arena>(input: &mut Parser<'arena>) -> Expr<'arena> {
     let t = input.next_token();
     debug_assert_eq!(t.0, Token::While);
     let while_condition = parse_expr_no_struct(input);
@@ -72,7 +72,7 @@ pub fn parse_while_block(input: &mut Parser<'_>) -> Expr {
 }
 
 /// Parses `ForLoop` and `IntForLoop`
-pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_for_loop<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let t = parser.next_token();
     debug_assert_eq!(t.0, Token::For);
     let (i_token, span) = parser.next_token();
@@ -145,11 +145,11 @@ pub fn parse_for_loop(parser: &mut Parser<'_>) -> Expr {
 }
 
 #[inline(always)]
-pub fn parse_eval_block(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_eval_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     Expr::EvalBlock(Box::from(parse_block(parser)))
 }
 
-pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_function<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Function);
     let (t_fn_id, span) = parser.next_token();
@@ -199,16 +199,16 @@ pub fn parse_function(parser: &mut Parser<'_>) -> Expr {
             parser.error(span, ParserErr::ArgumentsMissingCommaSeparator);
         }
     }
-    let fn_code = parse_block(parser);
+    let fn_code = parser.bump.alloc_slice_fill_iter(parse_block(parser));
     Expr::FunctionDecl(FunctionDeclarationExpr {
         name: fn_name,
         args: Box::from(args),
-        code: std::rc::Rc::from(fn_code),
+        code: fn_code,
         span,
     })
 }
 
-pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, Span { start, end: _ }) = parser.next_token();
     debug_assert_eq!(t, Token::Try);
     let try_code = parse_block(parser);
@@ -246,7 +246,7 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
         Box::from(c)
     } else {
         Box::from([Expr::FunctionCall(FunctionCallExpr {
-            qualified_name: QualifiedName::new([SmolStr::new("throw")]),
+            qualified_name: QualifiedName::new(&["throw"], parser.bump),
             args: Box::new([usr_var]),
             spans: Box::from([(start, end).into()]),
         })])
@@ -295,7 +295,7 @@ pub fn parse_try_catch_block(parser: &mut Parser<'_>) -> Expr {
     )
 }
 
-pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_struct_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Struct);
     let (next_token, span) = parser.next_token();
@@ -348,13 +348,13 @@ pub fn parse_struct_declare(parser: &mut Parser<'_>) -> Expr {
     Expr::StructDeclare(struct_name, Box::from(fields), span)
 }
 
-pub fn parse_loop_block(input: &mut Parser<'_>) -> Expr {
+pub fn parse_loop_block<'arena>(input: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, _) = input.next_token();
     debug_assert_eq!(t, Token::Loop);
     Expr::LoopBlock(Box::from(parse_block(input)))
 }
 
-pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
+pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, Span { start, end: _ }) = parser.next_token();
     debug_assert_eq!(t, Token::Match);
     let match_obj = parse_expr_no_struct(parser);
@@ -423,7 +423,7 @@ pub fn parse_match(parser: &mut Parser<'_>) -> Expr {
     Expr::EvalBlock(Box::from([
         Expr::VarDeclare(VariableDeclarationExpr {
             name: obj_var.clone(),
-            value: Box::new(match_obj),
+            value: parser.bump.alloc(match_obj),
             var_type: None,
         }),
         Expr::IfBlock(IfBlockExpr {

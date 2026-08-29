@@ -111,7 +111,7 @@ pub fn compile_function_call<'arena>(
         .map(|sig| (sig.args.clone(), sig.return_type == DataType::Null, sig.id))
     {
         check_args_length(
-            &function_call.args,
+            function_call.args,
             fn_args.len(),
             function_call.qualified_name.get_name(),
             function_call.get_call_span(),
@@ -134,7 +134,7 @@ pub fn compile_function_call<'arena>(
         }
 
         *state.allocated_arg_count = (*state.allocated_arg_count).max(function_call.args.len());
-        for arg in &function_call.args {
+        for arg in function_call.args {
             let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
             output.push(Instr::StoreFuncArg(arg_id));
             state.free_reg(arg_id);

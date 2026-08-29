@@ -19,7 +19,6 @@ use crate::parser::blocks::parse_block_expr;
 use crate::parser::parse_args;
 use crate::parser::parse_qualified_name;
 use crate::parser::parse_type;
-use smol_strc::SmolStr;
 
 // Must be called right after LParen is skipped
 // Identifier LParen Expr RParen
@@ -30,9 +29,13 @@ fn parse_fn_call<'arena>(
     span: Span,
 ) -> Expr<'arena> {
     let (args, arg_spans, _) = parse_args(parser);
-    let mut spans: Vec<Span> = arg_spans.into_vec();
+    let mut spans = arg_spans;
     spans.insert(0, span);
-    Expr::FunctionCall(FunctionCallExpr { qualified_name, args, spans: spans.into_boxed_slice() })
+    Expr::FunctionCall(FunctionCallExpr {
+        qualified_name,
+        args: args.into_bump_slice(),
+        spans: spans.into_bump_slice(),
+    })
 }
 
 // Must be called right after LParen is skipped
@@ -45,9 +48,7 @@ fn parse_struct<'arena>(
     let end: u32;
     loop {
         let (next_token, field_name_span) = parser.next_token();
-        let field_name = if let Token::Identifier(i) = next_token {
-            SmolStr::new(i)
-        } else {
+        let Token::Identifier(field_name) = next_token else {
             cold_path();
             parser.error(
                 field_name_span,
@@ -87,7 +88,7 @@ fn parse_struct<'arena>(
         }
     }
 
-    Expr::Struct(name, Box::from(fields), (start, end).into())
+    Expr::Struct(name, parser.bump.alloc_slice_copy(&fields), (start, end).into())
 }
 
 fn parse_type_conversion_fn<'arena>(
@@ -106,7 +107,7 @@ fn parse_type_conversion_fn<'arena>(
 // Call after IF is skipped
 fn parse_inline_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'arena> {
     let condition = parse_expr_no_struct(parser);
-    let then: Box<[Expr]> = Box::new([parse_block_expr(parser)]);
+    let then = [parse_block_expr(parser)];
     let mut otherwise: Vec<Expr> = Vec::with_capacity(2);
 
     let (next_token, _) = parser.next_token();
@@ -125,9 +126,9 @@ fn parse_inline_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Exp
     }
 
     Expr::IfBlock(IfBlockExpr {
-        condition: Box::new(condition),
-        then,
-        otherwise: otherwise.into_boxed_slice(),
+        condition: parser.bump.alloc(condition),
+        then: parser.bump.alloc_slice_copy(&then),
+        otherwise: parser.bump.alloc_slice_copy(&otherwise),
         span: (start, parser.last_token_end).into(),
     })
 }
@@ -137,7 +138,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
     match t {
         Token::Int(i) => Expr::Int(i),
         Token::Float(f) => Expr::Float(f),
-        Token::String(s) => Expr::String(parse_string(s)),
+        Token::String(s) => Expr::String(parse_string(s, parser.bump).into_bump_str()),
         Token::True => Expr::Bool(true),
         Token::False => Expr::Bool(false),
         Token::Null => Expr::Null,
@@ -179,7 +180,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                         _ => Expr::NamespacedVar(namespace, (t_span.start, end).into()),
                     }
                 }
-                _ => Expr::Var(SmolStr::new(s), (t_span.start, t_span.end).into()),
+                _ => Expr::Var(s, (t_span.start, t_span.end).into()),
             }
         }
         Token::LBracket => {
@@ -203,7 +204,10 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                     parser.error(span, ParserErr::ArrayElementsMissingComma);
                 }
             }
-            Expr::Array(Box::from(elems), Box::from(elem_spans))
+            Expr::Array(
+                parser.bump.alloc_slice_copy(&elems),
+                parser.bump.alloc_slice_copy(&elem_spans),
+            )
         }
         // LParen Expr RParen
         Token::LParen => {
@@ -218,7 +222,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                 Expr::Int(i) => Expr::Int(i.wrapping_neg()),
                 Expr::Float(f) => Expr::Float(-f),
                 other => Expr::Neg(
-                    Box::new(other),
+                    parser.bump.alloc(other),
                     (t_span.start, parser.peek_token_span().start).into(),
                     (expr_start, parser.peek_token_span().start).into(),
                 ),
@@ -230,7 +234,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
             match parse_expr_with_precedence(parser, 8, allow_struct) {
                 Expr::Bool(b) => Expr::Bool(!b),
                 other => Expr::BoolNeg(
-                    Box::new(other),
+                    parser.bump.alloc(other),
                     (t_span.start, parser.peek_token_span().start).into(),
                     (expr_start, parser.peek_token_span().start).into(),
                 ),
@@ -245,7 +249,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                 Token::LParen,
                 "Function arguments must be delimited by parentheses",
             );
-            let mut args: Vec<(SmolStr, Option<TypeExpr>)> = Vec::with_capacity(2);
+            let mut args: Vec<(&str, Option<TypeExpr>)> = Vec::with_capacity(2);
             loop {
                 if parser.peek_token() == Token::RParen {
                     break;
@@ -259,7 +263,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                     );
                 };
                 args.push((
-                    SmolStr::new(arg_name),
+                    arg_name,
                     if parser.peek_token() == Token::Colon {
                         parser.next_token();
                         Some(parse_type(parser))
@@ -291,11 +295,10 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
             // } else
             if next_token == Some(Token::LBrace) {
                 // returns null
-                // let return_type = SmolStr::new_static("null");
                 let fn_code = parse_block(parser);
                 Expr::AnonymousFunction(
-                    Box::from(args),
-                    Box::from(fn_code),
+                    parser.bump.alloc_slice_copy(&args),
+                    parser.bump.alloc_slice_copy(&fn_code),
                     (start, parser.last_token_end).into(),
                 )
             } else {
@@ -312,7 +315,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
         }
         // map
         Token::LBrace => {
-            let mut kv_pairs: Vec<(Expr, Span, Expr, Span)> = Vec::with_capacity(2);
+            let mut kv_pairs = bumpalo::collections::Vec::with_capacity_in(2, parser.bump);
             let end: u32;
             loop {
                 let key_start = parser.peek_token_span().start;
@@ -349,7 +352,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                     )
                 }
             }
-            Expr::Map(Box::from(kv_pairs), (t_span.start, end).into())
+            Expr::Map(kv_pairs.into_bump_slice(), (t_span.start, end).into())
         }
         unexpected => {
             cold_path();

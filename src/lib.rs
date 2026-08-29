@@ -44,6 +44,7 @@ pub fn get_output() -> String {
 #[wasm_bindgen]
 pub fn run(code: String) {
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
+    let bump = Bump::new();
     let (
         instructions,
         mut registers,
@@ -55,7 +56,7 @@ pub fn run(code: String) {
         allocated_call_depth,
         struct_fields,
         types,
-    ) = compile(code, "playground.kl", false);
+    ) = compile(&code, "playground.kl", false, &bump);
     vm::execute(
         &instructions,
         &mut registers,
@@ -78,6 +79,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
     let code = unsafe { CStr::from_ptr(code) }.to_string_lossy().to_string();
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let _ = catch_unwind(|| {
+        let bump = Bump::new();
         let (
             instructions,
             mut registers,
@@ -89,7 +91,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
             allocated_call_depth,
             struct_fields,
             types,
-        ) = compile(code, "embedded.kl", false);
+        ) = compile(&code, "embedded.kl", false, &bump);
         vm::execute(
             &instructions,
             &mut registers,

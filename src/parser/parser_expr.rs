@@ -9,41 +9,40 @@ use crate::compiler::expr::Expr;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
-use smol_strc::SmolStr;
-use smol_strc::ToSmolStr;
 use std::hint::unreachable_unchecked;
 
 pub fn parse_expr_with_precedence<'arena>(
-    input: &mut Parser<'arena>,
+    parser: &mut Parser<'arena>,
     min_precedence: u8,
     allow_struct: bool,
 ) -> Expr<'arena> {
-    let lhs_start = input.peek_token_span().start;
-    let mut lhs = parse_term(input, allow_struct);
-    let end = input.last_token_end;
-    lhs = parse_postfix_op(input, lhs, (lhs_start, end).into());
-    if input.peek_token_opt() == Some(Token::Colon) {
-        input.next_token();
-        let t = parse_type(input);
-        lhs = Expr::TypeEq(Box::new(lhs), t, (lhs_start, input.last_token_end).into());
+    let lhs_start = parser.peek_token_span().start;
+    let mut lhs = parse_term(parser, allow_struct);
+    let end = parser.last_token_end;
+    lhs = parse_postfix_op(parser, lhs, (lhs_start, end).into());
+    if parser.peek_token_opt() == Some(Token::Colon) {
+        parser.next_token();
+        let t = parse_type(parser);
+        lhs = Expr::TypeEq(parser.bump.alloc(lhs), t, (lhs_start, parser.last_token_end).into());
     }
-    let mut lhs_end = input.last_token_end;
-    while let Some(peek) = input.peek_token_opt() {
+    let mut lhs_end = parser.last_token_end;
+    while let Some(peek) = parser.peek_token_opt() {
         let Some((op, op_precedence)) = check_op(peek, min_precedence) else {
             break;
         };
-        input.next_token();
-        let rhs_start = input.peek_token_span().start;
-        let rhs = parse_expr_with_precedence(input, op_precedence, allow_struct);
-        let rhs_end = input.last_token_end;
-        lhs = add_op(input, op, lhs, rhs, (lhs_start, lhs_end).into(), (rhs_start, rhs_end).into());
+        parser.next_token();
+        let rhs_start = parser.peek_token_span().start;
+        let rhs = parse_expr_with_precedence(parser, op_precedence, allow_struct);
+        let rhs_end = parser.last_token_end;
+        lhs =
+            add_op(parser, op, lhs, rhs, (lhs_start, lhs_end).into(), (rhs_start, rhs_end).into());
         lhs_end = rhs_end;
     }
     lhs
 }
 
 pub fn add_op<'arena>(
-    parser: &Parser<'_>,
+    parser: &Parser<'arena>,
     op: Token,
     lhs: Expr<'arena>,
     rhs: Expr<'arena>,
@@ -54,50 +53,60 @@ pub fn add_op<'arena>(
         Token::OpOr => match (lhs, rhs) {
             (Expr::Bool(false), c) | (c, Expr::Bool(false)) => c,
             (Expr::Bool(true), _) => Expr::Bool(true),
-            (lhs, rhs) => Expr::BoolOr(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => {
+                Expr::BoolOr(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r)
+            }
         },
         Token::OpAnd => match (lhs, rhs) {
             (Expr::Bool(false), _) => Expr::Bool(false),
             (Expr::Bool(true), c) | (c, Expr::Bool(true)) => c,
-            (lhs, rhs) => Expr::BoolAnd(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => {
+                Expr::BoolAnd(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r)
+            }
         },
-        Token::OpEq => Expr::Eq(Box::new(lhs), Box::new(rhs)),
-        Token::OpNEq => Expr::NotEq(Box::new(lhs), Box::new(rhs)),
+        Token::OpEq => Expr::Eq(parser.bump.alloc(lhs), parser.bump.alloc(rhs)),
+        Token::OpNEq => Expr::NotEq(parser.bump.alloc(lhs), parser.bump.alloc(rhs)),
         Token::OpInf => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x < y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x < y),
-            (lhs, rhs) => Expr::Inf(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => Expr::Inf(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         Token::OpInfEq => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x <= y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x <= y),
-            (lhs, rhs) => Expr::InfEq(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => {
+                Expr::InfEq(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r)
+            }
         },
         Token::OpSup => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x > y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x > y),
-            (lhs, rhs) => Expr::Sup(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => Expr::Sup(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         Token::OpSupEq => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Bool(x >= y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Bool(x >= y),
-            (lhs, rhs) => Expr::SupEq(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => {
+                Expr::SupEq(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r)
+            }
         },
         Token::OpAdd => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x + y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x + y),
-            (Expr::String(x), Expr::String(y)) => Expr::String(format_args!("{x}{y}").to_smolstr()),
-            (lhs, rhs) => Expr::Add(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (Expr::String(x), Expr::String(y)) => {
+                Expr::String(bumpalo::format!(in parser.bump, "{}{}",x,y).into_bump_str())
+            }
+            (lhs, rhs) => Expr::Add(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         Token::OpSub => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x - y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x - y),
-            (lhs, rhs) => Expr::Sub(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => Expr::Sub(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         Token::OpMul => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x * y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x * y),
-            (lhs, rhs) => Expr::Mul(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => Expr::Mul(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         Token::OpDiv => match (lhs, rhs) {
             (_, Expr::Int(0)) => {
@@ -106,7 +115,7 @@ pub fn add_op<'arena>(
             }
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x / y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x / y),
-            (lhs, rhs) => Expr::Div(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => Expr::Div(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         Token::OpMod => match (lhs, rhs) {
             (_, Expr::Int(0) | Expr::Float(0.0)) => {
@@ -115,7 +124,7 @@ pub fn add_op<'arena>(
             }
             (Expr::Int(x), Expr::Int(y)) => Expr::Int(x % y),
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x % y),
-            (lhs, rhs) => Expr::Mod(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => Expr::Mod(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         Token::OpPow => match (lhs, rhs) {
             (Expr::Int(x), Expr::Int(y)) => {
@@ -128,7 +137,7 @@ pub fn add_op<'arena>(
             }
             (Expr::Float(x), Expr::Float(y)) => Expr::Float(x.powf(y)),
             (Expr::Float(x), Expr::Int(y)) => Expr::Float(x.powi(y)),
-            (lhs, rhs) => Expr::Pow(Box::new(lhs), Box::new(rhs), span_l, span_r),
+            (lhs, rhs) => Expr::Pow(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         _ => unsafe { unreachable_unchecked() },
     }
@@ -171,9 +180,9 @@ fn parse_postfix_op<'arena>(
                     let end = parser.last_token_end;
                     base_span.end = end;
                     base = Expr::ArrayGetSlice(
-                        Box::new(base),
-                        Box::from(Expr::Int(0)),
-                        Box::new(upper_bound),
+                        parser.bump.alloc(base),
+                        parser.bump.alloc(Expr::Int(0)),
+                        parser.bump.alloc(upper_bound),
                         base_span,
                     );
                 } else {
@@ -182,17 +191,20 @@ fn parse_postfix_op<'arena>(
                     if next_token == Token::RBracket {
                         // array index
                         base_span.end = next_token_span.end;
-                        base =
-                            Expr::ArrayGetIndex(Box::new(base), Box::new(lower_bound), base_span);
+                        base = Expr::ArrayGetIndex(
+                            parser.bump.alloc(base),
+                            parser.bump.alloc(lower_bound),
+                            base_span,
+                        );
                     } else {
                         let upper_bound = parse_expr(parser);
                         parser.next_token_expect(Token::RBracket, "Unmatched ']'. Invalid slice.");
                         let end = parser.last_token_end;
                         base_span.end = end;
                         base = Expr::ArrayGetSlice(
-                            Box::new(base),
-                            Box::from(lower_bound),
-                            Box::new(upper_bound),
+                            parser.bump.alloc(base),
+                            parser.bump.alloc(lower_bound),
+                            parser.bump.alloc(upper_bound),
                             base_span,
                         );
                     }
@@ -229,8 +241,8 @@ fn parse_postfix_op<'arena>(
 
                     let obj_function_call = Expr::ObjFunctionCall(FunctionCallExpr {
                         qualified_name: QualifiedName::new(&[id], parser.bump),
-                        args: args.into_boxed_slice(),
-                        spans: spans.into_boxed_slice(),
+                        args: parser.bump.alloc_slice_copy(&args),
+                        spans: parser.bump.alloc_slice_copy(&spans),
                     });
                     base_span.end = end;
                     base = obj_function_call;
@@ -279,14 +291,14 @@ fn parse_postfix_op<'arena>(
 
                     let obj_function_call = Expr::ObjFunctionCall(FunctionCallExpr {
                         qualified_name: QualifiedName::new(&namespace, parser.bump),
-                        args: args.into_boxed_slice(),
-                        spans: spans.into_boxed_slice(),
+                        args: parser.bump.alloc_slice_copy(&args),
+                        spans: parser.bump.alloc_slice_copy(&spans),
                     });
                     base_span.end = end;
                     base = obj_function_call;
                 } else {
                     let get_struct_field =
-                        Expr::GetStructField(Box::new(base), SmolStr::new(id), base_span, id_span);
+                        Expr::GetStructField(parser.bump.alloc(base), id, base_span, id_span);
                     base_span.end = id_span.end;
                     base = get_struct_field;
                 }

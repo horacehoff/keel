@@ -1,54 +1,53 @@
 use super::type_system::TypeExpr;
 use bumpalo::Bump;
-use smol_strc::SmolStr;
-use std::{hint::unreachable_unchecked, rc::Rc};
+use std::hint::unreachable_unchecked;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Copy)]
 pub struct IfBlockExpr<'arena> {
-    pub condition: Box<Expr<'arena>>,
+    pub condition: &'arena Expr<'arena>,
     /// if .. { <THEN> }
-    pub then: Box<[Expr<'arena>]>,
+    pub then: &'arena [Expr<'arena>],
     /// if .. {..} else { <OTHERWISE> }
-    pub otherwise: Box<[Expr<'arena>]>,
+    pub otherwise: &'arena [Expr<'arena>],
     pub span: Span,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
 pub struct DylibFnExpr<'arena> {
-    pub name: SmolStr,
+    pub name: &'arena str,
     /// Invariant:
     /// - `args.len() > 0`
     /// - `args[0]` is the function's return type
-    pub args: Box<[(TypeExpr<'arena>, Span)]>,
+    pub args: &'arena [(TypeExpr<'arena>, Span)],
     pub name_span: Span,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
 pub struct DylibImportExpr<'arena> {
-    pub path: SmolStr,
-    pub functions: Box<[DylibFnExpr<'arena>]>,
+    pub path: &'arena str,
+    pub functions: &'arena [DylibFnExpr<'arena>],
     pub span: Span,
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Copy)]
 pub struct StructFieldExpr<'arena> {
-    pub name: SmolStr,
+    pub name: &'arena str,
     pub value: Expr<'arena>,
     pub name_span: Span,
     pub value_span: Span,
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Copy)]
 pub struct FunctionCallExpr<'arena> {
     pub qualified_name: QualifiedName<'arena>,
-    pub args: Box<[Expr<'arena>]>,
+    pub args: &'arena [Expr<'arena>],
     /// Invariant
     /// - `spans.len() >= 1`
     /// - `spans[0]` is the span for the whole function call
-    pub spans: Box<[Span]>,
+    pub spans: &'arena [Span],
 }
 
-impl<'arena> FunctionCallExpr<'arena> {
+impl FunctionCallExpr<'_> {
     #[inline(always)]
     pub fn get_call_span(&self) -> Span {
         unsafe { *self.spans.get_unchecked(0) }
@@ -64,19 +63,19 @@ impl<'arena> FunctionCallExpr<'arena> {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Copy)]
 pub struct IntForLoopExpr<'arena> {
-    pub var_name: SmolStr,
+    pub var_name: &'arena str,
     /// Invariant:
     /// - `code.len() >= 2`
     /// - `code[0]` is the lower bound
     /// - `code[1]` is the lower bound
-    pub code: Box<[Expr<'arena>]>,
+    pub code: &'arena [Expr<'arena>],
     pub lower_bound_span: Span,
     pub upper_bound_span: Span,
 }
 
-impl<'arena> IntForLoopExpr<'arena> {
+impl IntForLoopExpr<'_> {
     #[inline(always)]
     pub fn get_lower_bound(&self) -> &Expr<'_> {
         unsafe { self.code.get_unchecked(0) }
@@ -91,38 +90,38 @@ impl<'arena> IntForLoopExpr<'arena> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
 pub struct FunctionDeclarationArgumentExpr<'arena> {
-    pub name: SmolStr,
+    pub name: &'arena str,
     pub enforced_type: Option<TypeExpr<'arena>>,
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Copy)]
 pub struct FunctionDeclarationExpr<'arena> {
-    pub name: SmolStr,
-    pub args: Box<[FunctionDeclarationArgumentExpr<'arena>]>,
+    pub name: &'arena str,
+    pub args: &'arena [FunctionDeclarationArgumentExpr<'arena>],
     pub code: &'arena [Expr<'arena>],
     pub span: Span,
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Copy)]
 pub struct StructFieldAssignmentExpr<'arena> {
-    pub struct_expr: Box<Expr<'arena>>,
-    pub field: SmolStr,
-    pub field_value: Box<Expr<'arena>>,
+    pub struct_expr: &'arena Expr<'arena>,
+    pub field: &'arena str,
+    pub field_value: &'arena Expr<'arena>,
     /// Invariant:
     /// - `spans.len() == 3`
     /// - `spans[0]` = struct_span
     /// - `spans[1]` = field_span
     /// - `spans[2]` = value_span
-    pub spans: Box<[Span]>,
+    pub spans: &'arena [Span],
 }
 
 /// A fully-qualified symbol name.
 /// Invariant:
 /// - `len > 0`
 /// - last element is the symbol's name
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
 pub struct QualifiedName<'arena>(&'arena [&'arena str]);
 
 impl<'arena> QualifiedName<'arena> {
@@ -150,91 +149,91 @@ impl<'arena> QualifiedName<'arena> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub struct VariableDeclarationExpr<'arena> {
-    pub name: SmolStr,
+    pub name: &'arena str,
     pub value: &'arena Expr<'arena>,
-    pub var_type: Option<Box<(TypeExpr<'arena>, Span)>>,
+    pub var_type: Option<&'arena (TypeExpr<'arena>, Span)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum Expr<'arena> {
     Float(f64),
     Int(i32),
     Bool(bool),
     Null,
-    String(SmolStr),
-    Var(SmolStr, Span),
+    String(&'arena str),
+    Var(&'arena str, Span),
     NamespacedVar(QualifiedName<'arena>, Span),
 
     /// Array(contents, [entire_array, elem_spans...])
-    Array(Box<[Self]>, Box<[Span]>),
+    Array(&'arena [Self], &'arena [Span]),
     /// Map(key-value pairs, span)
-    Map(Box<[(Self, Span, Self, Span)]>, Span),
+    Map(&'arena [(Self, Span, Self, Span)], Span),
     /// Struct(name, fields, span)
-    Struct(QualifiedName<'arena>, Box<[StructFieldExpr<'arena>]>, Span),
+    Struct(QualifiedName<'arena>, &'arena [StructFieldExpr<'arena>], Span),
     /// StructDeclare(name, fields, span)
-    StructDeclare(SmolStr, Box<[(SmolStr, TypeExpr<'arena>, Span)]>, Span),
+    StructDeclare(&'arena str, &'arena [(&'arena str, TypeExpr<'arena>, Span)], Span),
     /// GetStructField(struct_expr, field, struct_span, field_span, value_span)
-    GetStructField(Box<Self>, SmolStr, Span, Span),
+    GetStructField(&'arena Self, &'arena str, Span, Span),
     SetStructField(StructFieldAssignmentExpr<'arena>),
     /// VarDeclare(name, value),
     VarDeclare(VariableDeclarationExpr<'arena>),
     /// VarDeclare(name, value, start, end)
-    VarAssign(SmolStr, Box<Self>, Span),
-    NamespacedVarAssign(QualifiedName<'arena>, Box<Self>, Span),
+    VarAssign(&'arena str, &'arena Self, Span),
+    NamespacedVarAssign(QualifiedName<'arena>, &'arena Self, Span),
     IfBlock(IfBlockExpr<'arena>),
 
     /// AnonymousFunction(args, code, span)
-    AnonymousFunction(Box<[(SmolStr, Option<TypeExpr<'arena>>)]>, Box<[Self]>, Span),
-    WhileBlock(Box<Self>, Box<[Self]>),
+    AnonymousFunction(&'arena [(&'arena str, Option<TypeExpr<'arena>>)], &'arena [Self], Span),
+    WhileBlock(&'arena Self, &'arena [Self]),
     FunctionCall(FunctionCallExpr<'arena>),
     ObjFunctionCall(FunctionCallExpr<'arena>),
     FunctionDecl(FunctionDeclarationExpr<'arena>),
 
-    ReturnVal(Box<Option<Self>>),
+    ReturnVal(Option<&'arena Self>),
 
-    ArrayGetIndex(Box<Self>, Box<Self>, Span),
+    ArrayGetIndex(&'arena Self, &'arena Self, Span),
     /// ArrayGetSlice(array, range_start, range_end, span)
-    ArrayGetSlice(Box<Self>, Box<Self>, Box<Self>, Span),
-    ArrayModify(Box<Self>, Box<Self>, Box<Self>, Span, Span),
+    ArrayGetSlice(&'arena Self, &'arena Self, &'arena Self, Span),
+    ArrayModify(&'arena Self, &'arena Self, &'arena Self, Span, Span),
 
     /// ForLoop(loop_var_name, loop_array+code, obj_markers)
-    ForLoop(SmolStr, Box<Self>, Box<[Self]>, Span),
+    ForLoop(&'arena str, &'arena Self, &'arena [Self], Span),
     IntForLoop(IntForLoopExpr<'arena>),
     ImportDylib(DylibImportExpr<'arena>),
 
     /// ImportFile(path,alias ,(start, end))
-    ImportFile(SmolStr, Option<SmolStr>, Span),
+    ImportFile(&'arena str, Option<&'arena str>, Span),
 
     Break,
     Continue,
 
-    EvalBlock(Box<[Self]>),
-    LoopBlock(Box<[Self]>),
+    EvalBlock(&'arena [Self]),
+    LoopBlock(&'arena [Self]),
 
     /// TryCatchBlock(try_code, err_var, catch_code)
-    TryCatchBlock(Box<[Self]>, SmolStr, Box<[Self]>),
+    TryCatchBlock(&'arena [Self], &'arena str, &'arena [Self]),
 
     /// TypeEq(value, type, span)
-    TypeEq(Box<Self>, TypeExpr<'arena>, Span),
+    TypeEq(&'arena Self, TypeExpr<'arena>, Span),
 
-    Mul(Box<Self>, Box<Self>, Span, Span),
-    Div(Box<Self>, Box<Self>, Span, Span),
-    Add(Box<Self>, Box<Self>, Span, Span),
-    Sub(Box<Self>, Box<Self>, Span, Span),
-    Mod(Box<Self>, Box<Self>, Span, Span),
-    Pow(Box<Self>, Box<Self>, Span, Span),
-    Eq(Box<Self>, Box<Self>),
-    NotEq(Box<Self>, Box<Self>),
-    Sup(Box<Self>, Box<Self>, Span, Span),
-    SupEq(Box<Self>, Box<Self>, Span, Span),
-    Inf(Box<Self>, Box<Self>, Span, Span),
-    InfEq(Box<Self>, Box<Self>, Span, Span),
-    BoolAnd(Box<Self>, Box<Self>, Span, Span),
-    BoolOr(Box<Self>, Box<Self>, Span, Span),
-    BoolNeg(Box<Self>, Span, Span),
-    Neg(Box<Self>, Span, Span),
+    Mul(&'arena Self, &'arena Self, Span, Span),
+    Div(&'arena Self, &'arena Self, Span, Span),
+    Add(&'arena Self, &'arena Self, Span, Span),
+    Sub(&'arena Self, &'arena Self, Span, Span),
+    Mod(&'arena Self, &'arena Self, Span, Span),
+    Pow(&'arena Self, &'arena Self, Span, Span),
+    Eq(&'arena Self, &'arena Self),
+    NotEq(&'arena Self, &'arena Self),
+    Sup(&'arena Self, &'arena Self, Span, Span),
+    SupEq(&'arena Self, &'arena Self, Span, Span),
+    Inf(&'arena Self, &'arena Self, Span, Span),
+    InfEq(&'arena Self, &'arena Self, Span, Span),
+    BoolAnd(&'arena Self, &'arena Self, Span, Span),
+    BoolOr(&'arena Self, &'arena Self, Span, Span),
+    BoolNeg(&'arena Self, Span, Span),
+    Neg(&'arena Self, Span, Span),
 }
 
 #[cold]
@@ -259,17 +258,17 @@ pub const fn symbol_of_expr(expr: &Expr) -> &'static str {
     }
 }
 
-pub fn code_modifies_variable(var_name: &SmolStr, code: &[Expr]) -> bool {
+pub fn code_modifies_variable(var_name: &str, code: &[Expr]) -> bool {
     code.iter().any(|expr| match expr {
-        Expr::VarAssign(n, _, _) => n == var_name,
+        Expr::VarAssign(n, _, _) => *n == var_name,
         Expr::IfBlock(if_block) => {
-            code_modifies_variable(var_name, &if_block.then)
-                || code_modifies_variable(var_name, &if_block.otherwise)
+            code_modifies_variable(var_name, if_block.then)
+                || code_modifies_variable(var_name, if_block.otherwise)
         }
-        Expr::WhileBlock(_, code)
-        | Expr::EvalBlock(code)
-        | Expr::LoopBlock(code)
-        | Expr::ForLoop(_, _, code, _) => code_modifies_variable(var_name, code),
+        Expr::WhileBlock(_, code) | Expr::ForLoop(_, _, code, _) => {
+            code_modifies_variable(var_name, code)
+        }
+        Expr::EvalBlock(code) | Expr::LoopBlock(code) => code_modifies_variable(var_name, code),
         Expr::IntForLoop(for_loop) => code_modifies_variable(var_name, for_loop.get_loop_code()),
         _ => false,
     })
@@ -280,20 +279,21 @@ pub fn var_assign<'arena>(
     value: Expr<'arena>,
     expr_span: Span,
     value_span: Span,
+    bump: &'arena Bump,
 ) -> Expr<'arena> {
     if let Expr::Var(n, s) = target {
-        Expr::VarAssign(n, Box::from(value), s)
+        Expr::VarAssign(n, bump.alloc(value), s)
     } else if let Expr::ArrayGetIndex(base, idx, _) = target {
-        Expr::ArrayModify(base, idx, Box::from(value), expr_span, value_span)
+        Expr::ArrayModify(base, idx, bump.alloc(value), expr_span, value_span)
     } else if let Expr::GetStructField(struct_expr, field, struct_span, field_span) = target {
         Expr::SetStructField(StructFieldAssignmentExpr {
             struct_expr,
             field,
-            field_value: Box::from(value),
-            spans: Box::new([struct_span, field_span, value_span]),
+            field_value: bump.alloc(value),
+            spans: bump.alloc_slice_copy(&[struct_span, field_span, value_span]),
         })
     } else if let Expr::NamespacedVar(n, s) = target {
-        Expr::NamespacedVarAssign(n, Box::from(value), s)
+        Expr::NamespacedVarAssign(n, bump.alloc(value), s)
     } else {
         unsafe { unreachable_unchecked() }
     }

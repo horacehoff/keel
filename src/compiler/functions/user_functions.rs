@@ -19,7 +19,6 @@ use crate::compiler::expr::FunctionCallExpr;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
-use smol_strc::SmolStr;
 use std::collections::HashSet;
 
 /// Computes whether the function `state.fns[fn_id]` is recursive.
@@ -28,7 +27,7 @@ pub fn is_function_recursive(fn_id: usize, state: &mut State<'_, '_>) -> bool {
     if let Some(is_recursive) = state.functions[fn_id].is_recursive {
         is_recursive
     } else {
-        let name = state.functions[fn_id].name.as_str();
+        let name = state.functions[fn_id].name;
         let mut visited = HashSet::new();
         visited.insert(name);
         let is_recursive = can_reach(name, name, state.functions, &mut visited);
@@ -56,10 +55,8 @@ pub fn compile_function_impl(
     }
     // If it hasn't, compile a new specialization of this function
     let is_recursive = is_function_recursive(fn_id, state);
-    let fn_args =
-        state.functions[fn_id].args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>();
-    // let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
-    let fn_name = &state.functions[fn_id].name.clone();
+    let fn_args = state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
+    let fn_name = &state.functions[fn_id].name;
     compile_function(
         output,
         ctx,
@@ -84,7 +81,7 @@ pub fn handle_user_function<'arena>(
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
 ) -> Option<u16> {
-    let args = &function_call.args;
+    let args = function_call.args;
     let fn_name = function_call.qualified_name.get_name();
     let span = function_call.get_call_span();
     let args_indexes = &function_call.get_arg_spans();
@@ -228,7 +225,7 @@ pub fn compile_function<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     function_id: usize,
-    fn_args: &[SmolStr],
+    fn_args: &[&'arena str],
     fn_name: &str,
     infered_arg_types: &[DataType],
     fn_code: &'arena [Expr],
@@ -244,7 +241,7 @@ pub fn compile_function<'arena>(
             // Allocate a registers slot for each func arg
             state.registers.push(NULL);
             Variable {
-                name: x.clone(),
+                name: x,
                 register_id: (state.registers.len() - 1) as u16,
                 declared_type: infered_arg_types[i].clone(),
                 var_type: infered_arg_types[i].clone(),
@@ -253,7 +250,10 @@ pub fn compile_function<'arena>(
         .collect();
 
     // Get the arg destination ids
-    let args_loc = v_temp.iter().map(|x| x.register_id).collect::<Vec<u16>>();
+    let mut args_loc = bumpalo::collections::Vec::with_capacity_in(v_temp.len(), state.bump);
+    for x in &v_temp {
+        args_loc.push(x.register_id);
+    }
 
     // Temporarily jump over function to prevent executing it right now
     // This is a placeholder that's modified later on
@@ -270,11 +270,11 @@ pub fn compile_function<'arena>(
     infered_arg_types.iter().enumerate().for_each(|(i, infered_type)| {
         if let DataType::Fn(fn_id) = infered_type {
             anon_fns.push(state.scope(fn_file_idx).symbols.len());
-            state.scope_mut(fn_file_idx).symbols.push((fn_args[i].clone(), SymbolKind::Fn(*fn_id)));
-            state.new_var(fn_args[i].clone(), 0, DataType::Fn(*fn_id));
+            state.scope_mut(fn_file_idx).symbols.push((fn_args[i], SymbolKind::Fn(*fn_id)));
+            state.new_var(fn_args[i], 0, DataType::Fn(*fn_id));
         } else {
             // 0 => placeholder id, it's never used
-            state.new_var(fn_args[i].clone(), 0, infered_type.clone());
+            state.new_var(fn_args[i], 0, infered_type.clone());
         }
     });
     let fn_type = track_returns(fn_code, ctx.with_file_idx(fn_file_idx), state, fn_name);
@@ -288,13 +288,10 @@ pub fn compile_function<'arena>(
 
     state.v.truncate(v_len_before_args);
 
+    let args_loc = args_loc.into_bump_slice();
     // Add this func specialization to the func's metadata
     let func = state.functions.get_mut(function_id).unwrap();
-    func.impls.push(FunctionImpl {
-        loc,
-        args_loc: Box::from(args_loc.as_slice()),
-        arg_types: Box::from(infered_arg_types),
-    });
+    func.impls.push(FunctionImpl { loc, args_loc, arg_types: Box::from(infered_arg_types) });
     // Cache the return type
     if !func.return_type_cache.iter().any(|(args, _)| **args == *infered_arg_types) {
         func.return_type_cache.push((Box::from(infered_arg_types), return_type));

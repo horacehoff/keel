@@ -17,7 +17,6 @@ use crate::parser::Parser;
 use crate::parser::TypeExpr;
 use crate::parser::parse_code;
 use crate::parser::parse_type;
-use smol_strc::SmolStr;
 
 // call right after peeking Token::If
 pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'arena> {
@@ -36,9 +35,9 @@ pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'
         Box::new([])
     };
     Expr::IfBlock(IfBlockExpr {
-        condition: Box::new(condition),
-        then: output_code.into_boxed_slice(),
-        otherwise,
+        condition: parser.bump.alloc(condition),
+        then: parser.bump.alloc_slice_copy(&output_code),
+        otherwise: parser.bump.alloc_slice_copy(&otherwise),
         span: (start, parser.last_token_end).into(),
     })
 }
@@ -63,12 +62,12 @@ pub fn parse_block_expr<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     code
 }
 
-pub fn parse_while_block<'arena>(input: &mut Parser<'arena>) -> Expr<'arena> {
-    let t = input.next_token();
+pub fn parse_while_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
+    let t = parser.next_token();
     debug_assert_eq!(t.0, Token::While);
-    let while_condition = parse_expr_no_struct(input);
-    let while_code = parse_block(input);
-    Expr::WhileBlock(Box::new(while_condition), Box::from(while_code))
+    let while_condition = parse_expr_no_struct(parser);
+    let while_code = parse_block(parser);
+    Expr::WhileBlock(parser.bump.alloc(while_condition), parser.bump.alloc_slice_copy(&while_code))
 }
 
 /// Parses `ForLoop` and `IntForLoop`
@@ -76,9 +75,7 @@ pub fn parse_for_loop<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let t = parser.next_token();
     debug_assert_eq!(t.0, Token::For);
     let (i_token, span) = parser.next_token();
-    let id = if let Token::Identifier(id) = i_token {
-        SmolStr::new(id)
-    } else {
+    let Token::Identifier(id) = i_token else {
         cold_path();
         parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), i_token, ""));
     };
@@ -104,7 +101,7 @@ pub fn parse_for_loop<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
 
         Expr::IntForLoop(IntForLoopExpr {
             var_name: id,
-            code: code.into_boxed_slice(),
+            code: parser.bump.alloc_slice_copy(&code),
             lower_bound_span: (start, start).into(),
             upper_bound_span: (start2, end2).into(),
         })
@@ -128,7 +125,7 @@ pub fn parse_for_loop<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
 
             Expr::IntForLoop(IntForLoopExpr {
                 var_name: id,
-                code: code.into_boxed_slice(),
+                code: parser.bump.alloc_slice_copy(&code),
                 lower_bound_span: (start, end).into(),
                 upper_bound_span: (start2, end2).into(),
             })
@@ -136,8 +133,8 @@ pub fn parse_for_loop<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             let for_loop_code = parse_block(parser);
             Expr::ForLoop(
                 id,
-                Box::new(for_collection),
-                Box::from(for_loop_code),
+                parser.bump.alloc(for_collection),
+                parser.bump.alloc_slice_copy(&for_loop_code),
                 (start, end).into(),
             )
         }
@@ -146,16 +143,14 @@ pub fn parse_for_loop<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
 
 #[inline(always)]
 pub fn parse_eval_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
-    Expr::EvalBlock(Box::from(parse_block(parser)))
+    Expr::EvalBlock(parser.bump.alloc_slice_copy(&parse_block(parser)))
 }
 
 pub fn parse_function<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Function);
     let (t_fn_id, span) = parser.next_token();
-    let fn_name = if let Token::Identifier(fn_name) = t_fn_id {
-        SmolStr::new(fn_name)
-    } else {
+    let Token::Identifier(fn_name) = t_fn_id else {
         cold_path();
         parser.error(
             span,
@@ -172,7 +167,7 @@ pub fn parse_function<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
         let (arg, span) = parser.next_token();
         if let Token::Identifier(arg) = arg {
             args.push(FunctionDeclarationArgumentExpr {
-                name: SmolStr::new(arg),
+                name: arg,
                 enforced_type: if parser.peek_token() == Token::Colon {
                     parser.next_token();
                     Some(parse_type(parser))
@@ -199,10 +194,10 @@ pub fn parse_function<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             parser.error(span, ParserErr::ArgumentsMissingCommaSeparator);
         }
     }
-    let fn_code = parser.bump.alloc_slice_fill_iter(parse_block(parser));
+    let fn_code = parser.bump.alloc_slice_copy(&parse_block(parser));
     Expr::FunctionDecl(FunctionDeclarationExpr {
         name: fn_name,
-        args: Box::from(args),
+        args: parser.bump.alloc_slice_copy(&args),
         code: fn_code,
         span,
     })
@@ -213,8 +208,8 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
     debug_assert_eq!(t, Token::Try);
     let try_code = parse_block(parser);
     let mut has_catch = false;
-    let mut catch_blocks: Vec<(SmolStr, Vec<Expr>)> = Vec::with_capacity(1);
-    let mut catch_all_var = SmolStr::new_static("e");
+    let mut catch_blocks: Vec<(&str, Vec<Expr>)> = Vec::with_capacity(1);
+    let mut catch_all_var = "e";
     let mut catch_all_code = None;
     let end: u32;
     loop {
@@ -227,13 +222,13 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
         let (next_token, _) = parser.next_token();
         if let Token::Identifier(i) = next_token {
             // catch-all
-            catch_all_var = SmolStr::new(i);
+            catch_all_var = i;
             catch_all_code = Some(parse_block(parser));
             end = parser.peek_token_span().start;
             has_catch = true;
             break;
         } else if let Token::String(s) = next_token {
-            catch_blocks.push((SmolStr::new(parse_string(s)), parse_block(parser)));
+            catch_blocks.push((parse_string(s, parser.bump).into_bump_str(), parse_block(parser)));
             has_catch = true;
         }
     }
@@ -241,55 +236,59 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
         cold_path();
         parser.error((start, end).into(), ParserErr::TryBlockNoCatch);
     }
-    let usr_var = Expr::Var(catch_all_var.clone(), (start, end).into());
-    let else_code: Box<[Expr]> = if let Some(c) = catch_all_code {
-        Box::from(c)
+    let usr_var = Expr::Var(catch_all_var, (start, end).into());
+    let else_code = if let Some(c) = catch_all_code {
+        c
     } else {
-        Box::from([Expr::FunctionCall(FunctionCallExpr {
+        vec![Expr::FunctionCall(FunctionCallExpr {
             qualified_name: QualifiedName::new(&["throw"], parser.bump),
-            args: Box::new([usr_var]),
-            spans: Box::from([(start, end).into()]),
-        })])
+            args: parser.bump.alloc_slice_copy(&[usr_var]),
+            spans: parser.bump.alloc_slice_copy(&[(start, end).into()]),
+        })]
     };
 
     if catch_blocks.is_empty() {
-        return Expr::TryCatchBlock(Box::from(try_code), catch_all_var, else_code);
+        return Expr::TryCatchBlock(
+            parser.bump.alloc_slice_copy(&try_code),
+            catch_all_var,
+            parser.bump.alloc_slice_copy(&else_code),
+        );
     }
 
     let mut output_code: Vec<Expr> = Vec::with_capacity(2);
-    let mut otherwise_branches: Vec<(Expr, Box<[Expr]>)> = Vec::with_capacity(2);
+    let mut otherwise_branches: Vec<(Expr, Vec<Expr>)> = Vec::with_capacity(2);
     let mut main_condition = Expr::Null;
 
     let mut first = true;
     for (e, c) in catch_blocks {
         let condition = Expr::Eq(
-            Box::new(Expr::String(e)),
-            Box::new(Expr::Var(catch_all_var.clone(), (start, end).into())),
+            parser.bump.alloc(Expr::String(e)),
+            parser.bump.alloc(Expr::Var(catch_all_var, (start, end).into())),
         );
         if first {
             first = false;
             main_condition = condition;
             output_code.extend(c);
         } else {
-            otherwise_branches.push((condition, c.into_boxed_slice()));
+            otherwise_branches.push((condition, c));
         }
     }
     let mut otherwise = else_code;
     for (condition, code) in otherwise_branches.into_iter().rev() {
-        otherwise = Box::new([Expr::IfBlock(IfBlockExpr {
-            condition: Box::new(condition),
-            then: code,
-            otherwise,
+        otherwise = vec![Expr::IfBlock(IfBlockExpr {
+            condition: parser.bump.alloc(condition),
+            then: parser.bump.alloc_slice_copy(&code),
+            otherwise: parser.bump.alloc_slice_copy(&otherwise),
             span: (start, end).into(),
-        })]);
+        })];
     }
     Expr::TryCatchBlock(
-        Box::from(try_code),
+        parser.bump.alloc_slice_copy(&try_code),
         catch_all_var,
-        Box::from([Expr::IfBlock(IfBlockExpr {
-            condition: Box::from(main_condition),
-            then: output_code.into_boxed_slice(),
-            otherwise,
+        parser.bump.alloc_slice_copy(&[Expr::IfBlock(IfBlockExpr {
+            condition: parser.bump.alloc(main_condition),
+            then: parser.bump.alloc_slice_copy(&output_code),
+            otherwise: parser.bump.alloc_slice_copy(&otherwise),
             span: (start, end).into(),
         })]),
     )
@@ -299,19 +298,15 @@ pub fn parse_struct_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena>
     let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Struct);
     let (next_token, span) = parser.next_token();
-    let struct_name = if let Token::Identifier(id) = next_token {
-        SmolStr::new(id)
-    } else {
+    let Token::Identifier(struct_name) = next_token else {
         cold_path();
         parser.error(span, ParserErr::UnexpectedToken(Token::Identifier(""), next_token, ""));
     };
     parser.next_token_expect(Token::LBrace, "Expected '{'");
-    let mut fields: Vec<(SmolStr, TypeExpr, Span)> = Vec::with_capacity(4);
+    let mut fields: Vec<(&str, TypeExpr, Span)> = Vec::with_capacity(4);
     loop {
         let (next_token, _) = parser.next_token();
-        let field_name = if let Token::Identifier(i) = next_token {
-            SmolStr::new(i)
-        } else {
+        let Token::Identifier(field_name) = next_token else {
             cold_path();
             parser.error(
                 span,
@@ -345,20 +340,20 @@ pub fn parse_struct_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena>
             break;
         }
     }
-    Expr::StructDeclare(struct_name, Box::from(fields), span)
+    Expr::StructDeclare(struct_name, parser.bump.alloc_slice_copy(&fields), span)
 }
 
-pub fn parse_loop_block<'arena>(input: &mut Parser<'arena>) -> Expr<'arena> {
-    let (t, _) = input.next_token();
+pub fn parse_loop_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
+    let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Loop);
-    Expr::LoopBlock(Box::from(parse_block(input)))
+    Expr::LoopBlock(parser.bump.alloc_slice_copy(&parse_block(parser)))
 }
 
 pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, Span { start, end: _ }) = parser.next_token();
     debug_assert_eq!(t, Token::Match);
     let match_obj = parse_expr_no_struct(parser);
-    let obj_var = SmolStr::new_static("[MATCH TEMP]");
+    let obj_var = "[MATCH TEMP]";
     parser.next_token_expect(Token::LBrace, "Blocks must be delimited by braces");
     let mut first_condition: Option<Expr> = None;
     let mut output_code: Vec<Expr> = Vec::with_capacity(2);
@@ -403,8 +398,8 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             } else {
                 match_arms.push((
                     Expr::Eq(
-                        Box::new(Expr::Var(obj_var.clone(), (start, end).into())),
-                        Box::new(condition),
+                        parser.bump.alloc(Expr::Var(obj_var, (start, end).into())),
+                        parser.bump.alloc(condition),
                     ),
                     Box::from(code),
                 ));
@@ -414,25 +409,25 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let mut otherwise: Box<[Expr]> = wildcard;
     for (condition, code) in match_arms.into_iter().rev() {
         otherwise = Box::new([Expr::IfBlock(IfBlockExpr {
-            condition: Box::new(condition),
-            then: code,
-            otherwise,
+            condition: parser.bump.alloc(condition),
+            then: parser.bump.alloc_slice_copy(&code),
+            otherwise: parser.bump.alloc_slice_copy(&otherwise),
             span: (start, end).into(),
         })]);
     }
-    Expr::EvalBlock(Box::from([
+    Expr::EvalBlock(parser.bump.alloc_slice_copy(&[
         Expr::VarDeclare(VariableDeclarationExpr {
-            name: obj_var.clone(),
+            name: obj_var,
             value: parser.bump.alloc(match_obj),
             var_type: None,
         }),
         Expr::IfBlock(IfBlockExpr {
-            condition: Box::from(Expr::Eq(
-                Box::new(Expr::Var(obj_var, (start, end).into())),
-                Box::from(first_condition.unwrap()),
+            condition: parser.bump.alloc(Expr::Eq(
+                parser.bump.alloc(Expr::Var(obj_var, (start, end).into())),
+                parser.bump.alloc(first_condition.unwrap()),
             )),
-            then: output_code.into_boxed_slice(),
-            otherwise,
+            then: parser.bump.alloc_slice_copy(&output_code),
+            otherwise: parser.bump.alloc_slice_copy(&otherwise),
             span: (start, end).into(),
         }),
     ]))

@@ -17,8 +17,6 @@ use crate::errors::red;
 use crate::errors::throw_compiler_error;
 use ariadne::Label;
 use ariadne::Report;
-use smol_strc::SmolStr;
-use smol_strc::ToSmolStr;
 
 #[inline(never)]
 #[cold]
@@ -447,7 +445,7 @@ pub fn error_struct_missing_fields(
     struct_span: Span,
     struct_literal_span: Span,
     sources: &[Source],
-    missing_fields: &[&SmolStr],
+    missing_fields: &[&str],
 ) -> ! {
     throw_compiler_error(
         &|| {
@@ -467,11 +465,7 @@ pub fn error_struct_missing_fields(
                     .with_message(format_args!(
                         "This is missing field{} {}",
                         if missing_fields.len() > 1 { "s" } else { "" },
-                        missing_fields
-                            .iter()
-                            .map(|f| blue(f).to_smolstr())
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                        missing_fields.iter().map(blue).collect::<Vec<_>>().join(", ")
                     ))
                     .with_color(ariadne::Color::Red),
             );
@@ -536,8 +530,8 @@ pub fn error_invalid_obj_type(
                             blue(fn_name),
                             expected_type
                                 .iter()
-                                .map(|s| s.to_smolstr())
-                                .collect::<Vec<SmolStr>>()
+                                .map(|s| s.to_string())
+                                .collect::<Vec<_>>()
                                 .join(&format_args!("{RESET} or {BLUE}").to_string()),
                             red(perceived_type)
                         ))
@@ -684,8 +678,8 @@ pub fn check_args_range(
 pub fn error_struct_unknown_field(
     file_idx: u16,
     field_span: Span,
-    field: &SmolStr,
-    struct_name: &SmolStr,
+    field: &str,
+    struct_name: &str,
     fields: &[StructField],
     sources: &[Source],
 ) -> ! {
@@ -705,8 +699,7 @@ pub fn error_struct_unknown_field(
                             .with_color(ariadne::Color::Red),
                     );
 
-            let similar_field =
-                find_closest_str(field, fields.iter().map(|field| field.name.as_str()));
+            let similar_field = find_closest_str(field, fields.iter().map(|field| field.name));
             if let Some(similar_field) = similar_field {
                 report = report.with_help(format_args!(
                     "A field with a similar name exists: {}",
@@ -715,7 +708,7 @@ pub fn error_struct_unknown_field(
             } else {
                 report = report.with_help(format_args!(
                     "The available fields are: {}",
-                    fields.iter().map(|field| blue(&field.name)).collect::<Vec<_>>().join(", "),
+                    fields.iter().map(|field| blue(field.name)).collect::<Vec<_>>().join(", "),
                 ));
             }
             report.finish()
@@ -730,7 +723,7 @@ pub fn error_struct_field_invalid_type(
     file_idx: u16,
     struct_name: &str,
     struct_field_span: Span,
-    struct_field_name: &SmolStr,
+    struct_field_name: &str,
     struct_field_type: &DataType,
     value_span: Span,
     value_type: &DataType,
@@ -844,7 +837,7 @@ pub fn error_unknown_variable(
                         .with_color(ariadne::Color::Red),
                 );
 
-            let similar_var = find_closest_str(var_name, v.iter().map(|v| v.name.as_str()));
+            let similar_var = find_closest_str(var_name, v.iter().map(|v| v.name));
             if let Some(similar_var) = similar_var {
                 report = report.with_help(format_args!(
                     "A variable with a similar name exists: {}",
@@ -867,7 +860,7 @@ pub fn error_unknown_function(
     file_idx: u16,
     sources: &[Source],
 ) -> ! {
-    let similar_fn = find_closest_str(fn_name, scope.fns().map(|f| f.0.as_str()));
+    let similar_fn = find_closest_str(fn_name, scope.fns().map(|f| f.0));
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
@@ -935,7 +928,7 @@ pub fn error_unknown_function_in_namespace(
 ) -> ! {
     let namespace_str = path.join("::");
     let namespace = scope.walk_to_namespace(path, span, file_idx, sources);
-    let similar_fn = find_closest_str(fn_name, namespace.fns().map(|s| s.0.as_str()));
+    let similar_fn = find_closest_str(fn_name, namespace.fns().map(|s| s.0));
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
@@ -988,7 +981,7 @@ pub fn error_function_already_defined(
             )
             .with_label(
                 Label::new((src.filename, redeclaration_span.into()))
-                    .with_message(format_args!("Function {} is already defined", blue(&func.name)))
+                    .with_message(format_args!("Function {} is already defined", blue(func.name)))
                     .with_color(ariadne::Color::Red),
             );
 
@@ -1118,7 +1111,7 @@ pub fn error_unknown_type(
     sources: &[Source],
     scope: &Scope,
 ) -> ! {
-    let closest_struct = find_closest_str(t, scope.structs().map(|s| s.0.as_str()));
+    let closest_struct = find_closest_str(t, scope.structs().map(|s| s.0));
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
@@ -1153,7 +1146,7 @@ pub fn error_unknown_type_with_namespace(
 ) -> ! {
     let namespace_str = path.join("::");
     let namespace = scope.walk_to_namespace(path, span, file_idx, sources);
-    let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0.as_str()));
+    let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0));
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
@@ -1312,7 +1305,7 @@ pub fn error_function_arg_invalid_type_multiple(
 
             report = report.with_label(
                 Label::new((src.filename, arg_span.into()))
-                    .with_message(format_args!("Function {} expects this argument to be of type {GREEN}{}{RESET}, but this expression's type is {}", blue(fn_name), expected_type.iter().map(|s| s.to_smolstr()).collect::<Vec<SmolStr>>().join(&format_args!("{RESET} or {GREEN}").to_string()), red(perceived_type)))
+                    .with_message(format_args!("Function {} expects this argument to be of type {GREEN}{}{RESET}, but this expression's type is {}", blue(fn_name), expected_type.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(&format_args!("{RESET} or {GREEN}").to_string()), red(perceived_type)))
                     .with_color(ariadne::Color::Red),
             );
 

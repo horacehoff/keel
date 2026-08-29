@@ -60,8 +60,6 @@ use registers::move_reg_to_reg;
 use registers::move_to_id;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
-use smol_strc::SmolStr;
-use smol_strc::ToSmolStr;
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
@@ -429,7 +427,7 @@ fn compile_struct_literal<'arena>(
             struct_name,
             state.structs[expected_struct_idx].name_span,
             unexpected_field.name_span,
-            &unexpected_field.name,
+            unexpected_field.name,
             state.sources,
         )
     }
@@ -451,7 +449,7 @@ fn compile_struct_literal<'arena>(
                         ctx.file_idx,
                         struct_name,
                         field.span,
-                        &field.name,
+                        field.name,
                         &field.field_type,
                         *value_span,
                         &field_type,
@@ -477,8 +475,8 @@ fn compile_struct_literal<'arena>(
                             field.name == state.structs[expected_struct_idx].fields[*i].name
                         })
                     })
-                    .map(|i| &state.structs[struct_id].fields[i].name)
-                    .collect::<Vec<&SmolStr>>();
+                    .map(|i| state.structs[struct_id].fields[i].name)
+                    .collect::<Vec<&str>>();
                 compiler_errors::error_struct_missing_fields(
                     ctx.file_idx,
                     state.structs[expected_struct_idx].name_span,
@@ -505,7 +503,7 @@ fn compile_struct_literal<'arena>(
                         ctx.file_idx,
                         struct_name,
                         field.span,
-                        &field.name,
+                        field.name,
                         &field.field_type,
                         *value_span,
                         &field_type,
@@ -527,8 +525,8 @@ fn compile_struct_literal<'arena>(
                             field.name == state.structs[expected_struct_idx].fields[*i].name
                         })
                     })
-                    .map(|i| &state.structs[struct_id].fields[i].name)
-                    .collect::<Vec<&SmolStr>>();
+                    .map(|i| state.structs[struct_id].fields[i].name)
+                    .collect::<Vec<&str>>();
                 compiler_errors::error_struct_missing_fields(
                     ctx.file_idx,
                     state.structs[expected_struct_idx].name_span,
@@ -698,7 +696,7 @@ fn compile_map_literal<'arena>(
 #[must_use]
 fn compile_struct_field_access<'arena>(
     struct_expr: &'arena Expr,
-    field: &SmolStr,
+    field: &str,
     struct_span: Span,
     field_span: Span,
     ctx: Ctx,
@@ -708,12 +706,12 @@ fn compile_struct_field_access<'arena>(
     let t = struct_expr.infer_type(ctx, state);
     if let DataType::Struct(s_id) = t {
         let s = &state.structs[s_id as usize];
-        let idx = s.fields.iter().position(|f| &f.name == field).unwrap_or_else(|| {
+        let idx = s.fields.iter().position(|f| f.name == field).unwrap_or_else(|| {
             compiler_errors::error_struct_unknown_field(
                 ctx.file_idx,
                 field_span,
                 field,
-                &s.name,
+                s.name,
                 &s.fields,
                 state.sources,
             );
@@ -1356,7 +1354,7 @@ fn compile_if_block<'arena>(
             compile_if_block_branch(then, tgt_id, ctx, state, output);
             // This is just to make it so that the branch that's thrown away is still type-checked
             compile_if_block_branch(otherwise, tgt_id, ctx, state, &mut Vec::new());
-        } else if let [Expr::IfBlock(if_block)] = otherwise.as_ref() {
+        } else if let [Expr::IfBlock(if_block)] = otherwise {
             compile_if_block(if_block, Vec::new(), tgt_id, ctx, state, output);
         } else if !otherwise.is_empty() {
             compile_if_block_branch(otherwise, tgt_id, ctx, state, output);
@@ -1385,7 +1383,7 @@ fn compile_if_block<'arena>(
         for j in false_jump_idxs {
             set_jmp_size(&mut output[j], (branch_start - j) as u16);
         }
-    } else if let [Expr::IfBlock(if_block)] = otherwise.as_ref() {
+    } else if let [Expr::IfBlock(if_block)] = otherwise {
         compile_if_block(if_block, false_jump_idxs, tgt_id, ctx, state, output);
     } else {
         for j in false_jump_idxs {
@@ -1438,7 +1436,7 @@ fn compile_while_loop<'arena>(
 }
 
 fn compile_for_loop<'arena>(
-    var_name: &SmolStr,
+    var_name: &'arena str,
     array: &'arena Expr,
     code: &'arena [Expr],
     span: Span,
@@ -1446,7 +1444,7 @@ fn compile_for_loop<'arena>(
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
-    let real_var = var_name.as_str() != "_";
+    let real_var = var_name != "_";
 
     // parse the array, get its id (the target array is the first Expr in array_code)
     let array_type = array.infer_type(ctx, state);
@@ -1479,7 +1477,7 @@ fn compile_for_loop<'arena>(
 
     if real_var {
         state.new_var(
-            var_name.clone(),
+            var_name,
             current_element_id,
             match array_type {
                 DataType::String => DataType::String,
@@ -1583,7 +1581,7 @@ fn compile_int_for_loop<'arena>(
     state.const_registers.retain(|_, &mut v| v != elem_id);
 
     let v_len = state.v.len();
-    state.new_var(int_for_loop.var_name.clone(), elem_id, DataType::Int);
+    state.new_var(int_for_loop.var_name, elem_id, DataType::Int);
     let loop_id = ctx.block_id + 1;
 
     // (1) if i >= end_elem jump out -> push placeholder first so that compile_expr sees the correct offset
@@ -1636,7 +1634,7 @@ fn compile_loop_block<'arena>(
 
 fn compile_try_catch_block<'arena>(
     e: &'arena [Expr],
-    err_var: &SmolStr,
+    err_var: &'arena str,
     catch_code: &'arena [Expr],
     ctx: Ctx,
     state: &mut State<'arena, '_>,
@@ -1652,7 +1650,7 @@ fn compile_try_catch_block<'arena>(
 
     let v_len = state.v.len();
     let err_reg_id = state.alloc_reg();
-    state.new_var(err_var.clone(), err_reg_id, DataType::String);
+    state.new_var(err_var, err_reg_id, DataType::String);
     output[err_catch_instr] =
         Instr::StartErrorCatch((output.len() - err_catch_instr) as u16, err_reg_id);
     let catch_code = compile_expr(catch_code, ctx, state);
@@ -1706,10 +1704,10 @@ fn compile_var_declaration<'arena>(
     };
 
     if let DataType::Fn(fn_id) = value_type {
-        state.scope_mut(ctx.file_idx).symbols.push((name.clone(), SymbolKind::Fn(fn_id)));
+        state.scope_mut(ctx.file_idx).symbols.push((name, SymbolKind::Fn(fn_id)));
     }
     state.free_registers.retain(|&id| id != var_id);
-    state.new_var_with_type(name.clone(), var_id, value_type, declared_type);
+    state.new_var_with_type(name, var_id, value_type, declared_type);
 }
 
 fn compile_var_assignment<'arena>(
@@ -1763,10 +1761,10 @@ fn compile_var_assignment<'arena>(
         let inc_dec: Option<(bool, u16)> = match value {
             // var+1/1+var use the dedicated IncInt/IncIntTo instructions
             Expr::Add(l, r, _, _) => {
-                let src = if matches!(r.as_ref(), Expr::Int(1)) {
-                    Some(l.as_ref())
-                } else if matches!(l.as_ref(), Expr::Int(1)) {
-                    Some(r.as_ref())
+                let src = if matches!(r, Expr::Int(1)) {
+                    Some(l)
+                } else if matches!(l, Expr::Int(1)) {
+                    Some(r)
                 } else {
                     None
                 };
@@ -1774,8 +1772,8 @@ fn compile_var_assignment<'arena>(
             }
             // var-1 uses the dedicated DecInt/DecIntTo instructions
             Expr::Sub(l, r, _, _) => {
-                if matches!(r.as_ref(), Expr::Int(1)) {
-                    int_var_register(l.as_ref(), ctx, state).map(|src_id| (false, src_id))
+                if matches!(r, Expr::Int(1)) {
+                    int_var_register(l, ctx, state).map(|src_id| (false, src_id))
                 } else {
                     None
                 }
@@ -1870,11 +1868,10 @@ fn compile_var_access(
         state.functions[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
 
     let fn_impl_idx =
-        state.functions[fn_id].impls.iter().position(|imp| *imp.arg_types == arg_types);
+        state.functions[fn_id].impls.iter().position(|imp| *imp.arg_types == *arg_types);
 
     if fn_impl_idx.is_none() {
-        let fn_args =
-            state.functions[fn_id].args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>();
+        let fn_args = state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
         // let fn_code = Rc::clone(&state.functions[fn_id].code);
         compile_function(
             output,
@@ -1895,27 +1892,27 @@ fn compile_var_access(
     state.new_reg(Data::function(loc))
 }
 
-fn compile_struct_definition(
-    name: &SmolStr,
-    fields: &[(SmolStr, TypeExpr, Span)],
+fn compile_struct_definition<'arena>(
+    name: &'arena str,
+    fields: &[(&'arena str, TypeExpr, Span)],
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_, '_>,
+    state: &mut State<'arena, '_>,
 ) {
     let struct_id = state.structs.len() as u16;
     state.structs.push(Struct {
         // pushing it first allows structs to be recursive
-        name: name.clone(),
+        name,
         fields: Box::from([]),
         id: struct_id,
         name_span: span,
     });
     let symbol = SymbolKind::Struct((state.structs.len() - 1) as u16);
-    state.scope_mut(ctx.file_idx).symbols.push((name.clone(), symbol));
+    state.scope_mut(ctx.file_idx).symbols.push((name, symbol));
     let parsed_fields = fields
         .iter()
         .map(|(field_name, field_type, field_span)| StructField {
-            name: field_name.clone(),
+            name: field_name,
             field_type: field_type.to_datatype(
                 ctx.file_idx,
                 state.scope(ctx.file_idx),
@@ -1942,25 +1939,28 @@ fn compile_function_definition<'arena>(
     let mut callees = Vec::new();
     collect_direct_fn_calls(fn_code, &mut callees);
     let symbol = SymbolKind::Fn(state.functions.len() as u16);
-    state.scope_mut(ctx.file_idx).symbols.push((fn_name.clone(), symbol));
+    state.scope_mut(ctx.file_idx).symbols.push((fn_name, symbol));
     state.functions.push(Function {
-        name: fn_name.clone(),
-        args: Box::from(fn_args.iter().map(|arg| {
-            (
-                arg.name.clone(),
-                arg.enforced_type.as_ref().map(|t_e| {
-                    t_e.to_datatype(ctx.file_idx, state.scope(ctx.file_idx), state.sources)
-                }),
-            )
-        }))
-        .collect(),
+        name: fn_name,
+        args: fn_args
+            .iter()
+            .map(|arg| {
+                (
+                    arg.name,
+                    arg.enforced_type.as_ref().map(|t_e| {
+                        t_e.to_datatype(ctx.file_idx, state.scope(ctx.file_idx), state.sources)
+                    }),
+                )
+            })
+            .collect::<Vec<(&str, Option<DataType>)>>()
+            .into_boxed_slice(),
         code: fn_code,
         impls: Vec::new(),
         is_recursive: None,
         returns_null: check_if_returns_void(fn_code),
         src_file: ctx.file_idx,
         return_type_cache: Vec::new(),
-        direct_calls: callees.into_boxed_slice(),
+        direct_calls: state.bump.alloc_slice_copy(&callees),
         name_span: span,
     });
     state.fn_registers.push(Vec::new());
@@ -2427,7 +2427,7 @@ impl<'arena> Expr<'arena> {
             }
             Self::ReturnVal(return_value) => {
                 debug_assert!(!uses_id);
-                compile_return(return_value.as_ref().as_ref(), ctx, state, output);
+                compile_return(*return_value, ctx, state, output);
                 None
             }
             Self::Break => {
@@ -2472,16 +2472,16 @@ pub enum SymbolKind {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Scope {
-    pub symbols: Vec<(SmolStr, SymbolKind)>,
-    pub children: Vec<(SmolStr, Self)>,
+pub struct Scope<'arena> {
+    pub symbols: Vec<(&'arena str, SymbolKind)>,
+    pub children: Vec<(&'arena str, Self)>,
 }
 
-impl Scope {
-    pub fn fns(&self) -> impl Iterator<Item = &(SmolStr, SymbolKind)> {
+impl Scope<'_> {
+    pub fn fns(&self) -> impl Iterator<Item = &(&str, SymbolKind)> {
         self.symbols.iter().filter(|(_, kind)| matches!(kind, SymbolKind::Fn(_)))
     }
-    pub fn structs(&self) -> impl Iterator<Item = &(SmolStr, SymbolKind)> {
+    pub fn structs(&self) -> impl Iterator<Item = &(&str, SymbolKind)> {
         self.symbols.iter().filter(|(_, kind)| matches!(kind, SymbolKind::Struct(_)))
     }
     #[must_use]
@@ -2495,7 +2495,7 @@ impl Scope {
     ) -> Option<usize> {
         self.walk_to_namespace(path, span, file_idx, sources).symbols.iter().find_map(
             |(name, kind)| {
-                if name.as_str() == function_name
+                if name == &function_name
                     && let SymbolKind::Fn(fn_id) = kind
                 {
                     Some(*fn_id as usize)
@@ -2516,7 +2516,7 @@ impl Scope {
     ) -> Option<usize> {
         self.walk_to_namespace(path, span, file_idx, sources).symbols.iter().find_map(
             |(name, kind)| {
-                if name.as_str() == struct_name
+                if name == &struct_name
                     && let SymbolKind::Struct(struct_id) = kind
                 {
                     Some(*struct_id as usize)
@@ -2537,7 +2537,7 @@ impl Scope {
     ) -> Option<usize> {
         self.walk_to_namespace(path, span, file_idx, sources).symbols.iter().find_map(
             |(name, kind)| {
-                if name.as_str() == var_name
+                if name == &var_name
                     && let SymbolKind::Global(var_id) = kind
                 {
                     Some(*var_id as usize)
@@ -2576,19 +2576,19 @@ fn parse_toplevel<'a>(
     file_path: &Path,
     src_file_idx: u16,
     fns: &mut Vec<Function<'a>>,
-    structs: &mut Vec<Struct>,
+    structs: &mut Vec<Struct<'a>>,
     fn_registers: &mut Vec<Vec<u16>>,
-    dynamic_libs: &mut Vec<Dylib>,
+    dynamic_libs: &mut Vec<Dylib<'a>>,
     sources: &mut Vec<Source<'a>>,
-    scope: &mut Scope,
-    files: &mut FxHashMap<PathBuf, Scope>,
-    file_scopes: &mut Vec<Scope>,
-    pending_structs: &mut Vec<(u16, u16, Box<[(SmolStr, TypeExpr<'a>, Span)]>)>,
-    pending_fns: &mut Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr<'a>]>)>,
+    scope: &mut Scope<'a>,
+    files: &mut FxHashMap<PathBuf, Scope<'a>>,
+    file_scopes: &mut Vec<Scope<'a>>,
+    pending_structs: &mut Vec<(u16, u16, &'a [(&'a str, TypeExpr<'a>, Span)])>,
+    pending_fns: &mut Vec<(u16, u16, &[FunctionDeclarationArgumentExpr<'a>])>,
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: &mut Vec<(
         u16,
         u16,
-        Box<[DylibFnExpr<'a>]>,
+        &[DylibFnExpr<'a>],
         Rc<Library>,
         Span,
     )>,
@@ -2606,7 +2606,7 @@ fn parse_toplevel<'a>(
                 let fn_code = function_declaration.code;
                 let fn_args = function_declaration.args;
                 if let Some(func_idx) =
-                    scope.find_function(&[], &fn_name, span, src_file_idx, sources)
+                    scope.find_function(&[], fn_name, span, src_file_idx, sources)
                 {
                     let func = &fns[func_idx];
                     compiler_errors::error_function_already_defined(
@@ -2623,7 +2623,7 @@ fn parse_toplevel<'a>(
 
                 let fn_id = fns.len() as u16;
                 fns.push(Function {
-                    name: fn_name.clone(),
+                    name: fn_name,
                     args: Box::new([]),
                     code: fn_code,
                     impls: Vec::new(),
@@ -2631,7 +2631,7 @@ fn parse_toplevel<'a>(
                     returns_null: returns_void,
                     src_file: src_file_idx,
                     return_type_cache: Vec::new(),
-                    direct_calls: callees.into_boxed_slice(),
+                    direct_calls: bump.alloc_slice_copy(&callees),
                     name_span: span,
                 });
                 pending_fns.push((fn_id, src_file_idx, fn_args));
@@ -2640,7 +2640,7 @@ fn parse_toplevel<'a>(
             Expr::StructDeclare(name, fields, span) => {
                 let struct_id = structs.len() as u16;
                 structs.push(Struct {
-                    name: name.clone(),
+                    name,
                     fields: Box::from([]),
                     id: struct_id,
                     name_span: span,
@@ -2663,37 +2663,42 @@ fn parse_toplevel<'a>(
         match import {
             #[cfg(not(target_arch = "wasm32"))]
             Expr::ImportDylib(DylibImportExpr { path, functions, span }) => {
-                let base_path = if Path::new(path.as_str()).is_relative() {
-                    file_path
+                let base_path = if Path::new(path).is_relative() {
+                    &file_path
                         .parent()
                         .unwrap_or_else(|| Path::new("."))
-                        .join(path.as_str())
+                        .join(path)
                         .to_string_lossy()
-                        .to_smolstr()
+                        .to_string()
                 } else {
-                    path.clone()
+                    path
                 };
-                let dylib_name = std::path::PathBuf::from(base_path.as_str())
-                    .file_prefix()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(base_path.as_str())
-                    .to_smolstr();
+                let dylib_name = bump.alloc_str(
+                    std::path::PathBuf::from(base_path)
+                        .file_prefix()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(base_path),
+                );
                 // If the extension is omitted, the extension is chosen based on the target OS.
                 // An architecture-specific suffix is also tried before the extension
-                let path = if Path::new(base_path.as_str()).extension().is_none() {
-                    let arch_path = format!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
-                    if Path::new(&arch_path).exists() {
-                        SmolStr::from(arch_path)
-                    } else {
-                        format_args!("{base_path}.{DYLIB_EXT}").to_smolstr()
-                    }
-                } else {
-                    base_path
-                };
                 let lib = Rc::new(unsafe {
-                    libloading::Library::new(path.as_str()).unwrap_or_else(|_| {
-                        error_cannot_load_dynlib(span, src_file_idx, sources);
-                    })
+                    if Path::new(base_path).extension().is_none() {
+                        let path = {
+                            let arch_path = format!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
+                            if Path::new(&arch_path).exists() {
+                                arch_path
+                            } else {
+                                format!("{base_path}.{DYLIB_EXT}")
+                            }
+                        };
+                        libloading::Library::new(path).unwrap_or_else(|_| {
+                            error_cannot_load_dynlib(span, src_file_idx, sources);
+                        })
+                    } else {
+                        libloading::Library::new(base_path).unwrap_or_else(|_| {
+                            error_cannot_load_dynlib(span, src_file_idx, sources);
+                        })
+                    }
                 });
                 pending_dylibs.push((
                     src_file_idx,
@@ -2708,7 +2713,7 @@ fn parse_toplevel<'a>(
                 let file_path = file_path
                     .parent()
                     .unwrap_or_else(|| Path::new("."))
-                    .join(path.as_str())
+                    .join(path)
                     .canonicalize()
                     .unwrap_or_else(|_| {
                         keel_home_libs_path
@@ -2717,15 +2722,11 @@ fn parse_toplevel<'a>(
                                 #[cold]
                                 || error_cannot_read_file(span, src_file_idx, sources),
                             )
-                            .join(path.clone())
+                            .join(path)
                     });
 
                 let child_name = alias.unwrap_or_else(|| {
-                    file_path
-                        .file_prefix()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(path.as_str())
-                        .to_smolstr()
+                    bump.alloc_str(file_path.file_prefix().and_then(|s| s.to_str()).unwrap_or(path))
                 });
 
                 if let Some(cached) = files.get(&file_path) {
@@ -2737,7 +2738,7 @@ fn parse_toplevel<'a>(
                     bump.alloc_str(&std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
                         error_cannot_read_file(span, src_file_idx, sources);
                     }));
-                let file_name = bump.alloc_str(file_path.to_str().unwrap_or(path.as_str()));
+                let file_name = bump.alloc_str(file_path.to_str().unwrap_or(path));
 
                 let child_src_idx = sources.len() as u16;
 
@@ -2753,6 +2754,7 @@ fn parse_toplevel<'a>(
 
                 let mut child_scope = Scope { symbols: Vec::new(), children: Vec::new() };
 
+                let file_path_cloned = file_path.clone();
                 parse_toplevel(
                     bump,
                     file_code,
@@ -2773,7 +2775,7 @@ fn parse_toplevel<'a>(
                     pending_globals,
                     keel_home_libs_path,
                 );
-                files.insert(file_path, child_scope.clone());
+                files.insert(file_path_cloned, child_scope.clone());
                 scope.children.push((child_name, child_scope));
             }
             _ => unsafe { unreachable_unchecked() },
@@ -2783,7 +2785,7 @@ fn parse_toplevel<'a>(
     for var_declaration in file_globals {
         scope
             .symbols
-            .push((var_declaration.name.clone(), SymbolKind::Global(pending_globals.len() as u16)));
+            .push((var_declaration.name, SymbolKind::Global(pending_globals.len() as u16)));
         pending_globals.push((var_declaration, src_file_idx));
     }
 
@@ -2793,28 +2795,29 @@ fn parse_toplevel<'a>(
     file_scopes[src_file_idx as usize] = scope.clone();
 }
 
-fn resolve_types(
-    structs: &mut [Struct],
-    fns: &mut [Function],
-    pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)>,
-    pending_fns: Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr]>)>,
+fn resolve_types<'arena>(
+    bump: &'arena Bump,
+    structs: &mut [Struct<'arena>],
+    fns: &mut [Function<'arena>],
+    pending_structs: Vec<(u16, u16, &'arena [(&str, TypeExpr, Span)])>,
+    pending_fns: Vec<(u16, u16, &[FunctionDeclarationArgumentExpr<'arena>])>,
     #[cfg(not(target_arch = "wasm32"))] pending_dylibs: Vec<(
         u16,
         u16,
-        Box<[DylibFnExpr]>,
+        &[DylibFnExpr<'arena>],
         Rc<Library>,
         Span,
     )>,
     file_namespaces: &[Scope],
     dynamic_libs_fns: &mut Vec<DylibFn>,
-    dynamic_libs: &mut [Dylib],
+    dynamic_libs: &mut [Dylib<'arena>],
     sources: &[Source],
 ) {
     for (struct_id, src_file_idx, fields) in pending_structs {
         let resolved_fields = fields
             .iter()
             .map(|(field_name, field_type, field_span)| StructField {
-                name: field_name.clone(),
+                name: field_name,
                 field_type: field_type.to_datatype(
                     src_file_idx,
                     &file_namespaces[src_file_idx as usize],
@@ -2830,8 +2833,8 @@ fn resolve_types(
             .iter()
             .map(|arg| {
                 (
-                    arg.name.clone(),
-                    arg.enforced_type.clone().map(|t_e| {
+                    arg.name,
+                    arg.enforced_type.map(|t_e| {
                         t_e.to_datatype(
                             src_file_idx,
                             &file_namespaces[src_file_idx as usize],
@@ -2840,7 +2843,8 @@ fn resolve_types(
                     }),
                 )
             })
-            .collect();
+            .collect::<Vec<(&str, Option<DataType>)>>()
+            .into_boxed_slice();
         fns[fn_id as usize].args = resolved_args;
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -2858,7 +2862,7 @@ fn resolve_types(
                     .into_boxed_slice();
                 let fn_return_type = fn_return_type.to_datatype(src_file_idx, namespace, sources);
                 let return_val = FnSignature {
-                    name: name.clone(),
+                    name,
                     args: fn_args.iter().map(|(t, _)| t.clone()).collect(),
                     return_type: fn_return_type.clone(),
                     id: dynamic_libs_fns.len() as u16,
@@ -2934,7 +2938,7 @@ pub fn compile<'arena>(
     Vec<DylibFn>,
     usize,
     usize,
-    Vec<Struct>,
+    Vec<Struct<'arena>>,
     Vec<DataType>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -2976,11 +2980,10 @@ pub fn compile<'arena>(
 
     let mut files: FxHashMap<PathBuf, Scope> = FxHashMap::default();
     let mut file_scopes: Vec<Scope> = Vec::new();
-    let mut pending_structs: Vec<(u16, u16, Box<[(SmolStr, TypeExpr, Span)]>)> = Vec::new();
-    let mut pending_fns: Vec<(u16, u16, Box<[FunctionDeclarationArgumentExpr]>)> =
-        Vec::with_capacity(2);
+    let mut pending_structs = Vec::new();
+    let mut pending_fns = Vec::with_capacity(2);
     #[cfg(not(target_arch = "wasm32"))]
-    let mut pending_dylibs: Vec<(u16, u16, Box<[DylibFnExpr]>, Rc<Library>, Span)> = Vec::new();
+    let mut pending_dylibs = Vec::new();
     let mut pending_globals: Vec<(VariableDeclarationExpr, u16)> = Vec::new();
 
     let keel_home_libs =
@@ -3007,6 +3010,7 @@ pub fn compile<'arena>(
         &keel_home_libs,
     );
     resolve_types(
+        bump,
         &mut structs,
         &mut functions,
         pending_structs,
@@ -3044,6 +3048,7 @@ pub fn compile<'arena>(
         reserved_registers: FxHashSet::default(),
         file_scopes: &mut file_scopes,
         types: &mut types,
+        bump,
     };
     let mut instructions: Vec<Instr> = Vec::with_capacity(4);
     for (var_declaration, file_idx) in pending_globals {

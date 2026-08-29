@@ -18,7 +18,6 @@ use crate::instr::LibFuncVoid;
 use gc::Gc;
 use lexical_core::FormattedSize;
 use memchr::memmem;
-use smol_strc::ToSmolStr;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::hint::cold_path;
@@ -939,7 +938,7 @@ pub fn execute(
             Instr::GetSliceString(str_reg_id, idx_start, dest_reg_id) => {
                 let idx_start = r[idx_start].as_int();
                 let idx_end = r[args.pop_unchecked()].as_int();
-                let s = r[str_reg_id].as_str(str_pool).to_smolstr();
+                let s = r[str_reg_id].as_str(str_pool);
                 if (idx_end as usize) > s.len()
                     || (idx_start as usize) >= s.len()
                     || idx_start > idx_end

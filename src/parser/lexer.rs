@@ -1,6 +1,6 @@
 use crate::cold_path;
+use bumpalo::Bump;
 use logos::Logos;
-use smol_strc::SmolStr;
 use std::hint::unreachable_unchecked;
 
 impl std::fmt::Display for Token<'_> {
@@ -189,14 +189,14 @@ pub enum Token<'a> {
 }
 
 /// Strips the surrounding quotes & processes escape sequences \n \t \r \\ \" \0
-pub fn parse_string(s: &str) -> SmolStr {
+pub fn parse_string<'arena>(s: &str, bump: &'arena Bump) -> bumpalo::collections::String<'arena> {
     let inner = &s[1..s.len() - 1]; // Strip the surrounding quotes
 
     // Return the stripped string directly if it doesn't contain any escape sequences
     let Some(first_escape) = memchr::memchr(b'\\', inner.as_bytes()) else {
-        return SmolStr::from(inner);
+        return bumpalo::collections::String::from_str_in(inner, bump);
     };
-    let mut processed = String::with_capacity(inner.len());
+    let mut processed = bumpalo::collections::String::with_capacity_in(inner.len(), bump);
 
     // Find returns the first occurence, so we know that inner[..first_escape] does not contain any escape sequence
     processed.push_str(&inner[..first_escape]);
@@ -243,5 +243,5 @@ pub fn parse_string(s: &str) -> SmolStr {
             }
         }
     }
-    SmolStr::from(processed)
+    processed
 }

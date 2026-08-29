@@ -29,7 +29,6 @@ use lexer::parse_string;
 use logos::SpannedIter;
 use parser_expr::add_op;
 use parser_expr::parse_expr;
-use smol_strc::SmolStr;
 use std::hint::{cold_path, unreachable_unchecked};
 use std::iter::Peekable;
 
@@ -118,7 +117,7 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (src.filename.as_str(), ariadne::Source::from(src.contents.as_str())),
+            (src.filename, ariadne::Source::from(src.contents)),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
@@ -247,10 +246,7 @@ impl<'a> Parser<'a> {
         #[cfg(any(target_arch = "wasm32", feature = "embed"))]
         report
             .write(
-                (
-                    self.ctx.src.filename.as_str(),
-                    ariadne::Source::from(self.ctx.src.contents.as_str()),
-                ),
+                (self.ctx.src.filename, ariadne::Source::from(self.ctx.src.contents)),
                 crate::captured_output::CapturedOutputWriter,
             )
             .unwrap();
@@ -293,13 +289,16 @@ fn parse_qualified_name<'arena>(
 }
 
 // Must be called after LParen is skipped
-fn parse_args<'arena>(parser: &mut Parser<'arena>) -> (Box<[Expr<'arena>]>, Box<[Span]>, u32) {
-    let mut args = Vec::with_capacity(4);
-    let mut arg_spans: Vec<Span> = Vec::with_capacity(4);
+fn parse_args<'arena>(
+    parser: &mut Parser<'arena>,
+) -> (bumpalo::collections::Vec<'arena, Expr<'arena>>, bumpalo::collections::Vec<'arena, Span>, u32)
+{
+    let mut args = bumpalo::collections::Vec::with_capacity_in(4, parser.bump);
+    let mut arg_spans = bumpalo::collections::Vec::with_capacity_in(4, parser.bump);
     loop {
         if parser.peek_token() == Token::RParen {
             let end = parser.next_token().1.end;
-            return (Box::from(args), Box::from(arg_spans), end);
+            return (args, arg_spans, end);
         }
         let arg_start: u32 = parser.peek_token_span().start;
         args.push(parse_expr(parser));
@@ -336,9 +335,7 @@ fn parse_var_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, _) = parser.next_token();
     debug_assert!(t == Token::Let || t == Token::Static);
     let (t, span) = parser.next_token();
-    let var_name = if let Token::Identifier(id) = t {
-        SmolStr::new(id)
-    } else {
+    let Token::Identifier(var_name) = t else {
         cold_path();
         parser.error(
             span,
@@ -353,7 +350,8 @@ fn parse_var_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
         // typed
         parser.next_token();
         let type_start = parser.peek_token_span().start;
-        Some(Box::new((parse_type(parser), (type_start, parser.last_token_end).into())))
+        Some(parser.bump.alloc((parse_type(parser), (type_start, parser.last_token_end).into()))
+            as &(TypeExpr<'_>, Span))
     } else {
         None
     };
@@ -370,32 +368,32 @@ fn parse_var_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
 }
 
 fn parse_var_assign<'arena>(
-    input: &mut Parser<'arena>,
+    parser: &mut Parser<'arena>,
     e: Expr<'arena>,
     e_start: u32,
 ) -> Expr<'arena> {
-    let (t, _) = input.next_token();
+    let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Equals);
-    let e_end = input.peek_token_span().end;
-    let v_start = input.peek_token_span().start;
-    let v = parse_expr(input);
-    let v_end = input.peek_token_span().start;
-    var_assign(e, v, (e_start, e_end).into(), (v_start, v_end).into())
+    let e_end = parser.peek_token_span().end;
+    let v_start = parser.peek_token_span().start;
+    let v = parse_expr(parser);
+    let v_end = parser.peek_token_span().start;
+    var_assign(e, v, (e_start, e_end).into(), (v_start, v_end).into(), parser.bump)
 }
 
 fn parse_op_var_assign<'arena>(
-    input: &mut Parser<'arena>,
+    parser: &mut Parser<'arena>,
     e: Expr<'arena>,
     e_start: u32,
     op: Token<'_>,
 ) -> Expr<'arena> {
-    let operand_end = input.last_token_end;
-    let (t, _) = input.next_token();
+    let operand_end = parser.last_token_end;
+    let (t, _) = parser.next_token();
     debug_assert_eq!(t, op);
-    let e_end = input.peek_token_span().end;
-    let v_start = input.peek_token_span().start;
-    let v = parse_expr(input);
-    let v_end = input.last_token_end;
+    let e_end = parser.peek_token_span().end;
+    let v_start = parser.peek_token_span().start;
+    let v = parse_expr(parser);
+    let v_end = parser.last_token_end;
     let op = match op {
         Token::AssignOpAdd => Token::OpAdd,
         Token::AssignOpSub => Token::OpSub,
@@ -406,21 +404,22 @@ fn parse_op_var_assign<'arena>(
         _ => unsafe { unreachable_unchecked() },
     };
     var_assign(
-        e.clone(),
-        add_op(input, op, e, v, (e_start, operand_end).into(), (v_start, v_end).into()),
+        e,
+        add_op(parser, op, e, v, (e_start, operand_end).into(), (v_start, v_end).into()),
         (e_start, e_end).into(),
         (v_start, v_end).into(),
+        parser.bump,
     )
 }
 
-fn parse_return<'arena>(input: &mut Parser<'arena>) -> Expr<'arena> {
-    let (t, _) = input.next_token();
+fn parse_return<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
+    let (t, _) = parser.next_token();
     debug_assert_eq!(t, Token::Return);
-    if input.peek_token_opt() == Some(Token::SemiColon) {
-        Expr::ReturnVal(Box::new(None))
+    if parser.peek_token_opt() == Some(Token::SemiColon) {
+        Expr::ReturnVal(None)
     } else {
-        let e = parse_expr(input);
-        Expr::ReturnVal(Box::new(Some(e)))
+        let e = parse_expr(parser);
+        Expr::ReturnVal(Some(parser.bump.alloc(e)))
     }
 }
 
@@ -540,12 +539,12 @@ fn parse_code<'arena>(input: &mut Parser<'arena>) -> Vec<Expr<'arena>> {
     output
 }
 
-fn parse_file_import<'arena>(parser: &mut Parser<'_>) -> Expr<'arena> {
+fn parse_file_import<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, Span { start, end: _ }) = parser.next_token();
     debug_assert_eq!(t, Token::Import);
     let (next_token, span) = parser.next_token();
     let path = if let Token::String(s) = next_token {
-        SmolStr::new(parse_string(s))
+        parse_string(s, parser.bump)
     } else {
         cold_path();
         parser.error(
@@ -558,9 +557,7 @@ fn parse_file_import<'arena>(parser: &mut Parser<'_>) -> Expr<'arena> {
     if peek_token == Some(Token::As) {
         parser.next_token();
         let (next_token, span) = parser.next_token();
-        let alias = if let Token::Identifier(id) = next_token {
-            SmolStr::new(id)
-        } else {
+        let Token::Identifier(alias) = next_token else {
             cold_path();
             parser.error(
                 span,
@@ -572,23 +569,23 @@ fn parse_file_import<'arena>(parser: &mut Parser<'_>) -> Expr<'arena> {
             );
         };
         parser.next_token_expect(Token::SemiColon, "Import statements must end with a semicolon");
-        Expr::ImportFile(path, Some(alias), (start, span.end).into())
+        Expr::ImportFile(path.into_bump_str(), Some(alias), (start, span.end).into())
     } else {
         parser.next_token_expect(Token::SemiColon, "Import statements must end with a semicolon");
-        Expr::ImportFile(path, None, (start, end).into())
+        Expr::ImportFile(path.into_bump_str(), None, (start, end).into())
     }
 }
 
 fn parse_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
     let t = parse_atomic_type(parser);
     if parser.peek_token() == Token::Pipe {
-        let mut poly = Vec::with_capacity(2);
+        let mut poly = bumpalo::collections::Vec::with_capacity_in(2, parser.bump);
         poly.push(t);
         while parser.peek_token() == Token::Pipe {
             parser.next_token();
             poly.push(parse_atomic_type(parser));
         }
-        TypeExpr::Union(poly.into_boxed_slice())
+        TypeExpr::Union(poly.into_bump_slice())
     } else {
         t
     }
@@ -614,13 +611,13 @@ fn parse_atomic_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
         );
         let value_t = parse_type(parser);
         parser.next_token_expect(Token::RBrace, "Unmatched '{'");
-        TypeExpr::Map(Box::new(key_t), Box::new(value_t))
+        TypeExpr::Map(parser.bump.alloc(key_t), parser.bump.alloc(value_t))
     } else if next_token == Token::Function {
         parser.next_token_expect(
             Token::LParen,
             "Function types must have their arguments delimited by parentheses",
         );
-        let mut arg_types: Vec<TypeExpr> = Vec::with_capacity(2);
+        let mut arg_types = bumpalo::collections::Vec::with_capacity_in(2, parser.bump);
         loop {
             if parser.peek_token() == Token::RParen {
                 parser.next_token();
@@ -639,19 +636,19 @@ fn parse_atomic_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
             parser.next_token();
             parse_type(parser)
         } else {
-            TypeExpr::Identifier(SmolStr::new_static("null"), span)
+            TypeExpr::Identifier("null", span)
         });
-        TypeExpr::Function(arg_types.into_boxed_slice())
+        TypeExpr::Function(arg_types.into_bump_slice())
     } else if let Token::Identifier(i) = next_token {
         if parser.peek_token() == Token::DoubleColon {
             parser.next_token();
             let (namespace, end) = parse_qualified_name(parser, i);
             TypeExpr::NamespacedIdentifier(namespace, (span.start, end).into())
         } else {
-            TypeExpr::Identifier(SmolStr::new(i), span)
+            TypeExpr::Identifier(i, span)
         }
     } else if let Some(name) = get_primitive_type_name(next_token) {
-        TypeExpr::Identifier(SmolStr::new_static(name), span)
+        TypeExpr::Identifier(name, span)
     } else if Token::Null == next_token {
         TypeExpr::Null
     } else {
@@ -665,7 +662,7 @@ fn parse_atomic_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
         if parser.peek_token() == Token::LBracket {
             parser.next_token();
             parser.next_token_expect(Token::RBracket, "Unmatched '['");
-            t = TypeExpr::Array(Box::new(t));
+            t = TypeExpr::Array(parser.bump.alloc(t));
         } else {
             break;
         }
@@ -678,7 +675,7 @@ fn parse_dylib_import<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     debug_assert_eq!(t, Token::Dylib);
     let (next_token, span) = parser.next_token();
     let path = if let Token::String(s) = next_token {
-        SmolStr::new(parse_string(s))
+        parse_string(s, parser.bump)
     } else {
         cold_path();
         parser.error(
@@ -705,7 +702,7 @@ fn parse_dylib_import<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             if let TypeExpr::Identifier(name, span) = first {
                 fn_name_span = span;
                 args.push((
-                    TypeExpr::Identifier(SmolStr::new_static("null"), span),
+                    TypeExpr::Identifier("null", span),
                     (type_start_span, type_start_span).into(),
                 ));
                 name
@@ -722,9 +719,7 @@ fn parse_dylib_import<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
         } else {
             let (next_token, span) = parser.next_token();
             fn_name_span = span;
-            let fn_name = if let Token::Identifier(name) = next_token {
-                SmolStr::new(name)
-            } else {
+            let Token::Identifier(fn_name) = next_token else {
                 cold_path();
                 parser.error(
                     span,
@@ -763,13 +758,13 @@ fn parse_dylib_import<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             .next_token_expect(Token::SemiColon, "Function definitions must end with a semicolon");
         fn_signatures.push(DylibFnExpr {
             name: fn_name,
-            args: Box::from(args),
+            args: parser.bump.alloc_slice_copy(&args),
             name_span: fn_name_span,
         });
     }
     Expr::ImportDylib(DylibImportExpr {
-        path,
-        functions: Box::from(fn_signatures),
+        path: path.into_bump_str(),
+        functions: parser.bump.alloc_slice_copy(&fn_signatures),
         span: (start, end).into(),
     })
 }

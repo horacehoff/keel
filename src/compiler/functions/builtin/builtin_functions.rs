@@ -1,4 +1,3 @@
-use super::super::expr::Expr;
 use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::check_arg_type;
@@ -16,8 +15,6 @@ use crate::compiler::expr::FunctionCallExpr;
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
-use smol_strc::SmolStr;
-use std::rc::Rc;
 
 pub fn builtin_functions<'arena>(
     output: &mut Vec<Instr>,
@@ -26,7 +23,7 @@ pub fn builtin_functions<'arena>(
     tgt_id: Option<u16>,
     function_call: &'arena FunctionCallExpr,
 ) -> Option<u16> {
-    let args = &function_call.args;
+    let args = function_call.args;
     let span = function_call.get_call_span();
     let arg_spans = function_call.get_arg_spans();
     let name = function_call.qualified_name.get_name();
@@ -190,20 +187,17 @@ pub fn builtin_functions<'arena>(
                 if fn_impl_idx.is_none() {
                     // If it hasn't already been compiled for these argument types,
                     // compile it (which adds it to the function's implementation list)
-                    let fn_args = state.functions[fn_id]
-                        .args
-                        .iter()
-                        .map(|(a, _)| a.clone())
-                        .collect::<Vec<SmolStr>>();
+                    let fn_args =
+                        state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
                     // let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
-                    let closure_name = state.functions[fn_id].name.clone();
+                    let closure_name = state.functions[fn_id].name;
                     compile_function(
                         output,
                         ctx,
                         state,
                         fn_id,
                         &fn_args,
-                        &closure_name,
+                        closure_name,
                         &inferred_arg_types,
                         state.functions[fn_id].code,
                         fn_id as u16,

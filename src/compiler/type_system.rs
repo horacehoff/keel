@@ -25,13 +25,10 @@ use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::VariableDeclarationExpr;
 use rustc_hash::FxHashSet;
-use smol_strc::SmolStr;
-use smol_strc::ToSmolStr;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
-use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::compiler_data::Struct;
@@ -46,22 +43,22 @@ thread_local! {
         RefCell::new(FxHashSet::default());
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TypeExpr<'arena> {
-    Identifier(SmolStr, Span),
+    Identifier(&'arena str, Span),
     NamespacedIdentifier(QualifiedName<'arena>, Span),
-    Array(Box<Self>),
-    Map(Box<Self>, Box<Self>),
-    Union(Box<[Self]>),
-    Function(Box<[Self]>),
+    Array(&'arena Self),
+    Map(&'arena Self, &'arena Self),
+    Union(&'arena [Self]),
+    Function(&'arena [Self]),
     Null,
 }
 
-impl<'arena> TypeExpr<'arena> {
-    pub fn to_datatype(&self, file_idx: u16, scope: &Scope, sources: &[Source]) -> DataType {
+impl TypeExpr<'_> {
+    pub fn to_datatype(self, file_idx: u16, scope: &Scope, sources: &[Source]) -> DataType {
         match self {
             Self::Null => DataType::Null,
-            Self::Identifier(s, span) => match s.as_str() {
+            Self::Identifier(s, span) => match s {
                 "int" => DataType::Int,
                 "float" => DataType::Float,
                 "bool" => DataType::Bool,
@@ -69,23 +66,23 @@ impl<'arena> TypeExpr<'arena> {
                 "null" => DataType::Null,
                 struct_name => {
                     if let Some(struct_id) =
-                        scope.find_struct(&[], struct_name, *span, file_idx, sources)
+                        scope.find_struct(&[], struct_name, span, file_idx, sources)
                     {
                         DataType::Struct(struct_id as u16)
                     } else {
-                        error_unknown_type(*span, file_idx, struct_name, sources, scope);
+                        error_unknown_type(span, file_idx, struct_name, sources, scope);
                     }
                 }
             },
             Self::NamespacedIdentifier(s, span) => {
                 if let Some(struct_id) =
-                    scope.find_struct(s.get_namespace(), s.get_name(), *span, file_idx, sources)
+                    scope.find_struct(s.get_namespace(), s.get_name(), span, file_idx, sources)
                 {
                     DataType::Struct(struct_id as u16)
                 } else {
                     cold_path();
                     error_unknown_type_with_namespace(
-                        *span,
+                        span,
                         file_idx,
                         s.get_name(),
                         sources,
@@ -170,72 +167,55 @@ impl std::fmt::Display for DataType {
 }
 
 impl DataType {
-    pub fn format_detailed(&self, state: &State<'_, '_>) -> SmolStr {
+    pub fn format_detailed(&self, state: &State<'_, '_>) -> String {
         match self {
-            Self::Float => SmolStr::new_static("float"),
-            Self::Int => SmolStr::new_static("int"),
-            Self::Bool => SmolStr::new_static("bool"),
-            Self::String => SmolStr::new_static("string"),
+            Self::Float => String::from("float"),
+            Self::Int => String::from("int"),
+            Self::Bool => String::from("bool"),
+            Self::String => String::from("string"),
             Self::Array(array_type) => match array_type {
                 Some(array_type) => {
-                    format_args!("{}[]", array_type.format_detailed(state)).to_smolstr()
+                    format!("{}[]", array_type.format_detailed(state))
                 }
-                None => SmolStr::new_static("T[]"),
+                None => String::from("T[]"),
             },
-            Self::Null => SmolStr::new_static("null"),
-            Self::Unknown => SmolStr::new_static("Unknown"),
-            Self::Union(types) => format_args!(
-                "{}",
-                types
-                    .into_iter()
-                    .map(|x| x.format_detailed(state))
-                    .collect::<Vec<SmolStr>>()
-                    .join("|")
-            )
-            .to_smolstr(),
+            Self::Null => String::from("null"),
+            Self::Unknown => String::from("Unknown"),
+            Self::Union(types) => {
+                types.into_iter().map(|x| x.format_detailed(state)).collect::<Vec<_>>().join("|")
+            }
             Self::Struct(s) => {
                 let s = &state.structs[*s as usize];
-                format_args!(
+                format!(
                     "{} {{{}}}",
                     s.name,
                     s.fields
                         .iter()
-                        .map(|field| format_args!(
+                        .map(|field| format!(
                             "{}: {}",
                             field.name,
                             field.field_type.format_detailed(state)
-                        )
-                        .to_smolstr())
-                        .collect::<Vec<SmolStr>>()
+                        ))
+                        .collect::<Vec<_>>()
                         .join(", ")
                 )
-                .to_smolstr()
             }
-            Self::Map(m) => format_args!(
+            Self::Map(m) => format!(
                 "{{{}: {}}}",
                 m.0.as_ref().unwrap_or(&Self::Unknown),
                 m.1.as_ref().unwrap_or(&Self::Unknown)
-            )
-            .to_smolstr(),
+            ),
             Self::Fn(id) => {
                 let f = &state.functions[*id as usize];
-                format_args!(
-                    "fn ({})",
-                    f.args.iter().map(|(a, _)| a.clone()).collect::<Vec<SmolStr>>().join(", ")
-                )
-                .to_smolstr()
+                format!("fn ({})", f.args.iter().map(|(a, _)| *a).collect::<Vec<&str>>().join(", "))
             }
             Self::FnSignature(sig) => {
                 let (args, ret) = sig.split_at(sig.len() - 1);
-                format_args!(
+                format!(
                     "fn({}) -> {}",
-                    args.iter()
-                        .map(|t| t.format_detailed(state))
-                        .collect::<Vec<SmolStr>>()
-                        .join(", "),
+                    args.iter().map(|t| t.format_detailed(state)).collect::<Vec<_>>().join(", "),
                     ret[0].format_detailed(state)
                 )
-                .to_smolstr()
             }
         }
     }
@@ -359,19 +339,19 @@ pub fn collect_direct_fn_calls<'arena>(content: &'arena [Expr], calls: &mut Vec<
             Expr::FunctionCall(FunctionCallExpr { qualified_name, args, .. })
             | Expr::ObjFunctionCall(FunctionCallExpr { qualified_name, args, .. }) => {
                 calls.push(qualified_name.get_name());
-                expr_stack.extend(args);
+                expr_stack.extend(*args);
             }
             Expr::IfBlock(if_block) => {
-                expr_stack.push(&if_block.condition);
-                expr_stack.extend(&if_block.then);
-                expr_stack.extend(&if_block.otherwise);
+                expr_stack.push(if_block.condition);
+                expr_stack.extend(if_block.then);
+                expr_stack.extend(if_block.otherwise);
             }
             Expr::WhileBlock(condition, code) => {
                 expr_stack.push(condition);
-                expr_stack.extend(code);
+                expr_stack.extend(*code);
             }
             Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
-                expr_stack.extend(x);
+                expr_stack.extend(*x);
             }
             Expr::ReturnVal(code) => {
                 if let Some(code) = code.as_ref() {
@@ -386,11 +366,12 @@ pub fn collect_direct_fn_calls<'arena>(content: &'arena [Expr], calls: &mut Vec<
                 expr_stack.push(y);
                 expr_stack.push(z);
             }
-            Expr::VarDeclare(VariableDeclarationExpr { value: x, .. }) => expr_stack.push(x),
-            Expr::VarAssign(_, x, _) | Expr::Neg(x, _, _) | Expr::BoolNeg(x, _, _) => {
+            Expr::VarDeclare(VariableDeclarationExpr { value: x, .. })
+            | Expr::VarAssign(_, x, _) => expr_stack.push(x),
+            Expr::Neg(x, _, _) | Expr::BoolNeg(x, _, _) => {
                 expr_stack.push(x);
             }
-            Expr::ForLoop(_, _, code, _) => expr_stack.extend(code),
+            Expr::ForLoop(_, _, code, _) => expr_stack.extend(*code),
             Expr::IntForLoop(int_for_loop) => {
                 expr_stack.push(int_for_loop.get_lower_bound());
                 expr_stack.push(int_for_loop.get_upper_bound());
@@ -401,18 +382,18 @@ pub fn collect_direct_fn_calls<'arena>(content: &'arena [Expr], calls: &mut Vec<
                 expr_stack.push(index);
                 expr_stack.push(value);
             }
-            Expr::Array(elems, _) => expr_stack.extend(elems),
+            Expr::Array(elems, _) => expr_stack.extend(*elems),
             Expr::Struct(_, fields, _) => {
                 expr_stack.extend(fields.iter().map(|field| &field.value));
             }
             Expr::GetStructField(expr, _, _, _) => expr_stack.push(expr),
             Expr::SetStructField(struct_field_assignment) => {
-                expr_stack.push(&struct_field_assignment.struct_expr);
-                expr_stack.push(&struct_field_assignment.field_value);
+                expr_stack.push(struct_field_assignment.struct_expr);
+                expr_stack.push(struct_field_assignment.field_value);
             }
             Expr::TryCatchBlock(try_code, _, catch_code) => {
-                expr_stack.extend(try_code);
-                expr_stack.extend(catch_code);
+                expr_stack.extend(*try_code);
+                expr_stack.extend(*catch_code);
             }
             Expr::ArrayGetIndex(x, y, _)
             | Expr::Mul(x, y, _, _)
@@ -453,8 +434,8 @@ pub fn can_reach<'a>(
     fns: &'a [Function],
     visited: &mut HashSet<&'a str>,
 ) -> bool {
-    if let Some(from_fn) = fns.iter().find(|f| f.name.as_str() == src_fn) {
-        for callee in &from_fn.direct_calls {
+    if let Some(from_fn) = fns.iter().find(|f| f.name == src_fn) {
+        for callee in from_fn.direct_calls {
             if callee == &target_fn {
                 return true;
             }
@@ -470,8 +451,8 @@ pub fn check_if_returns_void(content: &[Expr]) -> bool {
     for content in content {
         match content {
             Expr::IfBlock(if_block) => {
-                if !check_if_returns_void(&if_block.then)
-                    || !check_if_returns_void(&if_block.otherwise)
+                if !check_if_returns_void(if_block.then)
+                    || !check_if_returns_void(if_block.otherwise)
                 {
                     return false;
                 }
@@ -551,7 +532,7 @@ pub fn resolve_function_return_type(
     let v_len_before_args = state.v.len();
     for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
         // 0 => placeholder id, it's never used
-        state.new_var(fn_args[i].0.clone(), 0, infered_type);
+        state.new_var(fn_args[i].0, 0, infered_type);
     }
 
     // Mutual-recursion cycle guard -> if we are already in the
@@ -608,8 +589,8 @@ pub fn fn_matches_signature(
     if !fn_args_match(fn_id, expected_arg_types, state) {
         return false;
     }
-    let fn_name = state.functions[fn_id].name.clone();
-    resolve_function_return_type(fn_id, expected_arg_types, &fn_name, ctx, state)
+    let fn_name = state.functions[fn_id].name;
+    resolve_function_return_type(fn_id, expected_arg_types, fn_name, ctx, state)
         == *expected_return_type
 }
 
@@ -637,13 +618,13 @@ fn track_condition_returns<'arena>(
     state: &mut State<'arena, '_>,
 ) -> FnReturnFlow {
     let mut return_types = Vec::new();
-    let then_flow = track_scoped_returns(&if_block.then, ctx, state, fn_name);
+    let then_flow = track_scoped_returns(if_block.then, ctx, state, fn_name);
     extend_return_types!(&mut return_types, then_flow.types);
 
     if if_block.otherwise.is_empty() {
         FnReturnFlow { types: return_types, always_returns: false }
     } else {
-        let otherwise_flow = track_scoped_returns(&if_block.otherwise, ctx, state, fn_name);
+        let otherwise_flow = track_scoped_returns(if_block.otherwise, ctx, state, fn_name);
         extend_return_types!(&mut return_types, otherwise_flow.types);
 
         FnReturnFlow {
@@ -678,7 +659,7 @@ fn track_return_flow<'arena>(
             }
             Expr::VarDeclare(VariableDeclarationExpr { name, value, var_type: _ }) => {
                 let var_type = value.infer_type(ctx, state);
-                state.new_var(name.clone(), 0, var_type);
+                state.new_var(name, 0, var_type);
             }
             Expr::VarAssign(name, expr, _) => {
                 let var_type = expr.infer_type(ctx, state);
@@ -692,7 +673,7 @@ fn track_return_flow<'arena>(
             }
             Expr::IntForLoop(int_for_loop) => {
                 let v_len = state.v.len();
-                state.new_var(int_for_loop.var_name.clone(), 0, DataType::Int);
+                state.new_var(int_for_loop.var_name, 0, DataType::Int);
                 let flow = track_return_flow(int_for_loop.get_loop_code(), ctx, state, fn_name);
                 extend_return_types!(&mut return_types, flow.types);
                 state.v.truncate(v_len);
@@ -706,8 +687,8 @@ fn track_return_flow<'arena>(
                     _ => unsafe { unreachable_unchecked() },
                 };
                 let v_len = state.v.len();
-                if var_name.as_str() != "_" {
-                    state.new_var(var_name.clone(), 0, elem_type);
+                if *var_name != "_" {
+                    state.new_var(var_name, 0, elem_type);
                 }
                 let flow = track_return_flow(array_code, ctx, state, fn_name);
                 extend_return_types!(&mut return_types, flow.types);
@@ -949,7 +930,7 @@ impl<'arena> Expr<'arena> {
                                 ctx.file_idx,
                                 *field_span,
                                 field_name,
-                                &s.name,
+                                s.name,
                                 &s.fields,
                                 state.sources,
                             )
@@ -1006,8 +987,7 @@ impl<'arena> Expr<'arena> {
                             .collect::<Vec<DataType>>();
 
                         let fn_id = if qualified_name.is_namespace_empty()
-                            && let Some(var) =
-                                state.v.iter().rfind(|var| var.name.as_str() == function_name)
+                            && let Some(var) = state.v.iter().rfind(|var| var.name == function_name)
                         {
                             if let DataType::Fn(id) = var.var_type {
                                 id as usize
@@ -1190,18 +1170,18 @@ impl<'arena> Expr<'arena> {
             }
             Self::AnonymousFunction(args, code, span) => {
                 let fn_name =
-                    format_args!("{}{}{}", ctx.file_idx, span.start, span.end).to_smolstr();
+                    bumpalo::format!(in state.bump,"{}{}{}", ctx.file_idx, span.start, span.end);
                 let returns_null = check_if_returns_void(code);
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(code, &mut callees);
                 let id = state.functions.len() as u16;
                 state.functions.push(Function {
-                    name: fn_name,
+                    name: fn_name.into_bump_str(),
                     args: args
                         .iter()
                         .map(|(name, t)| {
                             (
-                                name.clone(),
+                                *name,
                                 t.as_ref().map(|t| {
                                     t.to_datatype(
                                         ctx.file_idx,
@@ -1211,14 +1191,15 @@ impl<'arena> Expr<'arena> {
                                 }),
                             )
                         })
-                        .collect(),
+                        .collect::<Vec<(&str, Option<DataType>)>>()
+                        .into_boxed_slice(),
                     code,
                     impls: Vec::new(),
                     is_recursive: None,
                     returns_null,
                     src_file: ctx.file_idx,
                     return_type_cache: Vec::new(),
-                    direct_calls: callees.into_boxed_slice(),
+                    direct_calls: state.bump.alloc_slice_copy(&callees),
                     name_span: *span,
                 });
                 state.fn_registers.push(Vec::new());

@@ -40,7 +40,7 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [binary-trees.kl](/examples/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/binary-trees/binary-trees.lua) | [binary-trees.c](/examples/binary-trees/binary-trees.c) |
-| 540.7ms | 1264ms | 541.8ms | 247.4ms |
+| 512.4ms | 1264ms | 1005ms | 247.4ms |
 
 
 ## Quicksort (N=10000)
@@ -55,7 +55,7 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [sqrt.kl](/examples/sqrt/sqrt.kl) | [sqrt.py](/examples/sqrt/sqrt.py) | [sqrt.lua](/examples/sqrt/sqrt.lua) | [sqrt.c](/examples/sqrt/sqrt.c) |
-| 76.5ms | 1164ms | 167ms | 2.1ms |
+| 105.1ms | 1164ms | 167ms | 2.1ms |
 
 ## String.split(), Array.contains() * 50 000
 

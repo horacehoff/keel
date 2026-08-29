@@ -3,7 +3,6 @@ use crate::compiler::expr::Span;
 use crate::instr::Instr;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
-use smol_strc::{SmolStr, ToSmolStr};
 use std::hint::unreachable_unchecked;
 
 pub const BLUE: &str = "\x1B[94m";
@@ -98,13 +97,17 @@ pub enum ErrType<'a> {
     ModuloByZero,
 }
 
-impl From<ErrType<'_>> for SmolStr {
+impl From<ErrType<'_>> for String {
     fn from(value: ErrType) -> Self {
         match value {
-            ErrType::Custom(m) => m.to_smolstr(),
+            ErrType::Custom(m) => m.to_owned(),
             ErrType::InvalidFloat => "Invalid float".into(),
-            ErrType::IndexOutOfBounds(length, index) => format_args!("Tried to get index {RED}{BOLD}{index}{RESET} but the length is {BLUE}{BOLD}{length}{RESET}").to_smolstr(),
-            ErrType::SliceOutOfBounds(length, idx_start, idx_end) => format_args!("Invalid range {RED}{BOLD}{idx_start}{RESET}..{RED}{BOLD}{idx_end}{RESET} for collection with length {BLUE}{BOLD}{length}{RESET}").to_smolstr(),
+            ErrType::IndexOutOfBounds(length, index) => format!(
+                "Tried to get index {RED}{BOLD}{index}{RESET} but the length is {BLUE}{BOLD}{length}{RESET}"
+            ),
+            ErrType::SliceOutOfBounds(length, idx_start, idx_end) => format!(
+                "Invalid range {RED}{BOLD}{idx_start}{RESET}..{RED}{BOLD}{idx_end}{RESET} for collection with length {BLUE}{BOLD}{length}{RESET}"
+            ),
             ErrType::InvalidBool => "The string could not be parsed into a boolean".into(),
             ErrType::InvalidInt => "Invalid integer".into(),
             ErrType::FsAlreadyExists => "The entity (directory, file, ...) already exists".into(),
@@ -113,18 +116,38 @@ impl From<ErrType<'_>> for SmolStr {
             ErrType::FsInterrupted => "This operation was interrupted".into(),
             ErrType::FsInvalidData => "Malformed or invalid data were encountered".into(),
             ErrType::FsInvalidFilename => "The filename is invalid or too long".into(),
-            ErrType::FsIsADirectory => "This operation encountered a directory, when a non-directory was expected".into(),
-            ErrType::FsNotADirectory => "This operation encountered a non-directory, when a directory was expected".into(),
+            ErrType::FsIsADirectory => {
+                "This operation encountered a directory, when a non-directory was expected".into()
+            }
+            ErrType::FsNotADirectory => {
+                "This operation encountered a non-directory, when a directory was expected".into()
+            }
             ErrType::FsNotFound => "The entity (directory, file, ...) was not found".into(),
-            ErrType::FsPermissionDenied => "This operation lacked the necessary privileges to complete".into(),
-            ErrType::FsOutOfMemory => "This operation could not be completed, because it failed to allocate enough memory".into(),
-            ErrType::FsReadOnlyFilesystem => "The filesystem or storage medium is read-only, but a write operation was attempted".into(),
+            ErrType::FsPermissionDenied => {
+                "This operation lacked the necessary privileges to complete".into()
+            }
+            ErrType::FsOutOfMemory => {
+                "This operation could not be completed, because it failed to allocate enough memory"
+                    .into()
+            }
+            ErrType::FsReadOnlyFilesystem => {
+                "The filesystem or storage medium is read-only, but a write operation was attempted"
+                    .into()
+            }
             ErrType::FsStorageFull => "Storage is full".into(),
             ErrType::FsTimedOut => "This operation timed out".into(),
-            ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
-            ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into(),
-            ErrType::NullByteInString => "String passed to dynamic library function contains an interior null byte".into(),
-            ErrType::UnknownMapKey(key) => format_args!("Unknown key {RED}{BOLD}{key}{RESET}").to_smolstr(),
+            ErrType::DivisionByZero => {
+                "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into()
+            }
+            ErrType::ModuloByZero => {
+                "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into()
+            }
+            ErrType::NullByteInString => {
+                "String passed to dynamic library function contains an interior null byte".into()
+            }
+            ErrType::UnknownMapKey(key) => {
+                format!("Unknown key {RED}{BOLD}{key}{RESET}")
+            }
         }
     }
 }
@@ -170,7 +193,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
             file_id: 0,
         });
     let src = &ctx.sources[*file_id as usize];
-    let err_message: SmolStr = t.into();
+    let err_message: String = t.into();
     eprintln!("{RED}KEEL ERROR{RESET}");
     let report =
         Report::build(ReportKind::Error, (src.filename, (*start as usize)..(*end as usize)))
@@ -187,7 +210,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            (src.filename.as_str(), ariadne::Source::from(src.contents.as_str())),
+            (src.filename, ariadne::Source::from(src.contents)),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();
@@ -233,9 +256,7 @@ pub fn throw_compiler_error<'a>(
                 .with_sources(
                     sources
                         .iter()
-                        .map(|src| {
-                            (src.filename.as_str(), ariadne::Source::from(src.contents.as_str()))
-                        })
+                        .map(|src| (src.filename, ariadne::Source::from(src.contents)))
                         .collect(),
                 ),
             crate::captured_output::CapturedOutputWriter,

@@ -9,15 +9,14 @@ use crate::instr::Instr;
 use crate::vm::MapPool;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
+use bumpalo::Bump;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
-use smol_strc::SmolStr;
 use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use libloading::Library;
 
-#[derive(Debug)]
 pub struct ErrorCatch {
     pub catch_loc: u16,
     pub error_reg: u16,
@@ -25,43 +24,38 @@ pub struct ErrorCatch {
     pub args_len: u16,
 }
 
-#[derive(Debug)]
 pub struct Function<'arena> {
-    pub name: SmolStr,
-    pub args: Box<[(SmolStr, Option<DataType>)]>,
+    pub name: &'arena str,
+    pub args: Box<[(&'arena str, Option<DataType>)]>,
     pub code: &'arena [Expr<'arena>],
-    pub impls: Vec<FunctionImpl>,
+    pub impls: Vec<FunctionImpl<'arena>>,
     pub is_recursive: Option<bool>,
     pub returns_null: bool,
     pub src_file: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
-    pub direct_calls: Box<[&'arena str]>,
+    pub direct_calls: &'arena [&'arena str],
     pub name_span: Span,
 }
 
-#[derive(Debug)]
-pub struct FunctionImpl {
+pub struct FunctionImpl<'arena> {
     pub loc: u16,
-    pub args_loc: Box<[u16]>,
+    pub args_loc: &'arena [u16],
     pub arg_types: Box<[DataType]>,
 }
 
-#[derive(Debug)]
-pub struct FnSignature {
-    pub name: SmolStr,
+pub struct FnSignature<'arena> {
+    pub name: &'arena str,
     pub args: Box<[DataType]>,
     pub return_type: DataType,
     pub id: u16,
 }
 
-#[derive(Debug)]
-pub struct Dylib {
-    pub name: SmolStr,
-    pub fns: Box<[FnSignature]>,
+pub struct Dylib<'arena> {
+    pub name: &'arena str,
+    pub fns: Box<[FnSignature<'arena>]>,
 }
 
-#[derive(Debug)]
 pub struct DylibFn {
     /// [ return_type, arg_types... ]
     pub types: Box<[DataType]>,
@@ -80,17 +74,15 @@ impl DylibFn {
     }
 }
 
-#[derive(Debug)]
-pub struct StructField {
-    pub name: SmolStr,
+pub struct StructField<'arena> {
+    pub name: &'arena str,
     pub field_type: DataType,
     pub span: Span,
 }
 
-#[derive(Debug)]
-pub struct Struct {
-    pub name: SmolStr,
-    pub fields: Box<[StructField]>,
+pub struct Struct<'arena> {
+    pub name: &'arena str,
+    pub fields: Box<[StructField<'arena>]>,
     pub id: u16,
     pub name_span: Span,
 }
@@ -148,34 +140,35 @@ pub struct InstrSrc {
 }
 
 pub struct State<'arena, 'compiler> {
-    pub v: &'compiler mut Vec<Variable>,
-    pub globals: &'compiler mut Vec<Variable>,
+    pub v: &'compiler mut Vec<Variable<'arena>>,
+    pub globals: &'compiler mut Vec<Variable<'arena>>,
     pub registers: &'compiler mut Vec<Data>,
     pub functions: &'compiler mut Vec<Function<'arena>>,
-    pub structs: &'compiler mut Vec<Struct>,
+    pub structs: &'compiler mut Vec<Struct<'arena>>,
     pub pools: &'compiler mut Pools,
     pub instr_src: &'compiler mut Vec<InstrSrc>,
     pub fn_registers: &'compiler mut Vec<Vec<u16>>,
-    pub dylibs: &'compiler mut Vec<Dylib>,
+    pub dylibs: &'compiler mut Vec<Dylib<'arena>>,
     pub allocated_arg_count: &'compiler mut usize,
     pub allocated_call_depth: &'compiler mut usize,
     pub const_registers: &'compiler mut FxHashMap<Data, u16>,
     pub free_registers: &'compiler mut Vec<u16>,
     pub sources: &'compiler mut Vec<Source<'arena>>,
     pub reserved_registers: FxHashSet<u16>,
-    pub file_scopes: &'compiler mut Vec<Scope>,
+    pub file_scopes: &'compiler mut Vec<Scope<'arena>>,
     pub types: &'compiler mut Vec<DataType>,
+    pub bump: &'arena Bump,
 }
 
-impl State<'_, '_> {
+impl<'arena> State<'arena, '_> {
     #[must_use]
     #[inline(always)]
-    pub fn scope(&self, file_idx: u16) -> &Scope {
+    pub fn scope(&self, file_idx: u16) -> &Scope<'_> {
         unsafe { self.file_scopes.get_unchecked(file_idx as usize) }
     }
     #[must_use]
     #[inline(always)]
-    pub fn scope_mut(&mut self, file_idx: u16) -> &mut Scope {
+    pub fn scope_mut(&mut self, file_idx: u16) -> &mut Scope<'arena> {
         unsafe { self.file_scopes.get_unchecked_mut(file_idx as usize) }
     }
     #[must_use]
@@ -188,25 +181,25 @@ impl State<'_, '_> {
         }
     }
     #[must_use]
-    pub fn find_var(&self, var_name: &str) -> Option<&Variable> {
-        self.v.iter().rfind(|variable| variable.name.as_str() == var_name)
+    pub fn find_var(&self, var_name: &str) -> Option<&Variable<'_>> {
+        self.v.iter().rfind(|variable| variable.name == var_name)
     }
     #[must_use]
-    pub fn find_var_mut(&mut self, var_name: &str) -> Option<&mut Variable> {
-        self.v.iter_mut().rfind(|variable| variable.name.as_str() == var_name)
+    pub fn find_var_mut(&mut self, var_name: &str) -> Option<&mut Variable<'arena>> {
+        self.v.iter_mut().rfind(|variable| variable.name == var_name)
     }
     #[must_use]
     pub fn find_var_idx(&self, var_name: &str) -> Option<usize> {
-        self.v.iter().rposition(|variable| variable.name.as_str() == var_name)
+        self.v.iter().rposition(|variable| variable.name == var_name)
     }
     #[inline(always)]
-    pub fn new_var(&mut self, name: SmolStr, register_id: u16, var_type: DataType) {
+    pub fn new_var(&mut self, name: &'arena str, register_id: u16, var_type: DataType) {
         self.v.push(Variable { name, register_id, declared_type: var_type.clone(), var_type });
     }
     #[inline(always)]
     pub fn new_var_with_type(
         &mut self,
-        name: SmolStr,
+        name: &'arena str,
         register_id: u16,
         var_type: DataType,
         declared_type: DataType,
@@ -297,9 +290,8 @@ impl State<'_, '_> {
     }
 }
 
-#[derive(Debug)]
-pub struct Variable {
-    pub name: SmolStr,
+pub struct Variable<'arena> {
+    pub name: &'arena str,
     pub register_id: u16,
     /// Fixed at var declaration and never changes
     pub declared_type: DataType,

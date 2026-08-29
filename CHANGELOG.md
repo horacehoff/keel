@@ -2,7 +2,6 @@
 
 ## 0.5.0
 - Several critical bugs have been fixed
-- Lowered the memory footprint of the compiler
 - There's now a Windows install script
 - Formatting/Printing performance has been immensely improved
 - The `str` function has been renamed to `string`
@@ -12,6 +11,7 @@
 - Variables now have their type fixed at declaration
 - Variables can now be optionally typed with `let var: type = value` and `static var: type = value`
 - The standard library and future files are now stored in `$HOME/.keel/`
+- The performance of the GC has been improved and its memory footprint lowered
 
 ## 0.4.0 (07/30/2026)
 - Function arguments can now be typed with the syntax `arg: T`

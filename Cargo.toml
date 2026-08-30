@@ -46,6 +46,7 @@ logos = "0.16.1"
 rustc-hash = "2.1.3"
 fixedbitset = "0.5.7"
 bumpalo = {version="3.20.3",features=["collections"]}
+indexmap = "2.14.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.9.0"

@@ -44,7 +44,7 @@ pub fn get_output() -> String {
 #[wasm_bindgen]
 pub fn run(code: String) {
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
-    let bump = Bump::new();
+    let bump = Bump::with_capacity(code.len() * 10);
     let (
         instructions,
         mut registers,
@@ -79,7 +79,7 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
     let code = unsafe { CStr::from_ptr(code) }.to_string_lossy().to_string();
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let _ = catch_unwind(|| {
-        let bump = Bump::new();
+        let bump = Bump::with_capacity(code.len() * 10);
         let (
             instructions,
             mut registers,
@@ -174,7 +174,7 @@ pub fn main() {
             eprintln!("{RED}[KEEL]{RESET} Cannot read {RED}{BOLD}{filename}{RESET}");
             std::process::exit(1);
         });
-        let bump = Bump::new();
+        let bump = Bump::with_capacity(contents.len() * 10);
         compile(&contents, filename, false, &bump);
         return;
     }
@@ -186,13 +186,13 @@ pub fn main() {
         eprintln!("{RED}[KEEL]{RESET} Cannot read {RED}{BOLD}{filename}{RESET}");
         std::process::exit(1);
     });
+    let bump = Bump::with_capacity(contents.len() * 10);
 
     #[cfg(debug_assertions)]
     {
         let next = args.next();
         if next == Some(String::from("--debug")) {
             let now = std::time::Instant::now();
-            let bump = Bump::new();
             let (
                 instructions,
                 mut registers,
@@ -222,12 +222,10 @@ pub fn main() {
             println!("EXECUTION TIME: {:.3}ms", now.elapsed().as_nanos() / 1_000_000);
             return;
         } else if next == Some(String::from("--debug-parser")) {
-            let bump = Bump::new();
             compile(&contents, filename, false, &bump);
             return;
         }
     }
-    let bump = Bump::new();
     let (
         instructions,
         mut registers,

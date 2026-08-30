@@ -6,7 +6,7 @@ use super::super::type_system::c_arg_matches;
 use super::super::type_system::can_reach;
 use super::super::type_system::track_returns;
 use super::check_user_fn_arg_types;
-use crate::compiler::SymbolKind;
+use crate::compiler::Symbol;
 use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
 use crate::compiler::compiler_data::Ctx;
@@ -14,6 +14,7 @@ use crate::compiler::compiler_data::FunctionImpl;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args_user_fn;
+use crate::compiler::compiler_errors::error_function_already_defined;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::data::Data;
@@ -84,7 +85,7 @@ pub fn handle_user_function<'arena>(
     let args = function_call.args;
     let fn_name = function_call.qualified_name.get_name();
     let span = function_call.get_call_span();
-    let args_indexes = &function_call.get_arg_spans();
+    let arg_spans = &function_call.get_arg_spans();
     let is_recursive = is_function_recursive(function_idx, state);
 
     let fn_returns_null = state.functions[function_idx].returns_null;
@@ -99,7 +100,7 @@ pub fn handle_user_function<'arena>(
         span,
         (state.functions[function_idx].name_span, state.functions[function_idx].src_file),
         state,
-        args_indexes,
+        arg_spans,
     );
 
     //This inlines dylib wrappers
@@ -130,7 +131,7 @@ pub fn handle_user_function<'arena>(
                 error_function_arg_invalid_type(
                     &inferred,
                     &expected_arg_types[i],
-                    args_indexes[i],
+                    arg_spans[i],
                     fn_name,
                     Some((
                         state.functions[function_idx].name_span,
@@ -159,7 +160,7 @@ pub fn handle_user_function<'arena>(
     let inferred_arg_types =
         args.iter().map(|arg| arg.infer_type(ctx, state)).collect::<Vec<DataType>>();
 
-    check_user_fn_arg_types(function_idx, fn_name, &inferred_arg_types, args_indexes, ctx, state);
+    check_user_fn_arg_types(function_idx, fn_name, &inferred_arg_types, arg_spans, ctx, state);
 
     let fn_impl_idx = compile_function_impl(output, ctx, state, function_idx, &inferred_arg_types);
     let loc = state.functions[function_idx].impls[fn_impl_idx].loc;
@@ -239,10 +240,9 @@ pub fn compile_function<'arena>(
         .enumerate()
         .map(|(i, x)| {
             // Allocate a registers slot for each func arg
-            state.registers.push(NULL);
             Variable {
                 name: x,
-                register_id: (state.registers.len() - 1) as u16,
+                register_id: state.new_reg(NULL),
                 declared_type: infered_arg_types[i].clone(),
                 var_type: infered_arg_types[i].clone(),
             }
@@ -266,11 +266,20 @@ pub fn compile_function<'arena>(
 
     let v_len_before_args = state.v.len();
     // let fn_len = state.namespace.symbols.len();
-    let mut anon_fns: Vec<usize> = Vec::new();
+    let mut anon_fns: Vec<&str> = Vec::new();
     infered_arg_types.iter().enumerate().for_each(|(i, infered_type)| {
         if let DataType::Fn(fn_id) = infered_type {
-            anon_fns.push(state.scope(fn_file_idx).symbols.len());
-            state.scope_mut(fn_file_idx).symbols.push((fn_args[i], SymbolKind::Fn(*fn_id)));
+            anon_fns.push(fn_args[i]);
+            if let Some(func) =
+                state.scope_mut(fn_file_idx).symbols.insert((fn_args[i], Symbol::Fn), *fn_id)
+            {
+                error_function_already_defined(
+                    &state.functions[func as usize],
+                    (0u32, 0u32).into(),
+                    ctx.file_idx,
+                    state.sources,
+                );
+            }
             state.new_var(fn_args[i], 0, DataType::Fn(*fn_id));
         } else {
             // 0 => placeholder id, it's never used
@@ -314,7 +323,7 @@ pub fn compile_function<'arena>(
     std::mem::swap(state.v, &mut v_temp);
 
     for i in anon_fns.into_iter().rev() {
-        state.scope_mut(fn_file_idx).symbols.swap_remove(i);
+        state.scope_mut(fn_file_idx).symbols.shift_remove(&(i, Symbol::Fn));
     }
 
     let mut reserved_registers = get_tgt_ids(&parsed);
@@ -332,7 +341,7 @@ pub fn compile_function<'arena>(
     reserved_registers.sort_unstable();
     reserved_registers.dedup();
     state.reserved_registers.extend(reserved_registers);
-    state.free_registers.retain(|reg| !state.reserved_registers.contains(reg));
+    state.unfree_reserved_registers();
 
     if is_recursive {
         let all_written_regs: Vec<u16> = get_tgt_ids(&parsed);

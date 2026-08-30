@@ -10,8 +10,10 @@ use crate::vm::MapPool;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
 use bumpalo::Bump;
+use fixedbitset::FixedBitSet;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
+use std::hint::unreachable_unchecked;
 use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -152,7 +154,9 @@ pub struct State<'arena, 'compiler> {
     pub allocated_arg_count: &'compiler mut usize,
     pub allocated_call_depth: &'compiler mut usize,
     pub const_registers: &'compiler mut FxHashMap<Data, u16>,
+    pub const_registers_bitset: &'compiler mut FixedBitSet,
     pub free_registers: &'compiler mut Vec<u16>,
+    pub free_registers_bitset: &'compiler mut FixedBitSet,
     pub sources: &'compiler mut Vec<Source<'arena>>,
     pub reserved_registers: FxHashSet<u16>,
     pub file_scopes: &'compiler mut Vec<Scope<'arena>>,
@@ -209,9 +213,11 @@ impl<'arena> State<'arena, '_> {
     /// Creates a brand new register containing `data` and returns its index.
     #[must_use]
     pub fn new_reg(&mut self, data: Data) -> u16 {
-        let register_id = self.registers.len() as u16;
+        let register_id = self.registers.len();
+        self.free_registers_bitset.grow(register_id + 1);
+        self.const_registers_bitset.grow(register_id + 1);
         self.registers.push(data);
-        register_id
+        register_id as u16
     }
     /// Allocates a brand new constant register containing `data` and returns its index.
     /// If a constant register containing `data` already exists, it simply returns its index and doesn't create a new register.
@@ -220,9 +226,9 @@ impl<'arena> State<'arena, '_> {
         if let Some(&id) = self.const_registers.get(&data) {
             id
         } else {
-            let register_id = self.registers.len() as u16;
+            let register_id = self.new_reg(data);
             self.const_registers.insert(data, register_id);
-            self.registers.push(data);
+            unsafe { self.const_registers_bitset.insert_unchecked(register_id as usize) };
             register_id
         }
     }
@@ -234,17 +240,25 @@ impl<'arena> State<'arena, '_> {
     /// - the register isn't already marked as free
     pub fn free_reg(&mut self, id: u16) {
         if !self.v.iter().any(|var| var.register_id == id)
-            && !self.const_registers.values().any(|&reg| reg == id)
+            && !unsafe { self.const_registers_bitset.contains_unchecked(id as usize) }
             && !self.reserved_registers.contains(&id)
-            && !self.free_registers.contains(&id)
+            && !unsafe { self.free_registers_bitset.contains_unchecked(id as usize) }
         {
+            unsafe { self.free_registers_bitset.insert_unchecked(id as usize) };
             self.free_registers.push(id);
         }
     }
     /// Allocates a register. It `free_registers` isn't empty, it will reuse the latest one. Else, it will allocate a new one.
     #[must_use]
     pub fn alloc_reg(&mut self) -> u16 {
-        if let Some(reg) = self.free_registers.pop() { reg } else { self.new_reg(NULL) }
+        if let Some(reg) = self.free_registers.pop() {
+            unsafe {
+                self.free_registers_bitset.remove_unchecked(reg as usize);
+            };
+            reg
+        } else {
+            self.new_reg(NULL)
+        }
     }
     /// Allocates a register, reusing `tgt_id` if it holds some register id.
     /// If `tgt_id == None`, it calls `alloc_reg()`.
@@ -260,6 +274,31 @@ impl<'arena> State<'arena, '_> {
                 self.free_reg(id);
             }
         }
+    }
+    /// Unfree register `id` if it's been freed (if it hasn't, do nothing).
+    pub fn unfree_register(&mut self, id: u16) {
+        if unsafe { self.free_registers_bitset.contains_unchecked(id as usize) } {
+            unsafe { self.free_registers_bitset.remove_unchecked(id as usize) };
+            let Some(free_reg_id_pos) =
+                self.free_registers.iter().rposition(|&reg_id| reg_id == id)
+            else {
+                unsafe { unreachable_unchecked() }
+            };
+            self.free_registers.swap_remove(free_reg_id_pos);
+        }
+    }
+    /// Unfree all the registers in `free_registers` who are also in `reserved_registers`.
+    pub fn unfree_reserved_registers(&mut self) {
+        self.free_registers.retain(|reg| {
+            if self.reserved_registers.contains(reg) {
+                unsafe {
+                    self.free_registers_bitset.remove_unchecked(*reg as usize);
+                }
+                false
+            } else {
+                true
+            }
+        });
     }
 
     /// Similar to free_scope_registers, but also frees CloneArray template registers. Only call this after a loop ends.

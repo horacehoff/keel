@@ -289,12 +289,9 @@ fn parse_qualified_name<'arena>(
 }
 
 // Must be called after LParen is skipped
-fn parse_args<'arena>(
-    parser: &mut Parser<'arena>,
-) -> (bumpalo::collections::Vec<'arena, Expr<'arena>>, bumpalo::collections::Vec<'arena, Span>, u32)
-{
-    let mut args = bumpalo::collections::Vec::with_capacity_in(4, parser.bump);
-    let mut arg_spans = bumpalo::collections::Vec::with_capacity_in(4, parser.bump);
+fn parse_args<'arena>(parser: &mut Parser<'arena>) -> (Vec<Expr<'arena>>, Vec<Span>, u32) {
+    let mut args = Vec::with_capacity(4);
+    let mut arg_spans = Vec::with_capacity(4);
     loop {
         if parser.peek_token() == Token::RParen {
             let end = parser.next_token().1.end;
@@ -579,7 +576,7 @@ fn parse_file_import<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
 fn parse_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
     let t = parse_atomic_type(parser);
     if parser.peek_token() == Token::Pipe {
-        let mut poly = bumpalo::collections::Vec::with_capacity_in(2, parser.bump);
+        let mut poly = bumpalo::collections::Vec::with_capacity_in(4, parser.bump);
         poly.push(t);
         while parser.peek_token() == Token::Pipe {
             parser.next_token();
@@ -617,7 +614,7 @@ fn parse_atomic_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
             Token::LParen,
             "Function types must have their arguments delimited by parentheses",
         );
-        let mut arg_types = bumpalo::collections::Vec::with_capacity_in(2, parser.bump);
+        let mut arg_types = Vec::with_capacity(2);
         loop {
             if parser.peek_token() == Token::RParen {
                 parser.next_token();
@@ -638,7 +635,7 @@ fn parse_atomic_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
         } else {
             TypeExpr::Identifier("null", span)
         });
-        TypeExpr::Function(arg_types.into_bump_slice())
+        TypeExpr::Function(parser.bump.alloc_slice_copy(&arg_types))
     } else if let Token::Identifier(i) = next_token {
         if parser.peek_token() == Token::DoubleColon {
             parser.next_token();

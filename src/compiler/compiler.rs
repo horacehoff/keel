@@ -54,15 +54,19 @@ use compiler_data::Variable;
 use expr::Expr;
 use expr::Span;
 use expr::code_modifies_variable;
+use fixedbitset::FixedBitSet;
 use functions::compile_function_call;
+use indexmap::IndexMap;
 use methods::compile_method_call;
 use registers::move_reg_to_reg;
 use registers::move_to_id;
+use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
+use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -617,8 +621,7 @@ fn compile_map_literal<'arena>(
                 state.pools.map_pool[map_id].insert(key_val, state.registers[id as usize]);
             } else {
                 state.pools.map_pool[map_id].insert(key_val, NULL);
-                output.push(Instr::MapInsert(map_id as u16, state.registers.len() as u16, id));
-                state.registers.push(key_val);
+                output.push(Instr::MapInsert(map_id as u16, state.new_reg(key_val), id));
             }
         }
         state.new_reg(Data::map(map_id as u32))
@@ -1703,10 +1706,17 @@ fn compile_var_declaration<'arena>(
         }
     };
 
-    if let DataType::Fn(fn_id) = value_type {
-        state.scope_mut(ctx.file_idx).symbols.push((name, SymbolKind::Fn(fn_id)));
+    if let DataType::Fn(fn_id) = value_type
+        && let Some(func) = state.scope_mut(ctx.file_idx).symbols.insert((name, Symbol::Fn), fn_id)
+    {
+        compiler_errors::error_function_already_defined(
+            &state.functions[func as usize],
+            (0u32, 0u32).into(),
+            ctx.file_idx,
+            state.sources,
+        );
     }
-    state.free_registers.retain(|&id| id != var_id);
+    state.unfree_register(var_id);
     state.new_var_with_type(name, var_id, value_type, declared_type);
 }
 
@@ -1907,8 +1917,12 @@ fn compile_struct_definition<'arena>(
         id: struct_id,
         name_span: span,
     });
-    let symbol = SymbolKind::Struct((state.structs.len() - 1) as u16);
-    state.scope_mut(ctx.file_idx).symbols.push((name, symbol));
+    let struct_id = (state.structs.len() - 1) as u16;
+    if let Some(struct_id) =
+        state.scope_mut(ctx.file_idx).symbols.insert((name, Symbol::Struct), struct_id)
+    {
+        todo!("NO!");
+    }
     let parsed_fields = fields
         .iter()
         .map(|(field_name, field_type, field_span)| StructField {
@@ -1933,13 +1947,17 @@ fn compile_function_definition<'arena>(
     let span = function_declaration.span;
     let fn_code = function_declaration.code;
     let fn_args = &function_declaration.args;
-    if let Some(func) = state.functions.iter().find(|func| &func.name == fn_name) {
-        compiler_errors::error_function_already_defined(func, span, ctx.file_idx, state.sources);
-    }
     let mut callees = Vec::new();
     collect_direct_fn_calls(fn_code, &mut callees);
-    let symbol = SymbolKind::Fn(state.functions.len() as u16);
-    state.scope_mut(ctx.file_idx).symbols.push((fn_name, symbol));
+    let fn_id = state.functions.len() as u16;
+    if let Some(func) = state.scope_mut(ctx.file_idx).symbols.insert((fn_name, Symbol::Fn), fn_id) {
+        compiler_errors::error_function_already_defined(
+            &state.functions[func as usize],
+            span,
+            ctx.file_idx,
+            state.sources,
+        );
+    }
     state.functions.push(Function {
         name: fn_name,
         args: fn_args
@@ -2464,25 +2482,30 @@ const ARCH_SUFFIX: &str = "-x86_64";
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 const ARCH_SUFFIX: &str = "";
 
-#[derive(Debug, Copy, Clone)]
-pub enum SymbolKind {
-    Fn(u16),
-    Struct(u16),
-    Global(u16),
+#[derive(Clone, Hash, Eq, PartialEq, Copy)]
+pub enum Symbol {
+    Fn,
+    Struct,
+    Global,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Scope<'arena> {
-    pub symbols: Vec<(&'arena str, SymbolKind)>,
+    pub symbols: IndexMap<(&'arena str, Symbol), u16, FxBuildHasher>,
     pub children: Vec<(&'arena str, Self)>,
 }
 
 impl Scope<'_> {
-    pub fn fns(&self) -> impl Iterator<Item = &(&str, SymbolKind)> {
-        self.symbols.iter().filter(|(_, kind)| matches!(kind, SymbolKind::Fn(_)))
+    #[cold]
+    pub fn fns(&self) -> impl Iterator<Item = (&str, u16)> {
+        self.symbols.iter().filter(|((_, kind), _)| *kind == Symbol::Fn).map(|(&(k, _), &v)| (k, v))
     }
-    pub fn structs(&self) -> impl Iterator<Item = &(&str, SymbolKind)> {
-        self.symbols.iter().filter(|(_, kind)| matches!(kind, SymbolKind::Struct(_)))
+    #[cold]
+    pub fn structs(&self) -> impl Iterator<Item = (&str, u16)> {
+        self.symbols
+            .iter()
+            .filter(|((_, kind), _)| *kind == Symbol::Struct)
+            .map(|(&(k, _), &v)| (k, v))
     }
     #[must_use]
     pub fn find_function(
@@ -2493,17 +2516,10 @@ impl Scope<'_> {
         file_idx: u16,
         sources: &[Source],
     ) -> Option<usize> {
-        self.walk_to_namespace(path, span, file_idx, sources).symbols.iter().find_map(
-            |(name, kind)| {
-                if name == &function_name
-                    && let SymbolKind::Fn(fn_id) = kind
-                {
-                    Some(*fn_id as usize)
-                } else {
-                    None
-                }
-            },
-        )
+        self.walk_to_namespace(path, span, file_idx, sources)
+            .symbols
+            .get(&(function_name, Symbol::Fn))
+            .map(|symbol| *symbol as usize)
     }
     #[must_use]
     pub fn find_struct(
@@ -2514,38 +2530,24 @@ impl Scope<'_> {
         file_idx: u16,
         sources: &[Source],
     ) -> Option<usize> {
-        self.walk_to_namespace(path, span, file_idx, sources).symbols.iter().find_map(
-            |(name, kind)| {
-                if name == &struct_name
-                    && let SymbolKind::Struct(struct_id) = kind
-                {
-                    Some(*struct_id as usize)
-                } else {
-                    None
-                }
-            },
-        )
+        self.walk_to_namespace(path, span, file_idx, sources)
+            .symbols
+            .get(&(struct_name, Symbol::Struct))
+            .map(|symbol| *symbol as usize)
     }
     #[must_use]
     pub fn find_global(
         &self,
         path: &[&str],
-        var_name: &str,
+        global_var_name: &str,
         span: Span,
         file_idx: u16,
         sources: &[Source],
     ) -> Option<usize> {
-        self.walk_to_namespace(path, span, file_idx, sources).symbols.iter().find_map(
-            |(name, kind)| {
-                if name == &var_name
-                    && let SymbolKind::Global(var_id) = kind
-                {
-                    Some(*var_id as usize)
-                } else {
-                    None
-                }
-            },
-        )
+        self.walk_to_namespace(path, span, file_idx, sources)
+            .symbols
+            .get(&(global_var_name, Symbol::Global))
+            .map(|symbol| *symbol as usize)
     }
     #[must_use]
     pub fn walk_to_namespace(
@@ -2635,17 +2637,17 @@ fn parse_toplevel<'a>(
                     name_span: span,
                 });
                 pending_fns.push((fn_id, src_file_idx, fn_args));
-                scope.symbols.push((fn_name, SymbolKind::Fn(fn_id)));
+                scope.symbols.insert((fn_name, Symbol::Fn), fn_id);
             }
-            Expr::StructDeclare(name, fields, span) => {
+            Expr::StructDeclare(struct_name, fields, span) => {
                 let struct_id = structs.len() as u16;
                 structs.push(Struct {
-                    name,
+                    name: struct_name,
                     fields: Box::from([]),
                     id: struct_id,
                     name_span: span,
                 });
-                scope.symbols.push((name, SymbolKind::Struct(struct_id)));
+                scope.symbols.insert((struct_name, Symbol::Struct), struct_id);
                 pending_structs.push((struct_id, src_file_idx, fields));
             }
             #[cfg(target_arch = "wasm32")]
@@ -2752,7 +2754,7 @@ fn parse_toplevel<'a>(
 
                 // Parse the imported file's contents
 
-                let mut child_scope = Scope { symbols: Vec::new(), children: Vec::new() };
+                let mut child_scope = Scope { symbols: IndexMap::default(), children: Vec::new() };
 
                 let file_path_cloned = file_path.clone();
                 parse_toplevel(
@@ -2783,9 +2785,13 @@ fn parse_toplevel<'a>(
     }
 
     for var_declaration in file_globals {
-        scope
+        if let Some(previous_global) = scope
             .symbols
-            .push((var_declaration.name, SymbolKind::Global(pending_globals.len() as u16)));
+            .insert((var_declaration.name, Symbol::Global), pending_globals.len() as u16)
+        {
+            cold_path();
+            todo!("NO!");
+        }
         pending_globals.push((var_declaration, src_file_idx));
     }
 
@@ -3030,6 +3036,8 @@ pub fn compile<'arena>(
         single_run: true,
         offset: 0,
     };
+    let mut const_registers_bitset = FixedBitSet::new();
+    let mut free_registers_bitset = FixedBitSet::new();
     let mut state = State {
         v: &mut variables,
         globals: &mut globals,
@@ -3043,7 +3051,9 @@ pub fn compile<'arena>(
         allocated_arg_count: &mut allocated_arg_count,
         allocated_call_depth: &mut allocated_call_depth,
         const_registers: &mut const_registers,
+        const_registers_bitset: &mut const_registers_bitset,
         free_registers: &mut free_registers,
+        free_registers_bitset: &mut free_registers_bitset,
         sources: &mut sources,
         reserved_registers: FxHashSet::default(),
         file_scopes: &mut file_scopes,
@@ -3106,30 +3116,30 @@ pub fn compile<'arena>(
     instructions.extend(program_instructions);
     instructions.push(Instr::Halt(0));
 
-    // #[cfg(debug_assertions)]
-    // if debug {
-    //     println!("---- DEBUG ----");
-    //     if !pools.obj_pool.is_empty() {
-    //         println!("---  ARRAYS  ---");
-    //         for (i, data) in pools.obj_pool.iter().enumerate() {
-    //             println!(" {i} {data:?}");
-    //         }
-    //     }
-    //     println!("-- REGISTERS --");
-    //     for (i, data) in registers.iter().enumerate() {
-    //         println!(
-    //             " [{i}] {}",
-    //             data.format(&pools.obj_pool, &pools.str_pool, &pools.map_pool, &structs, true)
-    //         );
-    //     }
-    //     if !instructions.is_empty() {
-    //         println!("-- INSTRUCTIONS --");
-    //         for (i, instr) in instructions.iter().enumerate() {
-    //             println!(" {i}: {instr:?}");
-    //         }
-    //     }
-    //     println!("------------------");
-    // }
+    #[cfg(debug_assertions)]
+    if debug {
+        println!("---- DEBUG ----");
+        if !pools.obj_pool.is_empty() {
+            println!("---  ARRAYS  ---");
+            for (i, data) in pools.obj_pool.iter().enumerate() {
+                println!(" {i} {data:?}");
+            }
+        }
+        println!("-- REGISTERS --");
+        for (i, data) in registers.iter().enumerate() {
+            println!(
+                " [{i}] {}",
+                data.format(&pools.obj_pool, &pools.str_pool, &pools.map_pool, &structs, true)
+            );
+        }
+        if !instructions.is_empty() {
+            println!("-- INSTRUCTIONS --");
+            for (i, instr) in instructions.iter().enumerate() {
+                println!(" {i}: {instr:?}");
+            }
+        }
+        println!("------------------");
+    }
 
     (
         instructions,

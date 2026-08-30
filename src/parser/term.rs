@@ -33,8 +33,8 @@ fn parse_fn_call<'arena>(
     spans.insert(0, span);
     Expr::FunctionCall(FunctionCallExpr {
         qualified_name,
-        args: args.into_bump_slice(),
-        spans: spans.into_bump_slice(),
+        args: parser.bump.alloc_slice_copy(&args),
+        spans: parser.bump.alloc_slice_copy(&spans),
     })
 }
 
@@ -315,7 +315,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
         }
         // map
         Token::LBrace => {
-            let mut kv_pairs = bumpalo::collections::Vec::with_capacity_in(2, parser.bump);
+            let mut kv_pairs = Vec::with_capacity(2);
             let end: u32;
             loop {
                 let key_start = parser.peek_token_span().start;
@@ -352,7 +352,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                     )
                 }
             }
-            Expr::Map(kv_pairs.into_bump_slice(), (t_span.start, end).into())
+            Expr::Map(parser.bump.alloc_slice_copy(&kv_pairs), (t_span.start, end).into())
         }
         unexpected => {
             cold_path();

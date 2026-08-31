@@ -71,6 +71,12 @@ pub struct DylibFn {
 
 impl DylibFn {
     #[inline(always)]
+    #[must_use]
+    pub fn get_argument_type(&self, index: usize) -> &DataType {
+        unsafe { self.types.get_unchecked(index + 1) }
+    }
+    #[inline(always)]
+    #[must_use]
     pub fn get_return_type(&self) -> &DataType {
         unsafe { self.types.get_unchecked(0) }
     }
@@ -134,7 +140,6 @@ impl Ctx {
     }
 }
 
-#[derive(Copy, Clone)]
 pub struct InstrSrc {
     pub instr: Instr,
     pub span: Span,

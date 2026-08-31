@@ -261,7 +261,7 @@ pub fn c_struct_to_keel_struct(
                     NULL
                 } else {
                     Data::string(
-                        unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy().into_owned(),
+                        unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy().as_ref(),
                         obj_pool,
                         map_pool,
                         string_pool,
@@ -274,7 +274,9 @@ pub fn c_struct_to_keel_struct(
             DataType::Struct(nested_struct_id) => {
                 let s = unsafe { structs.get_unchecked(*nested_struct_id as usize) };
                 let (_, _, inner_offsets) = get_struct_size_datatype(&s.fields, structs);
-                let nested_data_fields = c_struct_to_keel_struct(
+                let new_struct_id =
+                    gc.alloc_array(obj_pool, map_pool, string_pool, r, recursion_stack);
+                obj_pool[new_struct_id as usize] = c_struct_to_keel_struct(
                     &c_struct[field_offset..],
                     &inner_offsets,
                     obj_pool,
@@ -286,9 +288,7 @@ pub fn c_struct_to_keel_struct(
                     gc,
                     structs,
                 );
-                let new_struct_id = obj_pool.len();
-                obj_pool.push(nested_data_fields);
-                buf.push(Data::struct_instance(*nested_struct_id, new_struct_id as u32));
+                buf.push(Data::struct_instance(*nested_struct_id, new_struct_id));
             }
             _ => {
                 // can only be an int here

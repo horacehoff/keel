@@ -207,6 +207,20 @@ impl ObjectPool {
             (*dst).extend_from_slice((&*src).get_unchecked(idx_start..idx_end));
         }
     }
+    #[inline(always)]
+    pub fn repeat_within(&mut self, src_idx: usize, dst_idx: usize, n: usize) {
+        debug_assert!(src_idx < self.len());
+        debug_assert!(dst_idx < self.len());
+        unsafe {
+            let ptr = self.as_mut_ptr();
+            let src = &*ptr.add(src_idx);
+            let dst = &mut *(ptr.add(dst_idx));
+            dst.reserve_exact(src.len() * n);
+            for _ in 0..n {
+                dst.extend_from_slice(src);
+            }
+        }
+    }
 }
 
 impl<T> Index<usize> for Pool<T> {
@@ -480,60 +494,62 @@ pub fn execute(
                 ffi_args.clear();
                 ffi_args.reserve_exact(args.len());
                 keep_alive.clear();
+                let func = unsafe { dyn_libs.get_unchecked(fn_id as usize) };
 
                 for idx in 0..args.len() {
                     let data = r[unsafe { *args.get_unchecked(idx) }];
-                    if data.is_int() {
-                        unsafe {
+                    ffi_args.push(match func.get_argument_type(idx) {
+                        DataType::Int => unsafe {
                             args_ptr.add(idx).write(data.as_int() as u64);
-                            ffi_args.push(libffi::middle::Arg::new(&*args_ptr.add(idx)));
-                        }
-                    } else if data.is_float() {
-                        unsafe {
+                            libffi::middle::Arg::new(&*args_ptr.add(idx))
+                        },
+                        DataType::Float => unsafe {
                             args_ptr.add(idx).write(data.as_float().to_bits());
-                            ffi_args.push(libffi::middle::Arg::new(&*args_ptr.add(idx)));
+                            libffi::middle::Arg::new(&*args_ptr.add(idx))
+                        },
+                        DataType::String => {
+                            if let Ok(b) = std::ffi::CString::new(data.as_str(str_pool)) {
+                                let bytes = b.into_bytes_with_nul().into_boxed_slice();
+                                let ptr = bytes.as_ptr() as u64;
+                                keep_alive.push(bytes);
+                                unsafe {
+                                    args_ptr.add(idx).write(ptr);
+                                    libffi::middle::Arg::new(&*args_ptr.add(idx))
+                                }
+                            } else {
+                                error_with_catch!(ErrType::NullByteInString, 'main);
+                            }
                         }
-                    } else if data.is_string() {
-                        let bytes = if let Ok(b) = std::ffi::CString::new(data.as_str(str_pool)) {
-                            b.into_bytes_with_nul().into_boxed_slice()
-                        } else {
-                            error_with_catch!(ErrType::NullByteInString, 'main);
-                        };
-                        let ptr = bytes.as_ptr() as u64;
-                        keep_alive.push(bytes);
-                        unsafe {
-                            args_ptr.add(idx).write(ptr);
-                            ffi_args.push(libffi::middle::Arg::new(&*args_ptr.add(idx)));
+                        DataType::Array(_) => {
+                            let ptr = ffi::array_to_c_ptr(data, obj_pool, str_pool, &mut keep_alive)
+                                as u64;
+                            unsafe {
+                                args_ptr.add(idx).write(ptr);
+                                libffi::middle::Arg::new(&*args_ptr.add(idx))
+                            }
                         }
-                    } else if data.is_array() {
-                        let ptr =
-                            ffi::array_to_c_ptr(data, obj_pool, str_pool, &mut keep_alive) as u64;
-                        unsafe {
-                            args_ptr.add(idx).write(ptr);
-                            ffi_args.push(libffi::middle::Arg::new(&*args_ptr.add(idx)));
-                        }
-                    } else if data.is_bool() {
-                        unsafe {
+                        DataType::Bool => unsafe {
                             args_ptr.add(idx).write(data.as_bool() as u64);
-                            ffi_args.push(libffi::middle::Arg::new(&*args_ptr.add(idx)));
+                            libffi::middle::Arg::new(&*args_ptr.add(idx))
+                        },
+                        _ => {
+                            debug_assert!(data.is_struct());
+                            // can only be a struct at this point
+                            let b = ffi::keel_struct_to_c_struct(
+                                data.as_struct(),
+                                obj_pool,
+                                str_pool,
+                                &mut keep_alive,
+                            )
+                            .into_boxed_slice();
+                            let ptr = &raw const *b;
+                            keep_alive.push(b);
+                            libffi::middle::Arg::new(unsafe { &*ptr })
                         }
-                    } else {
-                        // can only be a struct at this point
-                        let b = ffi::keel_struct_to_c_struct(
-                            data.as_struct(),
-                            obj_pool,
-                            str_pool,
-                            &mut keep_alive,
-                        )
-                        .into_boxed_slice();
-                        let ptr = &raw const *b;
-                        keep_alive.push(b);
-                        ffi_args.push(libffi::middle::Arg::new(unsafe { &*ptr }));
-                    }
+                    });
                 }
                 args.clear();
 
-                let func = unsafe { dyn_libs.get_unchecked(fn_id as usize) };
                 // Call the function, and convert the result back into Data
                 r[dest] = unsafe {
                     match func.get_return_type() {
@@ -545,9 +561,7 @@ pub fn execute(
                                 cold_path();
                                 NULL
                             } else {
-                                string!(
-                                    std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
-                                )
+                                string!(std::ffi::CStr::from_ptr(ptr).to_string_lossy().as_ref())
                             }
                         }
                         DataType::Bool => func.cif.call::<bool>(func.ptr, &ffi_args).into(),
@@ -563,7 +577,9 @@ pub fn execute(
                                 libffi::middle::ret(&mut return_buf[..]),
                             );
 
-                            let data_fields = ffi::c_struct_to_keel_struct(
+                            let new_struct_id =
+                                gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
+                            obj_pool[new_struct_id as usize] = ffi::c_struct_to_keel_struct(
                                 &return_buf,
                                 &field_offsets,
                                 obj_pool,
@@ -575,9 +591,7 @@ pub fn execute(
                                 &mut gc,
                                 structs,
                             );
-                            let new_id = obj_pool.len();
-                            obj_pool.push(data_fields);
-                            Data::struct_instance(*struct_idx, new_id as u32)
+                            Data::struct_instance(*struct_idx, new_struct_id)
                         }
                         _ => NULL,
                     }
@@ -861,7 +875,7 @@ pub fn execute(
             Instr::SetElementObj(array_reg_id, new_elem_reg_id, idx) => {
                 let array = obj_pool.get_mut(r[array_reg_id].as_array());
                 let index = r[idx].as_int();
-                if (index as usize) >= array.len() || index < 0 {
+                if (index as usize) >= array.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(array.len(), index));
                 }
                 unsafe {
@@ -872,7 +886,7 @@ pub fn execute(
                 let index = r[idx].as_int();
                 let temp_str_reg_id = r[string_reg_id];
                 let source_string = temp_str_reg_id.as_str(str_pool);
-                if (index as usize) >= source_string.len() || index < 0 {
+                if (index as usize) >= source_string.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(source_string.len(), index));
                 }
                 let mut temp = source_string.to_owned();
@@ -890,7 +904,7 @@ pub fn execute(
                 let idx = r[index].as_int();
                 let arr_id = r[array_reg_id].as_array();
                 let array = &obj_pool[arr_id];
-                if (idx as usize) >= array.len() || idx < 0 {
+                if (idx as usize) >= array.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(array.len(), idx));
                 }
                 r[dest] = unsafe { *array.get_unchecked(idx as usize) };
@@ -1071,7 +1085,7 @@ pub fn execute(
                 } else {
                     let array_id =
                         gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
-                    obj_pool[array_id as usize] = obj_pool[reg.as_array()].repeat(repeat_count);
+                    obj_pool.repeat_within(reg.as_array(), array_id as usize, repeat_count);
                     Data::array(array_id)
                 };
             }
@@ -1232,15 +1246,13 @@ pub fn execute(
                     split_ranges.push((start_idx, source_array.len()));
 
                     // alloc one array per range
-                    let mut sub_arrays: Vec<Data> = Vec::with_capacity(split_ranges.len());
                     for (start, end) in split_ranges {
                         let dest_array_id =
                             gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack)
                                 as usize;
                         obj_pool.extend_within(source_array_id, dest_array_id, start, end);
-                        sub_arrays.push(Data::array(dest_array_id as u32));
+                        obj_pool[array_id as usize].push(Data::array(dest_array_id as u32));
                     }
-                    obj_pool[array_id as usize] = sub_arrays;
                 }
                 r[dest_register] = Data::array(array_id);
             }
@@ -1327,8 +1339,10 @@ pub fn execute(
             #[cfg(not(target_arch = "wasm32"))]
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
                 let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
-                obj_pool[array_id as usize] =
-                    std::env::args().skip(2).map(|s| string!(s)).collect::<Vec<Data>>();
+                for arg in std::env::args().skip(2) {
+                    let arg_str = string!(arg);
+                    obj_pool[array_id as usize].push(arg_str);
+                }
                 r[dest] = Data::array(array_id);
             }
             Instr::CallLibFuncVoid(LibFuncVoid::Sort, tgt, _) => {

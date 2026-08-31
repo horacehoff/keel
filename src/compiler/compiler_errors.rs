@@ -928,7 +928,7 @@ pub fn error_unknown_function_in_namespace(
     sources: &[Source],
 ) -> ! {
     let namespace_str = path.join("::");
-    let namespace = scope.walk_to_namespace(path, span, file_idx, sources);
+    let namespace = scope.walk_to_namespace(path).unwrap();
     let similar_fn = find_closest_str(fn_name, namespace.fns().map(|s| s.0));
     throw_compiler_error(
         &|| {
@@ -1217,7 +1217,7 @@ pub fn error_unknown_type_with_namespace(
     path: &[&str],
 ) -> ! {
     let namespace_str = path.join("::");
-    let namespace = scope.walk_to_namespace(path, span, file_idx, sources);
+    let namespace = scope.walk_to_namespace(path).unwrap();
     let closest_struct = find_closest_str(t, namespace.structs().map(|s| s.0));
     throw_compiler_error(
         &|| {

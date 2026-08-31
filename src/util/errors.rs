@@ -4,8 +4,8 @@ use crate::instr::Instr;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use std::hint::unreachable_unchecked;
+use std::io::StdoutLock;
 use std::io::Write;
-use std::io::{BufWriter, StdoutLock};
 
 pub const BLUE: &str = "\x1B[94m";
 pub fn blue<F: std::fmt::Display>(t: F) -> String {
@@ -191,7 +191,11 @@ pub fn throw_error(
     ctx: &ErrorCtx,
     instr: Instr,
     t: ErrType,
-    handle: &mut BufWriter<StdoutLock>,
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))] handle: &mut std::io::BufWriter<
+        StdoutLock,
+    >,
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+    handle: &mut crate::captured_output::CapturedOutputWriter,
 ) -> ! {
     handle.flush().unwrap();
     let InstrSrc { instr: _, span: Span { start, end }, file_id } =

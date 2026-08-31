@@ -1,5 +1,4 @@
 use super::super::expr::Expr;
-use super::super::registers::get_tgt_ids;
 use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::super::type_system::c_arg_matches;
@@ -18,10 +17,11 @@ use crate::compiler::compiler_errors::error_function_already_defined;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::Span;
+use crate::compiler::registers::get_tgt_ids;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 /// Computes whether the function `state.fns[fn_id]` is recursive.
 /// This is only computed once per function.
@@ -29,10 +29,10 @@ pub fn is_function_recursive(fn_id: usize, state: &mut State<'_, '_>) -> bool {
     if let Some(is_recursive) = state.functions[fn_id].is_recursive {
         is_recursive
     } else {
-        let name = state.functions[fn_id].name;
-        let mut visited = HashSet::new();
-        visited.insert(name);
-        let is_recursive = can_reach(name, name, state.functions, &mut visited);
+        let mut visited = FxHashSet::default();
+        visited.insert(fn_id);
+        let is_recursive =
+            can_reach(fn_id, fn_id, state.functions, &mut visited, state.file_scopes);
         state.functions[fn_id].is_recursive = Some(is_recursive);
         is_recursive
     }
@@ -196,11 +196,9 @@ pub fn handle_user_function<'arena>(
         }
     }
     if !is_recursive {
-        state
-            .fn_registers
-            .get_mut(function_idx)
-            .unwrap()
-            .extend(get_tgt_ids(&output[saveframe_loc..]));
+        state.fn_registers.get_mut(function_idx).unwrap().extend(
+            get_tgt_ids(&output[saveframe_loc..], state.registers.len()).ones().map(|id| id as u16),
+        );
     }
 
     let return_register_id = if fn_returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
@@ -327,26 +325,23 @@ pub fn compile_function<'arena>(
         state.scope_mut(fn_file_idx).symbols.shift_remove(&(i, Symbol::Fn));
     }
 
-    let mut reserved_registers = get_tgt_ids(&parsed);
-    reserved_registers.extend(args_loc);
+    let all_written_regs = get_tgt_ids(&parsed, state.registers.len());
+
+    state.reserved_registers.extend(all_written_regs.ones().map(|id| id as u16));
+    state.reserved_registers.extend(args_loc);
     for instr in &parsed {
         match instr {
             Instr::CloneArray(template_reg, _, _)
             | Instr::CloneStruct(template_reg, _)
             | Instr::CloneMap(template_reg, _) => {
-                reserved_registers.push(*template_reg);
+                state.reserved_registers.insert(*template_reg);
             }
             _ => {}
         }
     }
-    reserved_registers.sort_unstable();
-    reserved_registers.dedup();
-    state.reserved_registers.extend(reserved_registers);
     state.unfree_reserved_registers();
 
     if is_recursive {
-        let all_written_regs: Vec<u16> = get_tgt_ids(&parsed);
-
         // For each recursive call, only save registers that are read between that call's return and the end of the function
         for (pos, instr) in parsed.iter().enumerate() {
             if matches!(instr, Instr::CallFuncRecursive(_, _)) {
@@ -363,7 +358,7 @@ pub fn compile_function<'arena>(
                 let mut live_regs: Vec<u16> = Vec::new();
                 for after_instr in &parsed[pos + 1..] {
                     after_instr.for_each_read_reg(|reg| {
-                        if all_written_regs.binary_search(&reg).is_ok() {
+                        if unsafe { all_written_regs.contains_unchecked(reg as usize) } {
                             live_regs.push(reg);
                         }
                     });
@@ -376,7 +371,11 @@ pub fn compile_function<'arena>(
             }
         }
     } else {
-        state.fn_registers.get_mut(fn_id as usize).unwrap().extend(get_tgt_ids(&parsed));
+        state
+            .fn_registers
+            .get_mut(fn_id as usize)
+            .unwrap()
+            .extend(all_written_regs.ones().map(|id| id as u16));
     }
 
     output.extend(parsed);

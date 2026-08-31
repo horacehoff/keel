@@ -11,8 +11,9 @@
 - Variables now have their type fixed at declaration
 - Variables can now be optionally typed with `let var: type = value` and `static var: type = value`
 - The standard library and future files are now stored in `$HOME/.keel/`
-- The performance of the GC has been improved and its memory footprint lowered
-- Compilation is significantly faster
+- The performance of the GC has been slightly improved
+- Runtime memory usage has been significantly lowered for allocation-heavy programs
+- Compilation is substantially faster
 - Multiple relatively minor VM/FFI optimizations
 
 ## 0.4.0 (07/30/2026)

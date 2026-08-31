@@ -32,6 +32,9 @@ fn mark_data(d: Data, string_live: &mut FixedBitSet, stack: &mut Vec<Data>) {
 }
 
 impl Gc {
+    const GC_OBJ_THRESHOLD: u32 = 256;
+    const GC_MAP_THRESHOLD: u32 = 256;
+    const GC_STRING_THRESHOLD: u32 = 256;
     pub fn new(obj_pool: &ObjectPool, map_pool: &MapPool, str_pool: &StringPool) -> Self {
         Self {
             free_arrays: Vec::with_capacity(obj_pool.len()),
@@ -103,13 +106,14 @@ impl Gc {
             return id;
         }
         if obj_pool.len() >= self.array_threshold as usize {
-            self.array_threshold *= 2;
             self.mark(obj_pool, map_pool, str_pool.len(), registers, recursion_stack);
             self.free_arrays.clear();
             // Mark as free any array that isn't referenced by a register
             for i in self.array_live.zeroes() {
                 self.free_arrays.push(i as u32);
             }
+            self.array_threshold =
+                ((obj_pool.len() - self.free_arrays.len()) as u32 * 2).max(Self::GC_OBJ_THRESHOLD);
             if let Some(id) = self.free_arrays.pop() {
                 obj_pool[id as usize].clear();
                 return id;
@@ -133,12 +137,13 @@ impl Gc {
             return id;
         }
         if map_pool.len() >= self.map_threshold as usize {
-            self.map_threshold *= 2;
             self.mark(obj_pool, map_pool, str_pool.len(), registers, recursion_stack);
             self.free_maps.clear();
             for i in self.map_live.zeroes() {
                 self.free_maps.push(i as u32);
             }
+            self.map_threshold =
+                ((map_pool.len() - self.free_maps.len()) as u32 * 2).max(Self::GC_MAP_THRESHOLD);
             if let Some(id) = self.free_maps.pop() {
                 map_pool[id as usize].clear();
                 return id;
@@ -157,12 +162,13 @@ impl Gc {
         registers: &RegisterFile,
         recursion_stack: &RegisterFile,
     ) {
-        self.string_threshold *= 2;
         self.mark(obj_pool, map_pool, str_pool_len, registers, recursion_stack);
         self.free_strings.clear();
         for i in self.string_live.zeroes() {
             self.free_strings.push(i as u16);
         }
+        self.string_threshold =
+            ((str_pool_len - self.free_strings.len()) as u32 * 2).max(Self::GC_STRING_THRESHOLD);
     }
 
     #[inline(always)]

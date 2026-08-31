@@ -136,11 +136,11 @@ impl<'arena> QualifiedName<'arena> {
     //     Self(src)
     // }
     #[inline(always)]
-    pub const fn get_name(&'arena self) -> &'arena str {
+    pub const fn get_name(&self) -> &'arena str {
         unsafe { self.0.last().unwrap_unchecked() }
     }
     #[inline(always)]
-    pub fn get_namespace(&'arena self) -> &'arena [&'arena str] {
+    pub fn get_namespace(&self) -> &'arena [&'arena str] {
         &self.0[..self.0.len() - 1]
     }
     #[inline(always)]

@@ -1572,7 +1572,7 @@ fn compile_int_for_loop<'arena>(
         let start_elem_id = lower_bound.compile(ctx, state, output, None, false, true).unwrap_id();
         let start_val = state.registers[start_elem_id as usize];
         let elem_id = state.alloc_reg();
-        if state.const_registers.values().any(|&v| v == start_elem_id) && start_val.is_int() {
+        if state.is_register_const(start_elem_id) && start_val.is_int() {
             output.push(Instr::SetInt(elem_id, start_val.as_int()));
         } else {
             output.push(Instr::Mov(start_elem_id, elem_id));
@@ -1582,7 +1582,7 @@ fn compile_int_for_loop<'arena>(
     let end_elem_id = upper_bound.compile(ctx, state, output, None, false, true).unwrap_id();
 
     // elem_id is a fresh mutable register -> remove from const_registers just in case
-    state.const_registers.retain(|_, &mut v| v != elem_id);
+    state.remove_reg_from_consts(elem_id);
 
     let v_len = state.v.len();
     state.new_var(int_for_loop.var_name, elem_id, DataType::Int);
@@ -1809,7 +1809,7 @@ fn compile_var_assignment<'arena>(
     let obj_id = value.compile(ctx, state, output, Some(reg_id), false, true).unwrap_id();
     if output.len() != output_len {
         move_to_id(output, reg_id);
-    } else if state.const_registers.values().any(|&v| v == obj_id) {
+    } else if state.is_register_const(obj_id) {
         move_reg_to_reg(output, obj_id, reg_id, state.registers[obj_id as usize]);
     } else {
         output.push(Instr::Mov(obj_id, reg_id));
@@ -2523,7 +2523,15 @@ impl Scope<'_> {
         file_idx: u16,
         sources: &[Source],
     ) -> Option<usize> {
-        self.walk_to_namespace(path, span, file_idx, sources)
+        self.walk_to_namespace(path)
+            .unwrap_or_else(|| error_unknown_namespace(path, span, file_idx, sources))
+            .symbols
+            .get(&(function_name, Symbol::Fn))
+            .map(|symbol| *symbol as usize)
+    }
+    #[must_use]
+    pub fn find_function_fallible(&self, path: &[&str], function_name: &str) -> Option<usize> {
+        self.walk_to_namespace(path)?
             .symbols
             .get(&(function_name, Symbol::Fn))
             .map(|symbol| *symbol as usize)
@@ -2537,7 +2545,8 @@ impl Scope<'_> {
         file_idx: u16,
         sources: &[Source],
     ) -> Option<usize> {
-        self.walk_to_namespace(path, span, file_idx, sources)
+        self.walk_to_namespace(path)
+            .unwrap_or_else(|| error_unknown_namespace(path, span, file_idx, sources))
             .symbols
             .get(&(struct_name, Symbol::Struct))
             .map(|symbol| *symbol as usize)
@@ -2551,19 +2560,14 @@ impl Scope<'_> {
         file_idx: u16,
         sources: &[Source],
     ) -> Option<usize> {
-        self.walk_to_namespace(path, span, file_idx, sources)
+        self.walk_to_namespace(path)
+            .unwrap_or_else(|| error_unknown_namespace(path, span, file_idx, sources))
             .symbols
             .get(&(global_var_name, Symbol::Global))
             .map(|symbol| *symbol as usize)
     }
     #[must_use]
-    pub fn walk_to_namespace(
-        &self,
-        path: &[&str],
-        span: Span,
-        file_idx: u16,
-        sources: &[Source],
-    ) -> &Self {
+    pub fn walk_to_namespace(&self, path: &[&str]) -> Option<&Self> {
         let mut current = self;
         for sub in path {
             current = if let Some((_, child_namespace)) =
@@ -2571,10 +2575,10 @@ impl Scope<'_> {
             {
                 child_namespace
             } else {
-                error_unknown_namespace(path, span, file_idx, sources);
+                return None;
             };
         }
-        current
+        Some(current)
     }
 }
 
@@ -2974,7 +2978,7 @@ pub fn compile<'arena>(
     Vec<Struct<'arena>>,
     Vec<DataType>,
 ) {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let now = std::time::Instant::now();
 
     let main_src_contents = bump.alloc_str(contents);

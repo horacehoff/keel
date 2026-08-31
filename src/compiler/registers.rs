@@ -1,3 +1,5 @@
+use fixedbitset::FixedBitSet;
+
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
@@ -304,13 +306,15 @@ impl Instr {
     }
 }
 
-/// Returns the IDs of all the registers which are modified by the given instructions
 #[must_use]
-pub fn get_tgt_ids(x: &[Instr]) -> Vec<u16> {
-    let mut ids: Vec<u16> = x.iter().filter_map(|i| i.get_tgt_id()).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
+pub fn get_tgt_ids(instructions: &[Instr], registers_len: usize) -> FixedBitSet {
+    let mut written_regs = FixedBitSet::with_capacity(registers_len);
+    for instr in instructions {
+        if let Some(id) = instr.get_tgt_id() {
+            unsafe { written_regs.insert_unchecked(id as usize) }
+        }
+    }
+    written_regs
 }
 
 /// Write v, located in the src_id register, into the dest_id register using the cheapest instruction

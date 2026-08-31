@@ -1,8 +1,8 @@
 use super::expr::Expr;
 use super::expr::Span;
-use super::registers::get_tgt_ids;
 use super::type_system::DataType;
 use crate::compiler::Scope;
+use crate::compiler::expr::QualifiedName;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
@@ -36,7 +36,7 @@ pub struct Function<'arena> {
     pub src_file_idx: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
-    pub direct_calls: &'arena [&'arena str],
+    pub direct_calls: &'arena [QualifiedName<'arena>],
     pub name_span: Span,
 }
 
@@ -245,10 +245,10 @@ impl<'arena> State<'arena, '_> {
     /// - the register isn't reserved in `reserved_registers`
     /// - the register isn't already marked as free
     pub fn free_reg(&mut self, id: u16) {
-        if !self.v.iter().any(|var| var.register_id == id)
-            && !unsafe { self.const_registers_bitset.contains_unchecked(id as usize) }
+        if unsafe { !self.free_registers_bitset.contains_unchecked(id as usize) }
+            && unsafe { !self.const_registers_bitset.contains_unchecked(id as usize) }
             && !self.reserved_registers.contains(&id)
-            && !unsafe { self.free_registers_bitset.contains_unchecked(id as usize) }
+            && !self.v.iter().any(|var| var.register_id == id)
         {
             unsafe { self.free_registers_bitset.insert_unchecked(id as usize) };
             self.free_registers.push(id);
@@ -275,8 +275,10 @@ impl<'arena> State<'arena, '_> {
     }
     /// Frees registers that are written by instructions in scope_instrs.
     pub fn free_scope_registers(&mut self, regs_before: u16, scope_instrs: &[Instr]) {
-        for id in get_tgt_ids(scope_instrs) {
-            if id >= regs_before {
+        for instr in scope_instrs {
+            if let Some(id) = instr.get_tgt_id()
+                && id >= regs_before
+            {
                 self.free_reg(id);
             }
         }
@@ -293,6 +295,13 @@ impl<'arena> State<'arena, '_> {
             self.free_registers.swap_remove(free_reg_id_pos);
         }
     }
+    /// Remove register `id` from `const_registers` (do nothing if it's not in `const_registers`).
+    pub fn remove_reg_from_consts(&mut self, id: u16) {
+        if unsafe { self.const_registers_bitset.contains_unchecked(id as usize) } {
+            unsafe { self.const_registers_bitset.remove_unchecked(id as usize) };
+            self.const_registers.remove(unsafe { self.registers.get_unchecked(id as usize) });
+        }
+    }
     /// Unfree all the registers in `free_registers` who are also in `reserved_registers`.
     pub fn unfree_reserved_registers(&mut self) {
         self.free_registers.retain(|reg| {
@@ -306,7 +315,11 @@ impl<'arena> State<'arena, '_> {
             }
         });
     }
-
+    #[inline(always)]
+    #[must_use]
+    pub fn is_register_const(&mut self, id: u16) -> bool {
+        unsafe { self.const_registers_bitset.contains_unchecked(id as usize) }
+    }
     /// Similar to free_scope_registers, but also frees CloneArray template registers. Only call this after a loop ends.
     pub fn free_loop_scope_registers(&mut self, regs_before: u16, scope_instrs: &[Instr]) {
         self.free_scope_registers(regs_before, scope_instrs);

@@ -26,7 +26,6 @@ use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::VariableDeclarationExpr;
 use rustc_hash::FxHashSet;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
 
@@ -332,13 +331,16 @@ pub fn struct_field_type_matches(expected: &DataType, received: &DataType) -> bo
 }
 
 /// Collect all the function calls in the given code
-pub fn collect_direct_fn_calls<'arena>(content: &'arena [Expr], calls: &mut Vec<&'arena str>) {
+pub fn collect_direct_fn_calls<'arena>(
+    content: &'arena [Expr],
+    calls: &mut Vec<QualifiedName<'arena>>,
+) {
     let mut expr_stack: Vec<&Expr> = content.iter().collect();
     while let Some(expression) = expr_stack.pop() {
         match expression {
             Expr::FunctionCall(FunctionCallExpr { qualified_name, args, .. })
             | Expr::ObjFunctionCall(FunctionCallExpr { qualified_name, args, .. }) => {
-                calls.push(qualified_name.get_name());
+                calls.push(*qualified_name);
                 expr_stack.extend(*args);
             }
             Expr::IfBlock(if_block) => {
@@ -427,21 +429,23 @@ pub fn c_arg_matches(inferred: &DataType, declared: &DataType) -> bool {
     }
 }
 
-/// Check if the function src_fn can call target_fn
-pub fn can_reach<'a>(
-    src_fn: &str,
-    target_fn: &str,
-    fns: &'a [Function],
-    visited: &mut HashSet<&'a str>,
+/// Check if the function `src_fn_idx` can call `target_fn_idx` (index is in `fns`)
+pub fn can_reach(
+    src_fn_idx: usize,
+    target_fn_idx: usize,
+    fns: &[Function],
+    visited: &mut FxHashSet<usize>,
+    file_scopes: &[Scope],
 ) -> bool {
-    if let Some(from_fn) = fns.iter().find(|f| f.name == src_fn) {
-        for callee in from_fn.direct_calls {
-            if callee == &target_fn {
-                return true;
-            }
-            if visited.insert(callee) && can_reach(callee, target_fn, fns, visited) {
-                return true;
-            }
+    let function = &fns[src_fn_idx];
+    for callee in function.direct_calls {
+        if let Some(callee_fn_idx) = file_scopes[function.src_file_idx as usize]
+            .find_function_fallible(callee.get_namespace(), callee.get_name())
+            && ((callee_fn_idx == target_fn_idx)
+                || (visited.insert(callee_fn_idx)
+                    && can_reach(callee_fn_idx, target_fn_idx, fns, visited, file_scopes)))
+        {
+            return true;
         }
     }
     false
@@ -1000,10 +1004,14 @@ impl<'arena> Expr<'arena> {
                                 )
                             }
                         } else {
-                            state
-                                .functions
-                                .iter()
-                                .rposition(|func| func.name == function_name)
+                            state.file_scopes[ctx.file_idx as usize]
+                                .find_function(
+                                    qualified_name.get_namespace(),
+                                    function_name,
+                                    function_call.spans[0],
+                                    ctx.file_idx,
+                                    state.sources,
+                                )
                                 .unwrap_or_else(|| {
                                     if qualified_name.is_namespace_empty() {
                                         error_unknown_function(

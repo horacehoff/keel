@@ -4,6 +4,8 @@ use crate::instr::Instr;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use std::hint::unreachable_unchecked;
+use std::io::Write;
+use std::io::{BufWriter, StdoutLock};
 
 pub const BLUE: &str = "\x1B[94m";
 pub fn blue<F: std::fmt::Display>(t: F) -> String {
@@ -185,7 +187,13 @@ impl ErrType<'_> {
 
 #[cold]
 #[inline(never)]
-pub fn throw_error(ctx: &ErrorCtx, instr: Instr, t: ErrType) -> ! {
+pub fn throw_error(
+    ctx: &ErrorCtx,
+    instr: Instr,
+    t: ErrType,
+    handle: &mut BufWriter<StdoutLock>,
+) -> ! {
+    handle.flush().unwrap();
     let InstrSrc { instr: _, span: Span { start, end }, file_id } =
         ctx.instr_src.iter().find(|s| s.instr == instr).unwrap_or(&InstrSrc {
             instr: Instr::Halt(1),

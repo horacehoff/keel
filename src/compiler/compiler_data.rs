@@ -33,7 +33,7 @@ pub struct Function<'arena> {
     pub impls: Vec<FunctionImpl<'arena>>,
     pub is_recursive: Option<bool>,
     pub returns_null: bool,
-    pub src_file: u16,
+    pub src_file_idx: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
     pub direct_calls: &'arena [&'arena str],
@@ -93,6 +93,7 @@ pub struct Struct<'arena> {
     pub fields: Box<[StructField<'arena>]>,
     pub id: u16,
     pub name_span: Span,
+    pub src_file_idx: u16,
 }
 
 #[allow(clippy::struct_field_names)]

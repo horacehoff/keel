@@ -527,7 +527,7 @@ pub fn resolve_function_return_type(
 
     let fn_args = state.functions[fn_id].args.clone();
     let fn_code = state.functions[fn_id].code;
-    let fn_src_file = state.functions[fn_id].src_file;
+    let fn_src_file = state.functions[fn_id].src_file_idx;
 
     let v_len_before_args = state.v.len();
     for (i, infered_type) in infered_arg_types.iter().cloned().enumerate() {
@@ -657,7 +657,7 @@ fn track_return_flow<'arena>(
                     return FnReturnFlow { types: return_types, always_returns: true };
                 }
             }
-            Expr::VarDeclare(VariableDeclarationExpr { name, value, var_type: _ }) => {
+            Expr::VarDeclare(VariableDeclarationExpr { name, value, var_type: _, span: _ }) => {
                 let var_type = value.infer_type(ctx, state);
                 state.new_var(name, 0, var_type);
             }
@@ -745,7 +745,7 @@ fn infer_symbol_type(
             error_function_needs_args_typed(
                 name,
                 span,
-                (state.functions[fn_id].name_span, state.functions[fn_id].src_file),
+                (state.functions[fn_id].name_span, state.functions[fn_id].src_file_idx),
                 ctx.file_idx,
                 state.sources,
             );
@@ -1197,7 +1197,7 @@ impl<'arena> Expr<'arena> {
                     impls: Vec::new(),
                     is_recursive: None,
                     returns_null,
-                    src_file: ctx.file_idx,
+                    src_file_idx: ctx.file_idx,
                     return_type_cache: Vec::new(),
                     direct_calls: state.bump.alloc_slice_copy(&callees),
                     name_span: *span,

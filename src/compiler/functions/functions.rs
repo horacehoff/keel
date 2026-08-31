@@ -80,7 +80,7 @@ pub fn check_user_fn_arg_types(
                 t,
                 args_indexes[i],
                 fn_name,
-                Some((state.functions[fn_id].name_span, state.functions[fn_id].src_file)),
+                Some((state.functions[fn_id].name_span, state.functions[fn_id].src_file_idx)),
                 ctx.file_idx,
                 state.sources,
             );

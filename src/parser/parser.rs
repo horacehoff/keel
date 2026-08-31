@@ -361,6 +361,7 @@ fn parse_var_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
         name: var_name,
         value: parser.bump.alloc(var_value),
         var_type,
+        span,
     })
 }
 

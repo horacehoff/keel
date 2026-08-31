@@ -420,6 +420,7 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             name: obj_var,
             value: parser.bump.alloc(match_obj),
             var_type: None,
+            span: Span::empty(),
         }),
         Expr::IfBlock(IfBlockExpr {
             condition: parser.bump.alloc(Expr::Eq(

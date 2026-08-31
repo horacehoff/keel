@@ -17,6 +17,7 @@ use crate::compiler::compiler_errors::check_args_user_fn;
 use crate::compiler::compiler_errors::error_function_already_defined;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::expr::FunctionCallExpr;
+use crate::compiler::expr::Span;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
@@ -69,7 +70,7 @@ pub fn compile_function_impl(
         state.functions[fn_id].code,
         fn_id as u16,
         is_recursive,
-        state.functions[fn_id].src_file,
+        state.functions[fn_id].src_file_idx,
     );
     state.functions[fn_id].impls.len() - 1
 }
@@ -98,7 +99,7 @@ pub fn handle_user_function<'arena>(
         fn_name,
         ctx.file_idx,
         span,
-        (state.functions[function_idx].name_span, state.functions[function_idx].src_file),
+        (state.functions[function_idx].name_span, state.functions[function_idx].src_file_idx),
         state,
         arg_spans,
     );
@@ -135,7 +136,7 @@ pub fn handle_user_function<'arena>(
                     fn_name,
                     Some((
                         state.functions[function_idx].name_span,
-                        state.functions[function_idx].src_file,
+                        state.functions[function_idx].src_file_idx,
                     )),
                     ctx.file_idx,
                     state.sources,
@@ -275,7 +276,7 @@ pub fn compile_function<'arena>(
             {
                 error_function_already_defined(
                     &state.functions[func as usize],
-                    (0u32, 0u32).into(),
+                    Span::empty(),
                     ctx.file_idx,
                     state.sources,
                 );

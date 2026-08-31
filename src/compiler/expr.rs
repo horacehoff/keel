@@ -154,6 +154,8 @@ pub struct VariableDeclarationExpr<'arena> {
     pub name: &'arena str,
     pub value: &'arena Expr<'arena>,
     pub var_type: Option<&'arena (TypeExpr<'arena>, Span)>,
+    /// Only used for global variables
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -311,6 +313,9 @@ impl Span {
     #[must_use]
     pub const fn extend(self, span: Self) -> Self {
         Self { start: self.start, end: span.end }
+    }
+    pub const fn empty() -> Self {
+        Self { start: 0, end: 0 }
     }
 }
 

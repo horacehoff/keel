@@ -7,11 +7,13 @@ use crate::compiler::compiler_errors::error_cannot_push_type_to_array;
 use crate::compiler::compiler_errors::error_cannot_read_file;
 use crate::compiler::compiler_errors::error_division_by_zero;
 use crate::compiler::compiler_errors::error_duplicate_map_key;
+use crate::compiler::compiler_errors::error_global_already_defined;
 use crate::compiler::compiler_errors::error_invalid_index_type;
 use crate::compiler::compiler_errors::error_invalid_type;
 use crate::compiler::compiler_errors::error_map_diff_types;
 use crate::compiler::compiler_errors::error_not_literal_map_key;
 use crate::compiler::compiler_errors::error_range_invalid_type;
+use crate::compiler::compiler_errors::error_struct_already_defined;
 use crate::compiler::compiler_errors::error_type_not_indexable;
 use crate::compiler::compiler_errors::error_unknown_namespace;
 #[cfg(not(target_arch = "wasm32"))]
@@ -66,7 +68,6 @@ use rustc_hash::FxHashSet;
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
-use std::hint::cold_path;
 use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -1711,7 +1712,7 @@ fn compile_var_declaration<'arena>(
     {
         compiler_errors::error_function_already_defined(
             &state.functions[func as usize],
-            (0u32, 0u32).into(),
+            Span::empty(),
             ctx.file_idx,
             state.sources,
         );
@@ -1894,7 +1895,7 @@ fn compile_var_access(
             state.functions[fn_id].code,
             fn_id as u16,
             false,
-            state.functions[fn_id].src_file,
+            state.functions[fn_id].src_file_idx,
         );
     }
 
@@ -1916,12 +1917,18 @@ fn compile_struct_definition<'arena>(
         fields: Box::from([]),
         id: struct_id,
         name_span: span,
+        src_file_idx: ctx.file_idx,
     });
     let struct_id = (state.structs.len() - 1) as u16;
     if let Some(struct_id) =
         state.scope_mut(ctx.file_idx).symbols.insert((name, Symbol::Struct), struct_id)
     {
-        todo!("NO!");
+        error_struct_already_defined(
+            &state.structs[struct_id as usize],
+            span,
+            ctx.file_idx,
+            state.sources,
+        );
     }
     let parsed_fields = fields
         .iter()
@@ -1976,7 +1983,7 @@ fn compile_function_definition<'arena>(
         impls: Vec::new(),
         is_recursive: None,
         returns_null: check_if_returns_void(fn_code),
-        src_file: ctx.file_idx,
+        src_file_idx: ctx.file_idx,
         return_type_cache: Vec::new(),
         direct_calls: state.bump.alloc_slice_copy(&callees),
         name_span: span,
@@ -2610,9 +2617,8 @@ fn parse_toplevel<'a>(
                 if let Some(func_idx) =
                     scope.find_function(&[], fn_name, span, src_file_idx, sources)
                 {
-                    let func = &fns[func_idx];
                     compiler_errors::error_function_already_defined(
-                        func,
+                        &fns[func_idx],
                         span,
                         src_file_idx,
                         sources,
@@ -2631,13 +2637,20 @@ fn parse_toplevel<'a>(
                     impls: Vec::new(),
                     is_recursive: None,
                     returns_null: returns_void,
-                    src_file: src_file_idx,
+                    src_file_idx,
                     return_type_cache: Vec::new(),
                     direct_calls: bump.alloc_slice_copy(&callees),
                     name_span: span,
                 });
                 pending_fns.push((fn_id, src_file_idx, fn_args));
-                scope.symbols.insert((fn_name, Symbol::Fn), fn_id);
+                if let Some(func_idx) = scope.symbols.insert((fn_name, Symbol::Fn), fn_id) {
+                    compiler_errors::error_function_already_defined(
+                        &fns[func_idx as usize],
+                        span,
+                        src_file_idx,
+                        sources,
+                    );
+                }
             }
             Expr::StructDeclare(struct_name, fields, span) => {
                 let struct_id = structs.len() as u16;
@@ -2646,8 +2659,18 @@ fn parse_toplevel<'a>(
                     fields: Box::from([]),
                     id: struct_id,
                     name_span: span,
+                    src_file_idx,
                 });
-                scope.symbols.insert((struct_name, Symbol::Struct), struct_id);
+                if let Some(struct_id) =
+                    scope.symbols.insert((struct_name, Symbol::Struct), struct_id)
+                {
+                    error_struct_already_defined(
+                        &structs[struct_id as usize],
+                        span,
+                        src_file_idx,
+                        sources,
+                    );
+                }
                 pending_structs.push((struct_id, src_file_idx, fields));
             }
             #[cfg(target_arch = "wasm32")]
@@ -2789,8 +2812,13 @@ fn parse_toplevel<'a>(
             .symbols
             .insert((var_declaration.name, Symbol::Global), pending_globals.len() as u16)
         {
-            cold_path();
-            todo!("NO!");
+            error_global_already_defined(
+                var_declaration.name,
+                pending_globals[previous_global as usize].0.span,
+                var_declaration.span,
+                src_file_idx,
+                sources,
+            );
         }
         pending_globals.push((var_declaration, src_file_idx));
     }
@@ -2802,7 +2830,6 @@ fn parse_toplevel<'a>(
 }
 
 fn resolve_types<'arena>(
-    bump: &'arena Bump,
     structs: &mut [Struct<'arena>],
     fns: &mut [Function<'arena>],
     pending_structs: Vec<(u16, u16, &'arena [(&str, TypeExpr, Span)])>,
@@ -3016,7 +3043,6 @@ pub fn compile<'arena>(
         &keel_home_libs,
     );
     resolve_types(
-        bump,
         &mut structs,
         &mut functions,
         pending_structs,
@@ -3097,7 +3123,7 @@ pub fn compile<'arena>(
     let program_instructions = compile_expr(
         state.functions
             .iter()
-            .find(|func| func.name == "main" && func.src_file == 0)
+            .find(|func| func.name == "main" && func.src_file_idx == 0)
             .unwrap_or_else(|| {
                 #[cfg(target_arch = "wasm32")]
                 wasm_error("Cannot find main function");
@@ -3112,7 +3138,7 @@ pub fn compile<'arena>(
         ctx.with_offset(instructions.len() as u16),
         &mut state,
     );
-    instructions.reserve_exact(program_instructions.len());
+    instructions.reserve_exact(program_instructions.len() + 1);
     instructions.extend(program_instructions);
     instructions.push(Instr::Halt(0));
 

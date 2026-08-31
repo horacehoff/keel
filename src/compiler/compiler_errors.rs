@@ -6,6 +6,7 @@ use super::Source;
 use super::Span;
 use super::State;
 use super::Variable;
+use crate::compiler::compiler_data::Struct;
 use crate::compiler::compiler_data::StructField;
 use crate::errors::BLUE;
 use crate::errors::GREEN;
@@ -968,7 +969,7 @@ pub fn error_function_already_defined(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let fn_src = &sources[func.src_file as usize];
+            let fn_src = &sources[func.src_file_idx as usize];
             let report = Report::build(
                 ariadne::ReportKind::Error,
                 (src.filename, redeclaration_span.into()),
@@ -982,6 +983,77 @@ pub fn error_function_already_defined(
             .with_label(
                 Label::new((src.filename, redeclaration_span.into()))
                     .with_message(format_args!("Function {} is already defined", blue(func.name)))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            report.finish()
+        },
+        sources,
+    )
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_struct_already_defined(
+    s: &Struct,
+    redeclaration_span: Span,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        &|| {
+            let src = &sources[file_idx as usize];
+            let fn_src = &sources[s.src_file_idx as usize];
+            let report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename, redeclaration_span.into()),
+            )
+            .with_message(format_args!("Struct already exists"))
+            .with_label(
+                Label::new((fn_src.filename, s.name_span.into()))
+                    .with_message(format_args!("Already defined here"))
+                    .with_color(ariadne::Color::Blue),
+            )
+            .with_label(
+                Label::new((src.filename, redeclaration_span.into()))
+                    .with_message(format_args!("Struct {} is already defined", blue(s.name)))
+                    .with_color(ariadne::Color::Red),
+            );
+
+            report.finish()
+        },
+        sources,
+    )
+}
+
+#[cold]
+#[inline(never)]
+pub fn error_global_already_defined(
+    global_name: &str,
+    initial_decl_span: Span,
+    redeclaration_span: Span,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        &|| {
+            let src = &sources[file_idx as usize];
+            let report = Report::build(
+                ariadne::ReportKind::Error,
+                (src.filename, redeclaration_span.into()),
+            )
+            .with_message(format_args!("Global variable already defined"))
+            .with_label(
+                Label::new((src.filename, initial_decl_span.into()))
+                    .with_message("Already declared here")
+                    .with_color(ariadne::Color::Red),
+            )
+            .with_label(
+                Label::new((src.filename, redeclaration_span.into()))
+                    .with_message(format_args!(
+                        "A second global variable with the name {} is declared here",
+                        blue(global_name)
+                    ))
                     .with_color(ariadne::Color::Red),
             );
 

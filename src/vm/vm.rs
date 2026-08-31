@@ -273,7 +273,6 @@ impl IndexMut<usize> for RegisterFile {
         unsafe { self.0.get_unchecked_mut(index) }
     }
 }
-
 #[cold]
 #[inline(never)]
 fn error_with_catch(
@@ -297,15 +296,13 @@ fn error_with_catch(
     handle: &mut crate::captured_output::CapturedOutputWriter,
 ) -> usize {
     if error_handles.is_empty() {
-        handle.flush().unwrap();
-        throw_error(err_ctx, unsafe { *instructions.get_unchecked(i) }, err);
+        throw_error(err_ctx, unsafe { *instructions.get_unchecked(i) }, err, handle);
     } else {
         let err_handle = error_handles.pop_unchecked();
         unsafe {
             args.set_len(err_handle.args_len as usize);
             call_frames.set_len(err_handle.call_frames_len as usize);
         }
-
         r[err_handle.error_reg] =
             Data::string(err.kind(), obj_pool, map_pool, string_pool, r, recursion_stack, gc);
         err_handle.catch_loc as usize

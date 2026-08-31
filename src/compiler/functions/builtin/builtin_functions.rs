@@ -202,7 +202,7 @@ pub fn builtin_functions<'arena>(
                         state.functions[fn_id].code,
                         fn_id as u16,
                         false,
-                        state.functions[fn_id].src_file,
+                        state.functions[fn_id].src_file_idx,
                     );
                 }
                 let fn_impl_idx =

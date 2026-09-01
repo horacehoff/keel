@@ -324,7 +324,7 @@ pub fn move_reg_to_reg(output: &mut Vec<Instr>, src_id: u16, dest_id: u16, v: Da
         output.push(Instr::SetInt(dest_id, v.as_int()));
     } else if v.is_bool() {
         output.push(Instr::SetBool(v.as_bool(), dest_id));
-    } else {
+    } else if src_id != dest_id {
         output.push(Instr::Mov(src_id, dest_id));
     }
 }

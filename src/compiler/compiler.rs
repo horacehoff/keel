@@ -1574,7 +1574,7 @@ fn compile_int_for_loop<'arena>(
         let elem_id = state.alloc_reg();
         if state.is_register_const(start_elem_id) && start_val.is_int() {
             output.push(Instr::SetInt(elem_id, start_val.as_int()));
-        } else {
+        } else if start_elem_id != elem_id {
             output.push(Instr::Mov(start_elem_id, elem_id));
         }
         elem_id
@@ -1811,7 +1811,7 @@ fn compile_var_assignment<'arena>(
         move_to_id(output, reg_id);
     } else if state.is_register_const(obj_id) {
         move_reg_to_reg(output, obj_id, reg_id, state.registers[obj_id as usize]);
-    } else {
+    } else if obj_id != reg_id {
         output.push(Instr::Mov(obj_id, reg_id));
     }
     if !state.v.iter().any(|var| var.name != name && var.register_id == obj_id) {

@@ -519,7 +519,9 @@ pub fn builtin_methods<'arena>(
             if is_str {
                 let data = Data::comp_str("", &mut state.pools.str_pool);
                 let empty_str_id = state.new_reg(data);
-                output.push(Instr::Mov(empty_str_id, result_id));
+                if empty_str_id != result_id {
+                    output.push(Instr::Mov(empty_str_id, result_id));
+                }
             } else {
                 output.push(Instr::EmptyArray(result_id));
             }
@@ -624,7 +626,9 @@ pub fn builtin_methods<'arena>(
             if is_str {
                 let data = Data::comp_str("", &mut state.pools.str_pool);
                 let empty_str_id = state.new_reg(data);
-                output.push(Instr::Mov(empty_str_id, result_id));
+                if empty_str_id != result_id {
+                    output.push(Instr::Mov(empty_str_id, result_id));
+                }
             } else {
                 output.push(Instr::EmptyArray(result_id));
             }

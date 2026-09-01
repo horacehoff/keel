@@ -217,7 +217,9 @@ pub fn builtin_functions<'arena>(
                     let arg_id =
                         arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
                     if output.len() == start_len {
-                        output.push(Instr::Mov(arg_id, tgt_id));
+                        if arg_id != tgt_id {
+                            output.push(Instr::Mov(arg_id, tgt_id));
+                        }
                     } else {
                         move_to_id(output, tgt_id);
                     }

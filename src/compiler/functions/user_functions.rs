@@ -183,14 +183,18 @@ pub fn handle_user_function<'arena>(
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
             let loc = state.functions[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.loc);
             let fn_reg_id = state.new_reg(Data::function(loc));
-            output.push(Instr::Mov(fn_reg_id, tgt_id));
+            if fn_reg_id != tgt_id {
+                output.push(Instr::Mov(fn_reg_id, tgt_id));
+            }
             continue;
         }
 
         let start_len = output.len();
         let arg_id = arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
         if output.len() == start_len {
-            output.push(Instr::Mov(arg_id, tgt_id));
+            if arg_id != tgt_id {
+                output.push(Instr::Mov(arg_id, tgt_id));
+            }
         } else {
             move_to_id(output, tgt_id);
         }
@@ -357,11 +361,19 @@ pub fn compile_function<'arena>(
 
                 let mut live_regs: Vec<u16> = Vec::new();
                 for after_instr in &parsed[pos + 1..] {
-                    after_instr.for_each_read_reg(|reg| {
-                        if unsafe { all_written_regs.contains_unchecked(reg as usize) } {
-                            live_regs.push(reg);
+                    if let Instr::CallFuncRecursive(_, _) = after_instr {
+                        for reg in args_loc {
+                            if unsafe { all_written_regs.contains_unchecked(*reg as usize) } {
+                                live_regs.push(*reg);
+                            }
                         }
-                    });
+                    } else {
+                        after_instr.for_each_read_reg(|reg| {
+                            if unsafe { all_written_regs.contains_unchecked(reg as usize) } {
+                                live_regs.push(reg);
+                            }
+                        });
+                    }
                 }
                 live_regs.sort_unstable();
                 live_regs.dedup();

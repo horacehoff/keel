@@ -3,6 +3,7 @@ use super::expr::Span;
 use super::type_system::DataType;
 use crate::compiler::Scope;
 use crate::compiler::expr::QualifiedName;
+use crate::compiler::type_system::VmType;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
@@ -59,8 +60,9 @@ pub struct Dylib<'arena> {
 }
 
 pub struct DylibFn {
+    pub args_len: usize,
     /// [ return_type, arg_types... ]
-    pub types: Box<[DataType]>,
+    pub types: Box<[VmType]>,
     #[cfg(not(target_arch = "wasm32"))]
     pub _lib: Rc<Library>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -72,13 +74,13 @@ pub struct DylibFn {
 impl DylibFn {
     #[inline(always)]
     #[must_use]
-    pub fn get_argument_type(&self, index: usize) -> &DataType {
-        unsafe { self.types.get_unchecked(index + 1) }
+    pub fn get_argument_type(&self, index: usize) -> VmType {
+        unsafe { *self.types.get_unchecked(index + 1) }
     }
     #[inline(always)]
     #[must_use]
-    pub fn get_return_type(&self) -> &DataType {
-        unsafe { self.types.get_unchecked(0) }
+    pub fn get_return_type(&self) -> VmType {
+        unsafe { *self.types.get_unchecked(0) }
     }
 }
 
@@ -158,6 +160,7 @@ pub struct State<'arena, 'compiler> {
     pub fn_registers: &'compiler mut Vec<Vec<u16>>,
     pub dylibs: &'compiler mut Vec<Dylib<'arena>>,
     pub allocated_arg_count: &'compiler mut usize,
+    pub allocated_arg_count_peak: &'compiler mut usize,
     pub allocated_call_depth: &'compiler mut usize,
     pub const_registers: &'compiler mut FxHashMap<Data, u16>,
     pub const_registers_bitset: &'compiler mut FixedBitSet,
@@ -345,6 +348,15 @@ impl<'arena> State<'arena, '_> {
             span,
             file_id: ctx.file_idx,
         });
+    }
+    pub fn add_arg_hint(&mut self, n: usize) {
+        *self.allocated_arg_count += n;
+        *self.allocated_arg_count_peak =
+            (*self.allocated_arg_count_peak).max(*self.allocated_arg_count);
+    }
+    #[inline]
+    pub const fn sub_arg_hint(&mut self, n: usize) {
+        *self.allocated_arg_count -= n;
     }
 }
 

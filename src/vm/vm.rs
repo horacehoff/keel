@@ -3,6 +3,7 @@ use crate::compiler::compiler_data::ErrorCatch;
 use crate::compiler::compiler_data::Pools;
 use crate::compiler::compiler_data::Struct;
 use crate::compiler::type_system::DataType;
+use crate::compiler::type_system::VmType;
 use crate::data::Data;
 use crate::data::DataHash;
 use crate::data::FALSE;
@@ -127,6 +128,7 @@ struct CallFrame {
 
 pub trait UncheckedVecOps<T> {
     fn pop_unchecked(&mut self) -> T;
+    fn push_unchecked(&mut self, value: T);
 }
 pub trait UncheckedSliceOps<T: Copy> {
     unsafe fn copy_from_slice_unchecked(&mut self, src: &[T]);
@@ -140,6 +142,14 @@ impl<T> UncheckedVecOps<T> for Vec<T> {
         unsafe {
             self.set_len(new_len);
             self.as_mut_ptr().add(new_len).read()
+        }
+    }
+    #[inline]
+    fn push_unchecked(&mut self, value: T) {
+        debug_assert!(self.len() < self.capacity());
+        unsafe {
+            self.as_mut_ptr().add(self.len()).write(value);
+            self.set_len(self.len() + 1);
         }
     }
 }
@@ -484,27 +494,30 @@ pub fn execute(
             #[cfg(target_arch = "wasm32")]
             Instr::CallDynamicLibFunc(_, _) => unsafe { std::hint::unreachable_unchecked() },
             #[cfg(not(target_arch = "wasm32"))]
-            Instr::CallDynamicLibFunc(fn_id, dest) => {
-                dyn_lib_args.clear();
-                dyn_lib_args.reserve_exact(args.len());
-                let args_ptr = dyn_lib_args.as_mut_ptr();
-                ffi_args.clear();
-                ffi_args.reserve_exact(args.len());
-                keep_alive.clear();
+            Instr::CallDynamicLibFunc { fn_id, dest_reg_id, last_arg_reg_id: last_arg_red_id } => {
                 let func = unsafe { dyn_libs.get_unchecked(fn_id as usize) };
+                let args_len = func.args_len;
+                ffi_args.clear();
+                ffi_args.reserve_exact(args_len);
+                keep_alive.clear();
 
-                for idx in 0..args.len() {
-                    let data = r[unsafe { *args.get_unchecked(idx) }];
-                    ffi_args.push(match func.get_argument_type(idx) {
-                        DataType::Int => unsafe {
+                args.push_unchecked(last_arg_red_id);
+                let args_base = args.len() - args_len;
+
+                dyn_lib_args.reserve_exact(args_len);
+                let args_ptr = dyn_lib_args.as_mut_ptr();
+                for idx in 0..args_len {
+                    let data = r[unsafe { *args.get_unchecked(args_base + idx) }];
+                    ffi_args.push_unchecked(match func.get_argument_type(idx) {
+                        VmType::Int => unsafe {
                             args_ptr.add(idx).write(data.as_int() as u64);
                             libffi::middle::Arg::new(&*args_ptr.add(idx))
                         },
-                        DataType::Float => unsafe {
+                        VmType::Float => unsafe {
                             args_ptr.add(idx).write(data.as_float().to_bits());
                             libffi::middle::Arg::new(&*args_ptr.add(idx))
                         },
-                        DataType::String => {
+                        VmType::String => {
                             if let Ok(b) = std::ffi::CString::new(data.as_str(str_pool)) {
                                 let bytes = b.into_bytes_with_nul().into_boxed_slice();
                                 let ptr = bytes.as_ptr() as u64;
@@ -517,7 +530,7 @@ pub fn execute(
                                 error_with_catch!(ErrType::NullByteInString, 'main);
                             }
                         }
-                        DataType::Array(_) => {
+                        VmType::Array => {
                             let ptr = ffi::array_to_c_ptr(data, obj_pool, str_pool, &mut keep_alive)
                                 as u64;
                             unsafe {
@@ -525,7 +538,7 @@ pub fn execute(
                                 libffi::middle::Arg::new(&*args_ptr.add(idx))
                             }
                         }
-                        DataType::Bool => unsafe {
+                        VmType::Bool => unsafe {
                             args_ptr.add(idx).write(data.as_bool() as u64);
                             libffi::middle::Arg::new(&*args_ptr.add(idx))
                         },
@@ -545,14 +558,15 @@ pub fn execute(
                         }
                     });
                 }
-                args.clear();
+
+                unsafe { args.set_len(args_base) }
 
                 // Call the function, and convert the result back into Data
-                r[dest] = unsafe {
+                r[dest_reg_id] = unsafe {
                     match func.get_return_type() {
-                        DataType::Int => Data::int(func.cif.call::<i32>(func.ptr, &ffi_args)),
-                        DataType::Float => Data::float(func.cif.call::<f64>(func.ptr, &ffi_args)),
-                        DataType::String => {
+                        VmType::Int => Data::int(func.cif.call::<i32>(func.ptr, &ffi_args)),
+                        VmType::Float => Data::float(func.cif.call::<f64>(func.ptr, &ffi_args)),
+                        VmType::String => {
                             let ptr = func.cif.call::<*const std::ffi::c_char>(func.ptr, &ffi_args);
                             if ptr.is_null() {
                                 cold_path();
@@ -561,10 +575,10 @@ pub fn execute(
                                 string!(std::ffi::CStr::from_ptr(ptr).to_string_lossy().as_ref())
                             }
                         }
-                        DataType::Bool => func.cif.call::<bool>(func.ptr, &ffi_args).into(),
-                        DataType::Struct(struct_idx) => {
+                        VmType::Bool => func.cif.call::<bool>(func.ptr, &ffi_args).into(),
+                        VmType::Struct { struct_id } => {
                             let struct_fields =
-                                unsafe { &structs.get_unchecked(*struct_idx as usize).fields };
+                                unsafe { &structs.get_unchecked(struct_id as usize).fields };
                             let (struct_size, _, field_offsets) =
                                 ffi::get_struct_size_datatype(struct_fields, structs);
                             let mut return_buf: Vec<u8> = vec![0; struct_size];
@@ -588,7 +602,7 @@ pub fn execute(
                                 &mut gc,
                                 structs,
                             );
-                            Data::struct_instance(*struct_idx, new_struct_id)
+                            Data::struct_instance(struct_id, new_struct_id)
                         }
                         _ => NULL,
                     }
@@ -864,7 +878,7 @@ pub fn execute(
                     handle.flush().unwrap();
                 }
             }
-            Instr::StoreFuncArg(id) => args.push(id),
+            Instr::StoreFuncArg(id) => unsafe { args.push_unchecked(id) },
             Instr::ObjElemMov(new_elem_reg_id, array_id, idx) => unsafe {
                 *obj_pool.get_mut(array_id as usize).get_unchecked_mut(idx as usize) =
                     r[new_elem_reg_id];
@@ -1136,15 +1150,12 @@ pub fn execute(
                     string!(zmij::Buffer::new().format(value.as_float()))
                 } else if value.is_bool() {
                     Data::small_str(if value.as_bool() { "true" } else { "false" })
-                } else if value.is_string() {
-                    value
                 } else {
                     string!(value.format(obj_pool, str_pool, map_pool, structs, false).as_str())
                 };
             }
             Instr::CallLibFunc(LibFunc::Bool, tgt, dest) => {
-                let temp_tgt = r[tgt];
-                let str = temp_tgt.as_str(str_pool);
+                let str = r[tgt].as_str(str_pool);
                 r[dest] = if str == "true" {
                     TRUE
                 } else if str == "false" {
@@ -1345,16 +1356,26 @@ pub fn execute(
             Instr::CallLibFuncVoid(LibFuncVoid::Sort, tgt, _) => {
                 let array = obj_pool.get_mut(r[tgt].as_array());
                 if !array.is_empty() {
-                    if array[0].is_int() {
-                        array.sort_unstable_by_key(|x| x.as_int());
-                    } else if array[0].is_float() {
+                    'sort: {
+                        let first_elem = unsafe { array.get_unchecked(0) };
+                        let t: u8 = if first_elem.is_int() {
+                            0
+                        } else if first_elem.is_float() {
+                            1
+                        } else if first_elem.is_string() {
+                            2
+                        } else {
+                            break 'sort;
+                        };
                         array.sort_unstable_by(|a, b| {
-                            a.as_float()
-                                .partial_cmp(&b.as_float())
-                                .unwrap_or(std::cmp::Ordering::Equal)
+                            if t == 0 {
+                                a.as_int().cmp(&b.as_int())
+                            } else if t == 1 {
+                                a.as_float().total_cmp(&b.as_float())
+                            } else {
+                                a.as_str(str_pool).cmp(b.as_str(str_pool))
+                            }
                         });
-                    } else if array[0].is_string() {
-                        array.sort_unstable_by(|a, b| a.as_str(str_pool).cmp(b.as_str(str_pool)));
                     }
                 }
             }

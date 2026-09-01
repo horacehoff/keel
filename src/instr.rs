@@ -98,7 +98,11 @@ pub enum Instr {
     SaveFrame(u16, u16, u16),
 
     /// CallDynamicLibFunc(fn_id, dest_register_id)
-    CallDynamicLibFunc(u16, u16),
+    CallDynamicLibFunc {
+        fn_id: u16,
+        dest_reg_id: u16,
+        last_arg_reg_id: u16,
+    },
 
     StoreFuncArg(u16),
     /// CallLibFunc(function, src_register_id, dest_register_id)

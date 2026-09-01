@@ -797,7 +797,7 @@ fn compile_array_slice<'arena>(
     }
     let idx_end_id = idx_end.compile(ctx, state, output, None, false, true).unwrap_id();
     output.push(Instr::StoreFuncArg(idx_end_id));
-    *state.allocated_arg_count = (*state.allocated_arg_count).max(1);
+    state.add_arg_hint(1);
     state.free_reg(idx_start_id);
     state.free_reg(idx_end_id);
     let dest_reg_id = state.alloc_reg();
@@ -808,6 +808,7 @@ fn compile_array_slice<'arena>(
     };
     output.push(to_push);
     state.add_to_src(ctx, output, span);
+    state.sub_arg_hint(1);
     dest_reg_id
 }
 
@@ -2890,6 +2891,8 @@ fn resolve_types<'arena>(
         let fns = fn_signatures
             .iter()
             .map(|DylibFnExpr { name, args, name_span }| {
+                use crate::compiler::type_system::datatype_to_vmtype;
+
                 let (fn_return_type, fn_return_type_span) = unsafe { args.get_unchecked(0) };
                 let fn_args = args
                     .iter()
@@ -2933,14 +2936,15 @@ fn resolve_types<'arena>(
                     )
                 };
 
-                let mut types = vec![fn_return_type];
-                types.extend(fn_args.iter().map(|(t, _)| t.clone()));
-
                 dynamic_libs_fns.push(DylibFn {
-                    types: Box::from(types),
+                    types: std::iter::once(&fn_return_type)
+                        .chain(fn_args.iter().map(|(t, _)| t))
+                        .map(datatype_to_vmtype)
+                        .collect(),
                     _lib: Rc::clone(&lib),
                     ptr,
                     cif,
+                    args_len: fn_args.len(),
                 });
                 return_val
             })
@@ -2948,18 +2952,6 @@ fn resolve_types<'arena>(
         dynamic_libs[dynlib_id as usize].fns = fns;
     }
 }
-
-// pub struct VmData {
-//     pub instructions: Vec<Instr>,
-//     pub registers: RegisterFile,
-//     pub pools: Pools,
-//     pub err_ctx: ErrorCtx,
-//     pub fn_registers: Vec<Vec<u16>>,
-//     pub dylib_fns: Vec<DylibFn>,
-//     pub allocated_arg_count: usize,
-//     pub allocated_call_depth: usize,
-//     pub structs: Vec<Struct>,
-// }
 
 pub fn compile<'arena>(
     contents: &str,
@@ -3006,6 +2998,7 @@ pub fn compile<'arena>(
     let mut structs: Vec<Struct> = Vec::new();
     let mut dyn_libs: Vec<Dylib> = Vec::new();
     let mut dylib_fns: Vec<DylibFn> = Vec::new();
+    let mut allocated_arg_count_peak = 0;
     let mut allocated_arg_count = 0;
     let mut allocated_call_depth = 0;
     let mut const_registers: FxHashMap<Data, u16> = FxHashMap::default();
@@ -3079,6 +3072,7 @@ pub fn compile<'arena>(
         fn_registers: &mut fn_registers,
         dylibs: &mut dyn_libs,
         allocated_arg_count: &mut allocated_arg_count,
+        allocated_arg_count_peak: &mut allocated_arg_count_peak,
         allocated_call_depth: &mut allocated_call_depth,
         const_registers: &mut const_registers,
         const_registers_bitset: &mut const_registers_bitset,
@@ -3178,7 +3172,7 @@ pub fn compile<'arena>(
         ErrorCtx { instr_src, sources },
         fn_registers,
         dylib_fns,
-        allocated_arg_count,
+        allocated_arg_count_peak,
         allocated_call_depth,
         structs,
         types,

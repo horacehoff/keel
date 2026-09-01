@@ -15,6 +15,7 @@
 - Runtime memory usage has been significantly lowered for allocation-heavy programs
 - Compilation is substantially faster
 - Multiple relatively minor VM/FFI optimizations
+- Optimized the emitted bytecode in some cases
 
 ## 0.4.0 (07/30/2026)
 - Function arguments can now be typed with the syntax `arg: T`

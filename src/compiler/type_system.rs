@@ -108,6 +108,35 @@ impl TypeExpr<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum VmType {
+    Int,
+    Float,
+    Bool,
+    String,
+    Null,
+    Array,
+    Struct { struct_id: u16 },
+    Map,
+    Fn,
+}
+
+pub const fn datatype_to_vmtype(t: &DataType) -> VmType {
+    match t {
+        DataType::Array(_) => VmType::Array,
+        DataType::Float => VmType::Float,
+        DataType::Int => VmType::Int,
+        DataType::Bool => VmType::Bool,
+        DataType::String => VmType::String,
+        DataType::Null => VmType::Null,
+        DataType::Fn(_) | DataType::FnSignature(_) => VmType::Fn,
+        DataType::Struct(struct_id) => VmType::Struct { struct_id: *struct_id },
+        DataType::Map(_) => VmType::Map,
+        DataType::Union(_) | DataType::Unknown => unsafe { unreachable_unchecked() },
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum DataType {
     /// Array(None) = Unknown[]

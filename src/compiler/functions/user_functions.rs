@@ -144,17 +144,25 @@ pub fn handle_user_function<'arena>(
             }
         }
 
-        *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
-        for arg in args {
+        state.add_arg_hint(args.len());
+        for arg in args.iter().take(args.len().saturating_sub(1)) {
             let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
             output.push(Instr::StoreFuncArg(arg_id));
             state.free_reg(arg_id);
         }
+        let last_arg_reg_id = if let Some(arg) = args.last() {
+            let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
+            state.free_reg(arg_id);
+            arg_id
+        } else {
+            u16::MAX
+        };
 
-        let register_id = if returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
-        output.push(Instr::CallDynamicLibFunc(dyn_id, register_id));
+        let dest_reg_id = if returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
+        output.push(Instr::CallDynamicLibFunc { fn_id: dyn_id, dest_reg_id, last_arg_reg_id });
         state.add_to_src(ctx, output, span);
-        return Some(register_id);
+        state.sub_arg_hint(args.len());
+        return Some(dest_reg_id);
     }
 
     // Infer arg types

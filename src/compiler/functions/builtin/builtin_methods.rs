@@ -66,7 +66,7 @@ fn add_args<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
 ) {
-    *state.allocated_arg_count = (*state.allocated_arg_count).max(args.len());
+    state.add_arg_hint(args.len());
     for arg in args.iter().rev() {
         let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
         output.push(Instr::StoreFuncArg(arg_id));
@@ -109,6 +109,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::StartsWith, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "ends_with" => {
@@ -117,6 +118,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::EndsWith, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "replace" => {
@@ -126,6 +128,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Replace, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "len" => {
@@ -158,6 +161,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Contains, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "trim" => {
@@ -173,6 +177,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimSequence, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "find" => {
@@ -203,6 +208,7 @@ pub fn builtin_methods<'arena>(
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Find, receiver_id, output_id));
             state.add_to_src(ctx, output, span);
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "is_float" => {
@@ -237,6 +243,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimSequenceLeft, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "trim_sequence_right" => {
@@ -247,6 +254,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::TrimSequenceRight, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "repeat" => {
@@ -264,6 +272,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Repeat, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "push" => {
@@ -350,6 +359,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Split, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "partition" => {
@@ -369,6 +379,7 @@ pub fn builtin_methods<'arena>(
             add_args(args, output, ctx, state);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Split, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "join" => {
@@ -396,6 +407,7 @@ pub fn builtin_methods<'arena>(
             }
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::JoinStringArray, receiver_id, output_id));
+            state.sub_arg_hint(args.len());
             Some(output_id)
         }
         "remove" => {

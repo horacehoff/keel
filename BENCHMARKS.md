@@ -40,7 +40,7 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [binary-trees.kl](/examples/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/binary-trees/binary-trees.lua) | [binary-trees.c](/examples/binary-trees/binary-trees.c) |
-| 512.4ms | 1264ms | 1005ms | 247.4ms |
+| 449.2ms | 1264ms | 1005ms | 247.4ms |
 
 
 ## Quicksort (N=10000)
@@ -103,11 +103,14 @@ print(count)</code></pre></td>
 
 ## FizzBuzz - 1 000 000 iterations
 
+> [!IMPORTANT]
+> The C program uses a per-line `printf`.
+
 ### With `--show-output`
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [fizzbuzz.kl](/examples/fizzbuzz/fizzbuzz.kl) | [fizzbuzz.py](/examples/fizzbuzz/fizzbuzz.py) | [fizzbuzz.lua](/examples/fizzbuzz/fizzbuzz.lua) | [fizzbuzz.c](/examples/fizzbuzz/fizzbuzz.c) |
-| 2101ms | 2765ms | 2179ms | 2158 |
+| 1821ms | 2765ms | 2179ms | 2158 |
 
 ### Default
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |

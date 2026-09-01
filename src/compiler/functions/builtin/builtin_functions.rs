@@ -82,6 +82,9 @@ pub fn builtin_functions<'arena>(
         "string" => {
             check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+            if args[0].infer_type(ctx, state) == DataType::String {
+                return Some(id);
+            }
             state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Str, id, output_id));
@@ -125,7 +128,8 @@ pub fn builtin_functions<'arena>(
                 let id_second_arg =
                     args[1].compile(ctx, state, output, None, false, true).unwrap_id();
                 output.push(Instr::StoreFuncArg(id_first_arg));
-                *state.allocated_arg_count = (*state.allocated_arg_count).max(1);
+                state.add_arg_hint(1);
+                state.sub_arg_hint(1);
                 id_second_arg
             };
             state.free_reg(id_first_arg);

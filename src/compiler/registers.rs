@@ -63,7 +63,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::GetIndexString(_, _, y)
         | Instr::GetSliceString(_, _, y)
         | Instr::SaveFrame(_, y, _)
-        | Instr::CallDynamicLibFunc(_, y)
+        | Instr::CallDynamicLibFunc { dest_reg_id: y, .. }
         | Instr::MapGet(_, _, y)
         | Instr::IncIntTo(_, y)
         | Instr::IsType(_, _, y)
@@ -176,7 +176,7 @@ impl Instr {
             | Self::GetIndexString(_, _, y)
             | Self::GetSliceString(_, _, y)
             | Self::SetElementString(y, _, _)
-            | Self::CallDynamicLibFunc(_, y)
+            | Self::CallDynamicLibFunc {dest_reg_id: y,..}
             | Self::IncInt(y)
             | Self::DecInt(y)
             | Self::IncIntTo(_, y)
@@ -277,6 +277,9 @@ impl Instr {
             | Self::ObjElemMov(a, _, _)
             | Self::CallFuncDynamic(a, _) => f(a),
 
+            Self::CallDynamicLibFunc { last_arg_reg_id, .. } if last_arg_reg_id == u16::MAX => {}
+            Self::CallDynamicLibFunc { last_arg_reg_id, .. } => f(last_arg_reg_id),
+
             Self::CallLibFuncVoid(func, a, b) => {
                 f(a);
                 if matches!(func, LibFuncVoid::FsWrite | LibFuncVoid::FsAppend) {
@@ -296,7 +299,6 @@ impl Instr {
             | Self::CallFunc(_, _)
             | Self::CallFuncRecursive(_, _)
             | Self::SaveFrame(_, _, _)
-            | Self::CallDynamicLibFunc(_, _)
             | Self::EmptyArray(_)
             | Self::SetInt(_, _)
             | Self::StartErrorCatch(_, _)

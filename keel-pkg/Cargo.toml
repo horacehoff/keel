@@ -12,7 +12,7 @@ documentation = "https://docs.keel-lang.com"
 clap = { version = "4.6.6", features = ["derive"] }
 console-utils = "1.8.3"
 constcat = "0.6.1"
-flate2 = { version="1.1.9", features=["zlib-rs"], default-features = false }
+flate2 = { version="1.1.10", features=["zlib-rs"], default-features = false }
 futures-util = "0.3.34"
 indicatif = {version="0.18.6", features=["tokio"]}
 owo-colors = "4.4.0"
@@ -24,7 +24,7 @@ tar = "0.4.46"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["macros","rt"] }
 tokio-util = {version="0.7.19",features=["io","io-util"]}
-toml = "1.1.4"
+toml = "1.1.5"
 
 [target.'cfg(windows)'.dependencies]
 junction = "2.0.0"

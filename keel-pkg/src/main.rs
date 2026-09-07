@@ -6,15 +6,16 @@ use owo_colors::OwoColorize;
 use owo_colors::colors::css::Gray;
 use reqwest::{Client, StatusCode};
 use std::hint::cold_path;
-use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::install::install_library;
 use crate::list::list_installed_packages;
+use crate::uninstall::uninstall_library;
 
 mod install;
 mod list;
 mod packages;
+mod uninstall;
 
 #[derive(Parser)]
 struct Cli {
@@ -31,6 +32,11 @@ enum Commands {
         /// Force the installation of the package, potentially overwriting a previously-installed package
         #[arg(short, long)]
         force: bool,
+    },
+    /// Uninstall a system-wide package
+    Uninstall {
+        /// The full Github repository or just the repository's name of the package
+        repository: String,
     },
     /// List all installed global packages
     List,
@@ -52,8 +58,8 @@ pub enum CliError {
         #[source]
         source: reqwest::Error,
     },
-    #[error("{TAB}Failed to create temporary folder: {}.\n{TAB}Check permissions.", path.display())]
-    CannotCreateFolder { path: PathBuf },
+    #[error("{TAB}Failed to create temporary folder: {}.\n{TAB}Check permissions.", path.bold())]
+    CannotCreateFolder { path: String },
     #[error(
         "{TAB}Internal error.\n{TAB}Please file a bug report at https://github.com/horacehoff/keel/issues.\n{TAB}Details: {details}."
     )]
@@ -76,8 +82,16 @@ pub enum CliError {
     GithubError { status_code: StatusCode, message: String },
     #[error("{TAB}{} is not a valid repository.", repository.bold())]
     InvalidRepo { repository: String },
+    #[error("{TAB}{} is not a valid tag or version.", tag.bold())]
+    InvalidTagOrVersion { tag: String },
     #[error("{TAB}There is already a package named {} installed.\n{TAB}To override this and uninstall it, use the -f/--force flag.", repo_name.bold())]
     PkgWithNameAlreadyExists { repo_name: String },
+    #[error("{TAB}Cannot read path {}",path.bold())]
+    CannotReadPath { path: String },
+    #[error("{TAB}The downloaded folder is empty!")]
+    DownloadedFolderIsEmpty,
+    #[error("{TAB}Failed to create symlink from {} to {}", path_src.bold(), path_dest.bold())]
+    FailedToCreateSymlink { path_src: String, path_dest: String },
 }
 
 #[cfg(target_os = "macos")]
@@ -131,6 +145,12 @@ async fn cli() -> Result<(), CliError> {
             )
             .await?;
         }
+        Some(Commands::Uninstall { repository }) => uninstall_library(
+            &repository,
+            &keel_home,
+            &keel_home_libs,
+            &keel_home_libs_packages_toml,
+        )?,
         Some(Commands::List) => {
             list_installed_packages(&keel_home_libs_packages_toml, &keel_home_libs)?;
         }

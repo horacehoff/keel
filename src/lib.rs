@@ -138,116 +138,112 @@ pub fn main() {
         return;
     }
 
-    let next_arg = unsafe { args.next().unwrap_unchecked() };
+    let argument = unsafe { args.next().unwrap_unchecked() };
 
-    if next_arg == "--help" || next_arg == "-h" {
+    if argument == "--help" || argument == "-h" {
         cold_path();
+        if args.len() != 0 {
+            cold_path();
+            eprintln!("{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n{ARGS}");
+            std::process::exit(1);
+        }
         println!(
             "{}\nKeel is a fast, statically-typed interpreted language that aims to combine Rust-like syntax with Python's ease-of-use.\n\nUsage:\n{ARGS}",
             util::KEEL_LOGO
         );
-        return;
-    }
-
-    if next_arg == "--version" || next_arg == "-v" {
+    } else if argument == "--version" || argument == "-v" {
         cold_path();
-        if args.len() > 1 {
+        if args.len() != 0 {
             cold_path();
             eprintln!("{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n{ARGS}");
-            return;
+            std::process::exit(1);
         }
         println!("Keel {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-
-    if next_arg == "check" {
+    } else if argument == "install" || argument == "list" || argument == "uninstall" {
+        // keel-pkg commands
         cold_path();
-        if args.len() == 0 {
+        todo!();
+    } else if argument == "check" {
+        cold_path();
+        if args.len() != 1 {
             cold_path();
             eprintln!("{RED}KEEL ERROR{RESET}\nInvalid arguments\nUsage:\n{ARGS}");
-            return;
+            std::process::exit(1);
         }
-        let next_arg = unsafe { args.next().unwrap_unchecked() };
-        let filename = &next_arg;
-        let contents = fs::read_to_string(filename).unwrap_or_else(|_| {
+        let filename = unsafe { args.next().unwrap_unchecked() };
+        let contents = fs::read_to_string(&filename).unwrap_or_else(|_| {
             cold_path();
             eprintln!("{RED}[KEEL]{RESET} Cannot read {RED}{BOLD}{filename}{RESET}");
             std::process::exit(1);
         });
-        let bump = Bump::with_capacity(contents.len() * 10);
-        compile(&contents, filename, false, &bump);
-        return;
-    }
+        let bump = Bump::with_capacity(contents.len() * 5);
+        compile(&contents, &filename, false, &bump);
+    } else {
+        let contents = fs::read_to_string(&argument).unwrap_or_else(|_| {
+            cold_path();
+            eprintln!("{RED}[KEEL]{RESET} Cannot read {RED}{BOLD}{argument}{RESET}");
+            std::process::exit(1);
+        });
+        let bump = Bump::with_capacity(contents.len() * 5);
 
-    let filename = &next_arg;
-
-    let contents = fs::read_to_string(filename).unwrap_or_else(|_| {
-        cold_path();
-        eprintln!("{RED}[KEEL]{RESET} Cannot read {RED}{BOLD}{filename}{RESET}");
-        std::process::exit(1);
-    });
-    let bump = Bump::with_capacity(contents.len() * 10);
-
-    #[cfg(debug_assertions)]
-    {
-        let next = args.next();
-        if next == Some(String::from("--debug")) {
-            let now = std::time::Instant::now();
-            let (
-                instructions,
-                mut registers,
-                mut pools,
-                err_ctx,
-                fn_registers,
-                fn_dyn_libs,
-                allocated_arg_count,
-                allocated_call_depth,
-                struct_fields,
-                types,
-            ) = compile(&contents, filename, true, &bump);
-            println!("COMPILATION TIME: {:.2?}", now.elapsed());
-            let now = std::time::Instant::now();
-            vm::execute(
-                &instructions,
-                &mut registers,
-                &mut pools,
-                &err_ctx,
-                &fn_registers,
-                &fn_dyn_libs,
-                &struct_fields,
-                &types,
-                allocated_arg_count,
-                allocated_call_depth,
-            );
-            println!("EXECUTION TIME: {:.3}ms", now.elapsed().as_nanos() / 1_000_000);
-            return;
-        } else if next == Some(String::from("--debug-parser")) {
-            compile(&contents, filename, false, &bump);
-            return;
+        #[cfg(debug_assertions)]
+        {
+            let next = args.next();
+            if next == Some(String::from("--debug")) {
+                let now = std::time::Instant::now();
+                let (
+                    instructions,
+                    mut registers,
+                    mut pools,
+                    err_ctx,
+                    fn_registers,
+                    fn_dyn_libs,
+                    allocated_arg_count,
+                    allocated_call_depth,
+                    struct_fields,
+                    types,
+                ) = compile(&contents, &argument, true, &bump);
+                println!("COMPILATION TIME: {:.2?}", now.elapsed());
+                let now = std::time::Instant::now();
+                vm::execute(
+                    &instructions,
+                    &mut registers,
+                    &mut pools,
+                    &err_ctx,
+                    &fn_registers,
+                    &fn_dyn_libs,
+                    &struct_fields,
+                    &types,
+                    allocated_arg_count,
+                    allocated_call_depth,
+                );
+                println!("EXECUTION TIME: {:.3}ms", now.elapsed().as_nanos() / 1_000_000);
+                return;
+            }
         }
+        let (
+            instructions,
+            mut registers,
+            mut arrays,
+            err_ctx,
+            fn_registers,
+            fn_dyn_libs,
+            allocated_arg_count,
+            allocated_call_depth,
+            struct_fields,
+            types,
+        ) = compile(&contents, &argument, false, &bump);
+        vm::execute(
+            &instructions,
+            &mut registers,
+            &mut arrays,
+            &err_ctx,
+            &fn_registers,
+            &fn_dyn_libs,
+            &struct_fields,
+            &types,
+            allocated_arg_count,
+            allocated_call_depth,
+        );
     }
-    let (
-        instructions,
-        mut registers,
-        mut arrays,
-        err_ctx,
-        fn_registers,
-        fn_dyn_libs,
-        allocated_arg_count,
-        allocated_call_depth,
-        struct_fields,
-        types,
-    ) = compile(&contents, filename, false, &bump);
-    vm::execute(
-        &instructions,
-        &mut registers,
-        &mut arrays,
-        &err_ctx,
-        &fn_registers,
-        &fn_dyn_libs,
-        &struct_fields,
-        &types,
-        allocated_arg_count,
-        allocated_call_depth,
-    );
 }

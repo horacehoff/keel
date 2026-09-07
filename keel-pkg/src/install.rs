@@ -120,8 +120,8 @@ pub async fn install_library(
     let github_release =
         get_github_release(&github_api_url, author, repo_name, tag.unwrap_or("latest"), &client)
             .await?;
-    Version::parse(github_release.tag_name.strip_prefix('v').unwrap_or(&github_release.tag_name))
-        .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+    let tag = github_release.tag_name.strip_prefix('v').unwrap_or(&github_release.tag_name);
+    Version::parse(tag).map_err(|_| CliError::InvalidTagOrVersion { tag: tag.to_string() })?;
     let github_asset = get_github_release_asset(&github_release, repo_name);
     let lib_folder_name = format!("{repo_name}@{}", github_release.tag_name);
     clear_line();
@@ -188,8 +188,9 @@ pub async fn install_library(
     progress_bar.set_message(format!("Downloading {}", lib_folder_name.bold()));
 
     let temp_lib_folder = keel_home.join("tmp/").join(&lib_folder_name);
-    std::fs::create_dir_all(&temp_lib_folder)
-        .map_err(|_| CliError::CannotCreateFolder { path: temp_lib_folder.clone() })?;
+    std::fs::create_dir_all(&temp_lib_folder).map_err(|_| CliError::CannotCreateFolder {
+        path: temp_lib_folder.display().to_string(),
+    })?;
     let bytes_stream = github_response.bytes_stream().map_err(std::io::Error::other);
     let stream_reader = StreamReader::new(bytes_stream);
 
@@ -224,12 +225,12 @@ pub async fn install_library(
     let lib_folder = keel_home_libs.join(&lib_folder_name);
 
     let mut lib_entries = std::fs::read_dir(&temp_lib_folder)
-        .map_err(|_| CliError::CannotCreateFolder { path: "./".into() })?;
+        .map_err(|_| CliError::CannotReadPath { path: temp_lib_folder.display().to_string() })?;
 
     let first_lib_entry = lib_entries
         .next()
-        .ok_or(CliError::CannotCreateFolder { path: "".into() })?
-        .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+        .ok_or(CliError::DownloadedFolderIsEmpty)?
+        .map_err(|_| CliError::DownloadedFolderIsEmpty)?;
 
     let _ = std::fs::remove_dir_all(&lib_folder);
     // If there's a single entry in the lib's archive (a top-levl folder or a single file), move that instead of the parent folder
@@ -238,14 +239,16 @@ pub async fn install_library(
         let dest = if first_lib_entry.file_type().unwrap().is_dir() {
             lib_folder.clone()
         } else {
-            std::fs::create_dir_all(&lib_folder)
-                .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+            std::fs::create_dir_all(&lib_folder).map_err(|_| CliError::CannotCreateFolder {
+                path: lib_folder.display().to_string(),
+            })?;
             lib_folder.join(first_lib_entry.file_name())
         };
-        std::fs::rename(src, dest).map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+        std::fs::rename(&src, &dest)
+            .map_err(|_| CliError::CannotCreateFolder { path: dest.display().to_string() })?;
     } else {
         std::fs::rename(&temp_lib_folder, &lib_folder)
-            .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+            .map_err(|_| CliError::CannotCreateFolder { path: lib_folder.display().to_string() })?;
     }
 
     let _ = std::fs::remove_dir_all(temp_lib_folder);
@@ -262,14 +265,22 @@ pub async fn install_library(
         #[cfg(unix)]
         {
             let _ = std::fs::remove_file(&folder_symlink_path);
-            std::os::unix::fs::symlink(&lib_folder, &folder_symlink_path)
-                .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+            std::os::unix::fs::symlink(&lib_folder, &folder_symlink_path).map_err(|_| {
+                CliError::FailedToCreateSymlink {
+                    path_src: lib_folder.display().to_string(),
+                    path_dest: folder_symlink_path.display().to_string(),
+                }
+            })?;
         }
         #[cfg(windows)]
         {
             let _ = std::fs::remove_dir(&folder_symlink_path);
-            junction::create(&lib_folder, &folder_symlink_path)
-                .map_err(|_| CliError::CannotCreateFolder { path: "".into() })?;
+            junction::create(&lib_folder, &folder_symlink_path).map_err(|_| {
+                CliError::FailedToCreateSymlink {
+                    path_src: lib_folder.display().to_string(),
+                    path_dest: folder_symlink_path.display().to_string(),
+                }
+            })?;
         }
     }
 

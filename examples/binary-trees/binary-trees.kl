@@ -16,7 +16,7 @@ fn check_tree(node) {
 
 fn main() {
     let min_depth = 4;
-    let arg = int(argv()[0]);
+    let arg = int(argv()[1]);
     let max_depth = if min_depth + 2 >= arg {min_depth + 2} else {arg};
     let stretch_depth = max_depth + 1;
 

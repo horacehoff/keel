@@ -1347,7 +1347,7 @@ pub fn execute(
             #[cfg(not(target_arch = "wasm32"))]
             Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
                 let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
-                for arg in std::env::args().skip(2) {
+                for arg in std::env::args().skip(1) {
                     let arg_str = string!(arg);
                     obj_pool[array_id as usize].push(arg_str);
                 }

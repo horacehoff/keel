@@ -137,7 +137,7 @@ fn main() {
 
     let bodies = [sun, jupiter, saturn, uranus, neptune];
     let nbody = bodies.len();
-    let N = int(argv()[0]);
+    let N = int(argv()[1]);
 
     offsetMomentum(bodies, nbody, SOLAR_MASS);
     print(energy(bodies, nbody));

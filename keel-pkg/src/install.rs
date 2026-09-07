@@ -85,7 +85,7 @@ async fn get_github_release(
 fn get_github_release_asset<'a>(
     github_release: &'a GithubRelease,
     repo_name: &str,
-) -> &'a GithubReleaseAsset {
+) -> Result<&'a GithubReleaseAsset, CliError> {
     github_release
         .assets
         .iter()
@@ -97,7 +97,7 @@ fn get_github_release_asset<'a>(
             }
             false
         })
-        .expect("Couldn't find a valid asset")
+        .ok_or_else(|| CliError::FailedToFindValidReleaseAsset { repo_name: repo_name.to_string() })
 }
 
 pub async fn install_library(
@@ -122,7 +122,7 @@ pub async fn install_library(
             .await?;
     let tag = github_release.tag_name.strip_prefix('v').unwrap_or(&github_release.tag_name);
     Version::parse(tag).map_err(|_| CliError::InvalidTagOrVersion { tag: tag.to_string() })?;
-    let github_asset = get_github_release_asset(&github_release, repo_name);
+    let github_asset = get_github_release_asset(&github_release, repo_name)?;
     let lib_folder_name = format!("{repo_name}@{}", github_release.tag_name);
     clear_line();
     print!("Found a suitable release asset: {}", github_asset.name.italic().fg::<Gray>());
@@ -284,7 +284,7 @@ pub async fn install_library(
         }
     }
 
-    write_new_manifest(&system_pkg_manifest, &mut manifest_file)?;
+    write_new_manifest(&system_pkg_manifest, &mut manifest_file, keel_home_libs_packages_toml)?;
 
     clear_line();
     println!(

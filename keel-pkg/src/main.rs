@@ -92,6 +92,18 @@ pub enum CliError {
     DownloadedFolderIsEmpty,
     #[error("{TAB}Failed to create symlink from {} to {}", path_src.bold(), path_dest.bold())]
     FailedToCreateSymlink { path_src: String, path_dest: String },
+    #[error("{TAB}Failed to create/open the system manifest at {}", path.bold())]
+    CannotOpenPkgManifest { path: String },
+    #[error("{TAB}Filed to acquire a lock on the system manifest at {}", path.bold())]
+    CannotAcquireLockOnPkgManifest { path: String },
+    #[error("{TAB}Failed to read the system manifest at {}", path.bold())]
+    CannotReadPkgManifest { path: String },
+    #[error("{TAB}Failed to write to the system manifest at {}", path.bold())]
+    CannotWritePkgManifest { path: String },
+    #[error("{TAB}Failed to TOML-parse the system manifest at {}", path.bold())]
+    FailedToParsePkgManifest { path: String },
+    #[error("{TAB}Failed to find a valid release asset in `{}` that fit the following:\n - {repo_name}{}.tar.gz\n - {repo_name}{}.tar.gz\n - {repo_name}{}.tar.gz\n - {repo_name}{}.tar.gz", repo_name.bold(), SUFFIXES[0],SUFFIXES[1],SUFFIXES[2],SUFFIXES[3], )]
+    FailedToFindValidReleaseAsset { repo_name: String },
 }
 
 #[cfg(target_os = "macos")]

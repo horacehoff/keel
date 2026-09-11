@@ -1,6 +1,6 @@
 # Keel Changelog
 
-## 0.5.0
+## 0.5.0 (in development)
 - Several critical bugs have been fixed
 - There's now a Windows install script
 - Formatting/Printing performance has been immensely improved

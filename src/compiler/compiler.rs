@@ -3144,7 +3144,7 @@ pub fn compile<'arena>(
     if debug {
         println!("---- DEBUG ----");
         if !pools.obj_pool.is_empty() {
-            println!("---  ARRAYS  ---");
+            println!("---  OBJECTS  ---");
             for (i, data) in pools.obj_pool.iter().enumerate() {
                 println!(" {i} {data:?}");
             }

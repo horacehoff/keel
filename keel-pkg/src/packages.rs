@@ -3,7 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, io::Read, path::Path};
 
 use console_utils::control::clear_line;
-use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::CliError;
@@ -25,9 +24,8 @@ pub struct Package {
     pub author: String,
     /// Last github query
     pub updated: u64,
-    pub latest: String,
-    /// each string is a tag
-    pub installed: Vec<String>,
+    /// GitHub tag
+    pub version: String,
 }
 
 /// Clears the current console line
@@ -103,51 +101,25 @@ pub fn read_system_packages_manifest(
 
 #[derive(PartialEq)]
 pub enum PkgInstallStatus {
-    AlreadyInstalled { latest: bool },
+    AlreadyInstalled,
     DifferentRepoExists,
     NotInstalled,
 }
 
-/// Returns if it's the latest version
 pub fn add_package_to_manifest(
     system_pkg_manifest: &mut PackagesManifest,
     author: &str,
     repo_name: &str,
     tag: &str,
-) -> bool {
-    if let Some(pkg) = system_pkg_manifest.packages.get_mut(repo_name) {
-        if !pkg.installed.iter().any(|v| v == tag) {
-            pkg.installed.push(tag.to_string());
-            pkg.installed.sort_by(|a, b| {
-                Version::parse(a.strip_prefix('v').unwrap_or(a))
-                    .expect("Shouldn't be possible")
-                    .cmp(
-                        &Version::parse(b.strip_prefix('v').unwrap_or(b))
-                            .expect("Shouldn't be possible"),
-                    )
-            });
-        }
-        pkg.updated = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let latest_tag = Version::parse(pkg.latest.strip_prefix('v').unwrap_or(&pkg.latest))
-            .expect("Shouldn't be possible");
-        let current_tag =
-            Version::parse(tag.strip_prefix('v').unwrap_or(tag)).expect("Shouldn't be possible");
-        if current_tag > latest_tag {
-            pkg.latest = tag.to_string();
-        }
-        pkg.latest == tag
-    } else {
-        system_pkg_manifest.packages.insert(
-            repo_name.to_string(),
-            Package {
-                author: author.to_string(),
-                updated: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-                latest: tag.to_string(),
-                installed: vec![tag.to_string()],
-            },
-        );
-        true
-    }
+) {
+    system_pkg_manifest.packages.insert(
+        repo_name.to_string(),
+        Package {
+            author: author.to_string(),
+            updated: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            version: tag.to_string(),
+        },
+    );
 }
 
 pub fn write_new_manifest(
@@ -186,8 +158,8 @@ pub fn is_package_already_installed(
 ) -> PkgInstallStatus {
     if let Some(pkg) = system_pkg_manifest.packages.get(repo_name) {
         if pkg.author == author {
-            if pkg.installed.iter().any(|v| v == tag) {
-                PkgInstallStatus::AlreadyInstalled { latest: pkg.latest == tag }
+            if pkg.version == tag {
+                PkgInstallStatus::AlreadyInstalled
             } else {
                 PkgInstallStatus::NotInstalled
             }

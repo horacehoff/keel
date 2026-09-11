@@ -12,6 +12,7 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 
 [Website](https://keel-lang.com)
 [Documentation](https://docs.keel-lang.com)
+[Install Keel](#installation)
 [Try Keel in your browser](https://keel-lang.com/playground)
 
 ## Why Keel?

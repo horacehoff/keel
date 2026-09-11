@@ -6,5 +6,6 @@ accepted = [
     "Apache-2.0",
     "BSD-3-Clause",
     "CDLA-Permissive-2.0",
-    "Zlib"
+    "Zlib",
+    "MPL-2.0"
 ]

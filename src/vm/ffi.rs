@@ -106,11 +106,17 @@ pub fn array_to_c_ptr(
 /// Computes a Keel struct's size, alignment, and per-field offsets
 /// Returns (size, alignment, `field_offsets`)
 #[cfg(not(target_arch = "wasm32"))]
-fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usize, Vec<usize>) {
+fn get_struct_size(
+    struct_fields: &[Data],
+    obj_pool: &ObjectPool,
+    needs_field_offsets: bool,
+) -> (usize, usize, Vec<usize>) {
     let mut offset: usize = 0;
     let mut max_alignment: usize = 0;
     let mut field_offsets: Vec<usize> = Vec::new();
-    field_offsets.reserve_exact(struct_fields.len());
+    if needs_field_offsets {
+        field_offsets.reserve_exact(struct_fields.len());
+    }
     for field in struct_fields {
         let elem_size: usize;
         let elem_alignment: usize;
@@ -126,11 +132,13 @@ fn get_struct_size(struct_fields: &[Data], obj_pool: &ObjectPool) -> (usize, usi
         } else {
             // can only be a struct here
             (elem_size, elem_alignment, _) =
-                get_struct_size(&obj_pool[field.as_struct()], obj_pool);
+                get_struct_size(&obj_pool[field.as_struct()], obj_pool, false);
         }
         let field_offset = offset.next_multiple_of(elem_alignment);
         offset = field_offset + elem_size;
-        field_offsets.push(field_offset);
+        if needs_field_offsets {
+            field_offsets.push(field_offset);
+        }
         max_alignment = max_alignment.max(elem_alignment);
     }
     (offset.next_multiple_of(max_alignment), max_alignment, field_offsets)
@@ -187,7 +195,7 @@ pub fn keel_struct_to_c_struct(
     keep_alive: &mut Vec<Box<[u8]>>,
 ) -> Vec<u8> {
     let struct_fields = &obj_pool[struct_index];
-    let (struct_size, _, field_offsets) = get_struct_size(struct_fields, obj_pool);
+    let (struct_size, _, field_offsets) = get_struct_size(struct_fields, obj_pool, true);
     let mut buf: Vec<u8> = vec![0u8; struct_size];
     for (i, field) in struct_fields.iter().enumerate() {
         unsafe {

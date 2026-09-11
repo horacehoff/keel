@@ -1,4 +1,3 @@
-use crate::TAB;
 use owo_colors::OwoColorize;
 use owo_colors::colors::css::Gray;
 use std::io::Write;
@@ -37,7 +36,8 @@ pub fn list_installed_packages(
         for (pkg_name, pkg) in system_pkg_manifest.packages {
             writeln!(
                 bufwriter,
-                "\n{TAB}{pkg_name} {}{}{}{}{}",
+                " - {pkg_name} {} {}{}{}{}{}",
+                pkg.version,
                 '('.italic().fg::<Gray>(),
                 pkg.author.italic().fg::<Gray>(),
                 '/'.italic().fg::<Gray>(),
@@ -45,21 +45,6 @@ pub fn list_installed_packages(
                 ')'.italic().fg::<Gray>(),
             )
             .expect(PRINT_ERR_MSG);
-            for v in pkg.installed {
-                if v == pkg.latest {
-                    writeln!(
-                        bufwriter,
-                        "{TAB}└── {v} {}{}{}{}",
-                        '('.italic().fg::<Gray>(),
-                        "installed as `".italic().fg::<Gray>(),
-                        pkg_name.italic().fg::<Gray>(),
-                        "`)".italic().fg::<Gray>()
-                    )
-                    .expect(PRINT_ERR_MSG);
-                } else {
-                    writeln!(bufwriter, "{TAB}└── {v}").expect(PRINT_ERR_MSG);
-                }
-            }
         }
     }
 

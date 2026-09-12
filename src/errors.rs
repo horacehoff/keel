@@ -3,6 +3,7 @@ use crate::compiler::expr::Span;
 use crate::instr::Instr;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
+use const_format::formatcp;
 use std::hint::unreachable_unchecked;
 use std::io::StdoutLock;
 use std::io::Write;
@@ -206,7 +207,7 @@ pub fn throw_error(
         });
     let src = &ctx.sources[*file_id as usize];
     let err_message: String = t.into();
-    eprintln!("{RED}KEEL ERROR{RESET}");
+    eprint!("{}", formatcp!("[{RED}ERROR{RESET}] "));
     let report =
         Report::build(ReportKind::Error, (src.filename, (*start as usize)..(*end as usize)))
             .with_label(
@@ -234,7 +235,7 @@ pub fn throw_error(
 #[inline(never)]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_error(msg: &str) -> ! {
-    crate::captured_output::print(&format!("KEEL ERROR\n{msg}\n"));
+    crate::captured_output::print(&format!("[{RED}ERROR{RESET}] {msg}\n"));
     wasm_bindgen::throw_str("keel error");
 }
 

@@ -4,4 +4,5 @@ accepted = [
     "ISC",
     "Unicode-3.0",
     "Apache-2.0",
+    "Zlib"
 ]

@@ -1,10 +1,12 @@
 use crate::compiler::compiler_data::{InstrSrc, Source};
 use crate::compiler::expr::Span;
+use crate::hformat;
 use crate::instr::Instr;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use const_format::formatcp;
 use std::hint::unreachable_unchecked;
+#[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
 use std::io::StdoutLock;
 use std::io::Write;
 
@@ -105,11 +107,34 @@ impl From<ErrType<'_>> for String {
         match value {
             ErrType::Custom(m) => m.to_owned(),
             ErrType::InvalidFloat => "Invalid float".into(),
-            ErrType::IndexOutOfBounds(length, index) => format!(
-                "Tried to get index {RED}{BOLD}{index}{RESET} but the length is {BLUE}{BOLD}{length}{RESET}"
+            ErrType::IndexOutOfBounds(length, index) => hformat!(
+                "Tried to get index ",
+                RED,
+                BOLD,
+                { index },
+                RESET,
+                "but the length is ",
+                BLUE,
+                BOLD,
+                { length },
+                RESET
             ),
-            ErrType::SliceOutOfBounds(length, idx_start, idx_end) => format!(
-                "Invalid range {RED}{BOLD}{idx_start}{RESET}..{RED}{BOLD}{idx_end}{RESET} for collection with length {BLUE}{BOLD}{length}{RESET}"
+            ErrType::SliceOutOfBounds(length, idx_start, idx_end) => hformat!(
+                "Invalid range ",
+                RED,
+                BOLD,
+                { idx_start },
+                RESET,
+                "..",
+                RED,
+                BOLD,
+                { idx_end },
+                RESET,
+                " for collection with length ",
+                BLUE,
+                BOLD,
+                { length },
+                RESET
             ),
             ErrType::InvalidBool => "The string could not be parsed into a boolean".into(),
             ErrType::InvalidInt => "Invalid integer".into(),
@@ -149,7 +174,7 @@ impl From<ErrType<'_>> for String {
                 "String passed to dynamic library function contains an interior null byte".into()
             }
             ErrType::UnknownMapKey(key) => {
-                format!("Unknown key {RED}{BOLD}{key}{RESET}")
+                hformat!("Unknown key ", RED, BOLD, { key }, RESET)
             }
         }
     }
@@ -235,7 +260,7 @@ pub fn throw_error(
 #[inline(never)]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_error(msg: &str) -> ! {
-    crate::captured_output::print(&format!("[{RED}ERROR{RESET}] {msg}\n"));
+    crate::captured_output::print(&hformat!("[", RED, "ERROR", RESET, "]", { msg }, "\n"));
     wasm_bindgen::throw_str("keel error");
 }
 
@@ -250,28 +275,32 @@ pub fn throw_compiler_error<'a>(
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     report
         .eprint(
-            FnCache::new((move |id| Err(format!("Failed to fetch source {id}"))) as fn(&_) -> _)
-                .with_sources(
-                    sources
-                        .iter()
-                        .map(|Source { filename, contents }| {
-                            (*filename, ariadne::Source::from(contents))
-                        })
-                        .collect(),
-                ),
+            FnCache::new(
+                (move |id: &&str| Err(hformat!("Failed to fetch source ", { id }))) as fn(&_) -> _,
+            )
+            .with_sources(
+                sources
+                    .iter()
+                    .map(|Source { filename, contents }| {
+                        (*filename, ariadne::Source::from(contents))
+                    })
+                    .collect(),
+            ),
         )
         .unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     report
         .write(
-            FnCache::new((move |id| Err(format!("Failed to fetch source {id}"))) as fn(&_) -> _)
-                .with_sources(
-                    sources
-                        .iter()
-                        .map(|src| (src.filename, ariadne::Source::from(src.contents)))
-                        .collect(),
-                ),
+            FnCache::new(
+                (move |id: &&str| Err(hformat!("Failed to fetch source ", { id }))) as fn(&_) -> _,
+            )
+            .with_sources(
+                sources
+                    .iter()
+                    .map(|src| (src.filename, ariadne::Source::from(src.contents)))
+                    .collect(),
+            ),
             crate::captured_output::CapturedOutputWriter,
         )
         .unwrap();

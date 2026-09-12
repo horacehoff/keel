@@ -16,8 +16,10 @@ use crate::errors::bold;
 use crate::errors::green;
 use crate::errors::red;
 use crate::errors::throw_compiler_error;
+use crate::hformat;
 use ariadne::Label;
 use ariadne::Report;
+use const_format::formatcp;
 
 #[inline(never)]
 #[cold]
@@ -533,7 +535,7 @@ pub fn error_invalid_obj_type(
                                 .iter()
                                 .map(|s| s.to_string())
                                 .collect::<Vec<_>>()
-                                .join(&format_args!("{RESET} or {BLUE}").to_string()),
+                                .join(formatcp!("{RESET} or {BLUE}")),
                             red(perceived_type)
                         ))
                         .with_color(ariadne::Color::Red),

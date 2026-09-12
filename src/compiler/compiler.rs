@@ -38,6 +38,7 @@ use crate::errors::BOLD;
 use crate::errors::ErrorCtx;
 use crate::errors::RED;
 use crate::errors::RESET;
+use crate::hformat;
 use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
@@ -2714,11 +2715,11 @@ fn parse_toplevel<'a>(
                 let lib = Rc::new(unsafe {
                     if Path::new(base_path).extension().is_none() {
                         let path = {
-                            let arch_path = format!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
+                            let arch_path = hformat!({ base_path }, ARCH_SUFFIX, ".", DYLIB_EXT);
                             if Path::new(&arch_path).exists() {
                                 arch_path
                             } else {
-                                format!("{base_path}.{DYLIB_EXT}")
+                                hformat!({ base_path }, ".", DYLIB_EXT)
                             }
                         };
                         libloading::Library::new(path).unwrap_or_else(|_| {

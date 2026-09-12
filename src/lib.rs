@@ -20,6 +20,7 @@ mod captured_output;
 mod compiler;
 mod data;
 mod errors;
+mod format_tests;
 mod instr;
 #[path = "./parser/parser.rs"]
 mod parser;

@@ -58,17 +58,17 @@ impl TestFormat for f64 {
 // the basic idea is to build the formatted string / static str recursively through the macro
 // This might end up as a separate lib if it's good enough!
 // this is NOT pretty
-macro_rules! test_format {
+macro_rules! hformat {
     // a dynamic (runtime) item with some elements after
     ([$buffer:ident] [$($pending_static_elems: tt)*] [$($capacity_expr: tt)*] [$($add_to_str_statements: tt)*] {$dynamic_elem: expr}, $($remaining:tt)*) => {{
-        let _temp_formatted = const_format::concatcp!($($pending_static_elems)*);
-        test_format!(
+        const _TEMP_FORMATTED: &str = const_format::concatcp!($($pending_static_elems)*);
+        hformat!(
             [$buffer]
             []
-            [$($capacity_expr)* + _temp_formatted.len() + $dynamic_elem.size()]
+            [$($capacity_expr)* + _TEMP_FORMATTED.len() + $dynamic_elem.size()]
             [$(
                 $add_to_str_statements)*
-                $buffer.push_str(_temp_formatted);
+                $buffer.push_str(_TEMP_FORMATTED);
                 ($dynamic_elem).append($buffer);
             ]
             $($remaining)*
@@ -76,16 +76,35 @@ macro_rules! test_format {
     }};
     // a dynamic (runtime) item with no elements after (the last one), allows a trailing comma
     ([$buffer:ident] [$($pending_static_elems: tt)*] [$($capacity_expr: tt)*] [$($add_to_str_statements: tt)*] {$dynamic_elem: expr} $(,)?) => {{
-        let _temp_formatted = const_format::concatcp!($($pending_static_elems)*);
-        test_format!(
+        const _TEMP_FORMATTED: &str = const_format::concatcp!($($pending_static_elems)*);
+        hformat!(
             [$buffer]
             []
-            [$($capacity_expr)* + _temp_formatted.len() + $dynamic_elem.size()]
+            [$($capacity_expr)* + _TEMP_FORMATTED.len() + $dynamic_elem.size()]
             [$(
                 $add_to_str_statements)*
-                $buffer.push_str(_temp_formatted);
+                $buffer.push_str(_TEMP_FORMATTED);
                 ($dynamic_elem).append($buffer);
             ]
+        )
+    }};
+    // static item with some elements after
+    ([$buffer:ident] [$($pending_static_elems: tt)*] [$($capacity_expr: tt)*] [$($add_to_str_statements: tt)*] $static_elem: expr, $($remaining:tt)*) => {{
+        hformat!(
+            [$buffer]
+            [$($pending_static_elems)* $static_elem,]
+            [$($capacity_expr)*]
+            [$($add_to_str_statements)*]
+            $($remaining)*
+        )
+    }};
+    // static item with no elements after
+    ([$buffer:ident] [$($pending_static_elems: tt)*] [$($capacity_expr: tt)*] [$($add_to_str_statements: tt)*] $static_elem: expr $(,)?) => {{
+        hformat!(
+            [$buffer]
+            [$($pending_static_elems)* $static_elem,]
+            [$($capacity_expr)*]
+            [$($add_to_str_statements)*]
         )
     }};
     // pure const
@@ -94,19 +113,19 @@ macro_rules! test_format {
     };
     // runtime/const hybrid
     ([$buffer:ident] [$($pending_static_elems: tt)*] [$($capacity_expr: tt)*] [$($add_to_str_statements: tt)*]) => {{
-        let const_formatted = const_format::concatcp!($($pending_static_elems)*);
-        let mut $buffer = String::with_capacity($($capacity_expr)* + const_formatted.len());
+        const _TEMP_FORMATTED: &str = const_format::concatcp!($($pending_static_elems)*);
+        let mut $buffer = String::with_capacity($($capacity_expr)* + _TEMP_FORMATTED.len());
         {
             // shadowed just to give the statements a &mut String
             let $buffer = &mut $buffer;
             $($add_to_str_statements)*
         }
-        $buffer.push_str(const_formatted);
+        $buffer.push_str(_TEMP_FORMATTED);
         $buffer
     }};
     // the last one, it's the one that's actually called in the code
     ($($elems: tt)*) => {
-        test_format!(
+        hformat!(
             [buf]
             []
             [0usize]
@@ -119,5 +138,5 @@ macro_rules! test_format {
 fn test() {
     let y = 3;
     let z = 9;
-    let x = test_format!({ y }, { z });
+    let x = hformat!({ y }, { z }, "hey");
 }

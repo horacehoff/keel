@@ -2087,6 +2087,7 @@ impl<'arena> Expr<'arena> {
         uses_id: bool,
     ) -> Option<u16> {
         match self {
+            Self::Match(_) => todo!(),
             Self::Int(num) => {
                 debug_assert!(uses_id);
                 let int = Data::int(*num);

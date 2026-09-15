@@ -22,6 +22,7 @@ use crate::compiler::compiler_errors::error_unknown_type_with_namespace;
 use crate::compiler::compiler_errors::error_unknown_variable;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::IfBlockExpr;
+use crate::compiler::expr::Pattern;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::VariableDeclarationExpr;
 use rustc_hash::FxHashSet;
@@ -381,6 +382,15 @@ pub fn collect_direct_fn_calls<'arena>(
                 expr_stack.push(condition);
                 expr_stack.extend(*code);
             }
+            Expr::Match(match_expr) => {
+                expr_stack.push(match_expr.obj);
+                for arm in match_expr.arms {
+                    if let Some(guard) = arm.guard {
+                        expr_stack.push(guard);
+                    }
+                    expr_stack.extend(arm.code);
+                }
+            }
             Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
                 expr_stack.extend(*x);
             }
@@ -500,6 +510,11 @@ pub fn check_if_returns_void(content: &[Expr]) -> bool {
             }
             Expr::IntForLoop(int_for_loop) => {
                 if !check_if_returns_void(int_for_loop.get_loop_code()) {
+                    return false;
+                }
+            }
+            Expr::Match(match_expr) => {
+                if match_expr.arms.iter().any(|arm| !check_if_returns_void(arm.code)) {
                     return false;
                 }
             }
@@ -680,6 +695,25 @@ fn track_return_flow<'arena>(
                 let flow = track_condition_returns(if_block, fn_name, ctx, state);
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
+                    return FnReturnFlow { types: return_types, always_returns: true };
+                }
+            }
+            Expr::Match(match_expr) => {
+                let mut match_return_types = Vec::new();
+                let mut arms_always_return = true;
+                for arm in match_expr.arms {
+                    let match_arm_flow = track_scoped_returns(arm.code, ctx, state, fn_name);
+                    extend_return_types!(&mut match_return_types, match_arm_flow.types);
+                    arms_always_return = arms_always_return && match_arm_flow.always_returns;
+                }
+                let match_has_wildcard =
+                    match_expr.arms.iter().any(|arm| matches!(arm.pattern, Pattern::Wildcard(_)));
+                let match_return_flow = FnReturnFlow {
+                    types: match_return_types,
+                    always_returns: arms_always_return && match_has_wildcard,
+                };
+                extend_return_types!(&mut return_types, match_return_flow.types);
+                if match_return_flow.always_returns {
                     return FnReturnFlow { types: return_types, always_returns: true };
                 }
             }

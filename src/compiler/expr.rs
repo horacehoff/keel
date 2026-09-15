@@ -158,6 +158,47 @@ pub struct VariableDeclarationExpr<'arena> {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PatternConstructorField<'arena> {
+    pub name: &'arena str,
+    pub pattern: Pattern<'arena>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PatternConstructor<'arena> {
+    pub name: QualifiedName<'arena>,
+    pub fields: &'arena [PatternConstructorField<'arena>],
+    pub fill_the_rest: bool, // '..'
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Pattern<'arena> {
+    // struct
+    Constructor(PatternConstructor<'arena>),
+    // binding
+    Var(QualifiedName<'arena>, Span),
+    // any literal
+    Constant(&'arena Expr<'arena>, Span),
+    Wildcard(Span),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MatchArm<'arena> {
+    pub pattern: Pattern<'arena>,
+    pub guard: Option<&'arena Expr<'arena>>,
+    pub code: &'arena [Expr<'arena>],
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MatchExpr<'arena> {
+    pub obj: &'arena Expr<'arena>, // match <obj>
+    pub arms: &'arena [MatchArm<'arena>],
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum Expr<'arena> {
     Float(f64),
@@ -185,6 +226,7 @@ pub enum Expr<'arena> {
     VarAssign(&'arena str, &'arena Self, Span),
     NamespacedVarAssign(QualifiedName<'arena>, &'arena Self, Span),
     IfBlock(IfBlockExpr<'arena>),
+    Match(MatchExpr<'arena>),
 
     /// AnonymousFunction(args, code, span)
     AnonymousFunction(&'arena [(&'arena str, Option<TypeExpr<'arena>>)], &'arena [Self], Span),
@@ -272,6 +314,9 @@ pub fn code_modifies_variable(var_name: &str, code: &[Expr]) -> bool {
         }
         Expr::EvalBlock(code) | Expr::LoopBlock(code) => code_modifies_variable(var_name, code),
         Expr::IntForLoop(for_loop) => code_modifies_variable(var_name, for_loop.get_loop_code()),
+        Expr::Match(match_expr) => {
+            match_expr.arms.iter().any(|arm| code_modifies_variable(var_name, arm.code))
+        }
         _ => false,
     })
 }

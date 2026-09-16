@@ -8,7 +8,7 @@
 
 Its goal is to provide a faster alternative to Python that sits closer to low-level languages while remaining accessible to a wide audience.
 
-**Contributions and issues are very welcome!**
+**[Contributions and issues](CONTRIBUTING.md) are very welcome!**
 
 [Website](https://keel-lang.com)
 [Documentation](https://docs.keel-lang.com)

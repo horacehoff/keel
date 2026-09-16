@@ -5,3 +5,4 @@
 - Better embedding API with limits (exclusive to the embed feature)
 - Enums (with data)
 - Generics
+- Better IDE extension

@@ -8,7 +8,7 @@
 
 Its goal is to provide a faster alternative to Python that sits closer to low-level languages while remaining accessible to a wide audience.
 
-**Contributions and issues are welcome!**
+**Contributions and issues are very welcome!**
 
 [Website](https://keel-lang.com)
 [Documentation](https://docs.keel-lang.com)
@@ -19,7 +19,7 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 
 - **Fast**: ~2-15x faster than Python ([benchmarks](BENCHMARKS.md)), with aggressive compile-time optimizations
 - **Familiar syntax**: Rust-like, with Python's ease-of-use
-- **Statically typed, zero annotations**: full type inference, static type checking, polymorphism
+- **Statically typed, optional annotations**: full type inference, static type checking, polymorphism
 - **FFI support**: call C/dynamic libraries directly from Keel
 - **Built-in REPL**
 

@@ -93,7 +93,4 @@ git clone https://github.com/horacehoff/keel && cd keel && cargo build --release
 ```
 
 ## Near-future roadmap
-- Structured errors
-- Match (a better one)
-- Struct methods
-- Better embedding API with limits
+The roadmap can be found [here](ROADMAP.md).

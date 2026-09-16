@@ -20,7 +20,7 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 - **Fast**: ~2-15x faster than Python ([benchmarks](BENCHMARKS.md)), with aggressive compile-time optimizations
 - **Familiar syntax**: Rust-like, with Python's ease-of-use
 - **Statically typed, optional annotations**: full type inference, static type checking, polymorphism
-- **FFI support**: call C/dynamic libraries directly from Keel
+- **FFI support**: easily call C/dynamic libraries directly from Keel. FFI call overhead is ~3.5x lower than LuaJIT (-joff).
 - **Built-in REPL**
 
 Keel also has a [VS Code extension](https://marketplace.visualstudio.com/items?itemName=horacehoff.keel) that provides syntax highlighting.

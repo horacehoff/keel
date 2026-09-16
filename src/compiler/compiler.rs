@@ -24,6 +24,10 @@ use crate::compiler::expr::FunctionDeclarationArgumentExpr;
 use crate::compiler::expr::FunctionDeclarationExpr;
 use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::IntForLoopExpr;
+use crate::compiler::expr::MatchArm;
+use crate::compiler::expr::MatchExpr;
+use crate::compiler::expr::Pattern;
+use crate::compiler::expr::PatternConstructor;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::StructFieldAssignmentExpr;
 use crate::compiler::expr::StructFieldExpr;
@@ -2029,6 +2033,53 @@ fn compile_eval_block<'arena>(
     output.extend(compile_expr(code, ctx.with_offset(output.len() as u16), state));
 }
 
+fn compile_match_block<'arena>(
+    MatchExpr { obj: match_obj, arms, span }: &'arena MatchExpr,
+    ctx: Ctx,
+    state: &mut State<'arena, '_>,
+    output: &mut Vec<Instr>,
+) {
+    const MATCH_OBJ_VAR: &str = "{";
+    let (mut if_code, if_arms): (&'arena [Expr<'arena>], &[MatchArm<'arena>]) =
+        match arms.split_last() {
+            Some((last, rest)) if matches!(last.pattern, Pattern::Wildcard(_)) => (last.code, rest),
+            _ => (&[], *arms),
+        };
+    for arm in if_arms.iter().rev() {
+        match arm.pattern {
+            Pattern::Constant(cst, span) => {
+                if_code = state.bump.alloc_slice_copy(&[Expr::IfBlock(IfBlockExpr {
+                    condition: state
+                        .bump
+                        .alloc(Expr::Eq(state.bump.alloc(Expr::Var(MATCH_OBJ_VAR, span)), cst)),
+                    then: arm.code,
+                    otherwise: if_code,
+                    span,
+                })])
+            }
+            Pattern::Identifier(id, id_span) => todo!(),
+            Pattern::Constructor(PatternConstructor {
+                qualified_name,
+                fields,
+                fill_the_rest,
+                span,
+            }) => todo!(),
+            Pattern::Wildcard(_) => unsafe { unreachable_unchecked() },
+        }
+    }
+
+    let interm_code = state.bump.alloc_slice_copy(&[
+        Expr::VarDeclare(VariableDeclarationExpr {
+            name: MATCH_OBJ_VAR,
+            value: match_obj,
+            var_type: None,
+            span: Span::empty(),
+        }),
+        if_code[0],
+    ]);
+    compile_eval_block(interm_code, ctx, state, output);
+}
+
 pub fn compile_expr<'arena>(
     input: &'arena [Expr<'arena>],
     ctx: Ctx,
@@ -2087,7 +2138,6 @@ impl<'arena> Expr<'arena> {
         uses_id: bool,
     ) -> Option<u16> {
         match self {
-            Self::Match(_) => todo!(),
             Self::Int(num) => {
                 debug_assert!(uses_id);
                 let int = Data::int(*num);
@@ -2473,6 +2523,12 @@ impl<'arena> Expr<'arena> {
                 compile_eval_block(code, ctx, state, output);
                 None
             }
+            Self::Match(match_expr) => {
+                debug_assert!(!uses_id);
+                compile_match_block(match_expr, ctx, state, output);
+                None
+            }
+
             Self::ImportDylib(..) | Self::ImportFile(..) => unsafe { unreachable_unchecked() },
         }
     }

@@ -6,3 +6,4 @@
 - Enums (with data)
 - Generics
 - Better IDE extension
+- A better logo

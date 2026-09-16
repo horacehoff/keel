@@ -10,9 +10,13 @@ use crate::compiler::expr::FunctionDeclarationArgumentExpr;
 use crate::compiler::expr::FunctionDeclarationExpr;
 use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::IntForLoopExpr;
+use crate::compiler::expr::MatchArm;
+use crate::compiler::expr::MatchExpr;
+use crate::compiler::expr::Pattern;
+use crate::compiler::expr::PatternConstructor;
+use crate::compiler::expr::PatternConstructorField;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
-use crate::compiler::expr::VariableDeclarationExpr;
 use crate::parser::Parser;
 use crate::parser::TypeExpr;
 use crate::parser::parse_code;
@@ -353,83 +357,143 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let (t, Span { start, end: _ }) = parser.next_token();
     debug_assert_eq!(t, Token::Match);
     let match_obj = parse_expr_no_struct(parser);
-    let obj_var = "[MATCH TEMP]";
-    parser.next_token_expect(Token::LBrace, "Blocks must be delimited by braces");
-    let mut first_condition: Option<Expr> = None;
-    let mut output_code: Vec<Expr> = Vec::with_capacity(2);
-    let mut match_arms: Vec<(Expr, Box<[Expr]>)> = Vec::with_capacity(2);
-    let mut wildcard: Box<[Expr]> = Box::new([]);
+    parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
+    let mut arms: Vec<MatchArm> = Vec::with_capacity(4);
     let end: u32;
     loop {
         let peek_token = parser.peek_token();
-        if peek_token == Token::Identifier("_") {
-            if first_condition.is_none() {
-                cold_path();
-                let span = (start, parser.peek_token_span().end).into();
-                parser.error(span, ParserErr::MatchBlockNoNonWildcardArm);
-            }
-            parser.next_token();
-            parser.next_token_expect(Token::FatArrow, "Expected '=>'");
-            let code = parse_block(parser);
-            end = parser.peek_token_span().end;
-            parser.next_token_expect(
-                Token::RBrace,
-                "The wildcard must be the last statement in a match",
-            );
-            wildcard = Box::from(code);
-            break;
-        } else if peek_token == Token::RBrace {
-            if first_condition.is_none() {
+        if peek_token == Token::RBrace {
+            if arms.is_empty() {
                 cold_path();
                 let span = (start, parser.peek_token_span().end).into();
                 parser.error(span, ParserErr::MatchBlockZeroArms);
             }
-            end = parser.peek_token_span().end;
-            parser.next_token();
+            end = parser.next_token().1.end;
             break;
-        } else {
-            let condition = parse_expr(parser);
-            let end = parser.peek_token_span().end;
-            parser.next_token_expect(Token::FatArrow, "");
-            let code = parse_block(parser);
-            if first_condition.is_none() {
-                first_condition = Some(condition);
-                output_code.extend(code);
-            } else {
-                match_arms.push((
-                    Expr::Eq(
-                        parser.bump.alloc(Expr::Var(obj_var, (start, end).into())),
-                        parser.bump.alloc(condition),
-                    ),
-                    Box::from(code),
-                ));
-            }
+        }
+        let is_arm_wildcard = peek_token == Token::Identifier("_");
+        if is_arm_wildcard && arms.is_empty() {
+            cold_path();
+            let span = (start, parser.peek_token_span().end).into();
+            parser.error(span, ParserErr::MatchBlockNoNonWildcardArm);
+        }
+        let arm_start = parser.peek_token_span().start;
+        let pattern = parse_pattern(parser);
+        parser.next_token_expect(
+            Token::FatArrow,
+            "Match arms need to be a pattern followed by '=>' and a block",
+        );
+        let arm_code = parse_block(parser);
+        let arm_end = parser.last_token_end;
+        arms.push(MatchArm {
+            pattern,
+            guard: None,
+            code: parser.bump.alloc_slice_copy(&arm_code),
+            span: (arm_start, arm_end).into(),
+        });
+        if is_arm_wildcard {
+            end = parser.peek_token_span().end;
+            parser.next_token_expect(Token::RBrace, "The wildcard must be the last arm in a match");
+            break;
         }
     }
-    let mut otherwise: Box<[Expr]> = wildcard;
-    for (condition, code) in match_arms.into_iter().rev() {
-        otherwise = Box::new([Expr::IfBlock(IfBlockExpr {
-            condition: parser.bump.alloc(condition),
-            then: parser.bump.alloc_slice_copy(&code),
-            otherwise: parser.bump.alloc_slice_copy(&otherwise),
-            span: (start, end).into(),
-        })]);
+    Expr::Match(MatchExpr {
+        obj: parser.bump.alloc(match_obj),
+        arms: parser.bump.alloc_slice_copy(&arms),
+        span: (start, end).into(),
+    })
+}
+
+fn parse_pattern<'arena>(parser: &mut Parser<'arena>) -> Pattern<'arena> {
+    let (token, token_span) = parser.next_token();
+    let literal_token = match token {
+        Token::Identifier("_") => return Pattern::Wildcard(token_span),
+        Token::Identifier(id) => return parse_match_constructor(parser, id, token_span),
+        Token::Int(i) => Expr::Int(i),
+        Token::Float(f) => Expr::Float(f),
+        Token::String(s) => Expr::String(parse_string(s, parser.bump).into_bump_str()),
+        Token::True => Expr::Bool(true),
+        Token::False => Expr::Bool(false),
+        Token::Null => Expr::Null,
+        Token::OpSub => {
+            let (num, num_span) = parser.next_token();
+            let neg_number = match num {
+                Token::Int(i) => Expr::Int(-i),
+                Token::Float(f) => Expr::Float(-f),
+                other => panic!(),
+            };
+            return Pattern::Constant(
+                parser.bump.alloc(neg_number),
+                (token_span.start, num_span.end).into(),
+            );
+        }
+        other => panic!(),
+    };
+    Pattern::Constant(parser.bump.alloc(literal_token), token_span)
+}
+
+fn parse_match_constructor<'arena>(
+    parser: &mut Parser<'arena>,
+    initial: &'arena str,
+    initial_span: Span,
+) -> Pattern<'arena> {
+    let mut namespace: Vec<&str> = Vec::with_capacity(2);
+    namespace.push(initial);
+    let mut end = initial_span.end;
+    while parser.peek_token() == Token::DoubleColon {
+        parser.next_token();
+        let (token, token_span) = parser.next_token();
+        let Token::Identifier(path_element) = token else { panic!() };
+        namespace.push(path_element);
+        end = token_span.end;
     }
-    Expr::EvalBlock(parser.bump.alloc_slice_copy(&[
-        Expr::VarDeclare(VariableDeclarationExpr {
-            name: obj_var,
-            value: parser.bump.alloc(match_obj),
-            var_type: None,
-            span: Span::empty(),
-        }),
-        Expr::IfBlock(IfBlockExpr {
-            condition: parser.bump.alloc(Expr::Eq(
-                parser.bump.alloc(Expr::Var(obj_var, (start, end).into())),
-                parser.bump.alloc(first_condition.unwrap()),
-            )),
-            then: parser.bump.alloc_slice_copy(&output_code),
-            otherwise: parser.bump.alloc_slice_copy(&otherwise),
-            span: (start, end).into(),
-        }),
-    ]))
+    let namespace = QualifiedName::new(&namespace, parser.bump);
+    if parser.next_token().0 != Token::LBrace {
+        return Pattern::Identifier(namespace, (initial_span.start, end).into());
+    }
+    parser.next_token();
+    let mut constructor_fields: Vec<PatternConstructorField> = Vec::with_capacity(2);
+    let mut fill_the_rest = false;
+    let end: u32;
+    loop {
+        let (token, t_span) = parser.next_token();
+        match token {
+            Token::RBrace => {
+                end = t_span.end;
+                break;
+            }
+            Token::RangeDot => {
+                fill_the_rest = true;
+                end = parser.next_token_expect(Token::RBrace, "").end;
+                break;
+            }
+            Token::Identifier(id) => {
+                let pattern = if parser.peek_token() == Token::Colon {
+                    parser.next_token();
+                    parse_pattern(parser)
+                } else {
+                    Pattern::Identifier(QualifiedName::new(&[id], parser.bump), t_span)
+                };
+                constructor_fields.push(PatternConstructorField {
+                    name: id,
+                    pattern,
+                    span: (t_span.start, parser.last_token_end).into(),
+                });
+                match parser.peek_token() {
+                    Token::Comma => {
+                        parser.next_token();
+                    }
+                    Token::RBrace => {}
+                    other => panic!(),
+                }
+            }
+            other => panic!(),
+        }
+    }
+    Pattern::Constructor(PatternConstructor {
+        qualified_name: namespace,
+        fields: parser.bump.alloc_slice_copy(&constructor_fields),
+        fill_the_rest,
+        span: (initial_span.start, end).into(),
+    })
 }

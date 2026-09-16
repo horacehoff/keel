@@ -16,7 +16,6 @@ use crate::errors::bold;
 use crate::errors::green;
 use crate::errors::red;
 use crate::errors::throw_compiler_error;
-use crate::hformat;
 use ariadne::Label;
 use ariadne::Report;
 use const_format::formatcp;

@@ -167,7 +167,7 @@ pub struct PatternConstructorField<'arena> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PatternConstructor<'arena> {
-    pub name: QualifiedName<'arena>,
+    pub qualified_name: QualifiedName<'arena>,
     pub fields: &'arena [PatternConstructorField<'arena>],
     pub fill_the_rest: bool, // '..'
     pub span: Span,
@@ -178,7 +178,7 @@ pub enum Pattern<'arena> {
     // struct
     Constructor(PatternConstructor<'arena>),
     // binding
-    Var(QualifiedName<'arena>, Span),
+    Identifier(QualifiedName<'arena>, Span),
     // any literal
     Constant(&'arena Expr<'arena>, Span),
     Wildcard(Span),

@@ -2,6 +2,8 @@
 
 Welcome! Contributions and issues are *very* welcome.
 
+To see a list of what needs to be worked on, check out the [roadmap](ROADMAP.md).
+
 If you found a bug, please create an issue.
 
 If you have an idea for a new feature, design change, or anything that modifies the core logic, please first create an issue to discuss it.

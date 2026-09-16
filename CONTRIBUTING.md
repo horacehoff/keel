@@ -1,6 +1,6 @@
 # Contributing to Keel
 
-Welcome! Contributions and issues are really appreciated.
+Welcome! Contributions and issues are *very* welcome.
 
 If you found a bug, please create an issue.
 

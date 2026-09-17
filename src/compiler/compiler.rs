@@ -941,7 +941,7 @@ fn compile_add_op<'arena>(
                 None
             }
         }
-        && let Some(src_var) = state.find_var(src_name)
+        && let Some(src_var) = state.find_var(src_name.get_name())
     {
         let src_id = src_var.register_id;
         let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
@@ -987,7 +987,7 @@ fn compile_sub_op<'arena>(
     if t_l == DataType::Int
         && matches!(r, Expr::Int(1))
         && let Expr::Var(src_name, _) = l
-        && let Some(src_var) = state.find_var(src_name)
+        && let Some(src_var) = state.find_var(src_name.get_name())
     {
         let src_id = src_var.register_id;
         let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
@@ -1700,17 +1700,26 @@ fn compile_var_declaration<'arena>(
         value_type.clone()
     };
 
-    let var_id = if ctx.single_run {
-        value.compile(ctx, state, output, None, true, true).unwrap_id()
+    let is_var_read = matches!(value, Expr::Var(..)) && !matches!(value_type, DataType::Fn(_));
+
+    let src_id = value.compile(ctx, state, output, None, ctx.single_run, true).unwrap_id();
+    let var_id = if is_var_read
+        && match value {
+            Expr::Var(v, _) if state.find_var(v.get_name()).is_some() => {
+                code_modifies_variable(v.get_name(), remaining_code)
+                    || code_modifies_variable(name, remaining_code)
+            }
+            _ => true,
+        } {
+        let reg_id = state.alloc_reg();
+        output.push(Instr::Mov(src_id, reg_id));
+        reg_id
+    } else if !ctx.single_run && code_modifies_variable(name, remaining_code) {
+        let var_id = state.alloc_reg();
+        move_reg_to_reg(output, src_id, var_id, state.registers[src_id as usize]);
+        var_id
     } else {
-        let src_id = value.compile(ctx, state, output, None, false, true).unwrap_id();
-        if code_modifies_variable(name, remaining_code) {
-            let mutable_id = state.alloc_reg();
-            move_reg_to_reg(output, src_id, mutable_id, state.registers[src_id as usize]);
-            mutable_id
-        } else {
-            src_id
-        }
+        src_id
     };
 
     if let DataType::Fn(fn_id) = value_type
@@ -1833,8 +1842,7 @@ fn compile_var_assignment<'arena>(
 #[must_use]
 fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_, '_>) -> Option<u16> {
     let (namespace, name, span): (&[&str], &str, Span) = match e {
-        Expr::Var(n, s) => (&[], n, *s),
-        Expr::NamespacedVar(n, s) => (n.get_namespace(), n.get_name(), *s),
+        Expr::Var(n, s) => (n.get_namespace(), n.get_name(), *s),
         _ => return None,
     };
     if namespace.is_empty()
@@ -2049,13 +2057,17 @@ fn compile_match_block<'arena>(
         match arm.pattern {
             Pattern::Constant(cst, span) => {
                 if_code = state.bump.alloc_slice_copy(&[Expr::IfBlock(IfBlockExpr {
-                    condition: state
-                        .bump
-                        .alloc(Expr::Eq(state.bump.alloc(Expr::Var(MATCH_OBJ_VAR, span)), cst)),
+                    condition: state.bump.alloc(Expr::Eq(
+                        state.bump.alloc(Expr::Var(
+                            QualifiedName::new(&[MATCH_OBJ_VAR], state.bump),
+                            span,
+                        )),
+                        cst,
+                    )),
                     then: arm.code,
                     otherwise: if_code,
                     span,
-                })])
+                })]);
             }
             Pattern::Identifier(id, id_span) => todo!(),
             Pattern::Constructor(PatternConstructor {
@@ -2164,13 +2176,9 @@ impl<'arena> Expr<'arena> {
             }
             Self::Var(name, span) => {
                 debug_assert!(uses_id);
-                Some(compile_var_access(&[], name, *span, ctx, state, output))
-            }
-            Self::NamespacedVar(qualified_name, span) => {
-                debug_assert!(uses_id);
                 Some(compile_var_access(
-                    qualified_name.get_namespace(),
-                    qualified_name.get_name(),
+                    name.get_namespace(),
+                    name.get_name(),
                     *span,
                     ctx,
                     state,
@@ -2477,14 +2485,9 @@ impl<'arena> Expr<'arena> {
             }
             Self::VarAssign(name, value, span) => {
                 debug_assert!(!uses_id);
-                compile_var_assignment(&[], name, value, *span, ctx, state, output);
-                None
-            }
-            Self::NamespacedVarAssign(qualified_name, value, span) => {
-                debug_assert!(!uses_id);
                 compile_var_assignment(
-                    qualified_name.get_namespace(),
-                    qualified_name.get_name(),
+                    name.get_namespace(),
+                    name.get_name(),
                     value,
                     *span,
                     ctx,

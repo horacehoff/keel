@@ -294,7 +294,7 @@ pub fn builtin_methods<'arena>(
             // If the array was declared as empty, upgrade its type so downstream indexing resolves correctly
             if receiver_type == DataType::Array(None)
                 && let Expr::Var(var_name, _) = receiver
-                && let Some(var) = state.find_var_mut(var_name)
+                && let Some(var) = state.find_var_mut(var_name.get_name())
             {
                 var.var_type = DataType::Array(Some(Box::new(arg_type)));
             }

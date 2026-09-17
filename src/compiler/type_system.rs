@@ -730,7 +730,7 @@ fn track_return_flow<'arena>(
             }
             Expr::VarAssign(name, expr, _) => {
                 let var_type = expr.infer_type(ctx, state);
-                if let Some(var) = state.find_var_mut(name) {
+                if let Some(var) = state.find_var_mut(name.get_name()) {
                     var.var_type = var_type;
                 }
             }
@@ -768,11 +768,11 @@ fn track_return_flow<'arena>(
                     && state
                         .v
                         .iter()
-                        .rfind(|var| &var.name == var_name)
+                        .rfind(|var| var.name == var_name.get_name())
                         .is_some_and(|var| var.var_type == DataType::Array(None))
                 {
                     let arg_type = function_call.args[1].infer_type(ctx, state);
-                    if let Some(var) = state.find_var_mut(var_name) {
+                    if let Some(var) = state.find_var_mut(var_name.get_name()) {
                         var.var_type = DataType::Array(Some(Box::new(arg_type)));
                     }
                 }
@@ -836,19 +836,12 @@ impl<'arena> Expr<'arena> {
     pub fn infer_type(&'arena self, ctx: Ctx, state: &mut State<'arena, '_>) -> DataType {
         match self {
             Self::Var(name, span) => {
-                if let Some(var) = state.find_var(name) {
+                if let Some(var) = state.find_var(name.get_name()) {
                     var.var_type.clone()
                 } else {
-                    infer_symbol_type(&[], name, *span, ctx, state)
+                    infer_symbol_type(name.get_namespace(), name.get_name(), *span, ctx, state)
                 }
             }
-            Self::NamespacedVar(qualified_name, span) => infer_symbol_type(
-                qualified_name.get_namespace(),
-                qualified_name.get_name(),
-                *span,
-                ctx,
-                state,
-            ),
             Self::Float(_) => DataType::Float,
             Self::Int(_) => DataType::Int,
             Self::String(_) => DataType::String,

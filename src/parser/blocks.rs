@@ -240,7 +240,8 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
         cold_path();
         parser.error((start, end).into(), ParserErr::TryBlockNoCatch);
     }
-    let usr_var = Expr::Var(catch_all_var, (start, end).into());
+    let catch_all_var_name = QualifiedName::new(&[catch_all_var], parser.bump);
+    let usr_var = Expr::Var(catch_all_var_name, (start, end).into());
     let else_code = if let Some(c) = catch_all_code {
         c
     } else {
@@ -267,7 +268,7 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
     for (e, c) in catch_blocks {
         let condition = Expr::Eq(
             parser.bump.alloc(Expr::String(e)),
-            parser.bump.alloc(Expr::Var(catch_all_var, (start, end).into())),
+            parser.bump.alloc(Expr::Var(catch_all_var_name, (start, end).into())),
         );
         if first {
             first = false;
@@ -393,7 +394,7 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
         });
         if is_arm_wildcard {
             end = parser.peek_token_span().end;
-            parser.next_token_expect(Token::RBrace, "The wildcard must be the last arm in a match");
+            parser.next_token_expect(Token::RBrace, "");
             break;
         }
     }
@@ -448,7 +449,7 @@ fn parse_match_constructor<'arena>(
         end = token_span.end;
     }
     let namespace = QualifiedName::new(&namespace, parser.bump);
-    if parser.next_token().0 != Token::LBrace {
+    if parser.peek_token() != Token::LBrace {
         return Pattern::Identifier(namespace, (initial_span.start, end).into());
     }
     parser.next_token();

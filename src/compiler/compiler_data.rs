@@ -194,14 +194,17 @@ impl<'arena> State<'arena, '_> {
         }
     }
     #[must_use]
+    #[inline(always)]
     pub fn find_var(&self, var_name: &str) -> Option<&Variable<'_>> {
         self.v.iter().rfind(|variable| variable.name == var_name)
     }
     #[must_use]
+    #[inline(always)]
     pub fn find_var_mut(&mut self, var_name: &str) -> Option<&mut Variable<'arena>> {
         self.v.iter_mut().rfind(|variable| variable.name == var_name)
     }
     #[must_use]
+    #[inline(always)]
     pub fn find_var_idx(&self, var_name: &str) -> Option<usize> {
         self.v.iter().rposition(|variable| variable.name == var_name)
     }

@@ -125,6 +125,7 @@ pub struct StructFieldAssignmentExpr<'arena> {
 pub struct QualifiedName<'arena>(&'arena [&'arena str]);
 
 impl<'arena> QualifiedName<'arena> {
+    #[inline(always)]
     pub fn new(src: &[&'arena str], bump: &'arena Bump) -> Self {
         let allocated = bump.alloc_slice_copy(src);
         Self(allocated)
@@ -206,9 +207,7 @@ pub enum Expr<'arena> {
     Bool(bool),
     Null,
     String(&'arena str),
-    Var(&'arena str, Span),
-    NamespacedVar(QualifiedName<'arena>, Span),
-
+    Var(QualifiedName<'arena>, Span),
     /// Array(contents, [entire_array, elem_spans...])
     Array(&'arena [Self], &'arena [Span]),
     /// Map(key-value pairs, span)
@@ -223,8 +222,7 @@ pub enum Expr<'arena> {
     /// VarDeclare(name, value),
     VarDeclare(VariableDeclarationExpr<'arena>),
     /// VarDeclare(name, value, start, end)
-    VarAssign(&'arena str, &'arena Self, Span),
-    NamespacedVarAssign(QualifiedName<'arena>, &'arena Self, Span),
+    VarAssign(QualifiedName<'arena>, &'arena Self, Span),
     IfBlock(IfBlockExpr<'arena>),
     Match(MatchExpr<'arena>),
 
@@ -304,7 +302,7 @@ pub const fn symbol_of_expr(expr: &Expr) -> &'static str {
 
 pub fn code_modifies_variable(var_name: &str, code: &[Expr]) -> bool {
     code.iter().any(|expr| match expr {
-        Expr::VarAssign(n, _, _) => *n == var_name,
+        Expr::VarAssign(n, _, _) => n.get_name() == var_name,
         Expr::IfBlock(if_block) => {
             code_modifies_variable(var_name, if_block.then)
                 || code_modifies_variable(var_name, if_block.otherwise)
@@ -339,8 +337,6 @@ pub fn var_assign<'arena>(
             field_value: bump.alloc(value),
             spans: bump.alloc_slice_copy(&[struct_span, field_span, value_span]),
         })
-    } else if let Expr::NamespacedVar(n, s) = target {
-        Expr::NamespacedVarAssign(n, bump.alloc(value), s)
     } else {
         unsafe { unreachable_unchecked() }
     }

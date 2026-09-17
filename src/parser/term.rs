@@ -177,10 +177,13 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                             parse_struct(parser, namespace, start)
                         }
                         // NAMESPACED VARIABLE
-                        _ => Expr::NamespacedVar(namespace, (t_span.start, end).into()),
+                        _ => Expr::Var(namespace, (t_span.start, end).into()),
                     }
                 }
-                _ => Expr::Var(s, (t_span.start, t_span.end).into()),
+                _ => Expr::Var(
+                    QualifiedName::new(&[s], parser.bump),
+                    (t_span.start, t_span.end).into(),
+                ),
             }
         }
         Token::LBracket => {

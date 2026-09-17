@@ -116,7 +116,7 @@ pub fn handle_user_function<'arena>(
         && call_args
             .iter()
             .zip(state.functions[function_idx].args.iter())
-            .all(|(e, (p, _))| matches!(e, Expr::Var(n, _) if n == p))
+            .all(|(e, (p, _))| matches!(e, Expr::Var(n, _) if n.get_name() == *p))
         && let Some(fn_sig) = state
             .dylibs
             .iter()

@@ -25,6 +25,7 @@ use blocks::parse_struct_declare;
 use blocks::parse_try_catch_block;
 use blocks::parse_while_block;
 use bumpalo::Bump;
+use const_format::formatcp;
 use lexer::parse_string;
 use logos::SpannedIter;
 use parser_expr::add_op;
@@ -92,14 +93,14 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         ParserErr::ModuloByZero => "Modulo by zero",
         ParserErr::IntegerNegativeExponent => "Integers cannot be raised to a negative exponent",
         ParserErr::ArgumentsMissingCommaSeparator => "Arguments must be separated by a comma",
-        ParserErr::TryBlockNoCatch => {
+        ParserErr::TryBlockNoCatch => formatcp!(
             "A {BLUE}{BOLD}try{RESET} block must have at least one {BLUE}{BOLD}catch{RESET} block"
-        }
-        ParserErr::MatchBlockNoNonWildcardArm => {
+        ),
+        ParserErr::MatchBlockNoNonWildcardArm => formatcp!(
             "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one non-wildcard arm{RESET}"
-        }
+        ),
         ParserErr::MatchBlockZeroArms => {
-            "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}"
+            formatcp!("{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}")
         }
     };
     eprintln!("{RED}KEEL ERROR{RESET}");

@@ -26,7 +26,9 @@ use crate::parser::parse_type;
 pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'arena> {
     let t = parser.next_token();
     debug_assert_eq!(t.0, Token::If);
+    let condition_start = parser.peek_token_span().start;
     let condition = parse_expr_no_struct(parser);
+    let condition_end = parser.last_token_end;
     let output_code = parse_block(parser);
     let otherwise: Box<[Expr]> = if parser.peek_token_opt() == Some(Token::Else) {
         parser.next_token();
@@ -42,6 +44,7 @@ pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'
         condition: parser.bump.alloc(condition),
         then: parser.bump.alloc_slice_copy(&output_code),
         otherwise: parser.bump.alloc_slice_copy(&otherwise),
+        condition_span: (condition_start, condition_end).into(),
         span: (start, parser.last_token_end).into(),
     })
 }
@@ -284,6 +287,7 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
             condition: parser.bump.alloc(condition),
             then: parser.bump.alloc_slice_copy(&code),
             otherwise: parser.bump.alloc_slice_copy(&otherwise),
+            condition_span: (start, end).into(),
             span: (start, end).into(),
         })];
     }
@@ -294,6 +298,7 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
             condition: parser.bump.alloc(main_condition),
             then: parser.bump.alloc_slice_copy(&output_code),
             otherwise: parser.bump.alloc_slice_copy(&otherwise),
+            condition_span: (start, end).into(),
             span: (start, end).into(),
         })]),
     )

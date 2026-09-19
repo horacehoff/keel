@@ -3719,3 +3719,25 @@ pub fn static_inc_to_from_other_static() {
         Data::int(43)
     );
 }
+#[test]
+pub fn recursive_closure() {
+    run_and_check_registers!(
+        "
+        fn main() {
+            let fact = fn(n) { if n <= 1 { return 1; } return n * fact(n - 1); };
+            print(fact(5));
+        }",
+        Data::int(120)
+    );
+}
+#[test]
+pub fn recursive_closure_multiple_calls() {
+    run_and_check_registers!(
+        "
+        fn main() {
+            let fib = fn(n) {if n < 2 {return n;} return fib(n-1) + fib(n-2);};
+            print(fib(10));
+        }",
+        Data::int(55)
+    );
+}

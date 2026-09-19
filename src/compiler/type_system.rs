@@ -1200,7 +1200,13 @@ impl<'arena> Expr<'arena> {
                         }
                         obj.infer_type(ctx, state)
                     }
-                    _ => unsafe { unreachable_unchecked() },
+                    fn_name => error_unknown_function(
+                        fn_name,
+                        function_call.spans[0],
+                        &Scope::default(),
+                        ctx.file_idx,
+                        state.sources,
+                    ),
                 }
             }
             Self::IfBlock(if_block) => {

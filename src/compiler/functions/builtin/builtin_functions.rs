@@ -1,8 +1,6 @@
-use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::check_arg_type;
 use super::check_user_fn_arg_types;
-use super::user_functions::compile_function;
 use super::user_functions::handle_user_function;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
@@ -12,6 +10,8 @@ use crate::compiler::compiler_errors::check_args_range;
 use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::compiler::expr::FunctionCallExpr;
+use crate::compiler::functions::user_functions::compile_function_impl;
+use crate::compiler::registers::move_value_to;
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
@@ -183,34 +183,8 @@ pub fn builtin_functions<'arena>(
 
                 check_user_fn_arg_types(fn_id, fn_name, &inferred_arg_types, arg_spans, ctx, state);
 
-                let fn_impl_idx = state.functions[fn_id]
-                    .impls
-                    .iter()
-                    .position(|fn_impl| *fn_impl.arg_types == inferred_arg_types);
-
-                if fn_impl_idx.is_none() {
-                    // If it hasn't already been compiled for these argument types,
-                    // compile it (which adds it to the function's implementation list)
-                    let fn_args =
-                        state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
-                    // let fn_code: Rc<[Expr]> = Rc::clone(&state.functions[fn_id].code);
-                    let closure_name = state.functions[fn_id].name;
-                    compile_function(
-                        output,
-                        ctx,
-                        state,
-                        fn_id,
-                        &fn_args,
-                        closure_name,
-                        &inferred_arg_types,
-                        state.functions[fn_id].code,
-                        fn_id as u16,
-                        false,
-                        state.functions[fn_id].src_file_idx,
-                    );
-                }
                 let fn_impl_idx =
-                    fn_impl_idx.unwrap_or_else(|| state.functions[fn_id].impls.len() - 1);
+                    compile_function_impl(output, ctx, state, fn_id, &inferred_arg_types);
 
                 let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
                 state.registers[fn_reg as usize] = Data::function(loc);
@@ -220,13 +194,7 @@ pub fn builtin_functions<'arena>(
                     let start_len = output.len();
                     let arg_id =
                         arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
-                    if output.len() == start_len {
-                        if arg_id != tgt_id {
-                            output.push(Instr::Mov(arg_id, tgt_id));
-                        }
-                    } else {
-                        move_to_id(output, tgt_id);
-                    }
+                    move_value_to(output, start_len, arg_id, tgt_id);
                 }
 
                 let return_register_id = state.alloc_reg_tgt(tgt_id);

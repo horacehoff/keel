@@ -1,4 +1,7 @@
-use crate::cold_path;
+use crate::{
+    cold_path,
+    errors::{BLUE, RESET},
+};
 use bumpalo::Bump;
 use logos::Logos;
 use std::hint::unreachable_unchecked;
@@ -181,7 +184,7 @@ pub enum Token<'a> {
             Ok(2_147_483_648) => i32::MIN,
             _ => {
                 cold_path();
-                panic!("Invalid float");
+                panic!("{BLUE}{slice}{RESET} is not a valid float");
             }
         }
     })]

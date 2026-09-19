@@ -1,5 +1,4 @@
 use super::super::expr::Expr;
-use super::super::registers::move_to_id;
 use super::super::type_system::DataType;
 use super::super::type_system::c_arg_matches;
 use super::super::type_system::can_reach;
@@ -18,6 +17,7 @@ use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::Span;
 use crate::compiler::registers::get_tgt_ids;
+use crate::compiler::registers::move_value_to;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
@@ -47,12 +47,14 @@ pub fn compile_function_impl(
     fn_id: usize,
     inferred_arg_types: &[DataType],
 ) -> usize {
+    let get_fn_impl = |state: &State| {
+        state.functions[fn_id]
+            .impls
+            .iter()
+            .position(|fn_impl| fn_impl.arg_types.as_ref() == inferred_arg_types)
+    };
     // Try to check if function has already been compiled for these specific arg types
-    if let Some(idx) = state.functions[fn_id]
-        .impls
-        .iter()
-        .position(|fn_impl| fn_impl.arg_types.as_ref() == inferred_arg_types)
-    {
+    if let Some(idx) = get_fn_impl(state) {
         return idx;
     }
     // If it hasn't, compile a new specialization of this function
@@ -72,7 +74,7 @@ pub fn compile_function_impl(
         is_recursive,
         state.functions[fn_id].src_file_idx,
     );
-    state.functions[fn_id].impls.len() - 1
+    unsafe { get_fn_impl(state).unwrap_unchecked() }
 }
 
 pub fn handle_user_function<'arena>(
@@ -199,13 +201,7 @@ pub fn handle_user_function<'arena>(
 
         let start_len = output.len();
         let arg_id = arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
-        if output.len() == start_len {
-            if arg_id != tgt_id {
-                output.push(Instr::Mov(arg_id, tgt_id));
-            }
-        } else {
-            move_to_id(output, tgt_id);
-        }
+        move_value_to(output, start_len, arg_id, tgt_id);
     }
     if !is_recursive {
         state.fn_registers.get_mut(function_idx).unwrap().extend(

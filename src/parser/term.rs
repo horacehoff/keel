@@ -106,7 +106,9 @@ fn parse_type_conversion_fn<'arena>(
 
 // Call after IF is skipped
 fn parse_inline_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'arena> {
+    let condition_start = parser.peek_token_span().start;
     let condition = parse_expr_no_struct(parser);
+    let condition_end = parser.last_token_end;
     let then = [parse_block_expr(parser)];
     let mut otherwise: Vec<Expr> = Vec::with_capacity(2);
 
@@ -129,6 +131,7 @@ fn parse_inline_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Exp
         condition: parser.bump.alloc(condition),
         then: parser.bump.alloc_slice_copy(&then),
         otherwise: parser.bump.alloc_slice_copy(&otherwise),
+        condition_span: (condition_start, condition_end).into(),
         span: (start, parser.last_token_end).into(),
     })
 }

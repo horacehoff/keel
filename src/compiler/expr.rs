@@ -9,6 +9,7 @@ pub struct IfBlockExpr<'arena> {
     pub then: &'arena [Expr<'arena>],
     /// if .. {..} else { <OTHERWISE> }
     pub otherwise: &'arena [Expr<'arena>],
+    pub condition_span: Span,
     pub span: Span,
 }
 
@@ -146,7 +147,7 @@ impl<'arena> QualifiedName<'arena> {
     }
     #[inline(always)]
     pub const fn is_namespace_empty(&self) -> bool {
-        self.0.len() < 2
+        self.0.len() == 1
     }
 }
 

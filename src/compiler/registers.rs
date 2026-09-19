@@ -5,11 +5,28 @@ use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
 use std::hint::unreachable_unchecked;
 
+pub fn move_value_to(output: &mut Vec<Instr>, src_instr_idx: usize, value_idx: u16, tgt_idx: u16) {
+    if value_idx != tgt_idx {
+        let instrs = &mut output[src_instr_idx..];
+        if instrs.last().and_then(|instr| instr.get_tgt_id()) == Some(value_idx) {
+            move_to_id(instrs, tgt_idx);
+            if instrs.last().and_then(|instr| instr.get_tgt_id()) == Some(tgt_idx) {
+                return;
+            }
+        }
+        output.push(Instr::Mov(value_idx, tgt_idx));
+    }
+}
+
 pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()
         || matches!(
             x.last().unwrap(),
-            Instr::ObjElemMov(_, _, _) | Instr::IncInt(_) | Instr::DecInt(_)
+            Instr::ObjElemMov(_, _, _)
+                | Instr::IncInt(_)
+                | Instr::DecInt(_)
+                | Instr::SetElementString(_, _, _)
+                | Instr::StartErrorCatch(_, _)
         )
     {
         return;
@@ -67,7 +84,11 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::MapGet(_, _, y)
         | Instr::IncIntTo(_, y)
         | Instr::IsType(_, _, y)
-        | Instr::DecIntTo(_, y) => *y = tgt_id,
+        | Instr::DecIntTo(_, y)
+        | Instr::CallFuncDynamic(_, y)
+        | Instr::CloneArray(_, y, _)
+        | Instr::CloneStruct(_, y)
+        | Instr::CloneMap(_, y) => *y = tgt_id,
         Instr::CallFuncRecursive(_, y_func) => {
             *y_func = tgt_id;
             for i in 1..x.len() - 1 {

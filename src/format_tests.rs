@@ -131,9 +131,9 @@ macro_rules! hformat {
     // runtime/const hybrid
     ([$buffer:ident] [$($pending_static_elems: tt)*] [$($capacity_expr: tt)*] [$($add_to_str_statements: tt)*]) => {{
         #[allow(unused_imports)]
-        use crate::format_tests::PushStrUnchecked;
+        use $crate::format_tests::PushStrUnchecked;
         #[allow(unused_imports)]
-        use crate::format_tests::HybridFormat;
+        use $crate::format_tests::HybridFormat;
         let _temp_formatted: &str = const_format::concatcp!($($pending_static_elems)*);
         let mut $buffer = String::with_capacity($($capacity_expr)* + _temp_formatted.len());
         {

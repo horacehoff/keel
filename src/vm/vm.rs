@@ -337,6 +337,7 @@ pub fn execute(
     let mut args: Vec<u16> = Vec::with_capacity(allocated_arg_count);
     let mut call_frames: Vec<CallFrame> = Vec::with_capacity(allocated_call_depth);
     let mut recursion_stack = RegisterFile(Vec::with_capacity(allocated_call_depth * r.len()));
+    let dynamic_func_callsite = (fn_registers.len() - 1) as u16;
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     let stdout = std::io::stdout();
@@ -1013,7 +1014,7 @@ pub fn execute(
                 call_frames.push(CallFrame {
                     return_addr: i as u16,
                     return_reg: return_reg_id,
-                    callsite_id: 0,
+                    callsite_id: dynamic_func_callsite,
                 });
                 i = r[fn_reg_id].as_function();
                 continue;

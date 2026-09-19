@@ -32,7 +32,8 @@ use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::StructFieldAssignmentExpr;
 use crate::compiler::expr::StructFieldExpr;
 use crate::compiler::expr::VariableDeclarationExpr;
-use crate::compiler::functions::user_functions::compile_function;
+use crate::compiler::functions::user_functions::compile_function_impl;
+use crate::compiler::registers::move_value_to;
 use crate::compiler::type_system::var_type_is_compatible;
 use crate::data::FALSE;
 use crate::data::NULL;
@@ -66,7 +67,6 @@ use functions::compile_function_call;
 use indexmap::IndexMap;
 use methods::compile_method_call;
 use registers::move_reg_to_reg;
-use registers::move_to_id;
 use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
@@ -1346,7 +1346,7 @@ fn compile_if_block_branch<'arena>(
 }
 
 fn compile_if_block<'arena>(
-    IfBlockExpr { condition, then, otherwise, span: _ }: &'arena IfBlockExpr,
+    IfBlockExpr { condition, then, otherwise, condition_span, span: _ }: &'arena IfBlockExpr,
     previous_jumps: Vec<usize>,
     tgt_id: Option<u16>,
     ctx: Ctx,
@@ -1358,6 +1358,18 @@ fn compile_if_block<'arena>(
         set_jmp_size(&mut output[j], (condition_start - j) as u16);
     }
 
+    let condition_type = condition.infer_type(ctx, state);
+    if condition_type != DataType::Bool {
+        error_invalid_type(
+            &DataType::Bool,
+            &condition_type,
+            *condition_span,
+            None,
+            None,
+            ctx.file_idx,
+            state.sources,
+        )
+    }
     let (b, true_jump_idxs, false_jump_idxs) = compile_condition(condition, ctx, state, output);
     if let Some(const_bool) = b {
         if const_bool {
@@ -1705,7 +1717,7 @@ fn compile_var_declaration<'arena>(
     let src_id = value.compile(ctx, state, output, None, ctx.single_run, true).unwrap_id();
     let var_id = if is_var_read
         && match value {
-            Expr::Var(v, _) if state.find_var(v.get_name()).is_some() => {
+            Expr::Var(v, _) if v.is_namespace_empty() && state.find_var(v.get_name()).is_some() => {
                 code_modifies_variable(v.get_name(), remaining_code)
                     || code_modifies_variable(name, remaining_code)
             }
@@ -1822,12 +1834,10 @@ fn compile_var_assignment<'arena>(
 
     let output_len = output.len();
     let obj_id = value.compile(ctx, state, output, Some(reg_id), false, true).unwrap_id();
-    if output.len() != output_len {
-        move_to_id(output, reg_id);
-    } else if state.is_register_const(obj_id) {
+    if state.is_register_const(obj_id) {
         move_reg_to_reg(output, obj_id, reg_id, state.registers[obj_id as usize]);
-    } else if obj_id != reg_id {
-        output.push(Instr::Mov(obj_id, reg_id));
+    } else {
+        move_value_to(output, output_len, obj_id, reg_id);
     }
     if !state.v.iter().any(|var| var.name != name && var.register_id == obj_id) {
         state.free_reg(obj_id);
@@ -1892,28 +1902,8 @@ fn compile_var_access(
     let arg_types: Vec<DataType> =
         state.functions[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
 
-    let fn_impl_idx =
-        state.functions[fn_id].impls.iter().position(|imp| *imp.arg_types == *arg_types);
-
-    if fn_impl_idx.is_none() {
-        let fn_args = state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
-        // let fn_code = Rc::clone(&state.functions[fn_id].code);
-        compile_function(
-            output,
-            ctx,
-            state,
-            fn_id,
-            &fn_args,
-            name,
-            &arg_types,
-            state.functions[fn_id].code,
-            fn_id as u16,
-            false,
-            state.functions[fn_id].src_file_idx,
-        );
-    }
-
-    let loc = state.functions[fn_id].impls[unsafe { fn_impl_idx.unwrap_unchecked() }].loc;
+    let fn_impl_idx = compile_function_impl(output, ctx, state, fn_id, &arg_types);
+    let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
     state.new_reg(Data::function(loc))
 }
 
@@ -2066,6 +2056,7 @@ fn compile_match_block<'arena>(
                     )),
                     then: arm.code,
                     otherwise: if_code,
+                    condition_span: span,
                     span,
                 })]);
             }
@@ -3200,6 +3191,7 @@ pub fn compile<'arena>(
     instructions.reserve_exact(program_instructions.len() + 1);
     instructions.extend(program_instructions);
     instructions.push(Instr::Halt(0));
+    fn_registers.push(Vec::new());
 
     #[cfg(debug_assertions)]
     if debug {

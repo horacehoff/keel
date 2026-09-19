@@ -155,11 +155,8 @@ Commands:
 
 #[allow(clippy::missing_panics_doc)]
 pub fn main() {
-    #[cfg(not(debug_assertions))]
     std::panic::set_hook(Box::new(|info| {
-        eprintln!(
-            "[{RED}ERROR{RESET}] {info}. Please report this at github.com/horacehoff/keel/issues."
-        );
+        eprintln!("{RED}Error:{RESET} {}", info.payload_as_str().unwrap_or(&info.to_string()));
     }));
 
     let mut args = std::env::args().skip(1);

@@ -2,9 +2,7 @@ use super::super::expr::Expr;
 use super::super::type_system::DataType;
 use super::super::type_system::c_arg_matches;
 use super::super::type_system::can_reach;
-use super::super::type_system::track_returns;
 use super::check_user_fn_arg_types;
-use crate::compiler::Symbol;
 use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
 use crate::compiler::compiler_data::Ctx;
@@ -12,10 +10,8 @@ use crate::compiler::compiler_data::FunctionImpl;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args_user_fn;
-use crate::compiler::compiler_errors::error_function_already_defined;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::expr::FunctionCallExpr;
-use crate::compiler::expr::Span;
 use crate::compiler::registers::get_tgt_ids;
 use crate::compiler::registers::move_value_to;
 use crate::data::Data;
@@ -60,14 +56,12 @@ pub fn compile_function_impl(
     // If it hasn't, compile a new specialization of this function
     let is_recursive = is_function_recursive(fn_id, state);
     let fn_args = state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
-    let fn_name = &state.functions[fn_id].name;
     compile_function(
         output,
         ctx,
         state,
         fn_id,
         &fn_args,
-        fn_name,
         inferred_arg_types,
         state.functions[fn_id].code,
         fn_id as u16,
@@ -234,8 +228,7 @@ pub fn compile_function<'arena>(
     state: &mut State<'arena, '_>,
     function_id: usize,
     fn_args: &[&'arena str],
-    fn_name: &str,
-    infered_arg_types: &[DataType],
+    inferred_arg_types: &[DataType],
     fn_code: &'arena [Expr],
     fn_id: u16,
     is_recursive: bool,
@@ -250,8 +243,8 @@ pub fn compile_function<'arena>(
             Variable {
                 name: x,
                 register_id: state.new_reg(NULL),
-                declared_type: infered_arg_types[i].clone(),
-                var_type: infered_arg_types[i].clone(),
+                declared_type: inferred_arg_types[i].clone(),
+                var_type: inferred_arg_types[i].clone(),
             }
         })
         .collect();
@@ -270,50 +263,16 @@ pub fn compile_function<'arena>(
     // Record start location for the compiled func body
     let fn_start = output.len();
     let loc = fn_start as u16 + ctx.offset;
-
-    let v_len_before_args = state.v.len();
-    // let fn_len = state.namespace.symbols.len();
-    let mut anon_fns: Vec<&str> = Vec::new();
-    infered_arg_types.iter().enumerate().for_each(|(i, infered_type)| {
-        if let DataType::Fn(fn_id) = infered_type {
-            anon_fns.push(fn_args[i]);
-            if let Some(func) =
-                state.scope_mut(fn_file_idx).symbols.insert((fn_args[i], Symbol::Fn), *fn_id)
-            {
-                error_function_already_defined(
-                    &state.functions[func as usize],
-                    Span::empty(),
-                    ctx.file_idx,
-                    state.sources,
-                );
-            }
-            state.new_var(fn_args[i], 0, DataType::Fn(*fn_id));
-        } else {
-            // 0 => placeholder id, it's never used
-            state.new_var(fn_args[i], 0, infered_type.clone());
-        }
-    });
-    let fn_type = track_returns(fn_code, ctx.with_file_idx(fn_file_idx), state, fn_name);
-    let return_type = if fn_type.is_empty() {
-        // If function doesn't return anything, return nothing
-        DataType::Null
-    } else {
-        // If function returns anything, check if it returns the same thing each time
-        DataType::Union(Box::from(fn_type)).check_poly()
-    };
-
-    state.v.truncate(v_len_before_args);
-
     let args_loc = args_loc.into_bump_slice();
     // Add this func specialization to the func's metadata
-    let func = state.functions.get_mut(function_id).unwrap();
-    func.impls.push(FunctionImpl { loc, args_loc, arg_types: Box::from(infered_arg_types) });
-    // Cache the return type
-    if !func.return_type_cache.iter().any(|(args, _)| **args == *infered_arg_types) {
-        func.return_type_cache.push((Box::from(infered_arg_types), return_type));
-    }
+    state.functions[function_id].impls.push(FunctionImpl {
+        loc,
+        args_loc,
+        arg_types: Box::from(inferred_arg_types),
+    });
 
     std::mem::swap(state.v, &mut v_temp);
+    let hidden_symbols = state.enter_function_scope(fn_file_idx, function_id);
 
     // Compile the function into instructions using local vars
     let parsed = compile_expr(
@@ -328,10 +287,7 @@ pub fn compile_function<'arena>(
         state,
     );
     std::mem::swap(state.v, &mut v_temp);
-
-    for i in anon_fns.into_iter().rev() {
-        state.scope_mut(fn_file_idx).symbols.shift_remove(&(i, Symbol::Fn));
-    }
+    state.exit_function_scope(fn_file_idx, hidden_symbols);
 
     let all_written_regs = get_tgt_ids(&parsed, state.registers.len());
 

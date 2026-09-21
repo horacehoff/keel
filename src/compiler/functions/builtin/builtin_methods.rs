@@ -411,13 +411,45 @@ pub fn builtin_methods<'arena>(
             Some(output_id)
         }
         "remove" => {
-            check(&[DataType::Array(None)], 1, &receiver_type, function_call, ctx, state.sources);
-            check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::Int]);
-            let arg_id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
-            state.free_reg(arg_id);
-            output.push(Instr::Remove(receiver_id, arg_id));
-            state.add_to_src(ctx, output, span);
-            None
+            if matches!(receiver_type, DataType::Array(_)) {
+                check(
+                    &[DataType::Array(None)],
+                    1,
+                    &receiver_type,
+                    function_call,
+                    ctx,
+                    state.sources,
+                );
+                check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::Int]);
+                let arg_id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+                state.free_reg(arg_id);
+                output.push(Instr::Remove(receiver_id, arg_id));
+                state.add_to_src(ctx, output, span);
+                None
+            } else {
+                check(
+                    &[DataType::Map(Box::from((None, None)))],
+                    1,
+                    &receiver_type,
+                    function_call,
+                    ctx,
+                    state.sources,
+                );
+                if let DataType::Map(t) = receiver_type
+                    && let Some(key_type) = t.0
+                {
+                    check_arg_type(name, ctx, state, args, arg_spans, 0, &[key_type]);
+                }
+                let arg_id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+                state.free_reg(arg_id);
+                let output_id = state.alloc_reg_tgt(tgt_id);
+                output.push(Instr::MapRemove {
+                    map_reg_id: receiver_id,
+                    key_reg_id: arg_id,
+                    dest_reg_id: output_id,
+                });
+                Some(output_id)
+            }
         }
         "sort" => {
             check(&[DataType::Array(None)], 0, &receiver_type, function_call, ctx, state.sources);
@@ -440,6 +472,7 @@ pub fn builtin_methods<'arena>(
                 check_arg_type(name, ctx, state, args, arg_spans, 0, &[key_type]);
             }
             let arg_id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+            state.free_reg(arg_id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::MapGet(receiver_id, arg_id, output_id));
             state.add_to_src(ctx, output, arg_spans[0]);

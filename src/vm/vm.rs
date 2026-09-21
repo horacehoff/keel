@@ -1010,6 +1010,10 @@ pub fn execute(
                 unsafe { (*ptr.add(new_id as usize)).clone_from(&*ptr.add(r[src_reg].as_map())) };
                 r[dest_reg] = Data::map(new_id);
             }
+            Instr::MapRemove { map_reg_id, key_reg_id, dest_reg_id } => {
+                r[dest_reg_id] =
+                    Data::bool(map_pool[r[map_reg_id].as_map()].remove(&r[key_reg_id]).is_some());
+            }
             Instr::CallFuncDynamic(fn_reg_id, return_reg_id) => {
                 call_frames.push(CallFrame {
                     return_addr: i as u16,

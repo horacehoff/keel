@@ -1735,14 +1735,9 @@ fn compile_var_declaration<'arena>(
     };
 
     if let DataType::Fn(fn_id) = value_type
-        && let Some(func) = state.scope_mut(ctx.file_idx).symbols.insert((name, Symbol::Fn), fn_id)
+        && matches!(value, Expr::AnonymousFunction(..))
     {
-        compiler_errors::error_function_already_defined(
-            &state.functions[func as usize],
-            Span::empty(),
-            ctx.file_idx,
-            state.sources,
-        );
+        state.functions[fn_id as usize].name = var_declaration.name;
     }
     state.unfree_register(var_id);
     state.new_var_with_type(name, var_id, value_type, declared_type);
@@ -2553,6 +2548,8 @@ pub enum Symbol {
 pub struct Scope<'arena> {
     pub symbols: IndexMap<(&'arena str, Symbol), u16, FxBuildHasher>,
     pub children: Vec<(&'arena str, Self)>,
+    /// Number of top-level symbols
+    pub toplevel_count: usize,
 }
 
 impl Scope<'_> {
@@ -2834,7 +2831,7 @@ fn parse_toplevel<'a>(
 
                 // Parse the imported file's contents
 
-                let mut child_scope = Scope { symbols: IndexMap::default(), children: Vec::new() };
+                let mut child_scope = Scope::default();
 
                 let file_path_cloned = file_path.clone();
                 parse_toplevel(
@@ -2883,6 +2880,7 @@ fn parse_toplevel<'a>(
     if file_scopes.len() <= src_file_idx as usize {
         file_scopes.resize_with(src_file_idx as usize + 1, Scope::default);
     }
+    scope.toplevel_count = scope.symbols.len();
     file_scopes[src_file_idx as usize] = scope.clone();
 }
 

@@ -2,6 +2,7 @@ use super::expr::Expr;
 use super::expr::Span;
 use super::type_system::DataType;
 use crate::compiler::Scope;
+use crate::compiler::Symbol;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::type_system::VmType;
 use crate::data::Data;
@@ -183,6 +184,33 @@ impl<'arena> State<'arena, '_> {
     #[inline(always)]
     pub fn scope_mut(&mut self, file_idx: u16) -> &mut Scope<'arena> {
         unsafe { self.file_scopes.get_unchecked_mut(file_idx as usize) }
+    }
+    /// Hides the functions declared by the code currently being compiled
+    pub fn enter_function_scope(
+        &mut self,
+        file_idx: u16,
+        fn_id: usize,
+    ) -> Vec<((&'arena str, Symbol), u16)> {
+        let fn_name = self.functions[fn_id].name;
+        let scope = self.scope_mut(file_idx);
+        let hidden_symbols: Vec<((&str, Symbol), u16)> =
+            scope.symbols.drain(scope.toplevel_count..).collect();
+        // Only function names are hidden (avoids a nasty anonymous function name conflict)
+        scope.symbols.extend(
+            hidden_symbols.iter().filter(|((_, kind), _)| *kind == Symbol::Struct).copied(),
+        );
+        scope.symbols.insert((fn_name, Symbol::Fn), fn_id as u16);
+        hidden_symbols
+    }
+    /// Restores all the symbols (used after `enter_function_scope`).
+    pub fn exit_function_scope(
+        &mut self,
+        file_idx: u16,
+        hidden_symbols: Vec<((&'arena str, Symbol), u16)>,
+    ) {
+        let scope = self.scope_mut(file_idx);
+        scope.symbols.truncate(scope.toplevel_count);
+        scope.symbols.extend(hidden_symbols);
     }
     #[must_use]
     pub fn compile_type(&mut self, t: DataType) -> u16 {

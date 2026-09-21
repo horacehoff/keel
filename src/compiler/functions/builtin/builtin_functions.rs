@@ -1,6 +1,5 @@
 use super::super::type_system::DataType;
 use super::check_arg_type;
-use super::check_user_fn_arg_types;
 use super::user_functions::handle_user_function;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_data::Ctx;
@@ -10,8 +9,6 @@ use crate::compiler::compiler_errors::check_args_range;
 use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::compiler::expr::FunctionCallExpr;
-use crate::compiler::functions::user_functions::compile_function_impl;
-use crate::compiler::registers::move_value_to;
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
@@ -171,35 +168,10 @@ pub fn builtin_functions<'arena>(
         }
         fn_name => {
             if let Some(var) = state.find_var(fn_name) {
-                let fn_reg = var.register_id;
-                let fn_id = if let DataType::Fn(id) = var.var_type {
-                    id as usize
-                } else {
+                let DataType::Fn(fn_id) = var.var_type else {
                     error_expected_function(&var.var_type, span, ctx.file_idx, state.sources)
                 };
-
-                let inferred_arg_types =
-                    args.iter().map(|arg| arg.infer_type(ctx, state)).collect::<Vec<DataType>>();
-
-                check_user_fn_arg_types(fn_id, fn_name, &inferred_arg_types, arg_spans, ctx, state);
-
-                let fn_impl_idx =
-                    compile_function_impl(output, ctx, state, fn_id, &inferred_arg_types);
-
-                let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
-                state.registers[fn_reg as usize] = Data::function(loc);
-
-                for (i, arg_expr) in args.iter().enumerate() {
-                    let tgt_id = state.functions[fn_id].impls[fn_impl_idx].args_loc[i];
-                    let start_len = output.len();
-                    let arg_id =
-                        arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
-                    move_value_to(output, start_len, arg_id, tgt_id);
-                }
-
-                let return_register_id = state.alloc_reg_tgt(tgt_id);
-                output.push(Instr::CallFuncDynamic(fn_reg, return_register_id));
-                Some(return_register_id)
+                handle_user_function(function_call, fn_id as usize, output, ctx, state, tgt_id)
             } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
                 &[],
                 fn_name,

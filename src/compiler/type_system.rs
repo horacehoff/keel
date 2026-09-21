@@ -478,8 +478,13 @@ pub fn can_reach(
 ) -> bool {
     let function = &fns[src_fn_idx];
     for callee in function.direct_calls {
-        if let Some(callee_fn_idx) = file_scopes[function.src_file_idx as usize]
-            .find_function_fallible(callee.get_namespace(), callee.get_name())
+        if let Some(callee_fn_idx) =
+            if callee.is_namespace_empty() && callee.get_name() == function.name {
+                Some(src_fn_idx)
+            } else {
+                file_scopes[function.src_file_idx as usize]
+                    .find_function_fallible(callee.get_namespace(), callee.get_name())
+            }
             && ((callee_fn_idx == target_fn_idx)
                 || (visited.insert(callee_fn_idx)
                     && can_reach(callee_fn_idx, target_fn_idx, fns, visited, file_scopes)))
@@ -594,7 +599,9 @@ pub fn resolve_function_return_type(
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().insert(fn_id));
 
     let fn_ctx = ctx.with_file_idx(fn_src_file);
+    let hidden_symbols = state.enter_function_scope(fn_src_file, fn_id);
     let fn_type = track_returns(fn_code, fn_ctx, state, fn_name);
+    state.exit_function_scope(fn_src_file, hidden_symbols);
 
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(&fn_id));
 
@@ -1116,6 +1123,9 @@ impl<'arena> Expr<'arena> {
                     "starts_with" | "ends_with" | "contains" | "is_float" | "is_int" => {
                         DataType::Bool
                     }
+                    "remove" if matches!(obj.infer_type(ctx, state), DataType::Map(_)) => {
+                        DataType::Bool
+                    }
                     "len" | "find" => DataType::Int,
                     "repeat" | "reverse" => {
                         let obj_type = obj.infer_type(ctx, state);
@@ -1239,8 +1249,7 @@ impl<'arena> Expr<'arena> {
                 )
             }
             Self::AnonymousFunction(args, code, span) => {
-                let fn_name =
-                    bumpalo::format!(in state.bump,"{}{}{}", ctx.file_idx, span.start, span.end);
+                let fn_name = bumpalo::format!(in state.bump,"anonymous@f{}s{}e{}", ctx.file_idx, span.start, span.end);
                 let returns_null = check_if_returns_void(code);
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(code, &mut callees);

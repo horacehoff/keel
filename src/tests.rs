@@ -3534,6 +3534,19 @@ pub fn map_get_key() {
 }
 
 #[test]
+pub fn map_remove_key() {
+    run_and_check_registers!(
+        "
+        fn main() {
+            let m = {0: 42, 1: 67};
+            print(m.remove(0));
+        }
+        ",
+        Data::bool(true)
+    );
+}
+
+#[test]
 pub fn map_insert_new_pair() {
     run_and_check_registers!(
         "
@@ -3739,5 +3752,35 @@ pub fn recursive_closure_multiple_calls() {
             print(fib(10));
         }",
         Data::int(55)
+    );
+}
+#[test]
+pub fn anon_fn_two_arg_types() {
+    run_and_check_registers!(
+        "
+        fn apply(f, x) {return f(x);}
+        fn main() {
+            let f = fn(x) {return x;};
+            let a = apply(f,1);
+            let b = apply(f,2);
+            print(b);
+        }
+        ",
+        Data::int(2)
+    );
+}
+#[test]
+pub fn anon_fn_compiled_in_one_body() {
+    run_and_check_registers!(
+        "
+        fn apply(f, x) {return f(x);}
+        fn main() {
+            let f = fn(x) {return x;};
+            let a = apply(f,1);
+            let b = apply(f,2);
+            print(b);
+        }
+        ",
+        Data::int(2)
     );
 }

@@ -230,6 +230,8 @@ print(my_array); // Prints "[1,2,3]"
 
 `<T[]>.remove(n: int)`<br/>
 Removes the n-th element from an array.
+`<{K: V}>.remove(k: K) -> bool`<br/>
+Removes the value associated with key K in the map. Returns true if the key-value pair was removed, false if it was not found.
 
 ```
 let my_array = [1,2];

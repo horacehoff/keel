@@ -176,6 +176,11 @@ pub enum Instr {
     MapInsert(u16, u16, u16),
     /// MapSet(map_reg_id, key_reg_id, val_reg_id)
     MapInsertReg(u16, u16, u16),
+    MapRemove {
+        map_reg_id: u16,
+        key_reg_id: u16,
+        dest_reg_id: u16,
+    },
     CloneMap(u16, u16),
 
     /// IsType(src_reg_id, type_idx, dest_reg_id)

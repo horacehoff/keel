@@ -72,7 +72,6 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use std::cell::LazyCell;
 use std::collections::HashMap;
-use std::hash::BuildHasherDefault;
 use std::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -570,10 +569,7 @@ fn compile_map_literal<'arena>(
     let mut global_key_type: DataType = DataType::Unknown;
     let mut global_val_type: DataType = DataType::Unknown;
     let map_id = state.pools.map_pool.len();
-    state
-        .pools
-        .map_pool
-        .push(HashMap::with_capacity_and_hasher(kv_pairs.len(), BuildHasherDefault::default()));
+    state.pools.map_pool.push(HashMap::with_capacity_and_hasher(kv_pairs.len(), FxBuildHasher));
     if ctx.single_run {
         for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
             if let Some((_, repeat_key_span, _, _)) =

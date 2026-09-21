@@ -5,7 +5,6 @@ use crate::compiler::compiler_data::Struct;
 use crate::compiler::type_system::DataType;
 use crate::compiler::type_system::VmType;
 use crate::data::Data;
-use crate::data::DataHash;
 use crate::data::FALSE;
 use crate::data::NULL;
 use crate::data::TRUE;
@@ -19,8 +18,8 @@ use crate::instr::LibFuncVoid;
 use gc::Gc;
 use lexical_core::FormattedSize;
 use memchr::memmem;
+use rustc_hash::FxBuildHasher;
 use std::collections::HashMap;
-use std::hash::BuildHasherDefault;
 use std::hint::cold_path;
 use std::io::Write;
 use std::ops::Index;
@@ -36,7 +35,7 @@ mod ffi;
 pub mod gc;
 
 pub type ObjectPool = Pool<Vec<Data>>;
-pub type MapPool = Pool<HashMap<Data, Data, BuildHasherDefault<DataHash>>>;
+pub type MapPool = Pool<HashMap<Data, Data, FxBuildHasher>>;
 pub type StringPool = Pool<String>;
 
 fn obj_eq(
@@ -51,7 +50,7 @@ fn obj_eq(
     } else if x.tag() != y.tag() {
         false
     } else if x.is_string() {
-        x.as_str(string_pool) == y.as_str(string_pool)
+        x.string_eq(y, string_pool)
     } else if x.is_array() || x.is_struct() {
         let x_obj = &obj_pool[x.as_array()];
         let y_obj = &obj_pool[y.as_array()];
@@ -120,6 +119,7 @@ fn data_matches_datatype(d: Data, t: &DataType, obj_pool: &ObjectPool, map_pool:
     }
 }
 
+#[repr(align(8))]
 struct CallFrame {
     return_addr: u16,
     return_reg: u16,
@@ -742,7 +742,7 @@ pub fn execute(
                 }
             }
             Instr::StrNotEqJmp(o1, o2, jump_size) => {
-                if r[o1].as_str(str_pool) != r[o2].as_str(str_pool) {
+                if !r[o1].string_eq(r[o2], str_pool) {
                     i += jump_size as usize;
                     continue;
                 }
@@ -754,10 +754,10 @@ pub fn execute(
                 r[dest] = (!obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool)).into();
             }
             Instr::StrEq(o1, o2, dest) => {
-                r[dest] = (r[o1].as_str(str_pool) == r[o2].as_str(str_pool)).into();
+                r[dest] = Data::bool(r[o1].string_eq(r[o2], str_pool));
             }
             Instr::StrNotEq(o1, o2, dest) => {
-                r[dest] = (r[o1].as_str(str_pool) != r[o2].as_str(str_pool)).into();
+                r[dest] = Data::bool(!r[o1].string_eq(r[o2], str_pool));
             }
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r[o1] == r[o2] {
@@ -772,7 +772,7 @@ pub fn execute(
                 }
             }
             Instr::StrEqJmp(o1, o2, jump_size) => {
-                if r[o1].as_str(str_pool) == r[o2].as_str(str_pool) {
+                if r[o1].string_eq(r[o2], str_pool) {
                     i += jump_size as usize;
                     continue;
                 }

@@ -3,7 +3,6 @@ use crate::vm::ObjectPool;
 use crate::vm::gc::Gc;
 use crate::vm::{MapPool, RegisterFile, StringPool};
 use lexical_core::FormattedSize;
-use std::hash::Hasher;
 
 const NAN_BASE: u64 =
     0b1111_1111_1111_1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
@@ -41,21 +40,6 @@ pub const TRUE: Data = Data(NAN_BOOL | 1);
 /// If they're longer, they're stored in `string_pool`.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Data(pub u64);
-
-#[derive(Default, Clone, Copy)]
-pub struct DataHash(u64);
-
-impl Hasher for DataHash {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, _bytes: &[u8]) {
-        unsafe { std::hint::unreachable_unchecked() }
-    }
-    fn write_u64(&mut self, i: u64) {
-        self.0 = i;
-    }
-}
 
 pub trait PoolString {
     fn pool_as_str(&self) -> &str;
@@ -134,7 +118,7 @@ impl Data {
     }
     #[inline(always)]
     pub const fn is_float(self) -> bool {
-        (self.0 & NAN_BASE) != NAN_BASE
+        self.0 < NAN_BOOL
     }
     #[inline(always)]
     /// Convert the given integer to a NaN-boxed integer.
@@ -249,6 +233,13 @@ impl Data {
         } else {
             unsafe { &*std::ptr::from_ref::<str>(str_pool[payload as usize].as_str()) }
         }
+    }
+    #[inline(always)]
+    pub fn string_eq(self, candidate: Self, str_pool: &StringPool) -> bool {
+        self.0 == candidate.0
+            || (self.is_large_str()
+                && candidate.is_large_str()
+                && str_pool[self.get_str_pool_id()] == str_pool[candidate.get_str_pool_id()])
     }
     #[inline(always)]
     pub const fn is_string(self) -> bool {

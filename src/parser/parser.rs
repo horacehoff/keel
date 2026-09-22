@@ -112,28 +112,8 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         )
         .finish();
 
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report.eprint((src.filename, ariadne::Source::from(src.contents))).unwrap();
-
-    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    report
-        .write(
-            (src.filename, ariadne::Source::from(src.contents)),
-            crate::captured_output::CapturedOutputWriter,
-        )
-        .unwrap();
-
-    #[cfg(debug_assertions)]
-    panic!();
-
-    #[cfg(not(any(debug_assertions, target_arch = "wasm32", feature = "embed")))]
-    std::process::exit(1);
-
-    #[cfg(target_arch = "wasm32")]
-    wasm_bindgen::throw_str("keel_error");
-
-    #[cfg(all(feature = "embed", not(debug_assertions)))]
-    panic!();
+    crate::errors::print_error_report(report, std::slice::from_ref(src));
+    crash()
 }
 
 impl<'a> Parser<'a> {
@@ -237,21 +217,7 @@ impl<'a> Parser<'a> {
         &self,
         report: F,
     ) -> ! {
-        let report = report();
-
-        #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-        report
-            .eprint((self.ctx.src.filename, ariadne::Source::from(self.ctx.src.contents)))
-            .unwrap();
-
-        #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-        report
-            .write(
-                (self.ctx.src.filename, ariadne::Source::from(self.ctx.src.contents)),
-                crate::captured_output::CapturedOutputWriter,
-            )
-            .unwrap();
-
+        crate::errors::print_error_report(report(), std::slice::from_ref(&self.ctx.src));
         crash();
     }
 }

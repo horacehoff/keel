@@ -297,7 +297,6 @@ fn error_with_catch(
     call_frames: &mut Vec<CallFrame>,
     error_handles: &mut Vec<ErrorCatch>,
     err_ctx: &ErrorCtx,
-    instructions: &[Instr],
     i: usize,
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))] handle: &mut std::io::BufWriter<
         StdoutLock,
@@ -306,7 +305,7 @@ fn error_with_catch(
     handle: &mut crate::captured_output::CapturedOutputWriter,
 ) -> usize {
     if error_handles.is_empty() {
-        throw_error(err_ctx, unsafe { *instructions.get_unchecked(i) }, err, handle);
+        throw_error(err_ctx, i, err, handle);
     } else {
         let err_handle = error_handles.pop_unchecked();
         unsafe {
@@ -387,7 +386,6 @@ pub fn execute(
                 &mut call_frames,
                 &mut error_handles,
                 err_ctx,
-                instructions,
                 i,
                 &mut handle,
             );
@@ -407,7 +405,6 @@ pub fn execute(
                 &mut call_frames,
                 &mut error_handles,
                 err_ctx,
-                instructions,
                 i,
                 &mut handle
             );

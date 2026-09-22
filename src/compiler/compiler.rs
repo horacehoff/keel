@@ -570,121 +570,72 @@ fn compile_map_literal<'arena>(
     let mut global_val_type: DataType = DataType::Unknown;
     let map_id = state.pools.map_pool.len();
     state.pools.map_pool.push(HashMap::with_capacity_and_hasher(kv_pairs.len(), FxBuildHasher));
-    if ctx.single_run {
-        for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
-            if let Some((_, repeat_key_span, _, _)) =
-                kv_pairs.iter().skip(i + 1).find(|(k, _, _, _)| k == key)
-            {
-                error_duplicate_map_key(
-                    *key_span,
-                    *repeat_key_span,
-                    map_span,
+    let mut keys: Vec<(Data, Span)> = Vec::with_capacity(kv_pairs.len());
+    let mut dynamic: Vec<(Data, u16)> =
+        Vec::with_capacity(if ctx.single_run { 0 } else { kv_pairs.len() });
+    for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
+        let key_t = key.infer_type(ctx, state);
+        let val_t = val.infer_type(ctx, state);
+        if i == 0 {
+            global_key_type = key_t;
+            global_val_type = val_t;
+        } else {
+            if key_t != global_key_type {
+                error_map_diff_types(
                     ctx.file_idx,
                     state.sources,
-                );
+                    map_span,
+                    &global_key_type,
+                    *key_span,
+                    &key_t,
+                )
             }
-            let key_t = key.infer_type(ctx, state);
-            let val_t = val.infer_type(ctx, state);
-            if i == 0 {
-                global_key_type = key_t;
-                global_val_type = val_t;
-            } else {
-                if key_t != global_key_type {
-                    error_map_diff_types(
-                        ctx.file_idx,
-                        state.sources,
-                        map_span,
-                        &global_key_type,
-                        *key_span,
-                        &key_t,
-                    )
-                }
-                if val_t != global_val_type {
-                    error_map_diff_types(
-                        ctx.file_idx,
-                        state.sources,
-                        map_span,
-                        &global_val_type,
-                        *val_span,
-                        &val_t,
-                    )
-                }
-            }
-            let output_len = output.len();
-            let key_val_id = key.compile(ctx, state, output, None, false, true).unwrap_id();
-            if !(key.is_constant_literal()
-                || matches!(key, Expr::Array(_, _)) && output_len == output.len())
-            {
-                error_not_literal_map_key(*key_span, map_span, ctx.file_idx, state.sources);
-            }
-            let key_val = state.registers[key_val_id as usize];
-            let id = val.compile(ctx, state, output, None, false, true).unwrap_id();
-            if val.is_constant_literal() {
-                state.pools.map_pool[map_id].insert(key_val, state.registers[id as usize]);
-            } else {
-                state.pools.map_pool[map_id].insert(key_val, NULL);
-                output.push(Instr::MapInsert(map_id as u16, state.new_reg(key_val), id));
+            if val_t != global_val_type {
+                error_map_diff_types(
+                    ctx.file_idx,
+                    state.sources,
+                    map_span,
+                    &global_val_type,
+                    *val_span,
+                    &val_t,
+                )
             }
         }
-        state.new_reg(Data::map(map_id as u32))
-    } else {
-        let mut dynamic: Vec<(Data, u16)> = Vec::with_capacity(kv_pairs.len());
-        for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
-            if let Some((_, repeat_key_span, _, _)) =
-                kv_pairs.iter().skip(i + 1).find(|(k, _, _, _)| k == key)
-            {
-                error_duplicate_map_key(
-                    *key_span,
-                    *repeat_key_span,
-                    map_span,
-                    ctx.file_idx,
-                    state.sources,
-                );
-            }
-            let key_t = key.infer_type(ctx, state);
-            let val_t = val.infer_type(ctx, state);
-            if i == 0 {
-                global_key_type = key_t;
-                global_val_type = val_t;
+        let output_len = output.len();
+        let key_val_id = key.compile(ctx, state, output, None, false, true).unwrap_id();
+        if !(key.is_constant_literal()
+            || matches!(key, Expr::Array(_, _)) && output_len == output.len())
+        {
+            error_not_literal_map_key(*key_span, map_span, ctx.file_idx, state.sources);
+        }
+        let key_val = state.registers[key_val_id as usize];
+
+        if let Some((_, repeat_key_span)) = keys.iter().find(|(k, _)| *k == key_val) {
+            error_duplicate_map_key(
+                *repeat_key_span,
+                *key_span,
+                map_span,
+                ctx.file_idx,
+                state.sources,
+            );
+        }
+        keys.push((key_val, *key_span));
+
+        let val_id = val.compile(ctx, state, output, None, false, true).unwrap_id();
+        if val.is_constant_literal() {
+            state.pools.map_pool[map_id].insert(key_val, state.registers[val_id as usize]);
+        } else {
+            state.pools.map_pool[map_id].insert(key_val, NULL);
+            if ctx.single_run {
+                output.push(Instr::MapInsert(map_id as u16, state.new_reg(key_val), val_id));
             } else {
-                if key_t != global_key_type {
-                    error_map_diff_types(
-                        ctx.file_idx,
-                        state.sources,
-                        map_span,
-                        &global_key_type,
-                        *key_span,
-                        &key_t,
-                    )
-                }
-                if val_t != global_val_type {
-                    error_map_diff_types(
-                        ctx.file_idx,
-                        state.sources,
-                        map_span,
-                        &global_val_type,
-                        *val_span,
-                        &val_t,
-                    )
-                }
-            }
-            let output_len = output.len();
-            let key_val_id = key.compile(ctx, state, output, None, false, true).unwrap_id();
-            if !(key.is_constant_literal()
-                || matches!(key, Expr::Array(_, _)) && output_len == output.len())
-            {
-                error_not_literal_map_key(*key_span, map_span, ctx.file_idx, state.sources);
-            }
-            let key_val = state.registers[key_val_id as usize];
-            let val_id = val.compile(ctx, state, output, None, false, true).unwrap_id();
-            if val.is_constant_literal() {
-                state.pools.map_pool[map_id].insert(key_val, state.registers[val_id as usize]);
-            } else {
-                state.pools.map_pool[map_id].insert(key_val, NULL);
                 dynamic.push((key_val, val_id));
             }
         }
-
+    }
+    if ctx.single_run {
+        state.new_reg(Data::map(map_id as u32))
+    } else {
         let template_reg = state.new_reg(Data::map(map_id as u32));
 
         let dest_reg = state.new_reg(Data::map(0));
@@ -2019,7 +1970,7 @@ fn compile_eval_block<'arena>(
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
-    output.extend(compile_expr(code, ctx.with_offset(output.len() as u16), state));
+    output.extend(compile_expr(code, ctx.advance_offset(output.len() as u16), state));
 }
 
 fn compile_match_block<'arena>(

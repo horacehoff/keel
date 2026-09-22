@@ -8,28 +8,79 @@ use std::hint::unreachable_unchecked;
 
 impl std::fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Token::Identifier(_) => write!(f, "an identifier"),
-            Token::Int(_) => write!(f, "an integer"),
-            Token::Float(_) => write!(f, "a float"),
-            Token::String(_) => write!(f, "a string"),
-            Token::LBrace => write!(f, "'{{'"),
-            Token::RBrace => write!(f, "'}}'"),
-            Token::LParen => write!(f, "'('"),
-            Token::RParen => write!(f, "')'"),
-            Token::LBracket => write!(f, "'['"),
-            Token::RBracket => write!(f, "']'"),
-            Token::FatArrow => write!(f, "'=>'"),
-            Token::TypeInt => write!(f, "'int'"),
-            Token::TypeFloat => write!(f, "'float'"),
-            Token::TypeBool => write!(f, "'bool'"),
-            Token::TypeString => write!(f, "'string'"),
-            other => write!(f, "{other:?}"),
-        }
+        f.write_str(match self {
+            Token::Identifier(_) => "an identifier",
+            Token::Int(_) => "an integer",
+            Token::Float(_) => "a float",
+            Token::String(_) => "a string",
+            Token::LBrace => "'{'",
+            Token::RBrace => "'}'",
+            Token::LParen => "'('",
+            Token::RParen => "')'",
+            Token::LBracket => "'['",
+            Token::RBracket => "']'",
+            Token::FatArrow => "'=>'",
+            Token::Arrow => "'->'",
+            Token::TypeInt => "'int'",
+            Token::TypeFloat => "'float'",
+            Token::TypeBool => "'bool'",
+            Token::TypeString => "'string'",
+            Token::AssignOpAdd => "'+='",
+            Token::AssignOpSub => "'-='",
+            Token::AssignOpMul => "'*='",
+            Token::AssignOpPow => "'^='",
+            Token::AssignOpMod => "'%='",
+            Token::AssignOpDiv => "'/='",
+            Token::OpOr => "'||'",
+            Token::Pipe => "'|'",
+            Token::OpAnd => "'&&'",
+            Token::OpEq => "'=='",
+            Token::OpNEq => "'!='",
+            Token::Equals => "'='",
+            Token::OpInfEq => "'<='",
+            Token::OpInf => "'<'",
+            Token::OpSupEq => "'>='",
+            Token::OpNot => "'!'",
+            Token::OpSup => "'>'",
+            Token::OpAdd => "'+'",
+            Token::OpDiv => "'/'",
+            Token::OpSub => "'-'",
+            Token::OpMul => "'*'",
+            Token::OpPow => "'^'",
+            Token::OpMod => "'%'",
+            Token::Null => "'null'",
+            Token::True => "'true'",
+            Token::False => "'false'",
+            Token::Dylib => "'dylib'",
+            Token::Loop => "'loop'",
+            Token::Let => "'let'",
+            Token::Match => "'match'",
+            Token::While => "'while'",
+            Token::Static => "'static'",
+            Token::Import => "'import'",
+            Token::If => "'if'",
+            Token::Catch => "'catch'",
+            Token::Struct => "'struct'",
+            Token::Return => "'return'",
+            Token::Break => "'break'",
+            Token::Continue => "'continue'",
+            Token::As => "'as'",
+            Token::Else => "'else'",
+            Token::Function => "'fn'",
+            Token::For => "'for'",
+            Token::In => "'in'",
+            Token::Try => "'try'",
+            Token::Comma => "','",
+            Token::RangeDot => "'..'",
+            Token::Dot => "'.'",
+            Token::DoubleColon => "'::'",
+            Token::Colon => "':'",
+            Token::SemiColon => "';'",
+        })
     }
 }
 
-#[derive(Logos, Debug, PartialEq, Clone, Copy)]
+#[derive(Logos, PartialEq, Clone, Copy, Debug)]
 #[logos(skip r"[ \t\r\n\f]+")] // Ignore whitespace
 #[logos(skip(r"//[^\n\r]*", allow_greedy = true))] // Ignore comments
 pub enum Token<'a> {
@@ -173,7 +224,7 @@ pub enum Token<'a> {
 
     #[regex(r"[0-9]*\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+", |lex| {
         let slice = lex.slice();
-        lexical_core::parse::<f64>(slice.as_bytes()).unwrap()
+        lexical_core::parse::<f64>(slice.as_bytes()).ok().unwrap()
     })]
     Float(f64),
 

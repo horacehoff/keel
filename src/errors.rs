@@ -1,7 +1,6 @@
 use crate::compiler::compiler_data::{InstrSrc, Source};
 use crate::compiler::expr::Span;
 use crate::hformat;
-use crate::instr::Instr;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use const_format::formatcp;
@@ -113,7 +112,7 @@ impl From<ErrType<'_>> for String {
                 BOLD,
                 { index },
                 RESET,
-                "but the length is ",
+                " but the length is ",
                 BLUE,
                 BOLD,
                 { length },
@@ -215,7 +214,7 @@ impl ErrType<'_> {
 #[inline(never)]
 pub fn throw_error(
     ctx: &ErrorCtx,
-    instr: Instr,
+    instr_idx: usize,
     t: ErrType,
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))] handle: &mut std::io::BufWriter<
         StdoutLock,
@@ -224,12 +223,11 @@ pub fn throw_error(
     handle: &mut crate::captured_output::CapturedOutputWriter,
 ) -> ! {
     handle.flush().unwrap();
-    let InstrSrc { instr: _, span: Span { start, end }, file_id } =
-        ctx.instr_src.iter().find(|s| s.instr == instr).unwrap_or(&InstrSrc {
-            instr: Instr::Halt(1),
-            span: Span { start: 0, end: 0 },
-            file_id: 0,
-        });
+    let InstrSrc { instr_idx: _, span: Span { start, end }, file_id } = ctx
+        .instr_src
+        .iter()
+        .find(|s| s.instr_idx as usize == instr_idx)
+        .unwrap_or(&InstrSrc { instr_idx: 0, span: Span { start: 0, end: 0 }, file_id: 0 });
     let src = &ctx.sources[*file_id as usize];
     let err_message: String = t.into();
     eprint!("{}", formatcp!("[{RED}ERROR{RESET}] "));
@@ -242,16 +240,7 @@ pub fn throw_error(
             )
             .finish();
 
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report.eprint((src.filename, ariadne::Source::from(src.contents))).unwrap();
-
-    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    report
-        .write(
-            (src.filename, ariadne::Source::from(src.contents)),
-            crate::captured_output::CapturedOutputWriter,
-        )
-        .unwrap();
+    print_error_report(report, &ctx.sources);
 
     crash();
 }
@@ -270,42 +259,28 @@ pub fn throw_compiler_error<'a>(
     report: &dyn Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>,
     sources: &'a [Source],
 ) -> ! {
-    let report = report();
+    print_error_report(report(), sources);
+    crash();
+}
+
+#[cold]
+#[inline(never)]
+pub fn print_error_report<'a>(
+    report: Report<'a, (&'a str, core::ops::Range<usize>)>,
+    sources: &'a [Source],
+) {
+    let fn_cache = FnCache::new(
+        (move |id: &&str| Err(hformat!("Failed to fetch source ", { id }))) as fn(&_) -> _,
+    )
+    .with_sources(
+        sources.iter().map(|src| (src.filename, ariadne::Source::from(src.contents))).collect(),
+    );
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    report
-        .eprint(
-            FnCache::new(
-                (move |id: &&str| Err(hformat!("Failed to fetch source ", { id }))) as fn(&_) -> _,
-            )
-            .with_sources(
-                sources
-                    .iter()
-                    .map(|Source { filename, contents }| {
-                        (*filename, ariadne::Source::from(contents))
-                    })
-                    .collect(),
-            ),
-        )
-        .unwrap();
+    report.eprint(fn_cache).unwrap();
 
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    report
-        .write(
-            FnCache::new(
-                (move |id: &&str| Err(hformat!("Failed to fetch source ", { id }))) as fn(&_) -> _,
-            )
-            .with_sources(
-                sources
-                    .iter()
-                    .map(|src| (src.filename, ariadne::Source::from(src.contents)))
-                    .collect(),
-            ),
-            crate::captured_output::CapturedOutputWriter,
-        )
-        .unwrap();
-
-    crash();
+    report.write(fn_cache, crate::captured_output::CapturedOutputWriter).unwrap();
 }
 
 #[cold]

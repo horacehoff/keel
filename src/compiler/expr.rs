@@ -2,7 +2,7 @@ use super::type_system::TypeExpr;
 use bumpalo::Bump;
 use std::hint::unreachable_unchecked;
 
-#[derive(PartialEq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct IfBlockExpr<'arena> {
     pub condition: &'arena Expr<'arena>,
     /// if .. { <THEN> }
@@ -13,7 +13,7 @@ pub struct IfBlockExpr<'arena> {
     pub span: Span,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct DylibFnExpr<'arena> {
     pub name: &'arena str,
     /// Invariant:
@@ -23,14 +23,14 @@ pub struct DylibFnExpr<'arena> {
     pub name_span: Span,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct DylibImportExpr<'arena> {
     pub path: &'arena str,
     pub functions: &'arena [DylibFnExpr<'arena>],
     pub span: Span,
 }
 
-#[derive(PartialEq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct StructFieldExpr<'arena> {
     pub name: &'arena str,
     pub value: Expr<'arena>,
@@ -38,7 +38,7 @@ pub struct StructFieldExpr<'arena> {
     pub value_span: Span,
 }
 
-#[derive(PartialEq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct FunctionCallExpr<'arena> {
     pub qualified_name: QualifiedName<'arena>,
     pub args: &'arena [Expr<'arena>],
@@ -64,7 +64,7 @@ impl FunctionCallExpr<'_> {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct IntForLoopExpr<'arena> {
     pub var_name: &'arena str,
     /// Invariant:
@@ -91,13 +91,13 @@ impl IntForLoopExpr<'_> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct FunctionDeclarationArgumentExpr<'arena> {
     pub name: &'arena str,
     pub enforced_type: Option<TypeExpr<'arena>>,
 }
 
-#[derive(PartialEq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct FunctionDeclarationExpr<'arena> {
     pub name: &'arena str,
     pub args: &'arena [FunctionDeclarationArgumentExpr<'arena>],
@@ -105,7 +105,7 @@ pub struct FunctionDeclarationExpr<'arena> {
     pub span: Span,
 }
 
-#[derive(PartialEq, Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy)]
 pub struct StructFieldAssignmentExpr<'arena> {
     pub struct_expr: &'arena Expr<'arena>,
     pub field: &'arena str,
@@ -151,7 +151,7 @@ impl<'arena> QualifiedName<'arena> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct VariableDeclarationExpr<'arena> {
     pub name: &'arena str,
     pub value: &'arena Expr<'arena>,
@@ -160,14 +160,14 @@ pub struct VariableDeclarationExpr<'arena> {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct PatternConstructorField<'arena> {
     pub name: &'arena str,
     pub pattern: Pattern<'arena>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct PatternConstructor<'arena> {
     pub qualified_name: QualifiedName<'arena>,
     pub fields: &'arena [PatternConstructorField<'arena>],
@@ -175,7 +175,7 @@ pub struct PatternConstructor<'arena> {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub enum Pattern<'arena> {
     // struct
     Constructor(PatternConstructor<'arena>),
@@ -186,7 +186,7 @@ pub enum Pattern<'arena> {
     Wildcard(Span),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct MatchArm<'arena> {
     pub pattern: Pattern<'arena>,
     pub guard: Option<&'arena Expr<'arena>>,
@@ -194,14 +194,14 @@ pub struct MatchArm<'arena> {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct MatchExpr<'arena> {
     pub obj: &'arena Expr<'arena>, // match <obj>
     pub arms: &'arena [MatchArm<'arena>],
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Expr<'arena> {
     Float(f64),
     Int(i32),

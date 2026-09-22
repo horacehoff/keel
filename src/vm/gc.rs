@@ -173,6 +173,6 @@ impl Gc {
 
     #[inline(always)]
     pub const fn str_pool_needs_gc(&self, str_pool_len: usize) -> bool {
-        str_pool_len >= self.string_threshold as usize && self.free_strings.is_empty()
+        self.free_strings.is_empty() && str_pool_len >= self.string_threshold as usize
     }
 }

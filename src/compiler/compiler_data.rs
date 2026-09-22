@@ -145,7 +145,7 @@ impl Ctx {
 }
 
 pub struct InstrSrc {
-    pub instr: Instr,
+    pub instr_idx: u16,
     pub span: Span,
     pub file_id: u16,
 }
@@ -375,7 +375,7 @@ impl<'arena> State<'arena, '_> {
     #[inline(always)]
     pub fn add_to_src(&mut self, ctx: Ctx, output: &[Instr], span: Span) {
         self.instr_src.push(InstrSrc {
-            instr: unsafe { *output.last().unwrap_unchecked() },
+            instr_idx: ctx.offset + (output.len() as u16) - 1,
             span,
             file_id: ctx.file_idx,
         });

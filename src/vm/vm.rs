@@ -717,11 +717,11 @@ pub fn execute(
             Instr::DecInt(reg) => r[reg].dec_int(),
             Instr::IncIntTo(src, dst) => {
                 let s = r[src];
-                r[dst].inc_into(s);
+                r[dst].inc_from(s);
             }
             Instr::DecIntTo(src, dst) => {
                 let s = r[src];
-                r[dst].dec_into(s);
+                r[dst].dec_from(s);
             }
             Instr::Eq(o1, o2, dest) => {
                 r[dest] = (r[o1] == r[o2]).into();

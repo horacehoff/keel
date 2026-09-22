@@ -244,13 +244,23 @@ impl Data {
     #[inline(always)]
     pub const fn is_string(self) -> bool {
         // this works because NAN_TAG_STRING_LARGE == NAN_TAG_STRING_SMALL + (1 << 48)
-        (self.0 & !PAYLOAD_MASK).wrapping_sub(NAN_STRING_SMALL) <= const { 1 << 48 }
+        (self.0 >> 49) == const { NAN_STRING_SMALL >> 49 }
     }
     /// Increments the integer stored in this Data in-place. Wraps.
     #[inline(always)]
     pub const fn inc_int(&mut self) {
         debug_assert!(self.is_int());
-        self.0 = NAN_INT | (self.0.wrapping_add(1) & 0xFFFF_FFFF);
+        #[cfg(target_endian = "little")]
+        {
+            let i = std::ptr::from_mut(self).cast::<u32>();
+            unsafe {
+                *i = (*i).wrapping_add(1);
+            }
+        }
+        #[cfg(target_endian = "big")]
+        {
+            self.0 = NAN_INT | (self.0.wrapping_add(1) & 0xFFFF_FFFF);
+        }
     }
     /// Decrements the integer stored in this Data in-place. Wraps.
     #[inline(always)]
@@ -260,13 +270,13 @@ impl Data {
     }
     /// Writes src + 1 into self. Wraps.
     #[inline(always)]
-    pub const fn inc_into(&mut self, src: Self) {
+    pub const fn inc_from(&mut self, src: Self) {
         debug_assert!(src.is_int());
         self.0 = NAN_INT | (src.0.wrapping_add(1) & 0xFFFF_FFFF);
     }
     /// Writes src - 1 into self. Wraps.
     #[inline(always)]
-    pub const fn dec_into(&mut self, src: Self) {
+    pub const fn dec_from(&mut self, src: Self) {
         debug_assert!(src.is_int());
         self.0 = NAN_INT | (src.0.wrapping_sub(1) & 0xFFFF_FFFF);
     }
@@ -327,7 +337,7 @@ impl Data {
     }
     #[inline(always)]
     pub const fn is_function(self) -> bool {
-        (self.0 & !PAYLOAD_MASK) == NAN_STRUCT && (self.0 & (1 << 46)) != 0
+        self.0 >= NAN_FUNCTION
     }
     pub fn format(
         self,

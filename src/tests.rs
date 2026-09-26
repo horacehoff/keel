@@ -3784,3 +3784,27 @@ pub fn anon_fn_compiled_in_one_body() {
         Data::int(2)
     );
 }
+#[test]
+pub fn args_are_not_overwritten() {
+    run_and_check_registers!(
+        "
+        fn f(a, b) {
+            return a * 10 + b;
+        }
+        fn main() {
+            print(f(1, f(2, 3)));
+        }
+        ",
+        Data::int(33)
+    );
+}
+#[test]
+pub fn correct_save_frame() {
+    run_and_check_registers!(
+        "
+        fn f(n) { if n <= 1 { return 1; } return f(f(n - 1) % n) + 1; }
+        fn main() { print(f(6)); }
+        ",
+        Data::int(6)
+    );
+}

@@ -316,6 +316,10 @@ pub fn code_modifies_variable(var_name: &str, code: &[Expr]) -> bool {
         Expr::Match(match_expr) => {
             match_expr.arms.iter().any(|arm| code_modifies_variable(var_name, arm.code))
         }
+        Expr::TryCatchBlock(try_code, _, catch_code) => {
+            code_modifies_variable(var_name, try_code)
+                || code_modifies_variable(var_name, catch_code)
+        }
         _ => false,
     })
 }

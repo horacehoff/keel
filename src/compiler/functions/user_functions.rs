@@ -14,6 +14,7 @@ use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::registers::get_tgt_ids;
 use crate::compiler::registers::move_value_to;
+use crate::compiler::type_system::collect_direct_fn_calls;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
@@ -181,6 +182,26 @@ pub fn handle_user_function<'arena>(
         None
     };
     // Move evaluated call args into the expected arg slots
+    // This is a VERY bad temporary fix
+    // This is tthe index of the last argument that can run user code, only earlier arguments are at risk of being overwritten
+    let last_harmless_arg = args
+        .iter()
+        .rposition(|arg| {
+            let mut calls = Vec::new();
+            collect_direct_fn_calls(std::slice::from_ref(arg), &mut calls);
+            calls.iter().any(|call| {
+                let fn_name = call.get_name();
+                fn_name == "map"
+                    || fn_name == "filter"
+                    || state
+                        .scope(ctx.file_idx)
+                        .find_function_fallible(call.get_namespace(), fn_name)
+                        .is_some()
+                    || (call.is_namespace_empty() && state.find_var(fn_name).is_some())
+            })
+        })
+        .unwrap_or(0);
+    let mut deferred_args: Vec<(u16, u16)> = Vec::new();
     for (i, arg_expr) in args.iter().enumerate() {
         let tgt_id = state.functions[function_idx].impls[fn_impl_idx].args_loc[i];
 
@@ -192,10 +213,20 @@ pub fn handle_user_function<'arena>(
             }
             continue;
         }
+        if i < last_harmless_arg {
+            let arg_id = arg_expr.compile(ctx, state, output, None, false, true).unwrap_id();
+            deferred_args.push((arg_id, tgt_id));
+            continue;
+        }
 
         let start_len = output.len();
         let arg_id = arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
         move_value_to(output, start_len, arg_id, tgt_id);
+    }
+    for (arg_id, tgt_id) in deferred_args {
+        if arg_id != tgt_id {
+            output.push(Instr::Mov(arg_id, tgt_id));
+        }
     }
     if !is_recursive {
         state.fn_registers.get_mut(function_idx).unwrap().extend(
@@ -307,18 +338,9 @@ pub fn compile_function<'arena>(
 
     if is_recursive {
         // For each recursive call, only save registers that are read between that call's return and the end of the function
-        for (pos, instr) in parsed.iter().enumerate() {
-            if matches!(instr, Instr::CallFuncRecursive(_, _)) {
-                // Walk backwards to find this call's SaveFrame and its callsite_id
-                let callsite_id = parsed[..pos]
-                    .iter()
-                    .rev()
-                    .find_map(|i| match i {
-                        Instr::SaveFrame(_, _, cid) => Some(*cid),
-                        _ => None,
-                    })
-                    .unwrap_id();
-
+        for (save_frame_instr_pos, instr) in parsed.iter().enumerate() {
+            if let Instr::SaveFrame(call_loc_relative, _, callsite_id) = *instr {
+                let pos = save_frame_instr_pos + call_loc_relative as usize;
                 let mut live_regs: Vec<u16> = Vec::new();
                 for after_instr in &parsed[pos + 1..] {
                     if let Instr::CallFuncRecursive(_, _) = after_instr {

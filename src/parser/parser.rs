@@ -112,7 +112,7 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         )
         .finish();
 
-    crate::errors::print_error_report(report, std::slice::from_ref(src));
+    crate::errors::print_error_report(&report, std::slice::from_ref(src));
     crash()
 }
 
@@ -217,7 +217,7 @@ impl<'a> Parser<'a> {
         &self,
         report: F,
     ) -> ! {
-        crate::errors::print_error_report(report(), std::slice::from_ref(&self.ctx.src));
+        crate::errors::print_error_report(&report(), std::slice::from_ref(&self.ctx.src));
         crash();
     }
 }

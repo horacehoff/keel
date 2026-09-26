@@ -240,7 +240,7 @@ pub fn throw_error(
             )
             .finish();
 
-    print_error_report(report, &ctx.sources);
+    print_error_report(&report, &ctx.sources);
 
     crash();
 }
@@ -259,14 +259,14 @@ pub fn throw_compiler_error<'a>(
     report: &dyn Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>,
     sources: &'a [Source],
 ) -> ! {
-    print_error_report(report(), sources);
+    print_error_report(&report(), sources);
     crash();
 }
 
 #[cold]
 #[inline(never)]
 pub fn print_error_report<'a>(
-    report: Report<'a, (&'a str, core::ops::Range<usize>)>,
+    report: &Report<'a, (&'a str, core::ops::Range<usize>)>,
     sources: &'a [Source],
 ) {
     let fn_cache = FnCache::new(

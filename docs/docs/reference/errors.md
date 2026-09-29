@@ -65,6 +65,7 @@ Error: Incompatible types
 - `fs_read_only_filesystem`
 - `fs_storage_full`
 - `fs_timed_out`
+- `fs_other` (will be available with the release of Keel 0.5)
 
 ### FFI
 

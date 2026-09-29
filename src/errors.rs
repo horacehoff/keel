@@ -49,22 +49,17 @@ impl From<std::io::ErrorKind> for ErrType<'_> {
             std::io::ErrorKind::ReadOnlyFilesystem => ErrType::FsReadOnlyFilesystem,
             std::io::ErrorKind::StorageFull => ErrType::FsStorageFull,
             std::io::ErrorKind::TimedOut => ErrType::FsTimedOut,
-            _ => unsafe { unreachable_unchecked() },
+            _ => ErrType::FsOther,
         }
     }
 }
 
-impl From<std::num::IntErrorKind> for ErrType<'_> {
-    fn from(value: std::num::IntErrorKind) -> Self {
-        match value {
-            std::num::IntErrorKind::Empty
-            | std::num::IntErrorKind::InvalidDigit
-            | std::num::IntErrorKind::NegOverflow
-            | std::num::IntErrorKind::PosOverflow => ErrType::InvalidInt,
-            _ => unsafe { unreachable_unchecked() },
-        }
-    }
-}
+// impl From<std::num::IntErrorKind> for ErrType<'_> {
+//     #[inline(always)]
+//     fn from(value: std::num::IntErrorKind) -> Self {
+//         ErrType::InvalidInt
+//     }
+// }
 
 /// Error types, largely borrowed from Rust
 pub enum ErrType<'a> {
@@ -86,6 +81,7 @@ pub enum ErrType<'a> {
     FsReadOnlyFilesystem,
     FsStorageFull,
     FsTimedOut,
+    FsOther,
     // NUMBER PARSING ERRORS
     InvalidInt,
     InvalidFloat,
@@ -163,6 +159,7 @@ impl From<ErrType<'_>> for String {
             }
             ErrType::FsStorageFull => "Storage is full".into(),
             ErrType::FsTimedOut => "This operation timed out".into(),
+            ErrType::FsOther => "File system operation failed".into(),
             ErrType::DivisionByZero => {
                 "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into()
             }
@@ -197,6 +194,7 @@ impl ErrType<'_> {
             ErrType::FsReadOnlyFilesystem => "fs_read_only_filesystem",
             ErrType::FsStorageFull => "fs_storage_full",
             ErrType::FsTimedOut => "fs_timed_out",
+            ErrType::FsOther => "fs_other",
             ErrType::InvalidInt => "invalid_int",
             ErrType::InvalidFloat => "invalid_float",
             ErrType::InvalidBool => "invalid_bool",

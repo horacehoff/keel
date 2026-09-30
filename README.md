@@ -84,6 +84,7 @@ keel -h/--help     # Print help
 ```
 
 ### Build from source (without PGO)
+MSRV: 1.96.1
 
 Make sure [Rust](https://rustup.rs/) is installed.
 

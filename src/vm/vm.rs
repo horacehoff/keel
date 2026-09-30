@@ -1153,7 +1153,7 @@ pub fn execute(
                 } else if value.is_bool() {
                     Data::small_str(if value.as_bool() { "true" } else { "false" })
                 } else {
-                    string!(value.format(obj_pool, str_pool, map_pool, structs, false).as_str())
+                    string!(value.format(obj_pool, str_pool, map_pool, structs, false))
                 };
             }
             Instr::CallLibFunc(LibFunc::Bool, tgt, dest) => {

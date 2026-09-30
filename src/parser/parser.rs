@@ -54,9 +54,10 @@ struct Parser<'a> {
     bump: &'a Bump,
 }
 
-#[derive(Clone, Copy)]
-enum ParserErr<'a> {
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub enum ParserErr<'a> {
     UnexpectedEOF,
+    #[default]
     UnknownToken,
     /// (expected, received)
     UnexpectedToken(Token<'a>, Token<'a>, &'static str),
@@ -71,6 +72,7 @@ enum ParserErr<'a> {
     TryBlockNoCatch,
     MatchBlockNoNonWildcardArm,
     MatchBlockZeroArms,
+    IntOutOfRange,
 }
 
 #[cold]
@@ -102,6 +104,9 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         ParserErr::MatchBlockZeroArms => {
             formatcp!("{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}")
         }
+        ParserErr::IntOutOfRange => formatcp!(
+            "Integers must be between {BLUE}{BOLD}-2147483648{RESET} and {BLUE}{BOLD}2147483647{RESET}"
+        ),
     };
     eprintln!("{RED}KEEL ERROR{RESET}");
     let report = Report::build(ReportKind::Error, (src.filename, (start as usize)..(end as usize)))
@@ -118,9 +123,9 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
 
 impl<'a> Parser<'a> {
     #[inline(always)]
-    fn eof_span(&self) -> Span {
+    const fn eof_span(&self) -> Span {
         let end = self.ctx.src.contents.len() as u32;
-        (end, end).into()
+        Span { start: end, end }
     }
     #[cold]
     #[inline(never)]
@@ -139,7 +144,7 @@ impl<'a> Parser<'a> {
         (
             t.0.unwrap_or_else(
                 #[cold]
-                |()| self.error((t.1.start, t.1.end).into(), ParserErr::UnknownToken),
+                |e| self.error((t.1.start, t.1.end).into(), e),
             ),
             (t.1.start, t.1.end).into(),
         )
@@ -152,7 +157,7 @@ impl<'a> Parser<'a> {
         };
         t.unwrap_or_else(
             #[cold]
-            |()| self.error((start, end).into(), ParserErr::UnknownToken),
+            |e| self.error((start, end).into(), e),
         )
     }
     #[inline(always)]
@@ -168,7 +173,7 @@ impl<'a> Parser<'a> {
         let (t, start, end) = self.input.peek().map(|(t, span)| (*t, span.start, span.end))?;
         Some(t.unwrap_or_else(
             #[cold]
-            |()| self.error((start, end).into(), ParserErr::UnknownToken),
+            |e| self.error((start, end).into(), e),
         ))
     }
     #[inline(always)]
@@ -219,6 +224,15 @@ impl<'a> Parser<'a> {
     ) -> ! {
         crate::errors::print_error_report(&report(), std::slice::from_ref(&self.ctx.src));
         crash();
+    }
+    pub fn parse_int(&self, i: i32, minus_sign: bool, span: Span) -> Expr<'a> {
+        if minus_sign {
+            Expr::Int(i.wrapping_neg())
+        } else if i != i32::MIN {
+            Expr::Int(i)
+        } else {
+            self.error(span, ParserErr::IntOutOfRange)
+        }
     }
 }
 

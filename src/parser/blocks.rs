@@ -415,7 +415,7 @@ fn parse_pattern<'arena>(parser: &mut Parser<'arena>) -> Pattern<'arena> {
     let literal_token = match token {
         Token::Identifier("_") => return Pattern::Wildcard(token_span),
         Token::Identifier(id) => return parse_match_constructor(parser, id, token_span),
-        Token::Int(i) => Expr::Int(i),
+        Token::Int(i) => parser.parse_int(i, false, token_span),
         Token::Float(f) => Expr::Float(f),
         Token::String(s) => Expr::String(parse_string(s, parser.bump).into_bump_str()),
         Token::True => Expr::Bool(true),
@@ -424,7 +424,7 @@ fn parse_pattern<'arena>(parser: &mut Parser<'arena>) -> Pattern<'arena> {
         Token::OpSub => {
             let (num, num_span) = parser.next_token();
             let neg_number = match num {
-                Token::Int(i) => Expr::Int(-i),
+                Token::Int(i) => parser.parse_int(i, true, num_span),
                 Token::Float(f) => Expr::Float(-f),
                 other => panic!(),
             };

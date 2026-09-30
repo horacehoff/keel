@@ -99,7 +99,7 @@ impl Data {
         Self(NAN_BOOL | b as u64)
     }
     #[inline(always)]
-    pub fn as_bool(self) -> bool {
+    pub const fn as_bool(self) -> bool {
         debug_assert!(self.is_bool());
         (self.0 & 1) != 0
     }

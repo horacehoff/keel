@@ -4,7 +4,6 @@ use crate::hformat;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use const_format::formatcp;
-use std::hint::unreachable_unchecked;
 #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
 use std::io::StdoutLock;
 use std::io::Write;
@@ -53,13 +52,6 @@ impl From<std::io::ErrorKind> for ErrType<'_> {
         }
     }
 }
-
-// impl From<std::num::IntErrorKind> for ErrType<'_> {
-//     #[inline(always)]
-//     fn from(value: std::num::IntErrorKind) -> Self {
-//         ErrType::InvalidInt
-//     }
-// }
 
 /// Error types, largely borrowed from Rust
 pub enum ErrType<'a> {
@@ -283,7 +275,7 @@ pub fn print_error_report<'a>(
 
 #[cold]
 #[inline(never)]
-pub fn crash() -> ! {
+pub const fn crash() -> ! {
     #[cfg(debug_assertions)]
     panic!();
 

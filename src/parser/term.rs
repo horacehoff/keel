@@ -139,7 +139,7 @@ fn parse_inline_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Exp
 pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Expr<'arena> {
     let (t, t_span) = parser.next_token();
     match t {
-        Token::Int(i) => Expr::Int(i),
+        Token::Int(i) => parser.parse_int(i, false, t_span),
         Token::Float(f) => Expr::Float(f),
         Token::String(s) => Expr::String(parse_string(s, parser.bump).into_bump_str()),
         Token::True => Expr::Bool(true),
@@ -223,15 +223,20 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
         }
         // - Expr
         Token::OpSub => {
-            let expr_start = parser.peek_token_span().start;
-            match parse_expr_with_precedence(parser, 8, allow_struct) {
-                Expr::Int(i) => Expr::Int(i.wrapping_neg()),
-                Expr::Float(f) => Expr::Float(-f),
-                other => Expr::Neg(
-                    parser.bump.alloc(other),
-                    (t_span.start, parser.peek_token_span().start).into(),
-                    (expr_start, parser.peek_token_span().start).into(),
-                ),
+            if parser.peek_token() == Token::Int(i32::MIN) {
+                let (_, next_span) = parser.next_token();
+                parser.parse_int(i32::MIN, true, next_span)
+            } else {
+                let expr_start = parser.peek_token_span().start;
+                match parse_expr_with_precedence(parser, 8, allow_struct) {
+                    Expr::Int(i) => Expr::Int(i.wrapping_neg()),
+                    Expr::Float(f) => Expr::Float(-f),
+                    other => Expr::Neg(
+                        parser.bump.alloc(other),
+                        (t_span.start, parser.peek_token_span().start).into(),
+                        (expr_start, parser.peek_token_span().start).into(),
+                    ),
+                }
             }
         }
         // ! Expr

@@ -1,7 +1,4 @@
-use crate::{
-    cold_path,
-    errors::{BLUE, RESET},
-};
+use super::ParserErr;
 use bumpalo::Bump;
 use logos::Logos;
 use std::hint::unreachable_unchecked;
@@ -83,6 +80,7 @@ impl std::fmt::Display for Token<'_> {
 #[derive(Logos, PartialEq, Clone, Copy, Debug)]
 #[logos(skip r"[ \t\r\n\f]+")] // Ignore whitespace
 #[logos(skip(r"//[^\n\r]*", allow_greedy = true))] // Ignore comments
+#[logos(error = ParserErr<'s>)]
 pub enum Token<'a> {
     // ASSIGNEMENT OPS
     #[token("+=")]
@@ -229,14 +227,10 @@ pub enum Token<'a> {
     Float(f64),
 
     #[regex(r"[0-9]+", |lex| {
-        let slice = lex.slice();
-        match lexical_core::parse::<i64>(slice.as_bytes()) {
-            Ok(v) if v <= (i32::MAX as i64) => v as i32,
-            Ok(2_147_483_648) => i32::MIN,
-            _ => {
-                cold_path();
-                panic!("{BLUE}{slice}{RESET} is not a valid float");
-            }
+        match lexical_core::parse::<i64>(lex.slice().as_bytes()) {
+            Ok(v) if v <= (i32::MAX as i64) => Ok(v as i32),
+            Ok(2_147_483_648) => Ok(i32::MIN), // only valid after a minus sign
+            _ => Err(ParserErr::IntOutOfRange)
         }
     })]
     Int(i32),

@@ -15,7 +15,7 @@ use bumpalo::Bump;
 use fixedbitset::FixedBitSet;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
-use std::hint::unreachable_unchecked;
+use core::hint::unreachable_unchecked;
 use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]

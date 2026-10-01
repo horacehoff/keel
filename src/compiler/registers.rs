@@ -3,7 +3,7 @@ use fixedbitset::FixedBitSet;
 use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFuncVoid;
-use std::hint::unreachable_unchecked;
+use core::hint::unreachable_unchecked;
 
 pub fn move_value_to(output: &mut Vec<Instr>, src_instr_idx: usize, value_idx: u16, tgt_idx: u16) {
     if value_idx != tgt_idx {

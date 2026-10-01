@@ -8,7 +8,7 @@ use const_format::formatcp;
 #[cfg(feature = "embed")]
 use std::ffi::{CStr, CString, c_char};
 use std::fs;
-use std::hint::cold_path;
+use core::hint::cold_path;
 #[cfg(feature = "embed")]
 use std::panic::catch_unwind;
 #[cfg(target_arch = "wasm32")]

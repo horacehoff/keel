@@ -14,7 +14,7 @@ use crate::compiler::compiler_data::StructField;
 
 /// Writes `bytes` into `dst` at `index`
 pub unsafe fn write_bytes_at_offset(
-    dst: &mut [std::mem::MaybeUninit<u8>],
+    dst: &mut [core::mem::MaybeUninit<u8>],
     index: usize,
     bytes: &[u8],
 ) {
@@ -22,14 +22,14 @@ pub unsafe fn write_bytes_at_offset(
     unsafe {
         // u8 and MaybeUninit<u8> have the exact same layout, so this pointer cast is safe
         dst.get_unchecked_mut(index..(index + bytes.len())).copy_from_slice(
-            &*(std::ptr::from_ref::<[u8]>(bytes) as *const [std::mem::MaybeUninit<u8>]),
+            &*(core::ptr::from_ref::<[u8]>(bytes) as *const [core::mem::MaybeUninit<u8>]),
         );
     }
 }
 
 /// Puts `buf` in `keep_alive` and returns a pointer to its now stable address
 pub fn keep_buffer_alive(
-    buf: Box<[std::mem::MaybeUninit<u8>]>,
+    buf: Box<[core::mem::MaybeUninit<u8>]>,
     keep_alive: &mut Vec<Box<[u8]>>,
 ) -> usize {
     let ptr = buf.as_ptr() as usize;
@@ -62,7 +62,7 @@ pub fn array_to_c_ptr(
         let mut bytes = Box::new_uninit_slice(elems.len());
         for (i, e) in elems.iter().enumerate() {
             unsafe {
-                write_bytes_at_offset(&mut bytes, i, &[e.as_bool() as u8]);
+                write_bytes_at_offset(&mut bytes, i, &[u8::from(e.as_bool())]);
             }
         }
         keep_buffer_alive(bytes, keep_alive)
@@ -205,7 +205,7 @@ pub fn keel_struct_to_c_struct(
                 buf.get_unchecked_mut(offset..offset + 4).copy_from_slice_unchecked(&bytes);
             } else if field.is_bool() {
                 buf.get_unchecked_mut(offset..offset + 1)
-                    .copy_from_slice_unchecked(&[field.as_bool() as u8]);
+                    .copy_from_slice_unchecked(&[u8::from(field.as_bool())]);
             } else if field.is_float() {
                 let bytes = field.as_float().to_ne_bytes();
                 buf.get_unchecked_mut(offset..offset + 8).copy_from_slice_unchecked(&bytes);
@@ -264,12 +264,12 @@ pub fn c_struct_to_keel_struct(
                 unsafe {
                     bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 8)]);
                 }
-                let ptr = usize::from_ne_bytes(bytes) as *const std::ffi::c_char;
+                let ptr = usize::from_ne_bytes(bytes) as *const core::ffi::c_char;
                 buf.push(if ptr.is_null() {
                     NULL
                 } else {
                     Data::string(
-                        unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy().as_ref(),
+                        unsafe { core::ffi::CStr::from_ptr(ptr) }.to_string_lossy().as_ref(),
                         obj_pool,
                         map_pool,
                         string_pool,

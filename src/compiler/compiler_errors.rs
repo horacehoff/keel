@@ -64,8 +64,8 @@ pub fn error_invalid_type(
     expected_type: &DataType,
     perceived_type: &DataType,
     span: Span,
-    help: Option<std::fmt::Arguments>,
-    note: Option<std::fmt::Arguments>,
+    help: Option<core::fmt::Arguments>,
+    note: Option<core::fmt::Arguments>,
     file_idx: u16,
     sources: &[Source],
 ) -> ! {
@@ -532,7 +532,7 @@ pub fn error_invalid_obj_type(
                             blue(fn_name),
                             expected_type
                                 .iter()
-                                .map(|s| s.to_string())
+                                .map(std::string::ToString::to_string)
                                 .collect::<Vec<_>>()
                                 .join(formatcp!("{RESET} or {BLUE}")),
                             red(perceived_type)
@@ -807,10 +807,10 @@ fn levenshtein(a: &str, b: &str) -> usize {
             let substitution_cost =
                 if a.as_bytes()[i] == b.as_bytes()[j] { v0[j] } else { v0[j] + 1 };
             v1[j + 1] =
-                std::cmp::min(deletion_cost, std::cmp::min(insertion_cost, substitution_cost));
+                core::cmp::min(deletion_cost, core::cmp::min(insertion_cost, substitution_cost));
         }
 
-        std::mem::swap(&mut v0, &mut v1);
+        core::mem::swap(&mut v0, &mut v1);
     }
 
     v0[n]
@@ -1378,7 +1378,7 @@ pub fn error_function_arg_invalid_type_multiple(
 
             report = report.with_label(
                 Label::new((src.filename, arg_span.into()))
-                    .with_message(format_args!("Function {} expects this argument to be of type {GREEN}{}{RESET}, but this expression's type is {}", blue(fn_name), expected_type.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(&format_args!("{RESET} or {GREEN}").to_string()), red(perceived_type)))
+                    .with_message(format_args!("Function {} expects this argument to be of type {GREEN}{}{RESET}, but this expression's type is {}", blue(fn_name), expected_type.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(&format_args!("{RESET} or {GREEN}").to_string()), red(perceived_type)))
                     .with_color(ariadne::Color::Red),
             );
 

@@ -156,7 +156,7 @@ impl Data {
         debug_assert!(s.len() <= 6);
         let mut payload = [0u8; 8];
         unsafe {
-            std::ptr::copy_nonoverlapping(s.as_ptr(), payload.as_mut_ptr(), s.len());
+            core::ptr::copy_nonoverlapping(s.as_ptr(), payload.as_mut_ptr(), s.len());
         }
         Self(NAN_STRING_SMALL | (u64::from_le_bytes(payload) & PAYLOAD_MASK))
     }
@@ -201,7 +201,7 @@ impl Data {
             }
             if let Some(id) = gc.free_strings.pop() {
                 s.move_to_slot(str_pool.get_mut(id as usize));
-                Self(NAN_STRING_LARGE | (id as u64))
+                Self(NAN_STRING_LARGE | u64::from(id))
             } else {
                 let string_pool_id = str_pool.len() as u64;
                 s.push_to_pool(str_pool);
@@ -215,7 +215,7 @@ impl Data {
             Self::small_str(s)
         } else if let Some(id) = gc.free_strings.pop() {
             s.clone_into(str_pool.get_mut(id as usize));
-            Self(NAN_STRING_LARGE | (id as u64))
+            Self(NAN_STRING_LARGE | u64::from(id))
         } else {
             let string_pool_id = str_pool.len() as u64;
             str_pool.push(s.to_owned());
@@ -228,10 +228,10 @@ impl Data {
         let payload = self.0 & PAYLOAD_MASK;
         if (self.0 & !PAYLOAD_MASK) == NAN_STRING_SMALL {
             let len = 8 - (payload.leading_zeros() as usize >> 3);
-            let ptr = std::ptr::from_ref::<Self>(self).cast::<u8>();
-            unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) }
+            let ptr = core::ptr::from_ref::<Self>(self).cast::<u8>();
+            unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr, len)) }
         } else {
-            unsafe { &*std::ptr::from_ref::<str>(str_pool[payload as usize].as_str()) }
+            unsafe { &*core::ptr::from_ref::<str>(str_pool[payload as usize].as_str()) }
         }
     }
     #[inline(always)]
@@ -252,7 +252,7 @@ impl Data {
         debug_assert!(self.is_int());
         #[cfg(target_endian = "little")]
         {
-            let i = std::ptr::from_mut(self).cast::<u32>();
+            let i = core::ptr::from_mut(self).cast::<u32>();
             unsafe {
                 *i = (*i).wrapping_add(1);
             }
@@ -450,6 +450,6 @@ impl From<Data> for f64 {
 impl From<bool> for Data {
     #[inline(always)]
     fn from(value: bool) -> Self {
-        Self(NAN_BOOL | (value as u64))
+        Self(NAN_BOOL | u64::from(value))
     }
 }

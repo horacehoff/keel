@@ -188,7 +188,7 @@ pub fn handle_user_function<'arena>(
         .iter()
         .rposition(|arg| {
             let mut calls = Vec::new();
-            collect_direct_fn_calls(std::slice::from_ref(arg), &mut calls);
+            collect_direct_fn_calls(core::slice::from_ref(arg), &mut calls);
             calls.iter().any(|call| {
                 let fn_name = call.get_name();
                 fn_name == "map"
@@ -302,7 +302,7 @@ pub fn compile_function<'arena>(
         arg_types: Box::from(inferred_arg_types),
     });
 
-    std::mem::swap(state.v, &mut v_temp);
+    core::mem::swap(state.v, &mut v_temp);
     let hidden_symbols = state.enter_function_scope(fn_file_idx, function_id);
 
     // Compile the function into instructions using local vars
@@ -317,7 +317,7 @@ pub fn compile_function<'arena>(
         },
         state,
     );
-    std::mem::swap(state.v, &mut v_temp);
+    core::mem::swap(state.v, &mut v_temp);
     state.exit_function_scope(fn_file_idx, hidden_symbols);
 
     let all_written_regs = get_tgt_ids(&parsed, state.registers.len());

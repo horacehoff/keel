@@ -20,10 +20,10 @@ use lexical_core::FormattedSize;
 use memchr::memmem;
 use rustc_hash::FxBuildHasher;
 use std::collections::HashMap;
-use std::hint::cold_path;
+use core::hint::cold_path;
 use std::io::Write;
-use std::ops::Index;
-use std::ops::IndexMut;
+use core::ops::Index;
+use core::ops::IndexMut;
 
 #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
 use std::io::{IsTerminal, StdoutLock};
@@ -179,7 +179,7 @@ impl<T> Pool<T> {
         Self(Vec::with_capacity(capacity))
     }
     #[inline(always)]
-    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+    pub fn iter(&self) -> core::slice::Iter<'_, T> {
         self.0.iter()
     }
     #[inline(always)]
@@ -537,7 +537,7 @@ pub fn execute(
                             }
                         }
                         VmType::Bool => unsafe {
-                            args_ptr.add(idx).write(data.as_bool() as u64);
+                            args_ptr.add(idx).write(u64::from(data.as_bool()));
                             libffi::middle::Arg::new(&*args_ptr.add(idx))
                         },
                         _ => {
@@ -565,12 +565,12 @@ pub fn execute(
                         VmType::Int => Data::int(func.cif.call::<i32>(func.ptr, &ffi_args)),
                         VmType::Float => Data::float(func.cif.call::<f64>(func.ptr, &ffi_args)),
                         VmType::String => {
-                            let ptr = func.cif.call::<*const std::ffi::c_char>(func.ptr, &ffi_args);
+                            let ptr = func.cif.call::<*const core::ffi::c_char>(func.ptr, &ffi_args);
                             if ptr.is_null() {
                                 cold_path();
                                 NULL
                             } else {
-                                string!(std::ffi::CStr::from_ptr(ptr).to_string_lossy().as_ref())
+                                string!(core::ffi::CStr::from_ptr(ptr).to_string_lossy().as_ref())
                             }
                         }
                         VmType::Bool => func.cif.call::<bool>(func.ptr, &ffi_args).into(),
@@ -635,7 +635,7 @@ pub fn execute(
                 dst.reserve_exact(len as usize);
                 unsafe {
                     dst.set_len(len as usize);
-                    std::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len as usize);
+                    core::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len as usize);
                 }
                 r[dest_reg] = Data::array(new_id as u32);
             }
@@ -650,7 +650,7 @@ pub fn execute(
                     let dst = obj_pool.get_mut(new_id);
                     dst.reserve_exact(len);
                     dst.set_len(len);
-                    std::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len);
+                    core::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len);
                 }
                 r[dest_reg] = Data::struct_instance(src_reg.struct_type_id(), new_id as u32);
             }
@@ -953,7 +953,7 @@ pub fn execute(
                     error_with_catch!(ErrType::IndexOutOfBounds(bytes.len(), idx));
                 }
                 r[dest] = string!(unsafe {
-                    std::str::from_utf8_unchecked(std::slice::from_ref(
+                    core::str::from_utf8_unchecked(core::slice::from_ref(
                         bytes.get_unchecked(idx as usize),
                     ))
                 });
@@ -1125,7 +1125,7 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Float, tgt, dest) => {
                 let reg = r[tgt];
                 r[dest] = Data::float(if reg.is_int() {
-                    reg.as_int() as f64
+                    f64::from(reg.as_int())
                 } else if let Ok(f) = lexical_core::parse::<f64>(reg.as_str(str_pool).as_bytes()) {
                     f
                 } else {

@@ -1,6 +1,6 @@
 use super::type_system::TypeExpr;
 use bumpalo::Bump;
-use std::hint::unreachable_unchecked;
+use core::hint::unreachable_unchecked;
 
 #[derive(Clone, Debug, Copy)]
 pub struct IfBlockExpr<'arena> {
@@ -365,21 +365,21 @@ impl Span {
     }
 }
 
-impl From<std::range::Range<usize>> for Span {
+impl From<core::range::Range<usize>> for Span {
     #[inline(always)]
-    fn from(value: std::range::Range<usize>) -> Self {
+    fn from(value: core::range::Range<usize>) -> Self {
         Self { start: value.start as u32, end: value.end as u32 }
     }
 }
 
-impl From<std::ops::Range<usize>> for Span {
+impl From<core::ops::Range<usize>> for Span {
     #[inline(always)]
-    fn from(value: std::ops::Range<usize>) -> Self {
+    fn from(value: core::ops::Range<usize>) -> Self {
         Self { start: value.start as u32, end: value.end as u32 }
     }
 }
 
-impl From<Span> for std::ops::Range<usize> {
+impl From<Span> for core::ops::Range<usize> {
     #[inline(always)]
     fn from(val: Span) -> Self {
         val.start as usize..val.end as usize

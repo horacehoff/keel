@@ -30,8 +30,8 @@ use lexer::parse_string;
 use logos::SpannedIter;
 use parser_expr::add_op;
 use parser_expr::parse_expr;
-use std::hint::{cold_path, unreachable_unchecked};
-use std::iter::Peekable;
+use core::hint::{cold_path, unreachable_unchecked};
+use core::iter::Peekable;
 
 use lexer::Token;
 use logos::Logos;
@@ -117,7 +117,7 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         )
         .finish();
 
-    crate::errors::print_error_report(&report, std::slice::from_ref(src));
+    crate::errors::print_error_report(&report, core::slice::from_ref(src));
     crash()
 }
 
@@ -222,7 +222,7 @@ impl<'a> Parser<'a> {
         &self,
         report: F,
     ) -> ! {
-        crate::errors::print_error_report(&report(), std::slice::from_ref(&self.ctx.src));
+        crate::errors::print_error_report(&report(), core::slice::from_ref(&self.ctx.src));
         crash();
     }
     pub fn parse_int(&self, i: i32, minus_sign: bool, span: Span) -> Expr<'a> {

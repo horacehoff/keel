@@ -21,7 +21,7 @@ use crate::data::Data;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
-use std::hint::unreachable_unchecked;
+use core::hint::unreachable_unchecked;
 
 fn check(
     expected_receiver_type: &[DataType],
@@ -198,7 +198,7 @@ pub fn builtin_methods<'arena>(
                     args,
                     arg_spans,
                     0,
-                    std::slice::from_ref(array_elem_type),
+                    core::slice::from_ref(array_elem_type),
                 );
             } else if receiver_type == DataType::String {
                 check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
@@ -287,7 +287,7 @@ pub fn builtin_methods<'arena>(
                     args,
                     arg_spans,
                     0,
-                    std::slice::from_ref(array_elem_type),
+                    core::slice::from_ref(array_elem_type),
                 );
             }
 
@@ -373,7 +373,7 @@ pub fn builtin_methods<'arena>(
                     args,
                     arg_spans,
                     0,
-                    std::slice::from_ref(&array_elem_type),
+                    core::slice::from_ref(&array_elem_type),
                 );
             }
             add_args(args, output, ctx, state);
@@ -535,7 +535,7 @@ pub fn builtin_methods<'arena>(
                 if is_str {
                     fn_matches_signature(fn_id, &[DataType::String, DataType::String], ctx, state)
                 } else {
-                    fn_args_match(fn_id, std::slice::from_ref(&elem_type), state)
+                    fn_args_match(fn_id, core::slice::from_ref(&elem_type), state)
                 }
             } {
                 let expected_type = DataType::FnSignature(Box::from([
@@ -554,7 +554,7 @@ pub fn builtin_methods<'arena>(
             }
 
             let fn_impl_idx =
-                compile_function_impl(output, ctx, state, fn_id, std::slice::from_ref(&elem_type));
+                compile_function_impl(output, ctx, state, fn_id, core::slice::from_ref(&elem_type));
             let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
             let arg_reg = state.functions[fn_id].impls[fn_impl_idx].args_loc[0];
 
@@ -661,7 +661,7 @@ pub fn builtin_methods<'arena>(
             }
 
             let fn_impl_idx =
-                compile_function_impl(output, ctx, state, fn_id, std::slice::from_ref(&elem_type));
+                compile_function_impl(output, ctx, state, fn_id, core::slice::from_ref(&elem_type));
             let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
             let arg_reg = state.functions[fn_id].impls[fn_impl_idx].args_loc[0];
 

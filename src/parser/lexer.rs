@@ -1,10 +1,10 @@
 use super::ParserErr;
 use bumpalo::Bump;
 use logos::Logos;
-use std::hint::unreachable_unchecked;
+use core::hint::unreachable_unchecked;
 
-impl std::fmt::Display for Token<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Token<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             Token::Identifier(_) => "an identifier",
             Token::Int(_) => "an integer",
@@ -228,7 +228,7 @@ pub enum Token<'a> {
 
     #[regex(r"[0-9]+", |lex| {
         match lexical_core::parse::<i64>(lex.slice().as_bytes()) {
-            Ok(v) if v <= (i32::MAX as i64) => Ok(v as i32),
+            Ok(v) if v <= i64::from(i32::MAX) => Ok(v as i32),
             Ok(2_147_483_648) => Ok(i32::MIN), // only valid after a minus sign
             _ => Err(ParserErr::IntOutOfRange)
         }

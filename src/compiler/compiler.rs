@@ -70,9 +70,9 @@ use registers::move_reg_to_reg;
 use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
-use std::cell::LazyCell;
+use core::cell::LazyCell;
 use std::collections::HashMap;
-use std::hint::unreachable_unchecked;
+use core::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use type_system::DataType;
@@ -1460,7 +1460,7 @@ fn compile_for_loop<'arena>(
     let loop_id = ctx.block_id + 1;
 
     // accounts for the GetIndexArray/GetIndexString instruction
-    let pending = real_var as u16;
+    let pending = u16::from(real_var);
 
     let regs_before = state.registers.len() as u16;
     let mut cond_code = compile_expr(
@@ -1974,7 +1974,7 @@ fn compile_eval_block<'arena>(
 }
 
 fn compile_match_block<'arena>(
-    MatchExpr { obj: match_obj, arms, span }: &'arena MatchExpr,
+    MatchExpr { obj: match_obj, arms, span: _ }: &'arena MatchExpr,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
@@ -2002,12 +2002,12 @@ fn compile_match_block<'arena>(
                     span,
                 })]);
             }
-            Pattern::Identifier(id, id_span) => todo!(),
+            Pattern::Identifier(_id, _id_span) => todo!(),
             Pattern::Constructor(PatternConstructor {
-                qualified_name,
-                fields,
-                fill_the_rest,
-                span,
+                qualified_name: _,
+                fields: _,
+                fill_the_rest: _,
+                span: _,
             }) => todo!(),
             Pattern::Wildcard(_) => unsafe { unreachable_unchecked() },
         }
@@ -2934,7 +2934,7 @@ fn resolve_types<'arena>(
                 };
 
                 dynamic_libs_fns.push(DylibFn {
-                    types: std::iter::once(&fn_return_type)
+                    types: core::iter::once(&fn_return_type)
                         .chain(fn_args.iter().map(|(t, _)| t))
                         .map(datatype_to_vmtype)
                         .collect(),

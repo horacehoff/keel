@@ -11,7 +11,7 @@ impl PushStrUnchecked for String {
         let string_len = string.len();
         debug_assert!(string_len <= self.capacity() - len);
         unsafe {
-            std::ptr::copy_nonoverlapping(string.as_ptr(), self.as_mut_ptr().add(len), string_len);
+            core::ptr::copy_nonoverlapping(string.as_ptr(), self.as_mut_ptr().add(len), string_len);
             self.as_mut_vec().set_len(len + string_len);
         }
     }

@@ -26,9 +26,9 @@ use crate::compiler::expr::Pattern;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::VariableDeclarationExpr;
 use rustc_hash::FxHashSet;
-use std::cell::RefCell;
-use std::hint::cold_path;
-use std::hint::unreachable_unchecked;
+use core::cell::RefCell;
+use core::hint::cold_path;
+use core::hint::unreachable_unchecked;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::compiler_data::Struct;
@@ -156,8 +156,8 @@ pub enum DataType {
     Map(Box<(Option<Self>, Option<Self>)>),
 }
 
-impl std::fmt::Display for DataType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for DataType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Float => write!(f, "float"),
             Self::Int => write!(f, "int"),
@@ -320,8 +320,8 @@ impl PartialEq for DataType {
     }
 }
 
-impl std::hash::Hash for DataType {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl core::hash::Hash for DataType {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         // All Array variants hash identically, which is required because Array(None) == Array(Some(_))
         match self {
             Self::Array(_) => 0u8.hash(state),

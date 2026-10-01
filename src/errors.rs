@@ -9,19 +9,19 @@ use std::io::StdoutLock;
 use std::io::Write;
 
 pub const BLUE: &str = "\x1B[94m";
-pub fn blue<F: std::fmt::Display>(t: F) -> String {
+pub fn blue<F: core::fmt::Display>(t: F) -> String {
     format!("{BLUE}{t}{RESET}")
 }
 pub const RED: &str = "\x1B[31m";
-pub fn red<F: std::fmt::Display>(t: F) -> String {
+pub fn red<F: core::fmt::Display>(t: F) -> String {
     format!("{RED}{t}{RESET}")
 }
 pub const BOLD: &str = "\x1B[1m";
-pub fn bold<F: std::fmt::Display>(t: F) -> String {
+pub fn bold<F: core::fmt::Display>(t: F) -> String {
     format!("{BOLD}{t}{RESET}")
 }
 pub const GREEN: &str = "\x1B[32m";
-pub fn green<F: std::fmt::Display>(t: F) -> String {
+pub fn green<F: core::fmt::Display>(t: F) -> String {
     format!("{GREEN}{t}{RESET}")
 }
 pub const RESET: &str = "\x1B[0m\x1B[39m";

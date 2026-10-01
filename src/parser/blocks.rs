@@ -426,14 +426,14 @@ fn parse_pattern<'arena>(parser: &mut Parser<'arena>) -> Pattern<'arena> {
             let neg_number = match num {
                 Token::Int(i) => parser.parse_int(i, true, num_span),
                 Token::Float(f) => Expr::Float(-f),
-                other => panic!(),
+                _other => panic!(),
             };
             return Pattern::Constant(
                 parser.bump.alloc(neg_number),
                 (token_span.start, num_span.end).into(),
             );
         }
-        other => panic!(),
+        _other => panic!(),
     };
     Pattern::Constant(parser.bump.alloc(literal_token), token_span)
 }
@@ -490,10 +490,10 @@ fn parse_match_constructor<'arena>(
                         parser.next_token();
                     }
                     Token::RBrace => {}
-                    other => panic!(),
+                    _other => panic!(),
                 }
             }
-            other => panic!(),
+            _other => panic!(),
         }
     }
     Pattern::Constructor(PatternConstructor {

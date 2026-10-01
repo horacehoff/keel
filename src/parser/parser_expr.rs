@@ -9,7 +9,7 @@ use crate::compiler::expr::Expr;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
-use std::hint::unreachable_unchecked;
+use core::hint::unreachable_unchecked;
 
 pub fn parse_expr_with_precedence<'arena>(
     parser: &mut Parser<'arena>,

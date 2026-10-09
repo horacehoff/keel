@@ -43,7 +43,6 @@ use crate::errors::BOLD;
 use crate::errors::ErrorCtx;
 use crate::errors::RED;
 use crate::errors::RESET;
-use crate::hformat;
 use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
@@ -59,20 +58,21 @@ use compiler_data::Pools;
 use compiler_data::State;
 use compiler_data::Struct;
 use compiler_data::Variable;
+use core::cell::LazyCell;
+use core::hint::unreachable_unchecked;
 use expr::Expr;
 use expr::Span;
 use expr::code_modifies_variable;
 use fixedbitset::FixedBitSet;
 use functions::compile_function_call;
+use hybrid_format::hformat;
 use indexmap::IndexMap;
 use methods::compile_method_call;
 use registers::move_reg_to_reg;
 use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
-use core::cell::LazyCell;
 use std::collections::HashMap;
-use core::hint::unreachable_unchecked;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use type_system::DataType;
@@ -2710,11 +2710,11 @@ fn parse_toplevel<'a>(
                 let lib = Rc::new(unsafe {
                     if Path::new(base_path).extension().is_none() {
                         let path = {
-                            let arch_path = hformat!({ base_path }, ARCH_SUFFIX, ".", DYLIB_EXT);
+                            let arch_path = hformat!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
                             if Path::new(&arch_path).exists() {
                                 arch_path
                             } else {
-                                hformat!({ base_path }, ".", DYLIB_EXT)
+                                hformat!("{base_path}.{DYLIB_EXT}")
                             }
                         };
                         libloading::Library::new(path).unwrap_or_else(|_| {

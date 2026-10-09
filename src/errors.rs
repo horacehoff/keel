@@ -1,9 +1,8 @@
 use crate::compiler::compiler_data::{InstrSrc, Source};
 use crate::compiler::expr::Span;
-use crate::hformat;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
-use const_format::formatcp;
+use hybrid_format::hformat;
 #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
 use std::io::StdoutLock;
 use std::io::Write;
@@ -95,33 +94,10 @@ impl From<ErrType<'_>> for String {
             ErrType::Custom(m) => m.to_owned(),
             ErrType::InvalidFloat => "Invalid float".into(),
             ErrType::IndexOutOfBounds(length, index) => hformat!(
-                "Tried to get index ",
-                RED,
-                BOLD,
-                { index },
-                RESET,
-                " but the length is ",
-                BLUE,
-                BOLD,
-                { length },
-                RESET
+                "Tried to get index {RED}{BOLD}{index}{RESET} but the length is {BLUE}{BOLD}{length}{RESET}",
             ),
             ErrType::SliceOutOfBounds(length, idx_start, idx_end) => hformat!(
-                "Invalid range ",
-                RED,
-                BOLD,
-                { idx_start },
-                RESET,
-                "..",
-                RED,
-                BOLD,
-                { idx_end },
-                RESET,
-                " for collection with length ",
-                BLUE,
-                BOLD,
-                { length },
-                RESET
+                "Invalid range {RED}{BOLD}{idx_start}{RESET}..{RED}{BOLD}{idx_end}{RESET} for collection with length {BLUE}{BOLD}{length}{RESET}",
             ),
             ErrType::InvalidBool => "The string could not be parsed into a boolean".into(),
             ErrType::InvalidInt => "Invalid integer".into(),
@@ -162,7 +138,7 @@ impl From<ErrType<'_>> for String {
                 "String passed to dynamic library function contains an interior null byte".into()
             }
             ErrType::UnknownMapKey(key) => {
-                hformat!("Unknown key ", RED, BOLD, { key }, RESET)
+                hformat!("Unknown key {RED}{BOLD}{key}{RESET}")
             }
         }
     }
@@ -220,7 +196,7 @@ pub fn throw_error(
         .unwrap_or(&InstrSrc { instr_idx: 0, span: Span { start: 0, end: 0 }, file_id: 0 });
     let src = &ctx.sources[*file_id as usize];
     let err_message: String = t.into();
-    eprint!("{}", formatcp!("[{RED}ERROR{RESET}] "));
+    eprint!("{}", hformat!("[{RED}ERROR{RESET}] "));
     let report =
         Report::build(ReportKind::Error, (src.filename, (*start as usize)..(*end as usize)))
             .with_label(
@@ -239,7 +215,7 @@ pub fn throw_error(
 #[inline(never)]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_error(msg: &str) -> ! {
-    crate::captured_output::print(&hformat!("[", RED, "ERROR", RESET, "]", { msg }, "\n"));
+    crate::captured_output::print(&hformat!("[{RED}ERROR{RESET}] {msg}\n"));
     wasm_bindgen::throw_str("keel error");
 }
 
@@ -260,7 +236,7 @@ pub fn print_error_report<'a>(
     sources: &'a [Source],
 ) {
     let fn_cache = FnCache::new(
-        (move |id: &&str| Err(hformat!("Failed to fetch source ", { id }))) as fn(&_) -> _,
+        (move |id: &&str| Err(hformat!("Failed to fetch source {id}"))) as fn(&_) -> _,
     )
     .with_sources(
         sources.iter().map(|src| (src.filename, ariadne::Source::from(src.contents))).collect(),
@@ -275,7 +251,7 @@ pub fn print_error_report<'a>(
 
 #[cold]
 #[inline(never)]
-pub const fn crash() -> ! {
+pub fn crash() -> ! {
     #[cfg(debug_assertions)]
     panic!();
 

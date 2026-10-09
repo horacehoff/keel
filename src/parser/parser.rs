@@ -9,7 +9,6 @@ use crate::compiler::expr::VariableDeclarationExpr;
 use crate::compiler::expr::{Expr, Span, var_assign};
 use crate::compiler::type_system::TypeExpr;
 use crate::errors::BLUE;
-use crate::errors::blue;
 use crate::errors::crash;
 use ariadne::Color;
 use ariadne::Label;
@@ -25,13 +24,13 @@ use blocks::parse_struct_declare;
 use blocks::parse_try_catch_block;
 use blocks::parse_while_block;
 use bumpalo::Bump;
-use const_format::formatcp;
+use core::hint::{cold_path, unreachable_unchecked};
+use core::iter::Peekable;
+use hybrid_format::hformat;
 use lexer::parse_string;
 use logos::SpannedIter;
 use parser_expr::add_op;
 use parser_expr::parse_expr;
-use core::hint::{cold_path, unreachable_unchecked};
-use core::iter::Peekable;
 
 use lexer::Token;
 use logos::Logos;
@@ -95,16 +94,16 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         ParserErr::ModuloByZero => "Modulo by zero",
         ParserErr::IntegerNegativeExponent => "Integers cannot be raised to a negative exponent",
         ParserErr::ArgumentsMissingCommaSeparator => "Arguments must be separated by a comma",
-        ParserErr::TryBlockNoCatch => formatcp!(
+        ParserErr::TryBlockNoCatch => hformat!(
             "A {BLUE}{BOLD}try{RESET} block must have at least one {BLUE}{BOLD}catch{RESET} block"
         ),
-        ParserErr::MatchBlockNoNonWildcardArm => formatcp!(
+        ParserErr::MatchBlockNoNonWildcardArm => hformat!(
             "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one non-wildcard arm{RESET}"
         ),
         ParserErr::MatchBlockZeroArms => {
-            formatcp!("{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}")
+            hformat!("{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}")
         }
-        ParserErr::IntOutOfRange => formatcp!(
+        ParserErr::IntOutOfRange => hformat!(
             "Integers must be between {BLUE}{BOLD}-2147483648{RESET} and {BLUE}{BOLD}2147483647{RESET}"
         ),
     };
@@ -185,10 +184,9 @@ impl<'a> Parser<'a> {
         if self.peek_token() != expected {
             if expected == Token::SemiColon {
                 error_missing_semicolon(self);
-            } else {
-                let (next_token, span) = self.next_token();
-                self.error(span, ParserErr::UnexpectedToken(expected, next_token, msg));
             }
+            let (next_token, span) = self.next_token();
+            self.error(span, ParserErr::UnexpectedToken(expected, next_token, msg));
         }
         self.next_token().1
     }
@@ -478,7 +476,9 @@ fn error_unclosed_delimiter(
                         ))
                         .with_color(ariadne::Color::Red),
                 )
-                .with_help(format_args!("Add a {} here to close it", blue(expected_closer_token)));
+                .with_help(format_args!(
+                    "Add a {BLUE}{expected_closer_token}{RESET} here to close it"
+                ));
         }
 
         report.finish()
@@ -502,7 +502,7 @@ fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
                 parser.ctx.src.filename,
                 (parser.last_token_end as usize..parser.last_token_end as usize),
             ))
-            .with_message(format_args!("Add a {} here", blue(';')))
+            .with_message(hformat!("Add a {BLUE}{}{RESET} here", ';'))
             .with_color(ariadne::Color::Blue),
         )
         .with_help("All statements end with a ';'")

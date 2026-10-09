@@ -18,7 +18,7 @@ use crate::errors::red;
 use crate::errors::throw_compiler_error;
 use ariadne::Label;
 use ariadne::Report;
-use const_format::formatcp;
+use hybrid_format::hformat;
 
 #[inline(never)]
 #[cold]
@@ -104,7 +104,7 @@ pub fn error_invalid_index_type(t: &DataType, span: Span, file_idx: u16, sources
         &DataType::Int,
         t,
         span,
-        Some(format_args!("Try using the {} function", blue("int()"))),
+        Some(format_args!("Try using the {BLUE}int(){RESET} function")),
         Some(format_args!("The {} type is the only valid index type", blue(DataType::Int))),
         file_idx,
         sources,
@@ -534,7 +534,7 @@ pub fn error_invalid_obj_type(
                                 .iter()
                                 .map(std::string::ToString::to_string)
                                 .collect::<Vec<_>>()
-                                .join(formatcp!("{RESET} or {BLUE}")),
+                                .join(hformat!("{RESET} or {BLUE}")),
                             red(perceived_type)
                         ))
                         .with_color(ariadne::Color::Red),
@@ -759,17 +759,15 @@ pub fn error_struct_field_invalid_type(
             if struct_field_type == &DataType::Int
                 && (value_type == &DataType::Float || value_type == &DataType::String)
             {
-                report = report.with_help(format_args!("Try using the {} function", blue("int()")));
+                report = report.with_help(hformat!("Try using the {BLUE}int(){RESET} function"));
             } else if struct_field_type == &DataType::Float
                 && (value_type == &DataType::Int || value_type == &DataType::String)
             {
-                report =
-                    report.with_help(format_args!("Try using the {} function", blue("float()")));
+                report = report.with_help(hformat!("Try using the {BLUE}float(){RESET} function",));
             } else if struct_field_type == &DataType::Bool && value_type == &DataType::String {
-                report =
-                    report.with_help(format_args!("Try using the {} function", blue("bool()")));
+                report = report.with_help(hformat!("Try using the {BLUE}bool(){RESET} function"));
             } else if struct_field_type == &DataType::String {
-                report = report.with_help(format_args!("Try using the {} function", blue("str()")));
+                report = report.with_help(hformat!("Try using the {BLUE}str(){RESET} function"));
             }
 
             report.finish()
@@ -1401,10 +1399,10 @@ pub fn error_range_invalid_type(
                 ariadne::ReportKind::Error,
                 (src.filename, span.into()),
             )
-            .with_message(format_args!("Invalid type in range"))
+            .with_message("Invalid type in range")
             .with_label(
                 Label::new((src.filename, span.into()))
-                    .with_message(format_args!(
+                    .with_message(hformat!(
                         "Expected {}, but this expression's type is {}",
                         blue(DataType::Int),
                         red(perceived_type)
@@ -1412,14 +1410,10 @@ pub fn error_range_invalid_type(
                     .with_color(ariadne::Color::Red),
             )
             .with_note(format_args!(
-                "A range has the following syntax: {}..{},\nwhere both {} and {} are of type {}",
-                blue("start"),
-                blue("end"),
-                blue("start"),
-                blue("end"),
+                "A range has the following syntax: {BLUE}start{RESET}..{BLUE}end{RESET},\nwhere both {BLUE}start{RESET} and {BLUE}end{RESET} are of type {BLUE}{}{RESET}",
                 blue(DataType::Int)
             ))
-            .with_help(format_args!("Try using the {} function.", blue("int()")));
+            .with_help(hformat!("Try using the {BLUE}int(){RESET} function."));
 
             report.finish()
         },

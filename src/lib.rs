@@ -4,11 +4,11 @@ use crate::errors::RED;
 use crate::errors::RESET;
 use crate::repl::repl;
 use bumpalo::Bump;
-use const_format::formatcp;
+use core::hint::cold_path;
+use hybrid_format::hformat;
 #[cfg(feature = "embed")]
 use std::ffi::{CStr, CString, c_char};
 use std::fs;
-use core::hint::cold_path;
 #[cfg(feature = "embed")]
 use std::panic::catch_unwind;
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +20,6 @@ mod captured_output;
 mod compiler;
 mod data;
 mod errors;
-mod format_tests;
 mod instr;
 #[path = "./parser/parser.rs"]
 mod parser;
@@ -117,7 +116,7 @@ pub unsafe extern "C" fn keel_free_output(output: *mut c_char) {
     }
 }
 
-const ARGS: &str = formatcp!(
+const ARGS: &str = hformat!(
     "[{RED}ERROR{RESET}] Unrecognized command.
 
 Usage: keel [file.kl] [args...]
@@ -126,7 +125,7 @@ Usage: keel [file.kl] [args...]
 For more information, use the `--help` flag."
 );
 
-const HELP: &str = formatcp!(
+const HELP: &str = hformat!(
     "  \x1b[34m// /\x1b[0m
  \x1b[34m// /\x1b[0m  keel {}
 \x1b[34m// /\x1b[0m
@@ -175,7 +174,7 @@ pub fn main() {
         }
         "--version" | "-v" => {
             cold_path();
-            println!("{}", formatcp!("Keel {}", env!("CARGO_PKG_VERSION")));
+            println!("{}", hformat!("Keel {}", env!("CARGO_PKG_VERSION")));
         }
         "install" | "uninstall" | "list" => {
             // keel-pkg commands

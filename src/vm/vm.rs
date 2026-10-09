@@ -15,15 +15,15 @@ use crate::fs;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
+use core::hint::cold_path;
+use core::ops::Index;
+use core::ops::IndexMut;
 use gc::Gc;
 use lexical_core::FormattedSize;
 use memchr::memmem;
 use rustc_hash::FxBuildHasher;
 use std::collections::HashMap;
-use core::hint::cold_path;
 use std::io::Write;
-use core::ops::Index;
-use core::ops::IndexMut;
 
 #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
 use std::io::{IsTerminal, StdoutLock};
@@ -306,16 +306,15 @@ fn error_with_catch(
 ) -> usize {
     if error_handles.is_empty() {
         throw_error(err_ctx, i, err, handle);
-    } else {
-        let err_handle = error_handles.pop_unchecked();
-        unsafe {
-            args.set_len(err_handle.args_len as usize);
-            call_frames.set_len(err_handle.call_frames_len as usize);
-        }
-        r[err_handle.error_reg] =
-            Data::string(err.kind(), obj_pool, map_pool, string_pool, r, recursion_stack, gc);
-        err_handle.catch_loc as usize
     }
+    let err_handle = error_handles.pop_unchecked();
+    unsafe {
+        args.set_len(err_handle.args_len as usize);
+        call_frames.set_len(err_handle.call_frames_len as usize);
+    }
+    r[err_handle.error_reg] =
+        Data::string(err.kind(), obj_pool, map_pool, string_pool, r, recursion_stack, gc);
+    err_handle.catch_loc as usize
 }
 
 #[allow(unused_unsafe)]
@@ -565,7 +564,8 @@ pub fn execute(
                         VmType::Int => Data::int(func.cif.call::<i32>(func.ptr, &ffi_args)),
                         VmType::Float => Data::float(func.cif.call::<f64>(func.ptr, &ffi_args)),
                         VmType::String => {
-                            let ptr = func.cif.call::<*const core::ffi::c_char>(func.ptr, &ffi_args);
+                            let ptr =
+                                func.cif.call::<*const core::ffi::c_char>(func.ptr, &ffi_args);
                             if ptr.is_null() {
                                 cold_path();
                                 NULL

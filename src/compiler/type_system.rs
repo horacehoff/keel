@@ -25,10 +25,11 @@ use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::Pattern;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::VariableDeclarationExpr;
-use rustc_hash::FxHashSet;
 use core::cell::RefCell;
 use core::hint::cold_path;
 use core::hint::unreachable_unchecked;
+use hybrid_format::hformat;
+use rustc_hash::FxHashSet;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::compiler_data::Struct;
@@ -204,7 +205,7 @@ impl DataType {
             Self::String => String::from("string"),
             Self::Array(array_type) => match array_type {
                 Some(array_type) => {
-                    format!("{}[]", array_type.format_detailed(state))
+                    hformat!("{}[]", array_type.format_detailed(state))
                 }
                 None => String::from("T[]"),
             },
@@ -215,12 +216,12 @@ impl DataType {
             }
             Self::Struct(s) => {
                 let s = &state.structs[*s as usize];
-                format!(
+                hformat!(
                     "{} {{{}}}",
                     s.name,
                     s.fields
                         .iter()
-                        .map(|field| format!(
+                        .map(|field| hformat!(
                             "{}: {}",
                             field.name,
                             field.field_type.format_detailed(state)
@@ -229,18 +230,21 @@ impl DataType {
                         .join(", ")
                 )
             }
-            Self::Map(m) => format!(
+            Self::Map(m) => hformat!(
                 "{{{}: {}}}",
-                m.0.as_ref().unwrap_or(&Self::Unknown),
-                m.1.as_ref().unwrap_or(&Self::Unknown)
+                m.0.as_ref().unwrap_or(&Self::Unknown).format_detailed(state),
+                m.1.as_ref().unwrap_or(&Self::Unknown).format_detailed(state)
             ),
             Self::Fn(id) => {
                 let f = &state.functions[*id as usize];
-                format!("fn ({})", f.args.iter().map(|(a, _)| *a).collect::<Vec<&str>>().join(", "))
+                hformat!(
+                    "fn ({})",
+                    f.args.iter().map(|(a, _)| *a).collect::<Vec<&str>>().join(", ")
+                )
             }
             Self::FnSignature(sig) => {
                 let (args, ret) = sig.split_at(sig.len() - 1);
-                format!(
+                hformat!(
                     "fn({}) -> {}",
                     args.iter().map(|t| t.format_detailed(state)).collect::<Vec<_>>().join(", "),
                     ret[0].format_detailed(state)
@@ -1084,16 +1088,15 @@ impl<'arena> Expr<'arena> {
                                             ctx.file_idx,
                                             state.sources,
                                         );
-                                    } else {
-                                        error_unknown_function_in_namespace(
-                                            function_name,
-                                            state.scope(ctx.file_idx),
-                                            qualified_name.get_namespace(),
-                                            function_call.get_call_span(),
-                                            ctx.file_idx,
-                                            state.sources,
-                                        );
                                     }
+                                    error_unknown_function_in_namespace(
+                                        function_name,
+                                        state.scope(ctx.file_idx),
+                                        qualified_name.get_namespace(),
+                                        function_call.get_call_span(),
+                                        ctx.file_idx,
+                                        state.sources,
+                                    );
                                 })
                         };
 

@@ -40,8 +40,8 @@ use crate::data::NULL;
 use crate::data::TRUE;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
+use crate::errors::ERROR_PREFIX;
 use crate::errors::ErrorCtx;
-use crate::errors::RED;
 use crate::errors::RESET;
 use crate::instr::LibFunc;
 use crate::parser;
@@ -3116,16 +3116,15 @@ pub fn compile<'arena>(
         });
     }
     let program_instructions = compile_expr(
-        state.functions
+        state
+            .functions
             .iter()
             .find(|func| func.name == "main" && func.src_file_idx == 0)
             .unwrap_or_else(|| {
                 #[cfg(target_arch = "wasm32")]
                 wasm_error("Cannot find main function");
 
-                eprintln!(
-                    "--------------\n{RED}KEEL RUNTIME ERROR:{RESET}\nCannot find {BLUE}{BOLD}main{RESET} function\n--------------",
-                );
+                eprintln!("{ERROR_PREFIX} Cannot find {BLUE}{BOLD}main{RESET} function");
                 std::process::exit(1);
             })
             .code,
@@ -3135,7 +3134,7 @@ pub fn compile<'arena>(
     );
     instructions.reserve_exact(program_instructions.len() + 1);
     instructions.extend(program_instructions);
-    instructions.push(Instr::Halt(0));
+    instructions.push(Instr::Halt(u16::MAX));
     fn_registers.push(Vec::new());
 
     #[cfg(debug_assertions)]

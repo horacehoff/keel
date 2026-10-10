@@ -42,6 +42,7 @@ Error: Incompatible types
 - `index_out_of_bounds`
 - `slice_out_of_bounds`
 - `unknown_map_key`
+- `integer_negative_exponent` (will be available with the release of Keel 0.5)
 
 ### Runtime parsing
 

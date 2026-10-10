@@ -8,6 +8,7 @@ use super::State;
 use super::Variable;
 use crate::compiler::compiler_data::Struct;
 use crate::compiler::compiler_data::StructField;
+use crate::errors::ARIADNE_ERROR_KIND;
 use crate::errors::BLUE;
 use crate::errors::GREEN;
 use crate::errors::RESET;
@@ -33,7 +34,7 @@ pub fn error_array_diff_types(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, array_span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, array_span.into()))
                 .with_message("Invalid array types")
                 .with_label(
                     Label::new((src.filename, array_span.into()))
@@ -72,7 +73,7 @@ pub fn error_invalid_type(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Invalid type")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -123,7 +124,7 @@ pub fn error_invalid_c_type(t: &DataType, span: Span, file_idx: u16, sources: &[
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Cannot pass type through FFI")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -158,7 +159,7 @@ pub fn error_function_needs_args_typed(
         &|| {
             let src = &sources[file_idx as usize];
             let fn_src = &sources[fn_decl_span.1 as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Cannot use function as a value")
                 .with_label(
                     Label::new((fn_src.filename, fn_decl_span.0.into()))
@@ -183,7 +184,7 @@ pub fn error_division_by_zero(modulo: bool, span: Span, file_idx: u16, sources: 
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message(format_args!(
                     "{} by zero",
                     if modulo { "Modulo" } else { "Division" }
@@ -215,7 +216,7 @@ pub fn error_cannot_push_type_to_array(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message(format_args!(
                     "Cannot insert {} in {}",
                     red(elem_type),
@@ -253,7 +254,7 @@ pub fn error_type_not_indexable(
         &|| {
             let src = &sources[file_idx as usize];
             let msg = if iterator_error { "iterated on" } else { "indexed" };
-            Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Invalid type")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -280,7 +281,7 @@ pub fn error_cannot_read_file(span: Span, file_idx: u16, sources: &[Source]) -> 
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Cannot read file")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -299,7 +300,7 @@ pub fn error_cannot_load_dynlib(span: Span, file_idx: u16, sources: &[Source]) -
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Cannot load dynamic library")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -324,7 +325,7 @@ pub fn error_cannot_find_dynlib_symbol(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, dynlib_span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, dynlib_span.into()))
                 .with_message("Cannot find symbol in dynamic library")
                 .with_label(
                     Label::new((src.filename, dynlib_span.into()))
@@ -358,7 +359,7 @@ pub fn error_map_diff_types(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, map_span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, map_span.into()))
                 .with_message("Invalid map types")
                 .with_label(
                     Label::new((src.filename, map_span.into()))
@@ -394,7 +395,7 @@ pub fn error_unknown_struct(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, struct_span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, struct_span.into()))
                 .with_message("Unknown struct")
                 .with_label(
                     Label::new((src.filename, struct_span.into()))
@@ -419,7 +420,7 @@ pub fn error_struct_no_such_field(
         &|| {
             let src = &sources[file_idx as usize];
             let report =
-                Report::build(ariadne::ReportKind::Error, (src.filename, struct_field_span.into()))
+                Report::build(ARIADNE_ERROR_KIND, (src.filename, struct_field_span.into()))
                     .with_message("Unknown struct field")
                     .with_label(
                         Label::new((src.filename, struct_span.into()))
@@ -452,25 +453,23 @@ pub fn error_struct_missing_fields(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, struct_literal_span.into()),
-            )
-            .with_message("Missing struct fields")
-            .with_label(
-                Label::new((src.filename, struct_span.into()))
-                    .with_message(format_args!("Struct defined here"))
-                    .with_color(ariadne::Color::Blue),
-            )
-            .with_label(
-                Label::new((src.filename, struct_literal_span.into()))
-                    .with_message(format_args!(
-                        "This is missing field{} {}",
-                        if missing_fields.len() > 1 { "s" } else { "" },
-                        missing_fields.iter().map(blue).collect::<Vec<_>>().join(", ")
-                    ))
-                    .with_color(ariadne::Color::Red),
-            );
+            let report =
+                Report::build(ARIADNE_ERROR_KIND, (src.filename, struct_literal_span.into()))
+                    .with_message("Missing struct fields")
+                    .with_label(
+                        Label::new((src.filename, struct_span.into()))
+                            .with_message(format_args!("Struct defined here"))
+                            .with_color(ariadne::Color::Blue),
+                    )
+                    .with_label(
+                        Label::new((src.filename, struct_literal_span.into()))
+                            .with_message(format_args!(
+                                "This is missing field{} {}",
+                                if missing_fields.len() > 1 { "s" } else { "" },
+                                missing_fields.iter().map(blue).collect::<Vec<_>>().join(", ")
+                            ))
+                            .with_color(ariadne::Color::Red),
+                    );
 
             report.finish()
         },
@@ -490,7 +489,7 @@ pub fn check_args_length(
         throw_compiler_error(
             &|| {
                 let src = &sources[file_idx as usize];
-                let report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+                let report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                     .with_message("Invalid argument count")
                     .with_label(
                         Label::new((src.filename, span.into()))
@@ -523,7 +522,7 @@ pub fn error_invalid_obj_type(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            let report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Invalid type")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -562,29 +561,26 @@ pub fn check_args_user_fn(
             &|| {
                 let src = &state.sources[file_idx as usize];
                 let fn_src = &state.sources[fn_decl_span.1 as usize];
-                let mut report = Report::build(
-                    ariadne::ReportKind::Error,
-                    (src.filename, span.into()),
-                )
-                .with_message("Invalid argument count")
-                .with_label(
-                    Label::new((fn_src.filename, fn_decl_span.0.into()))
-                        .with_message(format_args!(
-                            "The function {} is defined here",
-                            blue(fn_name)
-                        ))
-                        .with_color(ariadne::Color::Blue),
-                )
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "Function {} expects {} arguments but {} arguments were supplied",
-                            blue(fn_name),
-                            bold(expected_args_len),
-                            bold(args.len())
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
+                let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
+                    .with_message("Invalid argument count")
+                    .with_label(
+                        Label::new((fn_src.filename, fn_decl_span.0.into()))
+                            .with_message(format_args!(
+                                "The function {} is defined here",
+                                blue(fn_name)
+                            ))
+                            .with_color(ariadne::Color::Blue),
+                    )
+                    .with_label(
+                        Label::new((src.filename, span.into()))
+                            .with_message(format_args!(
+                                "Function {} expects {} arguments but {} arguments were supplied",
+                                blue(fn_name),
+                                bold(expected_args_len),
+                                bold(args.len())
+                            ))
+                            .with_color(ariadne::Color::Red),
+                    );
 
                 if args_len > expected_args_len {
                     let span: Span = (
@@ -630,7 +626,7 @@ pub fn check_args_range(
             &|| {
                 let src = &sources[file_idx as usize];
                 let mut report = Report::build(
-                    ariadne::ReportKind::Error,
+                    ARIADNE_ERROR_KIND,
                     (src.filename, span.into()),
                 )
                 .with_message("Invalid argument count")
@@ -688,18 +684,17 @@ pub fn error_struct_unknown_field(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report =
-                Report::build(ariadne::ReportKind::Error, (src.filename, field_span.into()))
-                    .with_message("Unknown field")
-                    .with_label(
-                        Label::new((src.filename, field_span.into()))
-                            .with_message(format_args!(
-                                "The field {} isn't defined in struct {}",
-                                red(field),
-                                blue(struct_name)
-                            ))
-                            .with_color(ariadne::Color::Red),
-                    );
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, field_span.into()))
+                .with_message("Unknown field")
+                .with_label(
+                    Label::new((src.filename, field_span.into()))
+                        .with_message(format_args!(
+                            "The field {} isn't defined in struct {}",
+                            red(field),
+                            blue(struct_name)
+                        ))
+                        .with_color(ariadne::Color::Red),
+                );
 
             let similar_field = find_closest_str(field, fields.iter().map(|field| field.name));
             if let Some(similar_field) = similar_field {
@@ -735,7 +730,7 @@ pub fn error_struct_field_invalid_type(
         &|| {
             let src = &sources[file_idx as usize];
             let mut report =
-                Report::build(ariadne::ReportKind::Error, (src.filename, struct_field_span.into()))
+                Report::build(ARIADNE_ERROR_KIND, (src.filename, struct_field_span.into()))
                     .with_message("Incompatible types")
                     .with_label(
                         Label::new((src.filename, struct_field_span.into()))
@@ -826,7 +821,7 @@ pub fn error_unknown_variable(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Unknown variable")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -864,7 +859,7 @@ pub fn error_unknown_function(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Unknown function")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -899,7 +894,7 @@ pub fn error_unknown_namespace(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            let report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Unknown namespace")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -932,7 +927,7 @@ pub fn error_unknown_function_in_namespace(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message("Unknown function in namespace")
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -969,21 +964,22 @@ pub fn error_function_already_defined(
         &|| {
             let src = &sources[file_idx as usize];
             let fn_src = &sources[func.src_file_idx as usize];
-            let report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, redeclaration_span.into()),
-            )
-            .with_message(format_args!("Function already exists"))
-            .with_label(
-                Label::new((fn_src.filename, func.name_span.into()))
-                    .with_message(format_args!("Already defined here"))
-                    .with_color(ariadne::Color::Blue),
-            )
-            .with_label(
-                Label::new((src.filename, redeclaration_span.into()))
-                    .with_message(format_args!("Function {} is already defined", blue(func.name)))
-                    .with_color(ariadne::Color::Red),
-            );
+            let report =
+                Report::build(ARIADNE_ERROR_KIND, (src.filename, redeclaration_span.into()))
+                    .with_message(format_args!("Function already exists"))
+                    .with_label(
+                        Label::new((fn_src.filename, func.name_span.into()))
+                            .with_message(format_args!("Already defined here"))
+                            .with_color(ariadne::Color::Blue),
+                    )
+                    .with_label(
+                        Label::new((src.filename, redeclaration_span.into()))
+                            .with_message(format_args!(
+                                "Function {} is already defined",
+                                blue(func.name)
+                            ))
+                            .with_color(ariadne::Color::Red),
+                    );
 
             report.finish()
         },
@@ -1003,21 +999,22 @@ pub fn error_struct_already_defined(
         &|| {
             let src = &sources[file_idx as usize];
             let fn_src = &sources[s.src_file_idx as usize];
-            let report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, redeclaration_span.into()),
-            )
-            .with_message(format_args!("Struct already exists"))
-            .with_label(
-                Label::new((fn_src.filename, s.name_span.into()))
-                    .with_message(format_args!("Already defined here"))
-                    .with_color(ariadne::Color::Blue),
-            )
-            .with_label(
-                Label::new((src.filename, redeclaration_span.into()))
-                    .with_message(format_args!("Struct {} is already defined", blue(s.name)))
-                    .with_color(ariadne::Color::Red),
-            );
+            let report =
+                Report::build(ARIADNE_ERROR_KIND, (src.filename, redeclaration_span.into()))
+                    .with_message(format_args!("Struct already exists"))
+                    .with_label(
+                        Label::new((fn_src.filename, s.name_span.into()))
+                            .with_message(format_args!("Already defined here"))
+                            .with_color(ariadne::Color::Blue),
+                    )
+                    .with_label(
+                        Label::new((src.filename, redeclaration_span.into()))
+                            .with_message(format_args!(
+                                "Struct {} is already defined",
+                                blue(s.name)
+                            ))
+                            .with_color(ariadne::Color::Red),
+                    );
 
             report.finish()
         },
@@ -1037,24 +1034,22 @@ pub fn error_global_already_defined(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, redeclaration_span.into()),
-            )
-            .with_message(format_args!("Global variable already defined"))
-            .with_label(
-                Label::new((src.filename, initial_decl_span.into()))
-                    .with_message("Already declared here")
-                    .with_color(ariadne::Color::Red),
-            )
-            .with_label(
-                Label::new((src.filename, redeclaration_span.into()))
-                    .with_message(format_args!(
-                        "A second global variable with the name {} is declared here",
-                        blue(global_name)
-                    ))
-                    .with_color(ariadne::Color::Red),
-            );
+            let report =
+                Report::build(ARIADNE_ERROR_KIND, (src.filename, redeclaration_span.into()))
+                    .with_message(format_args!("Global variable already defined"))
+                    .with_label(
+                        Label::new((src.filename, initial_decl_span.into()))
+                            .with_message("Already declared here")
+                            .with_color(ariadne::Color::Red),
+                    )
+                    .with_label(
+                        Label::new((src.filename, redeclaration_span.into()))
+                            .with_message(format_args!(
+                                "A second global variable with the name {} is declared here",
+                                blue(global_name)
+                            ))
+                            .with_color(ariadne::Color::Red),
+                    );
 
             report.finish()
         },
@@ -1076,10 +1071,8 @@ pub fn error_op(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report = Report::build(
-                ariadne::ReportKind::Error,
-                (src.filename, span_l.extend(span_r).into()),
-            );
+            let mut report =
+                Report::build(ARIADNE_ERROR_KIND, (src.filename, span_l.extend(span_r).into()));
 
             if (op == "-" && l == &DataType::Null) || op == "!" {
                 report = report
@@ -1186,7 +1179,7 @@ pub fn error_unknown_type(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message(format_args!("Unknown type {}", red(t)))
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -1221,7 +1214,7 @@ pub fn error_unknown_type_with_namespace(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report = Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message(format_args!("Unknown type {}", red(t)))
                 .with_label(
                     Label::new((src.filename, span.into()))
@@ -1255,7 +1248,7 @@ pub fn error_duplicate_map_key(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            Report::build(ariadne::ReportKind::Error, (src.filename, span.into()))
+            Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
                 .with_message(format_args!("Key is defined more than once in map"))
                 .with_label(
                     Label::new((src.filename, key_first_span.into()))
@@ -1285,7 +1278,7 @@ pub fn error_not_literal_map_key(
         &|| {
             let src = &sources[file_idx as usize];
             Report::build(
-                ariadne::ReportKind::Error,
+                ARIADNE_ERROR_KIND,
                 (src.filename, map_span.into()),
             )
             .with_message(format_args!("Non-literal map key"))
@@ -1317,9 +1310,8 @@ pub fn error_function_arg_invalid_type(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report =
-                Report::build(ariadne::ReportKind::Error, (src.filename, arg_span.into()))
-                    .with_message(format_args!("Invalid argument type"));
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, arg_span.into()))
+                .with_message(format_args!("Invalid argument type"));
 
             if let Some((fn_span, fn_file_idx)) = fn_decl_span {
                 let fn_src = &sources[fn_file_idx as usize];
@@ -1361,9 +1353,8 @@ pub fn error_function_arg_invalid_type_multiple(
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];
-            let mut report =
-                Report::build(ariadne::ReportKind::Error, (src.filename, arg_span.into()))
-                    .with_message(format_args!("Invalid argument type"));
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, arg_span.into()))
+                .with_message(format_args!("Invalid argument type"));
 
             if let Some((fn_span, fn_file_idx)) = fn_decl_span {
                 let fn_src = &sources[fn_file_idx as usize];
@@ -1396,7 +1387,7 @@ pub fn error_range_invalid_type(
         &|| {
             let src = &sources[file_idx as usize];
             let report = Report::build(
-                ariadne::ReportKind::Error,
+                ARIADNE_ERROR_KIND,
                 (src.filename, span.into()),
             )
             .with_message("Invalid type in range")

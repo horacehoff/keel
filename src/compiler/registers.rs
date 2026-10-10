@@ -310,7 +310,7 @@ impl Instr {
                     f(b);
                 }
             }
-            Self::Halt(x) if x != 0 => f(x),
+            Self::Halt(x) if x != u16::MAX => f(x),
 
             Self::CloneArray(src, _, _) | Self::CloneStruct(src, _) | Self::CloneMap(src, _) => {
                 f(src);

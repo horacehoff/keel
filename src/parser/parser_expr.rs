@@ -118,7 +118,7 @@ pub fn add_op<'arena>(
             (lhs, rhs) => Expr::Div(parser.bump.alloc(lhs), parser.bump.alloc(rhs), span_l, span_r),
         },
         Token::OpMod => match (lhs, rhs) {
-            (_, Expr::Int(0) | Expr::Float(0.0)) => {
+            (_, Expr::Int(0)) => {
                 cold_path();
                 parser.error(span_l.extend(span_r), ParserErr::ModuloByZero);
             }

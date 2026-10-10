@@ -1,5 +1,6 @@
 use crate::compiler::compile;
 use crate::errors::BOLD;
+use crate::errors::ERROR_PREFIX;
 use crate::errors::RED;
 use crate::errors::RESET;
 use crate::repl::repl;
@@ -117,7 +118,7 @@ pub unsafe extern "C" fn keel_free_output(output: *mut c_char) {
 }
 
 const ARGS: &str = hformat!(
-    "[{RED}ERROR{RESET}] Unrecognized command.
+    "{ERROR_PREFIX} Unrecognized command.
 
 Usage: keel [file.kl] [args...]
        keel <COMMAND>
@@ -155,7 +156,7 @@ Commands:
 #[allow(clippy::missing_panics_doc)]
 pub fn main() {
     std::panic::set_hook(Box::new(|info| {
-        eprintln!("{RED}Error:{RESET} {}", info.payload_as_str().unwrap_or(&info.to_string()));
+        eprintln!("{ERROR_PREFIX} {}", info.payload_as_str().unwrap_or(&info.to_string()));
     }));
 
     let mut args = std::env::args().skip(1);
@@ -193,7 +194,7 @@ pub fn main() {
                 use std::os::unix::process::CommandExt;
                 let e = std::process::Command::new(keel_pkg_path).args(keel_pkg_args).exec();
                 eprintln!(
-                    "Failed to redirect to keel-pkg: {e}. Report this bug at github.com/horacehoff/keel/issues"
+                    "{ERROR_PREFIX} Failed to redirect to keel-pkg: {e}. Report this bug at github.com/horacehoff/keel/issues"
                 );
                 std::process::exit(1);
             }
@@ -215,7 +216,7 @@ pub fn main() {
             let filename = unsafe { args.next().unwrap_unchecked() };
             let contents = fs::read_to_string(&filename).unwrap_or_else(|_| {
                 cold_path();
-                eprintln!("[{RED}ERROR{RESET}] Failed to read {RED}{BOLD}{filename}{RESET}.");
+                eprintln!("{ERROR_PREFIX} Failed to read {RED}{BOLD}{filename}{RESET}.");
                 std::process::exit(1);
             });
             let bump = Bump::with_capacity(contents.len() * 5);
@@ -230,7 +231,7 @@ pub fn main() {
         file => {
             let contents = fs::read_to_string(file).unwrap_or_else(|_| {
                 cold_path();
-                eprintln!("[{RED}ERROR{RESET}] Failed to read {RED}{BOLD}{file}{RESET}.");
+                eprintln!("{ERROR_PREFIX} Failed to read {RED}{BOLD}{file}{RESET}.");
                 std::process::exit(1);
             });
             let bump = Bump::with_capacity(contents.len() * 5);

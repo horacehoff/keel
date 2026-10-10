@@ -8,12 +8,12 @@ use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::VariableDeclarationExpr;
 use crate::compiler::expr::{Expr, Span, var_assign};
 use crate::compiler::type_system::TypeExpr;
+use crate::errors::ARIADNE_ERROR_KIND;
 use crate::errors::BLUE;
 use crate::errors::crash;
 use ariadne::Color;
 use ariadne::Label;
 use ariadne::Report;
-use ariadne::ReportKind;
 use blocks::parse_eval_block;
 use blocks::parse_for_loop;
 use blocks::parse_function;
@@ -107,14 +107,15 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
             "Integers must be between {BLUE}{BOLD}-2147483648{RESET} and {BLUE}{BOLD}2147483647{RESET}"
         ),
     };
-    eprintln!("{RED}KEEL ERROR{RESET}");
-    let report = Report::build(ReportKind::Error, (src.filename, (start as usize)..(end as usize)))
-        .with_label(
-            Label::new((src.filename, (start as usize)..(end as usize)))
-                .with_message(err_message)
-                .with_color(Color::Red),
-        )
-        .finish();
+    let report =
+        Report::build(ARIADNE_ERROR_KIND, (src.filename, (start as usize)..(end as usize)))
+            .with_label(
+                Label::new((src.filename, (start as usize)..(end as usize)))
+                    .with_message(err_message)
+                    .with_color(Color::Red),
+            )
+            .with_message(err_message)
+            .finish();
 
     crate::errors::print_error_report(&report, core::slice::from_ref(src));
     crash()
@@ -448,16 +449,14 @@ fn error_unclosed_delimiter(
     end: Option<(Token, Span)>,
 ) -> ! {
     parser.throw_parser_err(|| {
-        let mut report = Report::build(
-            ariadne::ReportKind::Error,
-            (parser.ctx.src.filename, opener_span.into()),
-        )
-        .with_message("Unclosed delimiter")
-        .with_label(
-            Label::new((parser.ctx.src.filename, opener_span.into()))
-                .with_message(format_args!("This {opener_token} is never closed"))
-                .with_color(ariadne::Color::Red),
-        );
+        let mut report =
+            Report::build(ARIADNE_ERROR_KIND, (parser.ctx.src.filename, opener_span.into()))
+                .with_message("Unclosed delimiter")
+                .with_label(
+                    Label::new((parser.ctx.src.filename, opener_span.into()))
+                        .with_message(format_args!("This {opener_token} is never closed"))
+                        .with_color(ariadne::Color::Red),
+                );
 
         if let Some((actual_closer_token, actual_closer_token_span)) = end {
             report = report.with_label(
@@ -490,7 +489,7 @@ fn error_unclosed_delimiter(
 fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
     parser.throw_parser_err(|| {
         Report::build(
-            ariadne::ReportKind::Error,
+            ARIADNE_ERROR_KIND,
             (
                 parser.ctx.src.filename,
                 (parser.last_token_end as usize..parser.last_token_end as usize),

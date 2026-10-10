@@ -150,7 +150,7 @@ pub fn builtin_functions<'arena>(
         "exit" => {
             check_args_range(args, 0, 1, name, arg_spans, ctx.file_idx, state.sources, span);
             let halt_code = if args.is_empty() {
-                0
+                u16::MAX
             } else {
                 check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::Int]);
                 args[0].compile(ctx, state, output, None, false, true).unwrap_id()

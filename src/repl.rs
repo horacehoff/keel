@@ -7,7 +7,7 @@ use std::io::{Write, stdin, stdout};
 pub fn repl() {
     println!("{BLUE}KEEL {} -- REPL (read-eval-print-loop){RESET}", env!("CARGO_PKG_VERSION"));
 
-    let exe = std::env::current_exe().expect("{RED}[ERROR]{RESET} Cannot find keel binary path");
+    let exe = std::env::current_exe().expect("Cannot find keel binary path");
     let tmp = std::env::temp_dir().join("keel_repl_tmp.kl");
 
     let mut all_lines: Vec<String> = Vec::with_capacity(1);
@@ -18,7 +18,9 @@ pub fn repl() {
         let mut s = String::new();
         print!("> ");
         let _ = stdout().flush();
-        stdin().read_line(&mut s).expect("{RED}[ERROR]{RESET} Incorrect input string");
+        if stdin().read_line(&mut s).expect("Incorrect input string") == 0 {
+            break;
+        };
         if s.ends_with('\n') {
             s.pop();
         }
@@ -50,13 +52,12 @@ pub fn repl() {
         contents.push('\n');
         contents.push('}');
 
-        std::fs::write(&tmp, &contents)
-            .expect("{RED}[ERROR]{RESET} Cannot write to temporary file");
+        std::fs::write(&tmp, &contents).expect("Cannot write to temporary file");
 
         let output = std::process::Command::new(&exe)
             .arg(tmp.to_str().unwrap())
             .output()
-            .expect("{RED}[ERROR]{RESET} Failed to execute Keel");
+            .expect("Failed to execute Keel");
 
         std::fs::remove_file(&tmp).unwrap();
 

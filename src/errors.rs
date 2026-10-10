@@ -7,6 +7,9 @@ use hybrid_format::hformat;
 use std::io::StdoutLock;
 use std::io::Write;
 
+pub const ARIADNE_ERROR_KIND: ReportKind<'static> = ReportKind::Custom("[ERROR]", Color::Red);
+pub const ERROR_PREFIX: &str = hformat!("{RED}[ERROR]:{RESET}");
+
 pub const BLUE: &str = "\x1B[94m";
 pub fn blue<F: core::fmt::Display>(t: F) -> String {
     format!("{BLUE}{t}{RESET}")
@@ -86,6 +89,7 @@ pub enum ErrType<'a> {
     NullByteInString,
     DivisionByZero,
     ModuloByZero,
+    IntegerNegativeExponent,
 }
 
 impl From<ErrType<'_>> for String {
@@ -140,6 +144,9 @@ impl From<ErrType<'_>> for String {
             ErrType::UnknownMapKey(key) => {
                 hformat!("Unknown key {RED}{BOLD}{key}{RESET}")
             }
+            ErrType::IntegerNegativeExponent => {
+                "Integers cannot be raised to a negative exponent".into()
+            }
         }
     }
 }
@@ -172,6 +179,7 @@ impl ErrType<'_> {
             ErrType::ModuloByZero => "modulo_by_zero",
             ErrType::NullByteInString => "null_byte_in_string",
             ErrType::UnknownMapKey(_) => "unknown_map_key",
+            ErrType::IntegerNegativeExponent => "integer_negative_exponent",
         }
     }
 }
@@ -196,14 +204,14 @@ pub fn throw_error(
         .unwrap_or(&InstrSrc { instr_idx: 0, span: Span { start: 0, end: 0 }, file_id: 0 });
     let src = &ctx.sources[*file_id as usize];
     let err_message: String = t.into();
-    eprint!("{}", hformat!("[{RED}ERROR{RESET}] "));
     let report =
-        Report::build(ReportKind::Error, (src.filename, (*start as usize)..(*end as usize)))
+        Report::build(ARIADNE_ERROR_KIND, (src.filename, (*start as usize)..(*end as usize)))
             .with_label(
                 Label::new((src.filename, (*start as usize)..(*end as usize)))
                     .with_message(err_message.as_str())
                     .with_color(Color::Red),
             )
+            .with_message(err_message.as_str())
             .finish();
 
     print_error_report(&report, &ctx.sources);
@@ -215,7 +223,7 @@ pub fn throw_error(
 #[inline(never)]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_error(msg: &str) -> ! {
-    crate::captured_output::print(&hformat!("[{RED}ERROR{RESET}] {msg}\n"));
+    crate::captured_output::print(&hformat!("{ERROR_PREFIX} {msg}\n"));
     wasm_bindgen::throw_str("keel error");
 }
 

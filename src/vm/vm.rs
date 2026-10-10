@@ -708,7 +708,11 @@ pub fn execute(
                 r[dest] = (r[o1].as_float().powf(r[o2].as_float())).into();
             }
             Instr::PowInt(o1, o2, dest) => {
-                r[dest] = Data::int(r[o1].as_int().pow(r[o2].as_int() as u32));
+                let e = r[o2].as_int();
+                if e < 0 {
+                    error_with_catch!(ErrType::IntegerNegativeExponent);
+                }
+                r[dest] = Data::int(r[o1].as_int().pow(e as u32));
             }
             Instr::IncInt(reg) => r[reg].inc_int(),
             Instr::DecInt(reg) => r[reg].dec_int(),
@@ -929,7 +933,7 @@ pub fn execute(
                 let arr_id = r[array_reg_id].as_array();
                 let array = &obj_pool[arr_id];
                 if (idx_end as usize) > array.len()
-                    || (idx_start as usize) >= array.len()
+                    || (idx_start as usize) > array.len()
                     || idx_start > idx_end
                 {
                     error_with_catch!(ErrType::SliceOutOfBounds(array.len(), idx_start, idx_end));
@@ -963,7 +967,7 @@ pub fn execute(
                 let idx_end = r[args.pop_unchecked()].as_int();
                 let s = r[str_reg_id].as_str(str_pool);
                 if (idx_end as usize) > s.len()
-                    || (idx_start as usize) >= s.len()
+                    || (idx_start as usize) > s.len()
                     || idx_start > idx_end
                 {
                     error_with_catch!(ErrType::SliceOutOfBounds(s.len(), idx_start, idx_end));
@@ -1092,7 +1096,7 @@ pub fn execute(
             }
             Instr::CallLibFunc(LibFunc::Repeat, tgt, dest) => {
                 let reg = r[tgt];
-                let repeat_count = r[args.pop_unchecked()].as_int() as usize;
+                let repeat_count = r[args.pop_unchecked()].as_int().max(0) as usize;
                 r[dest] = if reg.is_string() {
                     string!(reg.as_str(str_pool).repeat(repeat_count))
                 } else {
@@ -1411,7 +1415,7 @@ pub fn execute(
                 handle.flush().unwrap();
 
                 #[cfg(not(target_arch = "wasm32"))]
-                if code != 0 {
+                if code != u16::MAX {
                     std::process::exit(r[code].as_int());
                 }
 

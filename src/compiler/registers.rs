@@ -117,6 +117,7 @@ impl Instr {
             | Self::NotEqJmp(_, _, _)
             | Self::ObjNotEqJmp(_, _, _)
             | Self::StrNotEqJmp(_, _, _)
+            | Self::IsNotTypeJmp {..}
             | Self::EqJmp(_, _, _)
             | Self::ObjEqJmp(_, _, _)
             | Self::StrEqJmp(_, _, _)
@@ -289,6 +290,7 @@ impl Instr {
             | Self::NegInt(a, _)
             | Self::CallLibFunc(_, a, _)
             | Self::IsType(a, _, _)
+            | Self::IsNotTypeJmp { src_reg_id: a, .. }
             | Self::Print(a)
             | Self::StoreFuncArg(a)
             | Self::Return(a)

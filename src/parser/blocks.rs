@@ -12,15 +12,13 @@ use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::IntForLoopExpr;
 use crate::compiler::expr::MatchArm;
 use crate::compiler::expr::MatchExpr;
-use crate::compiler::expr::Pattern;
-use crate::compiler::expr::PatternConstructor;
-use crate::compiler::expr::PatternConstructorField;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::Span;
 use crate::parser::Parser;
 use crate::parser::TypeExpr;
 use crate::parser::parse_code;
 use crate::parser::parse_type;
+use crate::parser::patterns::parse_pattern;
 
 // call right after peeking Token::If
 pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'arena> {
@@ -377,14 +375,16 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             end = parser.next_token().1.end;
             break;
         }
-        let is_arm_wildcard = peek_token == Token::Identifier("_");
-        if is_arm_wildcard && arms.is_empty() {
-            cold_path();
-            let span = (start, parser.peek_token_span().end).into();
-            parser.error(span, ParserErr::MatchBlockNoNonWildcardArm);
-        }
         let arm_start = parser.peek_token_span().start;
         let pattern = parse_pattern(parser);
+        let (guard, guard_span) = if parser.peek_token() == Token::If {
+            parser.next_token();
+            let guard_start = parser.peek_token_span().start;
+            let guard = parse_expr(parser);
+            (Some(&*parser.bump.alloc(guard)), (guard_start, parser.last_token_end).into())
+        } else {
+            (None, Span::empty())
+        };
         parser.next_token_expect(
             Token::FatArrow,
             "Match arms need to be a pattern followed by '=>' and a block",
@@ -393,113 +393,15 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
         let arm_end = parser.last_token_end;
         arms.push(MatchArm {
             pattern,
-            guard: None,
+            guard,
+            guard_span,
             code: parser.bump.alloc_slice_copy(&arm_code),
             span: (arm_start, arm_end).into(),
         });
-        if is_arm_wildcard {
-            end = parser.peek_token_span().end;
-            parser.next_token_expect(Token::RBrace, "");
-            break;
-        }
     }
     Expr::Match(MatchExpr {
         obj: parser.bump.alloc(match_obj),
         arms: parser.bump.alloc_slice_copy(&arms),
         span: (start, end).into(),
-    })
-}
-
-fn parse_pattern<'arena>(parser: &mut Parser<'arena>) -> Pattern<'arena> {
-    let (token, token_span) = parser.next_token();
-    let literal_token = match token {
-        Token::Identifier("_") => return Pattern::Wildcard(token_span),
-        Token::Identifier(id) => return parse_match_constructor(parser, id, token_span),
-        Token::Int(i) => parser.parse_int(i, false, token_span),
-        Token::Float(f) => Expr::Float(f),
-        Token::String(s) => Expr::String(parse_string(s, parser.bump).into_bump_str()),
-        Token::True => Expr::Bool(true),
-        Token::False => Expr::Bool(false),
-        Token::Null => Expr::Null,
-        Token::OpSub => {
-            let (num, num_span) = parser.next_token();
-            let neg_number = match num {
-                Token::Int(i) => parser.parse_int(i, true, num_span),
-                Token::Float(f) => Expr::Float(-f),
-                _other => panic!(),
-            };
-            return Pattern::Constant(
-                parser.bump.alloc(neg_number),
-                (token_span.start, num_span.end).into(),
-            );
-        }
-        _other => panic!(),
-    };
-    Pattern::Constant(parser.bump.alloc(literal_token), token_span)
-}
-
-fn parse_match_constructor<'arena>(
-    parser: &mut Parser<'arena>,
-    initial: &'arena str,
-    initial_span: Span,
-) -> Pattern<'arena> {
-    let mut namespace: Vec<&str> = Vec::with_capacity(2);
-    namespace.push(initial);
-    let mut end = initial_span.end;
-    while parser.peek_token() == Token::DoubleColon {
-        parser.next_token();
-        let (token, token_span) = parser.next_token();
-        let Token::Identifier(path_element) = token else { panic!() };
-        namespace.push(path_element);
-        end = token_span.end;
-    }
-    let namespace = QualifiedName::new(&namespace, parser.bump);
-    if parser.peek_token() != Token::LBrace {
-        return Pattern::Identifier(namespace, (initial_span.start, end).into());
-    }
-    parser.next_token();
-    let mut constructor_fields: Vec<PatternConstructorField> = Vec::with_capacity(2);
-    let mut fill_the_rest = false;
-    let end: u32;
-    loop {
-        let (token, t_span) = parser.next_token();
-        match token {
-            Token::RBrace => {
-                end = t_span.end;
-                break;
-            }
-            Token::RangeDot => {
-                fill_the_rest = true;
-                end = parser.next_token_expect(Token::RBrace, "").end;
-                break;
-            }
-            Token::Identifier(id) => {
-                let pattern = if parser.peek_token() == Token::Colon {
-                    parser.next_token();
-                    parse_pattern(parser)
-                } else {
-                    Pattern::Identifier(QualifiedName::new(&[id], parser.bump), t_span)
-                };
-                constructor_fields.push(PatternConstructorField {
-                    name: id,
-                    pattern,
-                    span: (t_span.start, parser.last_token_end).into(),
-                });
-                match parser.peek_token() {
-                    Token::Comma => {
-                        parser.next_token();
-                    }
-                    Token::RBrace => {}
-                    _other => panic!(),
-                }
-            }
-            _other => panic!(),
-        }
-    }
-    Pattern::Constructor(PatternConstructor {
-        qualified_name: namespace,
-        fields: parser.bump.alloc_slice_copy(&constructor_fields),
-        fill_the_rest,
-        span: (initial_span.start, end).into(),
     })
 }

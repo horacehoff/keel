@@ -1400,6 +1400,17 @@ pub fn execute(
                 let error_data = r[error_reg_id];
                 error_with_catch!(ErrType::Custom(error_data.as_str(str_pool)));
             }
+            Instr::IsNotTypeJmp { src_reg_id, type_idx, jump_size } => {
+                if !data_matches_datatype(
+                    r[src_reg_id],
+                    unsafe { types.get_unchecked(type_idx as usize) },
+                    obj_pool,
+                    map_pool,
+                ) {
+                    i += jump_size as usize;
+                    continue;
+                }
+            }
             Instr::IsType(src, type_idx, dest) => {
                 r[dest] = data_matches_datatype(
                     r[src],

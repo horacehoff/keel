@@ -185,6 +185,11 @@ pub enum Instr {
 
     /// IsType(src_reg_id, type_idx, dest_reg_id)
     IsType(u16, u16, u16),
+    IsNotTypeJmp {
+        src_reg_id: u16,
+        type_idx: u16,
+        jump_size: u16,
+    },
 
     /// Exits the program with the i32 code if it's != 0
     Halt(u16),

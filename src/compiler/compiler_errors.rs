@@ -1411,3 +1411,29 @@ pub fn error_range_invalid_type(
         sources,
     );
 }
+
+pub fn error_invalid_pattern(
+    msg: core::fmt::Arguments,
+    help: Option<core::fmt::Arguments>,
+    span: Span,
+    file_idx: u16,
+    sources: &[Source],
+) -> ! {
+    throw_compiler_error(
+        &|| {
+            let src = &sources[file_idx as usize];
+            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
+                .with_message("Invalid pattern")
+                .with_label(
+                    Label::new((src.filename, span.into()))
+                        .with_message(msg)
+                        .with_color(ariadne::Color::Red),
+                );
+            if let Some(help) = help {
+                report = report.with_help(help);
+            }
+            report.finish()
+        },
+        sources,
+    )
+}

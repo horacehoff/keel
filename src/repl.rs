@@ -20,7 +20,7 @@ pub fn repl() {
         let _ = stdout().flush();
         if stdin().read_line(&mut s).expect("Incorrect input string") == 0 {
             break;
-        };
+        }
         if s.ends_with('\n') {
             s.pop();
         }

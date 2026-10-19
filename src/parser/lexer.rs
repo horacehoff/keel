@@ -1,7 +1,7 @@
 use super::ParserErr;
 use bumpalo::Bump;
-use logos::Logos;
 use core::hint::unreachable_unchecked;
+use logos::Logos;
 
 impl core::fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -69,6 +69,8 @@ impl core::fmt::Display for Token<'_> {
             Token::Try => "'try'",
             Token::Comma => "','",
             Token::RangeDot => "'..'",
+            Token::RangeDotEq => "'..='",
+            Token::At => "'@'",
             Token::Dot => "'.'",
             Token::DoubleColon => "'::'",
             Token::Colon => "':'",
@@ -199,6 +201,10 @@ pub enum Token<'a> {
     Comma,
     #[token("..")]
     RangeDot,
+    #[token("..=")]
+    RangeDotEq,
+    #[token("@")]
+    At,
     #[token(".")]
     Dot,
     #[token("::")]

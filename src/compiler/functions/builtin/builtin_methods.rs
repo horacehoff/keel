@@ -500,7 +500,7 @@ pub fn builtin_methods<'arena>(
             output.push(Instr::MapInsertReg(receiver_id, key_id, val_id));
             None
         }
-        "map" => {
+        "map" | "filter" => {
             check(
                 &[DataType::String, DataType::Array(None)],
                 1,
@@ -517,6 +517,7 @@ pub fn builtin_methods<'arena>(
                 error_expected_function(&fn_type, arg_spans[0], ctx.file_idx, state.sources);
             };
 
+            let is_filter = name == "filter";
             let is_str = receiver_type == DataType::String;
 
             let elem_type = if is_str {
@@ -530,21 +531,26 @@ pub fn builtin_methods<'arena>(
                     _ => unsafe { unreachable_unchecked() },
                 }
             };
+            let matches_signature = if is_filter {
+                fn_matches_signature(fn_id, &[elem_type.clone(), DataType::Bool], ctx, state)
+            } else if is_str {
+                fn_matches_signature(fn_id, &[DataType::String, DataType::String], ctx, state)
+            } else {
+                fn_args_match(fn_id, core::slice::from_ref(&elem_type), state)
+            };
 
-            if !{
-                if is_str {
-                    fn_matches_signature(fn_id, &[DataType::String, DataType::String], ctx, state)
+            if !matches_signature {
+                let return_type = if is_filter {
+                    DataType::Bool
+                } else if is_str {
+                    DataType::String
                 } else {
-                    fn_args_match(fn_id, core::slice::from_ref(&elem_type), state)
-                }
-            } {
-                let expected_type = DataType::FnSignature(Box::from([
-                    elem_type.clone(),
-                    if is_str { DataType::String } else { DataType::Unknown },
-                ]));
+                    DataType::Unknown
+                };
+                let expected = DataType::FnSignature(Box::from([elem_type.clone(), return_type]));
                 error_function_arg_invalid_type(
                     &fn_type,
-                    &expected_type,
+                    &expected,
                     arg_spans[0],
                     name,
                     None,
@@ -594,120 +600,16 @@ pub fn builtin_methods<'arena>(
             }
             let fn_return_val_id = state.alloc_reg();
             output.push(Instr::CallFuncDynamic(fn_value_reg, fn_return_val_id));
-            if is_str {
-                output.push(Instr::AddStr(result_id, fn_return_val_id, result_id));
+            let dest_reg_id = if is_filter {
+                output.push(Instr::IsFalseJmp(fn_return_val_id, 2));
+                arg_reg
             } else {
-                output.push(Instr::Push(result_id, fn_return_val_id));
-            }
-            let jump_size = (output.len() - body_start + 1) as u16;
-
-            output.push(Instr::IncInt(index_id));
-            output.push(Instr::InfIntJmpBack(index_id, len_id, jump_size));
-
-            let exit_size = (output.len() - jmp_start_idx) as u16;
-            output[jmp_start_idx] = Instr::SupEqIntJmp(index_id, len_id, exit_size);
-
-            if ctx.single_run {
-                state.free_reg(len_id);
-                state.free_reg(index_id);
-                state.free_reg(fn_return_val_id);
-            }
-
-            Some(result_id)
-        }
-        "filter" => {
-            check(
-                &[DataType::String, DataType::Array(None)],
-                1,
-                &receiver_type,
-                function_call,
-                ctx,
-                state.sources,
-            );
-
-            let fn_type = args[0].infer_type(ctx, state);
-            let fn_id = if let DataType::Fn(id) = fn_type {
-                id as usize
-            } else {
-                error_expected_function(&fn_type, arg_spans[0], ctx.file_idx, state.sources);
+                fn_return_val_id
             };
-
-            let is_str = receiver_type == DataType::String;
-
-            let elem_type = if is_str {
-                DataType::String
-            } else {
-                match &receiver_type {
-                    DataType::Array(Some(t)) => (**t).clone(),
-                    DataType::Array(None) => {
-                        state.functions[fn_id].args[0].1.clone().unwrap_or(DataType::Unknown)
-                    }
-                    _ => unsafe { unreachable_unchecked() },
-                }
-            };
-
-            if !fn_matches_signature(fn_id, &[elem_type.clone(), DataType::Bool], ctx, state) {
-                let expected_type =
-                    DataType::FnSignature(Box::from([elem_type.clone(), DataType::Bool]));
-                error_function_arg_invalid_type(
-                    &fn_type,
-                    &expected_type,
-                    arg_spans[0],
-                    name,
-                    None,
-                    ctx.file_idx,
-                    state.sources,
-                );
-            }
-
-            let fn_impl_idx =
-                compile_function_impl(output, ctx, state, fn_id, core::slice::from_ref(&elem_type));
-            let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
-            let arg_reg = state.functions[fn_id].impls[fn_impl_idx].args_loc[0];
-
-            let fn_value_reg = state.new_reg(Data::function(loc));
-
-            let result_id = state.alloc_reg_tgt(tgt_id);
             if is_str {
-                let data = Data::comp_str("", &mut state.pools.str_pool);
-                let empty_str_id = state.new_reg(data);
-                if empty_str_id != result_id {
-                    output.push(Instr::Mov(empty_str_id, result_id));
-                }
+                output.push(Instr::AddStr(result_id, dest_reg_id, result_id));
             } else {
-                output.push(Instr::EmptyArray(result_id));
-            }
-
-            let len_id = state.alloc_reg();
-            output.push(Instr::CallLibFunc(LibFunc::Len, receiver_id, len_id));
-
-            let index_id = if ctx.single_run {
-                state.new_reg(Data::int(0))
-            } else {
-                let r = state.alloc_reg();
-                output.push(Instr::SetInt(r, 0));
-                r
-            };
-
-            // Basically the same thing as compile_for_loop
-            let jmp_start_idx = output.len();
-            output.push(Instr::SupEqIntJmp(index_id, len_id, 0));
-
-            let body_start = output.len();
-            if is_str {
-                output.push(Instr::GetIndexString(receiver_id, index_id, arg_reg));
-            } else {
-                output.push(Instr::GetIndexArray(receiver_id, index_id, arg_reg));
-            }
-
-            let fn_return_val_id = state.alloc_reg();
-            output.push(Instr::CallFuncDynamic(fn_value_reg, fn_return_val_id));
-
-            output.push(Instr::IsFalseJmp(fn_return_val_id, 2));
-            if is_str {
-                output.push(Instr::AddStr(result_id, arg_reg, result_id));
-            } else {
-                output.push(Instr::Push(result_id, arg_reg));
+                output.push(Instr::Push(result_id, dest_reg_id));
             }
             let jump_size = (output.len() - body_start + 1) as u16;
 

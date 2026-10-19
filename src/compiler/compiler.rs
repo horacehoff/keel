@@ -24,15 +24,12 @@ use crate::compiler::expr::FunctionDeclarationArgumentExpr;
 use crate::compiler::expr::FunctionDeclarationExpr;
 use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::IntForLoopExpr;
-use crate::compiler::expr::MatchArm;
-use crate::compiler::expr::MatchExpr;
-use crate::compiler::expr::Pattern;
-use crate::compiler::expr::PatternConstructor;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::StructFieldAssignmentExpr;
 use crate::compiler::expr::StructFieldExpr;
 use crate::compiler::expr::VariableDeclarationExpr;
 use crate::compiler::functions::user_functions::compile_function_impl;
+use crate::compiler::patterns::compile_match_block;
 use crate::compiler::registers::move_value_to;
 use crate::compiler::type_system::var_type_is_compatible;
 use crate::data::FALSE;
@@ -99,6 +96,8 @@ mod methods;
 
 mod registers;
 
+mod patterns;
+
 pub trait UnwrapId {
     fn unwrap_id(self) -> u16;
 }
@@ -111,31 +110,39 @@ impl UnwrapId for Option<u16> {
     }
 }
 
+/// Returns the (true,false) fused instructions for `instr`
+const fn fused_jumps(instr: Instr, condition_id: u16) -> Option<(Instr, Instr)> {
+    if !matches!(instr.get_tgt_id(), Some(id) if id == condition_id) {
+        return None;
+    }
+    Some(match instr {
+        Instr::InfFloat(a, b, _) => (Instr::InfFloatJmp(a, b, 0), Instr::SupEqFloatJmp(a, b, 0)),
+        Instr::InfInt(a, b, _) => (Instr::InfIntJmp(a, b, 0), Instr::SupEqIntJmp(a, b, 0)),
+        Instr::InfEqFloat(a, b, _) => (Instr::InfEqFloatJmp(a, b, 0), Instr::SupFloatJmp(a, b, 0)),
+        Instr::InfEqInt(a, b, _) => (Instr::InfEqIntJmp(a, b, 0), Instr::SupIntJmp(a, b, 0)),
+        Instr::SupFloat(a, b, _) => (Instr::SupFloatJmp(a, b, 0), Instr::InfEqFloatJmp(a, b, 0)),
+        Instr::SupInt(a, b, _) => (Instr::SupIntJmp(a, b, 0), Instr::InfEqIntJmp(a, b, 0)),
+        Instr::SupEqFloat(a, b, _) => (Instr::SupEqFloatJmp(a, b, 0), Instr::InfFloatJmp(a, b, 0)),
+        Instr::SupEqInt(a, b, _) => (Instr::SupEqIntJmp(a, b, 0), Instr::InfIntJmp(a, b, 0)),
+        Instr::Eq(a, b, _) => (Instr::EqJmp(a, b, 0), Instr::NotEqJmp(a, b, 0)),
+        Instr::ObjEq(a, b, _) => (Instr::ObjEqJmp(a, b, 0), Instr::ObjNotEqJmp(a, b, 0)),
+        Instr::StrEq(a, b, _) => (Instr::StrEqJmp(a, b, 0), Instr::StrNotEqJmp(a, b, 0)),
+        Instr::NotEq(a, b, _) => (Instr::NotEqJmp(a, b, 0), Instr::EqJmp(a, b, 0)),
+        Instr::ObjNotEq(a, b, _) => (Instr::ObjNotEqJmp(a, b, 0), Instr::ObjEqJmp(a, b, 0)),
+        Instr::StrNotEq(a, b, _) => (Instr::StrNotEqJmp(a, b, 0), Instr::StrEqJmp(a, b, 0)),
+        _ => return None,
+    })
+}
+
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is false)
 fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_backwards: bool) {
-    if output.is_empty() {
+    let Some((_, mut jump_instr)) =
+        output.last().and_then(|&instr| fused_jumps(instr, condition_id))
+    else {
         return output.push(Instr::IsFalseJmp(condition_id, *len));
-    }
-    *output.last_mut().unwrap() = match *output.last().unwrap() {
-        Instr::InfFloat(o1, o2, o3) if o3 == condition_id => Instr::SupEqFloatJmp(o1, o2, *len),
-        Instr::InfInt(o1, o2, o3) if o3 == condition_id => Instr::SupEqIntJmp(o1, o2, *len),
-        Instr::InfEqFloat(o1, o2, o3) if o3 == condition_id => Instr::SupFloatJmp(o1, o2, *len),
-        Instr::InfEqInt(o1, o2, o3) if o3 == condition_id => Instr::SupIntJmp(o1, o2, *len),
-        Instr::SupFloat(o1, o2, o3) if o3 == condition_id => Instr::InfEqFloatJmp(o1, o2, *len),
-        Instr::SupInt(o1, o2, o3) if o3 == condition_id => Instr::InfEqIntJmp(o1, o2, *len),
-        Instr::SupEqFloat(o1, o2, o3) if o3 == condition_id => Instr::InfFloatJmp(o1, o2, *len),
-        Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::InfIntJmp(o1, o2, *len),
-        Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, *len),
-        Instr::ObjEq(o1, o2, o3) if o3 == condition_id => Instr::ObjNotEqJmp(o1, o2, *len),
-        Instr::StrEq(o1, o2, o3) if o3 == condition_id => Instr::StrNotEqJmp(o1, o2, *len),
-        Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, *len),
-        Instr::ObjNotEq(o1, o2, o3) if o3 == condition_id => Instr::ObjEqJmp(o1, o2, *len),
-        Instr::StrNotEq(o1, o2, o3) if o3 == condition_id => Instr::StrEqJmp(o1, o2, *len),
-        _ => {
-            output.push(Instr::IsFalseJmp(condition_id, *len));
-            return;
-        }
     };
+    set_jmp_size(&mut jump_instr, *len);
+    *output.last_mut().unwrap() = jump_instr;
     if jmp_backwards {
         *len -= 1;
     }
@@ -144,30 +151,10 @@ fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is true)
 #[inline(always)]
 fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
-    if output.is_empty() {
-        return output.push(Instr::IsTrueJmp(condition_id, 0));
+    match output.last().and_then(|&instr| fused_jumps(instr, condition_id)) {
+        Some((jump_instr, _)) => *output.last_mut().unwrap() = jump_instr,
+        None => output.push(Instr::IsTrueJmp(condition_id, 0)),
     }
-    let new_instr = match *output.last().unwrap() {
-        Instr::InfFloat(o1, o2, o3) if o3 == condition_id => Instr::InfFloatJmp(o1, o2, 0),
-        Instr::InfInt(o1, o2, o3) if o3 == condition_id => Instr::InfIntJmp(o1, o2, 0),
-        Instr::InfEqFloat(o1, o2, o3) if o3 == condition_id => Instr::InfEqFloatJmp(o1, o2, 0),
-        Instr::InfEqInt(o1, o2, o3) if o3 == condition_id => Instr::InfEqIntJmp(o1, o2, 0),
-        Instr::SupFloat(o1, o2, o3) if o3 == condition_id => Instr::SupFloatJmp(o1, o2, 0),
-        Instr::SupInt(o1, o2, o3) if o3 == condition_id => Instr::SupIntJmp(o1, o2, 0),
-        Instr::SupEqFloat(o1, o2, o3) if o3 == condition_id => Instr::SupEqFloatJmp(o1, o2, 0),
-        Instr::SupEqInt(o1, o2, o3) if o3 == condition_id => Instr::SupEqIntJmp(o1, o2, 0),
-        Instr::Eq(o1, o2, o3) if o3 == condition_id => Instr::EqJmp(o1, o2, 0),
-        Instr::ObjEq(o1, o2, o3) if o3 == condition_id => Instr::ObjEqJmp(o1, o2, 0),
-        Instr::StrEq(o1, o2, o3) if o3 == condition_id => Instr::StrEqJmp(o1, o2, 0),
-        Instr::NotEq(o1, o2, o3) if o3 == condition_id => Instr::NotEqJmp(o1, o2, 0),
-        Instr::ObjNotEq(o1, o2, o3) if o3 == condition_id => Instr::ObjNotEqJmp(o1, o2, 0),
-        Instr::StrNotEq(o1, o2, o3) if o3 == condition_id => Instr::StrNotEqJmp(o1, o2, 0),
-        _ => {
-            output.push(Instr::IsTrueJmp(condition_id, 0));
-            return;
-        }
-    };
-    *output.last_mut().unwrap() = new_instr;
 }
 
 /// Sets the jump size field of a jump instruction
@@ -191,6 +178,7 @@ const fn set_jmp_size(instr: &mut Instr, size: u16) {
         | Instr::ObjNotEqJmp(_, _, jump_size)
         | Instr::ObjEqJmp(_, _, jump_size)
         | Instr::StrNotEqJmp(_, _, jump_size)
+        | Instr::IsNotTypeJmp { jump_size, .. }
         | Instr::StrEqJmp(_, _, jump_size) => *jump_size = size,
         _ => unsafe { unreachable_unchecked() },
     }
@@ -923,35 +911,32 @@ fn compile_sub_op<'arena>(
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
-    let t_l = l.infer_type(ctx, state);
-    let t_r = r.infer_type(ctx, state);
-    if !((t_l == DataType::Float && t_r == DataType::Float)
-        || (t_l == DataType::Int && t_r == DataType::Int))
-    {
-        compiler_errors::error_op(&t_l, &t_r, "-", span_l, span_r, ctx.file_idx, state.sources);
-    }
     // var-1 uses the dedicated DecInt/DecIntTo instructions
-    if t_l == DataType::Int
-        && matches!(r, Expr::Int(1))
+    if matches!(r, Expr::Int(1))
         && let Expr::Var(src_name, _) = l
         && let Some(src_var) = state.find_var(src_name.get_name())
+        && src_var.var_type == DataType::Int
     {
         let src_id = src_var.register_id;
         let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
         output.push(if src_id == id { Instr::DecInt(id) } else { Instr::DecIntTo(src_id, id) });
         return id;
     }
-    let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
-    let id_r = r.compile(ctx, state, output, None, false, true).unwrap_id();
-    state.free_reg(id_l);
-    state.free_reg(id_r);
-    let id = state.alloc_reg_tgt(tgt_id);
-    output.push(if t_l == DataType::Float {
-        Instr::SubFloat(id_l, id_r, id)
-    } else {
-        Instr::SubInt(id_l, id_r, id)
-    });
-    id
+    uniform_op2(
+        Instr::SubFloat,
+        &DataType::Float,
+        Instr::SubInt,
+        &DataType::Int,
+        "-",
+        l,
+        r,
+        span_l,
+        span_r,
+        tgt_id,
+        ctx,
+        state,
+        output,
+    )
 }
 
 #[must_use]
@@ -995,6 +980,7 @@ fn compile_mod_op<'arena>(
 fn compile_eq_op<'arena>(
     l: &'arena Expr,
     r: &'arena Expr,
+    negate: bool,
     tgt_id: Option<u16>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
@@ -1010,42 +996,14 @@ fn compile_eq_op<'arena>(
     state.free_reg(id_l);
     state.free_reg(id_r);
     let id = state.alloc_reg_tgt(tgt_id);
-    output.push(if is_array {
-        Instr::ObjEq(id_l, id_r, id)
-    } else if is_string {
-        Instr::StrEq(id_l, id_r, id)
-    } else {
-        Instr::Eq(id_l, id_r, id)
+    output.push(match (is_array, is_string, negate) {
+        (true, _, false) => Instr::ObjEq(id_l, id_r, id),
+        (true, _, true) => Instr::ObjNotEq(id_l, id_r, id),
+        (false, true, false) => Instr::StrEq(id_l, id_r, id),
+        (false, true, true) => Instr::StrNotEq(id_l, id_r, id),
+        (false, false, false) => Instr::Eq(id_l, id_r, id),
+        (false, false, true) => Instr::NotEq(id_l, id_r, id),
     });
-    id
-}
-
-#[must_use]
-fn compile_neq_op<'arena>(
-    l: &'arena Expr,
-    r: &'arena Expr,
-    tgt_id: Option<u16>,
-    ctx: Ctx,
-    state: &mut State<'arena, '_>,
-    output: &mut Vec<Instr>,
-) -> u16 {
-    let l_type = l.infer_type(ctx, state);
-    let r_type = r.infer_type(ctx, state);
-    let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
-        && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
-    let is_string = l_type == DataType::String && r_type == DataType::String;
-    let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
-    let id_r = r.compile(ctx, state, output, None, false, true).unwrap_id();
-    state.free_reg(id_l);
-    state.free_reg(id_r);
-    let id = state.alloc_reg_tgt(tgt_id);
-    if is_array {
-        output.push(Instr::ObjNotEq(id_l, id_r, id));
-    } else if is_string {
-        output.push(Instr::StrNotEq(id_l, id_r, id));
-    } else {
-        output.push(Instr::NotEq(id_l, id_r, id));
-    }
     id
 }
 
@@ -1973,58 +1931,6 @@ fn compile_eval_block<'arena>(
     output.extend(compile_expr(code, ctx.advance_offset(output.len() as u16), state));
 }
 
-fn compile_match_block<'arena>(
-    MatchExpr { obj: match_obj, arms, span: _ }: &'arena MatchExpr,
-    ctx: Ctx,
-    state: &mut State<'arena, '_>,
-    output: &mut Vec<Instr>,
-) {
-    const MATCH_OBJ_VAR: &str = "{";
-    let (mut if_code, if_arms): (&'arena [Expr<'arena>], &[MatchArm<'arena>]) =
-        match arms.split_last() {
-            Some((last, rest)) if matches!(last.pattern, Pattern::Wildcard(_)) => (last.code, rest),
-            _ => (&[], *arms),
-        };
-    for arm in if_arms.iter().rev() {
-        match arm.pattern {
-            Pattern::Constant(cst, span) => {
-                if_code = state.bump.alloc_slice_copy(&[Expr::IfBlock(IfBlockExpr {
-                    condition: state.bump.alloc(Expr::Eq(
-                        state.bump.alloc(Expr::Var(
-                            QualifiedName::new(&[MATCH_OBJ_VAR], state.bump),
-                            span,
-                        )),
-                        cst,
-                    )),
-                    then: arm.code,
-                    otherwise: if_code,
-                    condition_span: span,
-                    span,
-                })]);
-            }
-            Pattern::Identifier(_id, _id_span) => todo!(),
-            Pattern::Constructor(PatternConstructor {
-                qualified_name: _,
-                fields: _,
-                fill_the_rest: _,
-                span: _,
-            }) => todo!(),
-            Pattern::Wildcard(_) => unsafe { unreachable_unchecked() },
-        }
-    }
-
-    let interm_code = state.bump.alloc_slice_copy(&[
-        Expr::VarDeclare(VariableDeclarationExpr {
-            name: MATCH_OBJ_VAR,
-            value: match_obj,
-            var_type: None,
-            span: Span::empty(),
-        }),
-        if_code[0],
-    ]);
-    compile_eval_block(interm_code, ctx, state, output);
-}
-
 pub fn compile_expr<'arena>(
     input: &'arena [Expr<'arena>],
     ctx: Ctx,
@@ -2210,11 +2116,11 @@ impl<'arena> Expr<'arena> {
             }
             Self::Eq(l, r) => {
                 debug_assert!(uses_id);
-                Some(compile_eq_op(l, r, tgt_id, ctx, state, output))
+                Some(compile_eq_op(l, r, false, tgt_id, ctx, state, output))
             }
             Self::NotEq(l, r) => {
                 debug_assert!(uses_id);
-                Some(compile_neq_op(l, r, tgt_id, ctx, state, output))
+                Some(compile_eq_op(l, r, true, tgt_id, ctx, state, output))
             }
             Self::Sup(l, r, span1, span2) => {
                 debug_assert!(uses_id);
@@ -2780,7 +2686,6 @@ fn parse_toplevel<'a>(
 
                 let mut child_scope = Scope::default();
 
-                let file_path_cloned = file_path.clone();
                 parse_toplevel(
                     bump,
                     file_code,
@@ -2801,7 +2706,7 @@ fn parse_toplevel<'a>(
                     pending_globals,
                     keel_home_libs_path,
                 );
-                files.insert(file_path_cloned, child_scope.clone());
+                files.insert(file_path, child_scope.clone());
                 scope.children.push((child_name, child_scope));
             }
             _ => unsafe { unreachable_unchecked() },

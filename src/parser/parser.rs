@@ -38,6 +38,7 @@ use logos::Logos;
 mod blocks;
 mod lexer;
 mod parser_expr;
+mod patterns;
 mod term;
 
 type TokenIter<'a> = Peekable<SpannedIter<'a, Token<'a>>>;
@@ -69,7 +70,7 @@ pub enum ParserErr<'a> {
     IntegerNegativeExponent,
     ArgumentsMissingCommaSeparator,
     TryBlockNoCatch,
-    MatchBlockNoNonWildcardArm,
+    InvalidRangePattern,
     MatchBlockZeroArms,
     IntOutOfRange,
 }
@@ -97,9 +98,7 @@ fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> 
         ParserErr::TryBlockNoCatch => hformat!(
             "A {BLUE}{BOLD}try{RESET} block must have at least one {BLUE}{BOLD}catch{RESET} block"
         ),
-        ParserErr::MatchBlockNoNonWildcardArm => hformat!(
-            "{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one non-wildcard arm{RESET}"
-        ),
+        ParserErr::InvalidRangePattern => "Range patterns need two ints or two floats",
         ParserErr::MatchBlockZeroArms => {
             hformat!("{BLUE}{BOLD}Match blocks{RESET} must have {BOLD}at least one arm{RESET}")
         }

@@ -22,9 +22,10 @@ use crate::compiler::compiler_errors::error_unknown_type_with_namespace;
 use crate::compiler::compiler_errors::error_unknown_variable;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::IfBlockExpr;
-use crate::compiler::expr::Pattern;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::VariableDeclarationExpr;
+use crate::compiler::patterns::declare_pattern_bindings;
+use crate::compiler::patterns::type_after_mismatch;
 use core::cell::RefCell;
 use core::hint::cold_path;
 use core::hint::unreachable_unchecked;
@@ -710,21 +711,28 @@ fn track_return_flow<'arena>(
                 }
             }
             Expr::Match(match_expr) => {
-                let mut match_return_types = Vec::new();
+                let mut candidate = match_expr.obj.infer_type(ctx, state);
                 let mut arms_always_return = true;
+                let mut has_irrefutable_arm = false;
                 for arm in match_expr.arms {
-                    let match_arm_flow = track_scoped_returns(arm.code, ctx, state, fn_name);
-                    extend_return_types!(&mut match_return_types, match_arm_flow.types);
-                    arms_always_return = arms_always_return && match_arm_flow.always_returns;
+                    let v_len = state.v.len();
+                    let Some(is_irrefutable) =
+                        declare_pattern_bindings(&arm.pattern, &candidate, ctx, state)
+                    else {
+                        continue;
+                    };
+                    let arm_flow = track_return_flow(arm.code, ctx, state, fn_name);
+                    state.v.truncate(v_len);
+                    extend_return_types!(&mut return_types, arm_flow.types);
+                    arms_always_return &= arm_flow.always_returns;
+                    if is_irrefutable && arm.guard.is_none() {
+                        has_irrefutable_arm = true;
+                        break;
+                    }
+                    candidate =
+                        type_after_mismatch(&arm.pattern, arm.guard, &candidate, ctx, state);
                 }
-                let match_has_wildcard =
-                    match_expr.arms.iter().any(|arm| matches!(arm.pattern, Pattern::Wildcard(_)));
-                let match_return_flow = FnReturnFlow {
-                    types: match_return_types,
-                    always_returns: arms_always_return && match_has_wildcard,
-                };
-                extend_return_types!(&mut return_types, match_return_flow.types);
-                if match_return_flow.always_returns {
+                if arms_always_return && has_irrefutable_arm {
                     return FnReturnFlow { types: return_types, always_returns: true };
                 }
             }

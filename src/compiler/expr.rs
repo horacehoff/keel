@@ -161,35 +161,49 @@ pub struct VariableDeclarationExpr<'arena> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct PatternConstructorField<'arena> {
+pub struct PatternField<'arena> {
     pub name: &'arena str,
     pub pattern: Pattern<'arena>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct PatternConstructor<'arena> {
+pub struct StructPattern<'arena> {
     pub qualified_name: QualifiedName<'arena>,
-    pub fields: &'arena [PatternConstructorField<'arena>],
-    pub fill_the_rest: bool, // '..'
+    pub fields: &'arena [PatternField<'arena>],
+    pub fill_the_rest: bool, // ends with '..'?
     pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct ArrayPattern<'arena> {
+    pub prefix: &'arena [Pattern<'arena>], // everything before a potential '..'
+    pub rest: Option<&'arena Pattern<'arena>>,
+    pub suffix: &'arena [Pattern<'arena>],
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum Pattern<'arena> {
-    // struct
-    Constructor(PatternConstructor<'arena>),
-    // binding
-    Identifier(QualifiedName<'arena>, Span),
-    // any literal
-    Constant(&'arena Expr<'arena>, Span),
-    Wildcard(Span),
+    Wildcard,
+    Binding(&'arena str, Option<&'arena Self>, Span),
+    Constant(&'arena Expr<'arena>),
+    Range {
+        lower_bound: &'arena Expr<'arena>,
+        upper_bound: Option<&'arena Expr<'arena>>,
+        is_inclusive: bool,
+    },
+    Struct(StructPattern<'arena>),
+    Array(ArrayPattern<'arena>),
+    // pattern: type
+    Typed(&'arena Self, TypeExpr<'arena>),
+    Or(&'arena [Self], Span),
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct MatchArm<'arena> {
     pub pattern: Pattern<'arena>,
     pub guard: Option<&'arena Expr<'arena>>,
+    pub guard_span: Span,
     pub code: &'arena [Expr<'arena>],
     pub span: Span,
 }

@@ -16,6 +16,7 @@
 - Compilation is substantially faster
 - Multiple relatively minor VM/FFI optimizations
 - Optimized the emitted bytecode in some cases
+- Added an actual match block with patterns and struct destructuring
 
 ## 0.4.0 (07/30/2026)
 - Function arguments can now be typed with the syntax `arg: T`

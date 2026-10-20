@@ -116,30 +116,32 @@ const fn fused_jumps(instr: Instr, condition_id: u16) -> Option<(Instr, Instr)> 
         return None;
     }
     Some(match instr {
-        Instr::InfFloat(a, b, _) => (Instr::InfFloatJmp(a, b, 0), Instr::SupEqFloatJmp(a, b, 0)),
-        Instr::InfInt(a, b, _) => (Instr::InfIntJmp(a, b, 0), Instr::SupEqIntJmp(a, b, 0)),
-        Instr::InfEqFloat(a, b, _) => (Instr::InfEqFloatJmp(a, b, 0), Instr::SupFloatJmp(a, b, 0)),
-        Instr::InfEqInt(a, b, _) => (Instr::InfEqIntJmp(a, b, 0), Instr::SupIntJmp(a, b, 0)),
-        Instr::SupFloat(a, b, _) => (Instr::SupFloatJmp(a, b, 0), Instr::InfEqFloatJmp(a, b, 0)),
-        Instr::SupInt(a, b, _) => (Instr::SupIntJmp(a, b, 0), Instr::InfEqIntJmp(a, b, 0)),
-        Instr::SupEqFloat(a, b, _) => (Instr::SupEqFloatJmp(a, b, 0), Instr::InfFloatJmp(a, b, 0)),
-        Instr::SupEqInt(a, b, _) => (Instr::SupEqIntJmp(a, b, 0), Instr::InfIntJmp(a, b, 0)),
+        Instr::InfFloat(a, b, _) => (Instr::InfFloatJmp(a, b, 0), Instr::NotInfFloatJmp(a, b, 0)),
+        Instr::InfInt(a, b, _) => (Instr::InfIntJmp(a, b, 0), Instr::InfEqIntJmp(b, a, 0)),
+        Instr::InfEqFloat(a, b, _) => {
+            (Instr::InfEqFloatJmp(a, b, 0), Instr::NotInfEqFloatJmp(a, b, 0))
+        }
+        Instr::InfEqInt(a, b, _) => (Instr::InfEqIntJmp(a, b, 0), Instr::InfIntJmp(b, a, 0)),
         Instr::Eq(a, b, _) => (Instr::EqJmp(a, b, 0), Instr::NotEqJmp(a, b, 0)),
         Instr::ObjEq(a, b, _) => (Instr::ObjEqJmp(a, b, 0), Instr::ObjNotEqJmp(a, b, 0)),
-        Instr::StrEq(a, b, _) => (Instr::StrEqJmp(a, b, 0), Instr::StrNotEqJmp(a, b, 0)),
         Instr::NotEq(a, b, _) => (Instr::NotEqJmp(a, b, 0), Instr::EqJmp(a, b, 0)),
         Instr::ObjNotEq(a, b, _) => (Instr::ObjNotEqJmp(a, b, 0), Instr::ObjEqJmp(a, b, 0)),
-        Instr::StrNotEq(a, b, _) => (Instr::StrNotEqJmp(a, b, 0), Instr::StrEqJmp(a, b, 0)),
         _ => return None,
     })
 }
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is false)
-fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_backwards: bool) {
+fn add_cmp_false(
+    condition_id: u16,
+    false_reg: u16,
+    len: &mut u16,
+    output: &mut Vec<Instr>,
+    jmp_backwards: bool,
+) {
     let Some((_, mut jump_instr)) =
         output.last().and_then(|&instr| fused_jumps(instr, condition_id))
     else {
-        return output.push(Instr::IsFalseJmp(condition_id, *len));
+        return output.push(Instr::EqJmp(condition_id, false_reg, *len));
     };
     set_jmp_size(&mut jump_instr, *len);
     *output.last_mut().unwrap() = jump_instr;
@@ -150,10 +152,10 @@ fn add_cmp_false(condition_id: u16, len: &mut u16, output: &mut Vec<Instr>, jmp_
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is true)
 #[inline(always)]
-fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
+fn add_cmp_true(condition_id: u16, true_reg: u16, output: &mut Vec<Instr>) {
     match output.last().and_then(|&instr| fused_jumps(instr, condition_id)) {
         Some((jump_instr, _)) => *output.last_mut().unwrap() = jump_instr,
-        None => output.push(Instr::IsTrueJmp(condition_id, 0)),
+        None => output.push(Instr::EqJmp(condition_id, true_reg, 0)),
     }
 }
 
@@ -161,25 +163,18 @@ fn add_cmp_true(condition_id: u16, output: &mut Vec<Instr>) {
 #[inline(always)]
 const fn set_jmp_size(instr: &mut Instr, size: u16) {
     match instr {
-        Instr::IsFalseJmp(_, jump_size)
-        | Instr::IsTrueJmp(_, jump_size)
-        | Instr::Jmp(jump_size)
-        | Instr::SupEqFloatJmp(_, _, jump_size)
-        | Instr::SupEqIntJmp(_, _, jump_size)
-        | Instr::SupFloatJmp(_, _, jump_size)
-        | Instr::SupIntJmp(_, _, jump_size)
+        Instr::Jmp(jump_size)
         | Instr::InfEqFloatJmp(_, _, jump_size)
         | Instr::InfEqIntJmp(_, _, jump_size)
         | Instr::InfFloatJmp(_, _, jump_size)
         | Instr::InfIntJmp(_, _, jump_size)
-        | Instr::InfIntJmpBack(_, _, jump_size)
+        | Instr::NotInfFloatJmp(_, _, jump_size)
+        | Instr::NotInfEqFloatJmp(_, _, jump_size)
         | Instr::NotEqJmp(_, _, jump_size)
         | Instr::EqJmp(_, _, jump_size)
         | Instr::ObjNotEqJmp(_, _, jump_size)
         | Instr::ObjEqJmp(_, _, jump_size)
-        | Instr::StrNotEqJmp(_, _, jump_size)
-        | Instr::IsNotTypeJmp { jump_size, .. }
-        | Instr::StrEqJmp(_, _, jump_size) => *jump_size = size,
+        | Instr::IsNotTypeJmp { jump_size, .. } => *jump_size = size,
         _ => unsafe { unreachable_unchecked() },
     }
 }
@@ -215,7 +210,7 @@ fn compile_short_circuit_condition<'arena>(
                 state.free_reg(id_r);
                 let id = state.alloc_reg();
                 output.push(Instr::BoolAnd(id_l, id_r, id));
-                add_cmp_true(id, output);
+                add_cmp_true(id, state.new_const_reg(TRUE), output);
                 state.free_reg(id);
                 (vec![output.len() - 1], Vec::new())
             } else {
@@ -231,11 +226,11 @@ fn compile_short_circuit_condition<'arena>(
         expr => {
             let cond_id = expr.compile(ctx, state, output, None, false, true).unwrap_id();
             if bool_or_mode {
-                add_cmp_true(cond_id, output);
+                add_cmp_true(cond_id, state.new_const_reg(TRUE), output);
                 state.free_reg(cond_id);
                 (vec![output.len() - 1], Vec::new())
             } else {
-                add_cmp_false(cond_id, &mut 0, output, false);
+                add_cmp_false(cond_id, state.new_const_reg(FALSE), &mut 0, output, false);
                 state.free_reg(cond_id);
                 (Vec::new(), vec![output.len() - 1])
             }
@@ -275,30 +270,28 @@ fn compile_condition<'arena>(
     } else if state.const_registers.get(&FALSE) == Some(&cond_id) {
         return (Some(false), Vec::new(), Vec::new());
     }
-    add_cmp_false(cond_id, &mut 0, output, false);
+    add_cmp_false(cond_id, state.new_const_reg(FALSE), &mut 0, output, false);
     state.free_reg(cond_id);
     (None, Vec::new(), vec![output.len() - 1])
 }
 
+const LOOP_MARKER: u16 = u16::MAX;
+const LOOP_MARKER_REG: u16 = 1;
+
 fn parse_loop_flow_control(
     loop_code: &mut [Instr],
-    loop_id: u16,
     code_length: u16,
     for_loop: bool,
     indefinite: bool,
 ) {
     loop_code.iter_mut().enumerate().for_each(|(i, x)| {
-        if let Instr::NotEqJmp(break_id, 0, 0) = x
-            && *break_id == loop_id
-        {
+        if *x == Instr::NotEqJmp(LOOP_MARKER_REG, 0, LOOP_MARKER) {
             if for_loop && !indefinite {
                 *x = Instr::Jmp(code_length - i as u16 - 1);
             } else {
                 *x = Instr::Jmp(code_length - i as u16);
             }
-        } else if let Instr::EqJmp(continue_id, 0, 0) = x
-            && *continue_id == loop_id
-        {
+        } else if *x == Instr::EqJmp(LOOP_MARKER_REG, 0, LOOP_MARKER) {
             if for_loop {
                 *x = Instr::Jmp(code_length - i as u16 - 3);
             } else {
@@ -344,20 +337,21 @@ fn compile_array_literal<'arena>(
         return array_reg;
     }
     if ctx.single_run {
+        let array_reg = state.new_reg(Data::array(array_id as u32));
         for elem in array_items {
             let id = elem.compile(ctx, state, output, None, false, true).unwrap_id();
             if elem.is_constant_literal() {
                 state.pools.obj_pool.get_mut(array_id).push(state.registers[id as usize]);
             } else {
-                output.push(Instr::ObjElemMov(
+                output.push(Instr::SetFieldObj(
+                    array_reg,
                     id,
-                    array_id as u16,
                     state.pools.obj_pool[array_id].len() as u16,
                 ));
                 state.pools.obj_pool.get_mut(array_id).push(NULL);
             }
         }
-        state.new_reg(Data::array(array_id as u32))
+        array_reg
     } else {
         // Check if all elements are constant (no instructions emitted)
         let mut constant_array = true;
@@ -378,7 +372,7 @@ fn compile_array_literal<'arena>(
             let template_reg = state.new_reg(Data::array(array_id as u32));
             let dest_reg = state.new_reg(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
 
-            output.push(Instr::CloneArray(
+            output.push(Instr::CloneObj(
                 template_reg,
                 dest_reg,
                 state.pools.obj_pool[array_id].len() as u16,
@@ -433,6 +427,7 @@ fn compile_struct_literal<'arena>(
         state.pools.obj_pool.len() - 1
     };
     if ctx.single_run {
+        let struct_reg = state.new_reg(Data::struct_instance(type_id, struct_id as u32));
         for field_idx in 0..expected_fields_len {
             if let Some(StructFieldExpr { name: _, value, name_span: _, value_span }) =
                 fields.iter().find(|field| {
@@ -457,9 +452,9 @@ fn compile_struct_literal<'arena>(
                 if value.is_constant_literal() {
                     state.pools.obj_pool.get_mut(struct_id).push(state.registers[id as usize]);
                 } else {
-                    output.push(Instr::ObjElemMov(
+                    output.push(Instr::SetFieldObj(
+                        struct_reg,
                         id,
-                        struct_id as u16,
                         state.pools.obj_pool[struct_id].len() as u16,
                     ));
                     state.pools.obj_pool.get_mut(struct_id).push(NULL);
@@ -484,7 +479,7 @@ fn compile_struct_literal<'arena>(
             }
         }
 
-        state.new_reg(Data::struct_instance(type_id, struct_id as u32))
+        struct_reg
     } else {
         let mut dynamic: Vec<(u16, u16)> = Vec::with_capacity(expected_fields_len);
         for field_idx in 0..expected_fields_len {
@@ -538,9 +533,9 @@ fn compile_struct_literal<'arena>(
 
         let dest_reg = state.new_reg(Data::struct_instance(type_id, 0));
 
-        output.push(Instr::CloneStruct(template_reg, dest_reg));
+        output.push(Instr::CloneObj(template_reg, dest_reg, expected_fields_len as u16));
         for (val_reg, slot) in dynamic {
-            output.push(Instr::SetFieldStruct(dest_reg, val_reg, slot));
+            output.push(Instr::SetFieldObj(dest_reg, val_reg, slot));
         }
         dest_reg
     }
@@ -561,6 +556,7 @@ fn compile_map_literal<'arena>(
     let mut keys: Vec<(Data, Span)> = Vec::with_capacity(kv_pairs.len());
     let mut dynamic: Vec<(Data, u16)> =
         Vec::with_capacity(if ctx.single_run { 0 } else { kv_pairs.len() });
+    let map_reg = state.new_reg(Data::map(map_id as u32));
     for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
         let key_t = key.infer_type(ctx, state);
         let val_t = val.infer_type(ctx, state);
@@ -615,20 +611,17 @@ fn compile_map_literal<'arena>(
         } else {
             state.pools.map_pool[map_id].insert(key_val, NULL);
             if ctx.single_run {
-                output.push(Instr::MapInsert(map_id as u16, state.new_reg(key_val), val_id));
+                output.push(Instr::MapInsertReg(map_reg, state.new_reg(key_val), val_id));
             } else {
                 dynamic.push((key_val, val_id));
             }
         }
     }
     if ctx.single_run {
-        state.new_reg(Data::map(map_id as u32))
+        map_reg
     } else {
-        let template_reg = state.new_reg(Data::map(map_id as u32));
-
         let dest_reg = state.new_reg(Data::map(0));
-
-        output.push(Instr::CloneMap(template_reg, dest_reg));
+        output.push(Instr::CloneMap(map_reg, dest_reg));
         for (key_val, val_id) in dynamic {
             let key_reg = state.new_const_reg(key_val);
             output.push(Instr::MapInsertReg(dest_reg, key_reg, val_id));
@@ -867,20 +860,16 @@ fn compile_add_op<'arena>(
     }
     // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
     if t_l == DataType::Int
-        && let Some(Expr::Var(src_name, _)) = {
-            if matches!(r, Expr::Int(1)) {
-                Some(l)
-            } else if matches!(l, Expr::Int(1)) {
-                Some(r)
-            } else {
-                None
-            }
+        && let Some((Expr::Var(src_name, _), imm)) = match (l, r) {
+            (_, Expr::Int(i)) => i16::try_from(*i).ok().map(|i| (l, i)),
+            (Expr::Int(i), _) => i16::try_from(*i).ok().map(|i| (r, i)),
+            _ => None,
         }
         && let Some(src_var) = state.find_var(src_name.get_name())
     {
         let src_id = src_var.register_id;
         let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
-        output.push(if src_id == id { Instr::IncInt(id) } else { Instr::IncIntTo(src_id, id) });
+        output.push(Instr::AddIntImm { src: src_id, dst: id, imm: imm as u16 });
         return id;
     }
     let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
@@ -912,14 +901,15 @@ fn compile_sub_op<'arena>(
     output: &mut Vec<Instr>,
 ) -> u16 {
     // var-1 uses the dedicated DecInt/DecIntTo instructions
-    if matches!(r, Expr::Int(1))
+    if let Expr::Int(i) = r
+        && let Some(imm) = i.checked_neg().and_then(|i| i16::try_from(i).ok())
         && let Expr::Var(src_name, _) = l
         && let Some(src_var) = state.find_var(src_name.get_name())
         && src_var.var_type == DataType::Int
     {
         let src_id = src_var.register_id;
         let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
-        output.push(if src_id == id { Instr::DecInt(id) } else { Instr::DecIntTo(src_id, id) });
+        output.push(Instr::AddIntImm { src: src_id, dst: id, imm: imm as u16 });
         return id;
     }
     uniform_op2(
@@ -988,21 +978,19 @@ fn compile_eq_op<'arena>(
 ) -> u16 {
     let l_type = l.infer_type(ctx, state);
     let r_type = r.infer_type(ctx, state);
-    let is_array = matches!(l_type, DataType::Array(_) | DataType::Struct(_))
-        && matches!(r_type, DataType::Array(_) | DataType::Struct(_));
-    let is_string = l_type == DataType::String && r_type == DataType::String;
+    let is_obj = (matches!(l_type, DataType::Array(_) | DataType::Struct(_))
+        && matches!(r_type, DataType::Array(_) | DataType::Struct(_)))
+        || (l_type == DataType::String && r_type == DataType::String);
     let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
     let id_r = r.compile(ctx, state, output, None, false, true).unwrap_id();
     state.free_reg(id_l);
     state.free_reg(id_r);
     let id = state.alloc_reg_tgt(tgt_id);
-    output.push(match (is_array, is_string, negate) {
-        (true, _, false) => Instr::ObjEq(id_l, id_r, id),
-        (true, _, true) => Instr::ObjNotEq(id_l, id_r, id),
-        (false, true, false) => Instr::StrEq(id_l, id_r, id),
-        (false, true, true) => Instr::StrNotEq(id_l, id_r, id),
-        (false, false, false) => Instr::Eq(id_l, id_r, id),
-        (false, false, true) => Instr::NotEq(id_l, id_r, id),
+    output.push(match (is_obj, negate) {
+        (true, false) => Instr::ObjEq(id_l, id_r, id),
+        (true, true) => Instr::ObjNotEq(id_l, id_r, id),
+        (false, false) => Instr::Eq(id_l, id_r, id),
+        (false, true) => Instr::NotEq(id_l, id_r, id),
     });
     id
 }
@@ -1022,9 +1010,12 @@ fn compile_neg_op<'arena>(
     state.free_reg(id_l);
     let id = state.alloc_reg_tgt(tgt_id);
     if operand_type == DataType::Float {
-        output.push(Instr::NegFloat(id_l, id));
+        // keeps the -0.0 sign
+        let minus_one = state.new_const_reg(Data::float(-1.0));
+        output.push(Instr::MulFloat(id_l, minus_one, id));
     } else if operand_type == DataType::Int {
-        output.push(Instr::NegInt(id_l, id));
+        let zero = state.new_const_reg(Data::int(0));
+        output.push(Instr::SubInt(zero, id_l, id));
     } else {
         compiler_errors::error_op(
             &DataType::Null,
@@ -1064,7 +1055,8 @@ fn compile_bool_neg_op<'arena>(
             state.sources,
         );
     }
-    output.push(Instr::NegBool(id_l, id));
+    let false_reg = state.new_const_reg(FALSE);
+    output.push(Instr::Eq(id_l, false_reg, id));
     id
 }
 
@@ -1213,7 +1205,7 @@ fn compile_struct_field_assignment<'arena>(
     };
     let id = struct_expr.compile(ctx, state, output, None, false, true).unwrap_id();
     let new_elem_reg_id = new_val.compile(ctx, state, output, None, false, true).unwrap_id();
-    output.push(Instr::SetFieldStruct(id, new_elem_reg_id, field_index));
+    output.push(Instr::SetFieldObj(id, new_elem_reg_id, field_index));
 }
 
 fn compile_if_block_branch<'arena>(
@@ -1343,8 +1335,6 @@ fn compile_while_loop<'arena>(
     }
 
     // parse the code block, clone the vars to avoid overriding anything
-    let loop_id = ctx.block_id + 1;
-
     let mut cond_code =
         compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u16), state);
 
@@ -1357,9 +1347,9 @@ fn compile_while_loop<'arena>(
     let body_len = cond_code.len() as u16;
     let len = cond_len + body_len; // full span used by JmpBack
     // Break/Continue offsets are relative to cond_code, so pass body_len+1 (body remaining + JmpBack)
-    parse_loop_flow_control(&mut cond_code, loop_id, body_len + 1, false, false);
+    parse_loop_flow_control(&mut cond_code, body_len + 1, false, false);
     output.extend(cond_code);
-    output.push(Instr::JmpBack(len));
+    output.push(Instr::Jmp(len.wrapping_neg()));
 }
 
 fn compile_for_loop<'arena>(
@@ -1415,7 +1405,6 @@ fn compile_for_loop<'arena>(
             },
         );
     }
-    let loop_id = ctx.block_id + 1;
 
     // accounts for the GetIndexArray/GetIndexString instruction
     let pending = u16::from(real_var);
@@ -1432,7 +1421,7 @@ fn compile_for_loop<'arena>(
 
     // add the condition ('i < len') jumping logic
     let mut len = (cond_code.len() + 3) as u16 + pending;
-    add_cmp_false(condition_id, &mut len, output, true);
+    add_cmp_false(condition_id, state.new_const_reg(FALSE), &mut len, output, true);
 
     // make the current_element_id register actually hold the element's value
     if real_var {
@@ -1442,14 +1431,15 @@ fn compile_for_loop<'arena>(
             output.push(Instr::GetIndexArray(array, index_id, current_element_id));
         }
     }
-    parse_loop_flow_control(&mut cond_code, loop_id, len, true, false);
+    parse_loop_flow_control(&mut cond_code, len, true, false);
     // then add the condition code
     output.extend(cond_code);
     // add 1 to the index (i+=1) so that the next loop iteration will have the next element in the array
-    output.push(Instr::IncInt(index_id));
+    // output.push(Instr::IncInt(index_id));
+    output.push(Instr::AddIntImm { src: index_id, dst: index_id, imm: 1 });
 
     // jump back to the loop if still inside of it
-    output.push(Instr::JmpBack(len));
+    output.push(Instr::Jmp(len.wrapping_neg()));
 
     if ctx.single_run {
         state.free_reg(array_len_id);
@@ -1489,31 +1479,23 @@ fn compile_int_for_loop<'arena>(
     if t2 != DataType::Int {
         error_range_invalid_type(int_for_loop.upper_bound_span, &t2, ctx.file_idx, state.sources);
     }
-    let elem_id = if ctx.single_run {
-        lower_bound.compile(ctx, state, output, None, false, true).unwrap_id()
+    let elem_id = state.alloc_reg();
+    let output_len = output.len();
+    let start_elem_id =
+        lower_bound.compile(ctx, state, output, Some(elem_id), false, true).unwrap_id();
+    if state.is_register_const(start_elem_id) {
+        move_reg_to_reg(output, start_elem_id, elem_id, state.registers[start_elem_id as usize]);
     } else {
-        let start_elem_id = lower_bound.compile(ctx, state, output, None, false, true).unwrap_id();
-        let start_val = state.registers[start_elem_id as usize];
-        let elem_id = state.alloc_reg();
-        if state.is_register_const(start_elem_id) && start_val.is_int() {
-            output.push(Instr::SetInt(elem_id, start_val.as_int()));
-        } else if start_elem_id != elem_id {
-            output.push(Instr::Mov(start_elem_id, elem_id));
-        }
-        elem_id
-    };
+        move_value_to(output, output_len, start_elem_id, elem_id);
+    }
     let end_elem_id = upper_bound.compile(ctx, state, output, None, false, true).unwrap_id();
-
-    // elem_id is a fresh mutable register -> remove from const_registers just in case
-    state.remove_reg_from_consts(elem_id);
 
     let v_len = state.v.len();
     state.new_var(int_for_loop.var_name, elem_id, DataType::Int);
-    let loop_id = ctx.block_id + 1;
 
     // (1) if i >= end_elem jump out -> push placeholder first so that compile_expr sees the correct offset
     let jmp_idx = output.len();
-    output.push(Instr::SupEqIntJmp(elem_id, end_elem_id, 0));
+    output.push(Instr::InfEqIntJmp(end_elem_id, elem_id, 0));
 
     let regs_before = state.registers.len() as u16;
     let compiled_loop_code =
@@ -1525,15 +1507,19 @@ fn compile_int_for_loop<'arena>(
     output.extend(compiled_loop_code);
 
     // (3) i+= 1
-    output.push(Instr::IncInt(elem_id));
+    output.push(Instr::AddIntImm { src: elem_id, dst: elem_id, imm: 1 });
 
     // (4) if i < end_elem jump back to body
-    output.push(Instr::InfIntJmpBack(elem_id, end_elem_id, compiled_loop_code_len + 1));
+    output.push(Instr::InfIntJmp(
+        elem_id,
+        end_elem_id,
+        (compiled_loop_code_len + 1).wrapping_neg(),
+    ));
 
     let exit_size = (output.len() - jmp_idx) as u16;
-    output[jmp_idx] = Instr::SupEqIntJmp(elem_id, end_elem_id, exit_size);
+    output[jmp_idx] = Instr::InfEqIntJmp(end_elem_id, elem_id, exit_size);
 
-    parse_loop_flow_control(&mut output[jmp_idx + 1..], loop_id, exit_size, true, false);
+    parse_loop_flow_control(&mut output[jmp_idx + 1..], exit_size, true, false);
     state.v.truncate(v_len);
 
     if ctx.single_run {
@@ -1548,15 +1534,14 @@ fn compile_loop_block<'arena>(
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
-    let loop_id = ctx.block_id + 1;
     let regs_before = state.registers.len() as u16;
     let mut compiled =
         compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u16), state);
     state.free_loop_scope_registers(regs_before, &compiled);
     let code_length = compiled.len() as u16;
-    parse_loop_flow_control(&mut compiled, loop_id, code_length + 1, false, true);
+    parse_loop_flow_control(&mut compiled, code_length + 1, false, true);
     output.extend(compiled);
-    output.push(Instr::JmpBack(code_length));
+    output.push(Instr::Jmp(code_length.wrapping_neg()));
 }
 
 fn compile_try_catch_block<'arena>(
@@ -1569,7 +1554,11 @@ fn compile_try_catch_block<'arena>(
 ) {
     output.push(Instr::StartErrorCatch(0, 0)); // patched later on
     let err_catch_instr = output.len() - 1;
-    let main_code = compile_expr(e, ctx, state);
+    let main_code = compile_expr(
+        e,
+        Ctx { try_depth: ctx.try_depth + 1, ..ctx }.advance_offset(output.len() as u16),
+        state,
+    );
     output.extend(main_code);
     output.push(Instr::StopErrorCatch);
     output.push(Instr::Jmp(0)); // jumps over the catch handler if no error arises
@@ -1580,7 +1569,7 @@ fn compile_try_catch_block<'arena>(
     state.new_var(err_var, err_reg_id, DataType::String);
     output[err_catch_instr] =
         Instr::StartErrorCatch((output.len() - err_catch_instr) as u16, err_reg_id);
-    let catch_code = compile_expr(catch_code, ctx, state);
+    let catch_code = compile_expr(catch_code, ctx.advance_offset(output.len() as u16), state);
     state.v.truncate(v_len);
     output.extend(catch_code);
     output[jmp_catch_instr] = Instr::Jmp((output.len() - jmp_catch_instr) as u16);
@@ -1719,14 +1708,10 @@ fn compile_var_assignment<'arena>(
             _ => None,
         };
         if let Some((is_inc, src_id)) = inc_dec {
-            output.push(if src_id == reg_id {
-                if is_inc { Instr::IncInt(reg_id) } else { Instr::DecInt(reg_id) }
-            } else {
-                if is_inc {
-                    Instr::IncIntTo(src_id, reg_id)
-                } else {
-                    Instr::DecIntTo(src_id, reg_id)
-                }
+            output.push(Instr::AddIntImm {
+                src: src_id,
+                dst: reg_id,
+                imm: if is_inc { 1 } else { (-1i16) as u16 },
             });
             return;
         }
@@ -1901,24 +1886,35 @@ fn compile_return<'arena>(
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
-    if let Some(x) = return_value {
-        let id = x.compile(ctx, state, output, None, false, true).unwrap_id();
-        if ctx.is_compiling_recursive {
-            output.push(Instr::RecursiveReturn(id));
-        } else {
-            output.push(Instr::Return(id));
-        }
+    let id = return_value.map(|x| x.compile(ctx, state, output, None, false, true).unwrap_id());
+    if ctx.in_function {
+        output.extend(core::iter::repeat_n(Instr::StopErrorCatch, ctx.try_depth as usize));
     }
+    output.push(match (ctx.in_function, ctx.is_compiling_recursive, id) {
+        (false, ..) => Instr::Halt(u16::MAX),
+        (true, true, Some(id)) => Instr::RecursiveReturn(id),
+        (true, true, None) => Instr::RecursiveVoidReturn,
+        (true, false, Some(id)) => Instr::Return(id),
+        (true, false, None) => Instr::VoidReturn,
+    });
 }
 
 #[inline]
 fn compile_loop_break(ctx: Ctx, output: &mut Vec<Instr>) {
-    output.push(Instr::NotEqJmp(ctx.block_id + 1, 0, 0));
+    output.extend(core::iter::repeat_n(
+        Instr::StopErrorCatch,
+        (ctx.try_depth - ctx.loop_try_depth) as usize,
+    ));
+    output.push(Instr::NotEqJmp(LOOP_MARKER_REG, 0, LOOP_MARKER));
 }
 
 #[inline]
 fn compile_loop_continue(ctx: Ctx, output: &mut Vec<Instr>) {
-    output.push(Instr::EqJmp(ctx.block_id + 1, 0, 0));
+    output.extend(core::iter::repeat_n(
+        Instr::StopErrorCatch,
+        (ctx.try_depth - ctx.loop_try_depth) as usize,
+    ));
+    output.push(Instr::EqJmp(LOOP_MARKER_REG, 0, LOOP_MARKER));
 }
 
 #[inline]
@@ -2125,9 +2121,9 @@ impl<'arena> Expr<'arena> {
             Self::Sup(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op2(
-                    Instr::SupFloat,
+                    |a, b, dst| Instr::InfFloat(b, a, dst),
                     &DataType::Float,
-                    Instr::SupInt,
+                    |a, b, dst| Instr::InfInt(b, a, dst),
                     &DataType::Int,
                     ">",
                     l,
@@ -2143,9 +2139,9 @@ impl<'arena> Expr<'arena> {
             Self::SupEq(l, r, span1, span2) => {
                 debug_assert!(uses_id);
                 Some(uniform_op2(
-                    Instr::SupEqFloat,
+                    |a, b, dst| Instr::InfEqFloat(b, a, dst),
                     &DataType::Float,
-                    Instr::SupEqInt,
+                    |a, b, dst| Instr::InfEqInt(b, a, dst),
                     &DataType::Int,
                     ">=",
                     l,
@@ -2955,11 +2951,13 @@ pub fn compile<'arena>(
     );
 
     let ctx = Ctx {
-        block_id: 0,
+        in_function: false,
         is_compiling_recursive: false,
         file_idx: 0,
         single_run: true,
         offset: 0,
+        try_depth: 0,
+        loop_try_depth: 0,
     };
     let mut const_registers_bitset = FixedBitSet::new();
     let mut free_registers_bitset = FixedBitSet::new();

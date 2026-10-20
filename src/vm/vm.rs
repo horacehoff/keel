@@ -38,6 +38,39 @@ pub type ObjectPool = Pool<Vec<Data>>;
 pub type MapPool = Pool<HashMap<Data, Data, FxBuildHasher>>;
 pub type StringPool = Pool<String>;
 
+#[inline(never)]
+#[must_use]
+fn container_eq(
+    x: Data,
+    y: Data,
+    obj_pool: &ObjectPool,
+    map_pool: &MapPool,
+    string_pool: &StringPool,
+) -> bool {
+    if x.is_array() || x.is_struct() {
+        let x_obj = &obj_pool[x.as_array()];
+        let y_obj = &obj_pool[y.as_array()];
+        if x_obj.len() != y_obj.len() {
+            return false;
+        }
+        if x_obj == y_obj {
+            return true;
+        }
+        x_obj.iter().zip(y_obj).all(|(x, y)| obj_eq(*x, *y, obj_pool, map_pool, string_pool))
+    } else if x.is_map() {
+        let x_map = &map_pool[x.as_map()];
+        let y_map = &map_pool[y.as_map()];
+        x_map.len() == y_map.len()
+            && x_map.iter().all(|(k, v)| {
+                y_map.get(k).is_some_and(|y_v| obj_eq(*v, *y_v, obj_pool, map_pool, string_pool))
+            })
+    } else {
+        false
+    }
+}
+
+#[inline(always)]
+#[must_use]
 fn obj_eq(
     x: Data,
     y: Data,
@@ -51,30 +84,8 @@ fn obj_eq(
         false
     } else if x.is_string() {
         x.string_eq(y, string_pool)
-    } else if x.is_array() || x.is_struct() {
-        let x_obj = &obj_pool[x.as_array()];
-        let y_obj = &obj_pool[y.as_array()];
-        if x_obj.len() != y_obj.len() {
-            return false;
-        }
-        if x_obj == y_obj {
-            return true;
-        }
-        x_obj.iter().zip(y_obj).all(|(x, y)| obj_eq(*x, *y, obj_pool, map_pool, string_pool))
-    } else if x.is_map() {
-        let x_map = &map_pool[x.as_map()];
-        let y_map = &map_pool[y.as_map()];
-        if x_map.len() != y_map.len() {
-            return false;
-        }
-        if x_map == y_map {
-            return true;
-        }
-        x_map.iter().all(|(k, v)| {
-            y_map.get(k).is_some_and(|y_v| obj_eq(*v, *y_v, obj_pool, map_pool, string_pool))
-        })
     } else {
-        false
+        container_eq(x, y, obj_pool, map_pool, string_pool)
     }
 }
 
@@ -317,6 +328,24 @@ fn error_with_catch(
     err_handle.catch_loc as usize
 }
 
+#[inline(always)]
+#[must_use]
+fn recursive_return(
+    call_frames: &mut Vec<CallFrame>,
+    recursion_stack: &mut RegisterFile,
+    r: &mut RegisterFile,
+    fn_registers: &[Vec<u16>],
+) -> CallFrame {
+    let call_frame = call_frames.pop_unchecked();
+    let regs = unsafe { fn_registers.get_unchecked(call_frame.callsite_id as usize) };
+    let base = recursion_stack.len() - regs.len();
+    for (reg, &saved) in regs.iter().zip(unsafe { recursion_stack.0.get_unchecked(base..) }) {
+        r[*reg] = saved;
+    }
+    unsafe { recursion_stack.0.set_len(base) };
+    call_frame
+}
+
 #[allow(unused_unsafe)]
 pub fn execute(
     instructions: &[Instr],
@@ -371,7 +400,7 @@ pub fn execute(
     }
 
     macro_rules! error_with_catch {
-        ($err:expr) => {
+        ($err:expr $(, $label:lifetime)?) => {
             cold_path();
             i = error_with_catch(
                 $err,
@@ -388,42 +417,18 @@ pub fn execute(
                 i,
                 &mut handle,
             );
-            continue;
-        };
-        ($err:expr, $label:lifetime) => {
-            cold_path();
-            i = error_with_catch(
-                $err,
-                r,
-                obj_pool,
-                map_pool,
-                str_pool,
-                &mut recursion_stack,
-                &mut gc,
-                &mut args,
-                &mut call_frames,
-                &mut error_handles,
-                err_ctx,
-                i,
-                &mut handle
-            );
-            continue $label;
+            continue $($label)?;
         };
     }
 
     'main: loop {
         match unsafe { *instructions.get_unchecked(i) } {
             Instr::Jmp(size) => {
-                i += size as usize;
-                continue;
-            }
-            Instr::JmpBack(size) => {
-                i -= size as usize;
+                i = (i as u16).wrapping_add(size) as usize;
                 continue;
             }
             Instr::Mov(tgt, dest) => r[dest] = r[tgt],
             Instr::SetInt(dest, n) => r[dest] = Data::int(n),
-            Instr::SetBool(b, dest) => r[dest] = b.into(),
             Instr::CallFunc(new_loc, return_id) => {
                 call_frames.push(CallFrame {
                     return_addr: i as u16,
@@ -461,32 +466,15 @@ pub fn execute(
                 r[return_reg] = r[tgt];
             }
             Instr::RecursiveReturn(tgt) => {
-                let call_frame = call_frames.pop_unchecked();
                 let temp = r[tgt];
-                let regs = unsafe { fn_registers.get_unchecked(call_frame.callsite_id as usize) };
-                let base = recursion_stack.len() - regs.len();
-                for (reg, &saved) in
-                    regs.iter().zip(unsafe { recursion_stack.0.get_unchecked(base..) })
-                {
-                    r[*reg] = saved;
-                }
-                unsafe {
-                    recursion_stack.0.set_len(base);
-                }
+                let call_frame =
+                    recursive_return(&mut call_frames, &mut recursion_stack, r, fn_registers);
                 i = call_frame.return_addr as usize;
                 r[call_frame.return_reg] = temp;
             }
-            Instr::IsFalseJmp(cond_id, size) => {
-                if r[cond_id] == FALSE {
-                    i += size as usize;
-                    continue;
-                }
-            }
-            Instr::IsTrueJmp(cond_id, size) => {
-                if r[cond_id] == TRUE {
-                    i += size as usize;
-                    continue;
-                }
+            Instr::RecursiveVoidReturn => {
+                i = recursive_return(&mut call_frames, &mut recursion_stack, r, fn_registers)
+                    .return_addr as usize;
             }
             #[cfg(target_arch = "wasm32")]
             Instr::CallDynamicLibFunc { .. } => unsafe { std::hint::unreachable_unchecked() },
@@ -610,7 +598,7 @@ pub fn execute(
                 r[dest] = (r[o1].as_float() + r[o2].as_float()).into();
             }
             Instr::AddInt(o1, o2, dest) => {
-                r[dest] = Data::int(r[o1].as_int() + r[o2].as_int());
+                r[dest] = Data::int(r[o1].as_int().wrapping_add(r[o2].as_int()));
             }
             Instr::AddStr(o1, o2, dest) => {
                 let d1 = r[o1];
@@ -626,7 +614,7 @@ pub fn execute(
                 let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack);
                 r[arr_reg_id] = Data::array(array_id);
             }
-            Instr::CloneArray(src_reg, dest_reg, len) => {
+            Instr::CloneObj(src_reg, dest_reg, len) => {
                 let src_id = r[src_reg].as_array();
                 let new_id =
                     gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack) as usize;
@@ -637,22 +625,7 @@ pub fn execute(
                     dst.set_len(len as usize);
                     core::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len as usize);
                 }
-                r[dest_reg] = Data::array(new_id as u32);
-            }
-            Instr::CloneStruct(src_reg, dest_reg) => {
-                let new_id =
-                    gc.alloc_array(obj_pool, map_pool, str_pool, r, &recursion_stack) as usize;
-                let src_reg = r[src_reg];
-                let src = &obj_pool[src_reg.as_struct()];
-                let len = src.len();
-                unsafe {
-                    let src_ptr = src.as_ptr();
-                    let dst = obj_pool.get_mut(new_id);
-                    dst.reserve_exact(len);
-                    dst.set_len(len);
-                    core::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len);
-                }
-                r[dest_reg] = Data::struct_instance(src_reg.struct_type_id(), new_id as u32);
+                r[dest_reg] = Data(r[src_reg].tag() | new_id as u64);
             }
             Instr::AddArray(o1, o2, dest) => {
                 let array1_id = r[o1].as_array();
@@ -672,11 +645,12 @@ pub fn execute(
                 }
                 r[dest] = Data::array(output_array_id);
             }
+            Instr::AddIntImm { src, dst, imm } => r[dst] = r[src].add_int_imm(imm as i16),
             Instr::MulFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() * r[o2].as_float()).into();
             }
             Instr::MulInt(o1, o2, dest) => {
-                r[dest] = Data::int(r[o1].as_int() * r[o2].as_int());
+                r[dest] = Data::int(r[o1].as_int().wrapping_mul(r[o2].as_int()));
             }
             Instr::DivFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() / r[o2].as_float()).into();
@@ -686,13 +660,13 @@ pub fn execute(
                 if b == 0 {
                     error_with_catch!(ErrType::DivisionByZero);
                 }
-                r[dest] = Data::int(r[o1].as_int() / b);
+                r[dest] = Data::int(r[o1].as_int().wrapping_div(b));
             }
             Instr::SubFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() - r[o2].as_float()).into();
             }
             Instr::SubInt(o1, o2, dest) => {
-                r[dest] = Data::int(r[o1].as_int() - r[o2].as_int());
+                r[dest] = Data::int(r[o1].as_int().wrapping_sub(r[o2].as_int()));
             }
             Instr::ModFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() % r[o2].as_float()).into();
@@ -702,7 +676,7 @@ pub fn execute(
                 if b == 0 {
                     error_with_catch!(ErrType::ModuloByZero);
                 }
-                r[dest] = Data::int(r[o1].as_int() % b);
+                r[dest] = Data::int(r[o1].as_int().wrapping_rem(b));
             }
             Instr::PowFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float().powf(r[o2].as_float())).into();
@@ -712,17 +686,7 @@ pub fn execute(
                 if e < 0 {
                     error_with_catch!(ErrType::IntegerNegativeExponent);
                 }
-                r[dest] = Data::int(r[o1].as_int().pow(e as u32));
-            }
-            Instr::IncInt(reg) => r[reg].inc_int(),
-            Instr::DecInt(reg) => r[reg].dec_int(),
-            Instr::IncIntTo(src, dst) => {
-                let s = r[src];
-                r[dst].inc_from(s);
-            }
-            Instr::DecIntTo(src, dst) => {
-                let s = r[src];
-                r[dst].dec_from(s);
+                r[dest] = Data::int(r[o1].as_int().wrapping_pow(e as u32));
             }
             Instr::Eq(o1, o2, dest) => {
                 r[dest] = (r[o1] == r[o2]).into();
@@ -732,19 +696,13 @@ pub fn execute(
             }
             Instr::NotEqJmp(o1, o2, jump_size) => {
                 if r[o1] != r[o2] {
-                    i += jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
             }
             Instr::ObjNotEqJmp(o1, o2, jump_size) => {
                 if !obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
-                    i += jump_size as usize;
-                    continue;
-                }
-            }
-            Instr::StrNotEqJmp(o1, o2, jump_size) => {
-                if !r[o1].string_eq(r[o2], str_pool) {
-                    i += jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
             }
@@ -754,69 +712,53 @@ pub fn execute(
             Instr::ObjNotEq(o1, o2, dest) => {
                 r[dest] = (!obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool)).into();
             }
-            Instr::StrEq(o1, o2, dest) => {
-                r[dest] = Data::bool(r[o1].string_eq(r[o2], str_pool));
-            }
-            Instr::StrNotEq(o1, o2, dest) => {
-                r[dest] = Data::bool(!r[o1].string_eq(r[o2], str_pool));
-            }
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r[o1] == r[o2] {
-                    i += jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
             }
             Instr::ObjEqJmp(o1, o2, jump_size) => {
                 if obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
-                    i += jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
-            }
-            Instr::StrEqJmp(o1, o2, jump_size) => {
-                if r[o1].string_eq(r[o2], str_pool) {
-                    i += jump_size as usize;
-                    continue;
-                }
-            }
-            Instr::SupFloat(o1, o2, dest) => {
-                r[dest] = (r[o1].as_float() > r[o2].as_float()).into();
-            }
-            Instr::SupInt(o1, o2, dest) => {
-                r[dest] = (r[o1].as_int() > r[o2].as_int()).into();
             }
             Instr::InfEqFloatJmp(o1, o2, jump_size) => {
                 if r[o1].as_float() <= r[o2].as_float() {
-                    i += jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
             }
             Instr::InfEqIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() <= r[o2].as_int() {
-                    i += jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
             }
-            Instr::SupEqFloat(o1, o2, dest) => {
-                r[dest] = (r[o1].as_float() >= r[o2].as_float()).into();
-            }
-            Instr::SupEqInt(o1, o2, dest) => {
-                r[dest] = (r[o1].as_int() >= r[o2].as_int()).into();
-            }
             Instr::InfFloatJmp(o1, o2, jump_size) => {
                 if r[o1].as_float() < r[o2].as_float() {
-                    i += jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    continue;
+                }
+            }
+            #[allow(clippy::neg_cmp_op_on_partial_ord)]
+            Instr::NotInfFloatJmp(o1, o2, jump_size) => {
+                if !(r[o1].as_float() < r[o2].as_float()) {
+                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    continue;
+                }
+            }
+            #[allow(clippy::neg_cmp_op_on_partial_ord)]
+            Instr::NotInfEqFloatJmp(o1, o2, jump_size) => {
+                if !(r[o1].as_float() <= r[o2].as_float()) {
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
             }
             Instr::InfIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() < r[o2].as_int() {
-                    i += jump_size as usize;
-                    continue;
-                }
-            }
-            Instr::InfIntJmpBack(o1, o2, jump_size) => {
-                if r[o1].as_int() < r[o2].as_int() {
-                    i -= jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
             }
@@ -826,50 +768,17 @@ pub fn execute(
             Instr::InfInt(o1, o2, dest) => {
                 r[dest] = (r[o1].as_int() < r[o2].as_int()).into();
             }
-            Instr::SupEqFloatJmp(o1, o2, jump_size) => {
-                if r[o1].as_float() >= r[o2].as_float() {
-                    i += jump_size as usize;
-                    continue;
-                }
-            }
-            Instr::SupEqIntJmp(o1, o2, jump_size) => {
-                if r[o1].as_int() >= r[o2].as_int() {
-                    i += jump_size as usize;
-                    continue;
-                }
-            }
             Instr::InfEqFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() <= r[o2].as_float()).into();
             }
             Instr::InfEqInt(o1, o2, dest) => {
                 r[dest] = (r[o1].as_int() <= r[o2].as_int()).into();
             }
-            Instr::SupFloatJmp(o1, o2, jump_size) => {
-                if r[o1].as_float() > r[o2].as_float() {
-                    i += jump_size as usize;
-                    continue;
-                }
-            }
-            Instr::SupIntJmp(o1, o2, jump_size) => {
-                if r[o1].as_int() > r[o2].as_int() {
-                    i += jump_size as usize;
-                    continue;
-                }
-            }
             Instr::BoolAnd(o1, o2, dest) => {
                 r[dest] = (r[o1].as_bool() && r[o2].as_bool()).into();
             }
             Instr::BoolOr(o1, o2, dest) => {
                 r[dest] = (r[o1].as_bool() || r[o2].as_bool()).into();
-            }
-            Instr::NegBool(src, dest) => {
-                r[dest] = (!r[src].as_bool()).into();
-            }
-            Instr::NegFloat(tgt, dest) => {
-                r[dest] = (-r[tgt].as_float()).into();
-            }
-            Instr::NegInt(tgt, dest) => {
-                r[dest] = Data::int(-r[tgt].as_int());
             }
             Instr::Print(tgt) => {
                 r[tgt].format_to(&mut output, obj_pool, str_pool, map_pool, structs, false);
@@ -881,10 +790,6 @@ pub fn execute(
                 }
             }
             Instr::StoreFuncArg(id) => unsafe { args.push_unchecked(id) },
-            Instr::ObjElemMov(new_elem_reg_id, array_id, idx) => unsafe {
-                *obj_pool.get_mut(array_id as usize).get_unchecked_mut(idx as usize) =
-                    r[new_elem_reg_id];
-            },
             Instr::SetElementObj(array_reg_id, new_elem_reg_id, idx) => {
                 let array = obj_pool.get_mut(r[array_reg_id].as_array());
                 let index = r[idx].as_int();
@@ -907,8 +812,8 @@ pub fn execute(
                 temp.insert_str(index as usize, r[new_str_reg_id].as_str(str_pool));
                 r[string_reg_id] = string!(temp);
             }
-            Instr::SetFieldStruct(struct_reg_id, new_elem_reg_id, idx) => {
-                let s = obj_pool.get_mut(r[struct_reg_id].as_struct());
+            Instr::SetFieldObj(struct_reg_id, new_elem_reg_id, idx) => {
+                let s = obj_pool.get_mut(r[struct_reg_id].as_array());
                 unsafe {
                     *s.get_unchecked_mut(idx as usize) = r[new_elem_reg_id];
                 }
@@ -956,7 +861,7 @@ pub fn execute(
                 if (idx as usize) >= bytes.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(bytes.len(), idx));
                 }
-                r[dest] = string!(unsafe {
+                r[dest] = Data::small_str(unsafe {
                     core::str::from_utf8_unchecked(core::slice::from_ref(
                         bytes.get_unchecked(idx as usize),
                     ))
@@ -998,9 +903,6 @@ pub fn execute(
                         r[key_reg_id].format(obj_pool, str_pool, map_pool, structs, false).as_str()
                     ));
                 };
-            }
-            Instr::MapInsert(map_pool_id, key_reg_id, val_reg_id) => {
-                map_pool[map_pool_id as usize].insert(r[key_reg_id], r[val_reg_id]);
             }
             Instr::MapInsertReg(map_reg_id, key_reg_id, val_reg_id) => {
                 map_pool[r[map_reg_id].as_map()].insert(r[key_reg_id], r[val_reg_id]);
@@ -1177,8 +1079,8 @@ pub fn execute(
             Instr::CallLibFunc(LibFunc::Input, tgt, dest) => {
                 let temp_tgt = r[tgt];
                 let str_msg = temp_tgt.as_str(str_pool);
-                write!(handle, "{str_msg}").unwrap();
-                std::io::stdout().flush().unwrap();
+                handle.write_all(str_msg.as_bytes()).unwrap();
+                handle.flush().unwrap();
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line).unwrap();
                 r[dest] = string!(line.trim_end_matches(['\n', '\r']));
@@ -1407,7 +1309,7 @@ pub fn execute(
                     obj_pool,
                     map_pool,
                 ) {
-                    i += jump_size as usize;
+                    i = (i as u16).wrapping_add(jump_size) as usize;
                     continue;
                 }
             }

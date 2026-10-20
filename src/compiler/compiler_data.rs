@@ -12,10 +12,10 @@ use crate::vm::MapPool;
 use crate::vm::ObjectPool;
 use crate::vm::StringPool;
 use bumpalo::Bump;
+use core::hint::unreachable_unchecked;
 use fixedbitset::FixedBitSet;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
-use core::hint::unreachable_unchecked;
 use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -114,7 +114,7 @@ pub struct Source<'a> {
 
 #[derive(Clone, Copy)]
 pub struct Ctx {
-    pub block_id: u16,
+    pub in_function: bool,
     /// Whether the code being compiled is within a recursive function
     pub is_compiling_recursive: bool,
     /// Whether the code being compiled is guaranteed to run at most once
@@ -123,12 +123,14 @@ pub struct Ctx {
     pub file_idx: u16,
     /// Instruction offset that's only used when compiling a function
     pub offset: u16,
+    pub try_depth: u16,
+    pub loop_try_depth: u16,
 }
 
 impl Ctx {
     #[inline(always)]
     pub const fn no_single_run(self) -> Self {
-        Self { single_run: false, ..self }
+        Self { single_run: false, loop_try_depth: self.try_depth, ..self }
     }
     #[inline(always)]
     pub const fn advance_offset(self, output_len: u16) -> Self {
@@ -329,13 +331,6 @@ impl<'arena> State<'arena, '_> {
             self.free_registers.swap_remove(free_reg_id_pos);
         }
     }
-    /// Remove register `id` from `const_registers` (do nothing if it's not in `const_registers`).
-    pub fn remove_reg_from_consts(&mut self, id: u16) {
-        if unsafe { self.const_registers_bitset.contains_unchecked(id as usize) } {
-            unsafe { self.const_registers_bitset.remove_unchecked(id as usize) };
-            self.const_registers.remove(unsafe { self.registers.get_unchecked(id as usize) });
-        }
-    }
     /// Unfree all the registers in `free_registers` who are also in `reserved_registers`.
     pub fn unfree_reserved_registers(&mut self) {
         self.free_registers.retain(|reg| {
@@ -359,11 +354,7 @@ impl<'arena> State<'arena, '_> {
         self.free_scope_registers(regs_before, scope_instrs);
         // Free CloneArray template registers
         for instr in scope_instrs {
-            if let Instr::CloneArray(template_reg, _, _) = instr
-                && *template_reg >= regs_before
-            {
-                self.free_reg(*template_reg);
-            } else if let Instr::CloneStruct(template_reg, _) = instr
+            if let Instr::CloneObj(template_reg, _, _) = instr
                 && *template_reg >= regs_before
             {
                 self.free_reg(*template_reg);

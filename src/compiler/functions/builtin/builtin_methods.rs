@@ -18,6 +18,7 @@ use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::functions::check_arg_type;
 use crate::compiler::functions::user_functions::compile_function_impl;
 use crate::data::Data;
+use crate::data::FALSE;
 use crate::instr::Instr;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
@@ -590,7 +591,7 @@ pub fn builtin_methods<'arena>(
 
             // Basically the same thing as compile_for_loop
             let jmp_start_idx = output.len();
-            output.push(Instr::SupEqIntJmp(index_id, len_id, 0));
+            output.push(Instr::InfEqIntJmp(len_id, index_id, 0));
 
             let body_start = output.len();
             if is_str {
@@ -601,7 +602,8 @@ pub fn builtin_methods<'arena>(
             let fn_return_val_id = state.alloc_reg();
             output.push(Instr::CallFuncDynamic(fn_value_reg, fn_return_val_id));
             let dest_reg_id = if is_filter {
-                output.push(Instr::IsFalseJmp(fn_return_val_id, 2));
+                let false_reg = state.new_const_reg(FALSE);
+                output.push(Instr::EqJmp(fn_return_val_id, false_reg, 2));
                 arg_reg
             } else {
                 fn_return_val_id
@@ -613,11 +615,11 @@ pub fn builtin_methods<'arena>(
             }
             let jump_size = (output.len() - body_start + 1) as u16;
 
-            output.push(Instr::IncInt(index_id));
-            output.push(Instr::InfIntJmpBack(index_id, len_id, jump_size));
+            output.push(Instr::AddIntImm { src: index_id, dst: index_id, imm: 1 });
+            output.push(Instr::InfIntJmp(index_id, len_id, jump_size.wrapping_neg()));
 
             let exit_size = (output.len() - jmp_start_idx) as u16;
-            output[jmp_start_idx] = Instr::SupEqIntJmp(index_id, len_id, exit_size);
+            output[jmp_start_idx] = Instr::InfEqIntJmp(len_id, index_id, exit_size);
 
             if ctx.single_run {
                 state.free_reg(len_id);

@@ -15,6 +15,7 @@
 - Runtime memory usage has been significantly lowered for allocation-heavy programs
 - Compilation is substantially faster
 - Multiple relatively minor VM/FFI optimizations
+- Recursion is faster
 - Optimized the emitted bytecode in some cases
 - Added an actual match block with patterns and struct destructuring
 

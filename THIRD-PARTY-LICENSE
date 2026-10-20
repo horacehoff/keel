@@ -218,9 +218,9 @@ THIS SOFTWARE.
 --------
 MIT License
 Used by:
-- cc 1.6.0 - https://github.com/rust-lang/cc-rs
+- cc 1.9.0 - https://github.com/rust-lang/cc-rs
 - cfg-if 1.0.5 - https://github.com/rust-lang/cfg-if
-- find-msvc-tools 0.1.14 - https://github.com/rust-lang/cc-rs
+- find-msvc-tools 0.1.15 - https://github.com/rust-lang/cc-rs
 - js-sys 0.3.106 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys
 - wasm-bindgen-macro-support 0.2.129 - https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support
 - wasm-bindgen-macro 0.2.129 - https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro
@@ -413,7 +413,7 @@ DEALINGS IN THE SOFTWARE.
 --------
 MIT License
 Used by:
-- equivalent 1.0.2 - https://github.com/indexmap-rs/equivalent
+- equivalent 1.0.3 - https://github.com/indexmap-rs/equivalent
 
 Copyright (c) 2016--2023
 
@@ -567,7 +567,7 @@ DEALINGS IN THE SOFTWARE.
 --------
 MIT License
 Used by:
-- libc 0.2.190 - https://github.com/rust-lang/libc
+- libc 0.2.191 - https://github.com/rust-lang/libc
 
 Copyright (c) The Rust Project Developers
 
@@ -659,7 +659,7 @@ Used by:
 
 MIT License
 
-Copyright (c) 2021-2022 Joshua Barretto
+Copyright (c) 2021-2022 Joshua Barretto 
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -747,8 +747,8 @@ Used by:
 - quote 1.0.47 - https://github.com/dtolnay/quote
 - rustversion 1.0.23 - https://github.com/dtolnay/rustversion
 - syn 2.0.119 - https://github.com/dtolnay/syn
-- syn 3.0.6 - https://github.com/dtolnay/syn
-- unicode-ident 1.0.26 - https://github.com/dtolnay/unicode-ident
+- syn 3.0.9 - https://github.com/dtolnay/syn
+- unicode-ident 1.0.27 - https://github.com/dtolnay/unicode-ident
 - zmij 1.0.23 - https://github.com/dtolnay/zmij
 
 Permission is hereby granted, free of charge, to any
@@ -885,7 +885,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 --------
 Unicode License v3
 Used by:
-- unicode-ident 1.0.26 - https://github.com/dtolnay/unicode-ident
+- unicode-ident 1.0.27 - https://github.com/dtolnay/unicode-ident
 
 UNICODE LICENSE V3
 

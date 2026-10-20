@@ -236,49 +236,20 @@ impl Data {
     }
     #[inline(always)]
     pub fn string_eq(self, candidate: Self, str_pool: &StringPool) -> bool {
-        self.0 == candidate.0
-            || (self.is_large_str()
-                && candidate.is_large_str()
-                && str_pool[self.get_str_pool_id()] == str_pool[candidate.get_str_pool_id()])
+        self.is_large_str()
+            && str_pool[self.get_str_pool_id()] == str_pool[candidate.get_str_pool_id()]
     }
     #[inline(always)]
     pub const fn is_string(self) -> bool {
         // this works because NAN_TAG_STRING_LARGE == NAN_TAG_STRING_SMALL + (1 << 48)
         (self.0 >> 49) == const { NAN_STRING_SMALL >> 49 }
     }
-    /// Increments the integer stored in this Data in-place. Wraps.
+    /// Returns `self + imm`, wraps.
     #[inline(always)]
-    pub const fn inc_int(&mut self) {
+    #[must_use]
+    pub const fn add_int_imm(self, imm: i16) -> Self {
         debug_assert!(self.is_int());
-        #[cfg(target_endian = "little")]
-        {
-            let i = core::ptr::from_mut(self).cast::<u32>();
-            unsafe {
-                *i = (*i).wrapping_add(1);
-            }
-        }
-        #[cfg(target_endian = "big")]
-        {
-            self.0 = NAN_INT | (self.0.wrapping_add(1) & 0xFFFF_FFFF);
-        }
-    }
-    /// Decrements the integer stored in this Data in-place. Wraps.
-    #[inline(always)]
-    pub const fn dec_int(&mut self) {
-        debug_assert!(self.is_int());
-        self.0 = NAN_INT | (self.0.wrapping_sub(1) & 0xFFFF_FFFF);
-    }
-    /// Writes src + 1 into self. Wraps.
-    #[inline(always)]
-    pub const fn inc_from(&mut self, src: Self) {
-        debug_assert!(src.is_int());
-        self.0 = NAN_INT | (src.0.wrapping_add(1) & 0xFFFF_FFFF);
-    }
-    /// Writes src - 1 into self. Wraps.
-    #[inline(always)]
-    pub const fn dec_from(&mut self, src: Self) {
-        debug_assert!(src.is_int());
-        self.0 = NAN_INT | (src.0.wrapping_sub(1) & 0xFFFF_FFFF);
+        Self((self.0 & !0xFFFF_FFFF) | (self.0 as u32).wrapping_add(imm as u32) as u64)
     }
     #[inline(always)]
     pub const fn is_large_str(self) -> bool {

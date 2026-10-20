@@ -4,35 +4,23 @@ pub enum Instr {
     Print(u16),
 
     // LOGIC
-    /// Jumps x instructions forwards
+    /// Jumps by x instructions (backward jumps are encoded with wrapping_neg)
     Jmp(u16),
-    /// Jumps x instructions backwards
-    JmpBack(u16),
-    IsFalseJmp(u16, u16),
-    IsTrueJmp(u16, u16),
-    SupEqFloatJmp(u16, u16, u16),
-    SupEqIntJmp(u16, u16, u16),
-    SupFloatJmp(u16, u16, u16),
-    SupIntJmp(u16, u16, u16),
     InfEqFloatJmp(u16, u16, u16),
     InfEqIntJmp(u16, u16, u16),
     InfFloatJmp(u16, u16, u16),
     InfIntJmp(u16, u16, u16),
-    InfIntJmpBack(u16, u16, u16),
+    NotInfFloatJmp(u16, u16, u16),
+    NotInfEqFloatJmp(u16, u16, u16),
     NotEqJmp(u16, u16, u16),
     EqJmp(u16, u16, u16),
     ObjNotEqJmp(u16, u16, u16),
     ObjEqJmp(u16, u16, u16),
-    StrNotEqJmp(u16, u16, u16),
-    StrEqJmp(u16, u16, u16),
 
     Mov(u16, u16),
     /// SetInt(dest_reg_id, val)\
     /// Writes val directly into dest_reg_id
     SetInt(u16, i32),
-    /// SetBool(dest_reg_id, val)\
-    /// Writes val directly into dest_reg_id
-    SetBool(bool, u16),
 
     // OPS
     AddFloat(u16, u16, u16),
@@ -49,35 +37,22 @@ pub enum Instr {
     ModInt(u16, u16, u16),
     PowFloat(u16, u16, u16),
     PowInt(u16, u16, u16),
-    /// Increments the integer in-place by 1
-    IncInt(u16),
-    /// Decrements the integer in-place by 1
-    DecInt(u16),
-    /// IncIntTo(src, dst)\
-    /// dst = src + 1
-    IncIntTo(u16, u16),
-    /// DecIntTo(src, dst)\
-    /// dst = src - 1
-    DecIntTo(u16, u16),
+    /// `imm` is an i16, wraps.
+    AddIntImm {
+        src: u16,
+        dst: u16,
+        imm: u16,
+    },
     Eq(u16, u16, u16),
     NotEq(u16, u16, u16),
     ObjEq(u16, u16, u16),
     ObjNotEq(u16, u16, u16),
-    StrEq(u16, u16, u16),
-    StrNotEq(u16, u16, u16),
-    SupFloat(u16, u16, u16),
-    SupInt(u16, u16, u16),
-    SupEqFloat(u16, u16, u16),
-    SupEqInt(u16, u16, u16),
     InfFloat(u16, u16, u16),
     InfInt(u16, u16, u16),
     InfEqFloat(u16, u16, u16),
     InfEqInt(u16, u16, u16),
     BoolAnd(u16, u16, u16),
     BoolOr(u16, u16, u16),
-    NegBool(u16, u16),
-    NegFloat(u16, u16),
-    NegInt(u16, u16),
 
     /// CallFunc(n,y)\
     /// Jumps to the nth instruction, and adds y as a slot to be set by the Return instruction\
@@ -88,6 +63,7 @@ pub enum Instr {
     CallFuncRecursive(u16, u16),
     /// Jumps to the instruction right after the last CallFunc encountered by the interpreter
     VoidReturn,
+    RecursiveVoidReturn,
     /// Return(n)\
     /// Returns the data located in register n
     Return(u16),
@@ -122,21 +98,15 @@ pub enum Instr {
     /// CallFuncDynamic(fn_reg_id, return_reg_id)
     CallFuncDynamic(u16, u16),
 
-    /// ArrayMov(new_elem_reg_id, array_id, idx)\
-    /// Replaces the idx-th element in the array (with the id array_id) with the element located in new_elem_reg_id
-    ObjElemMov(u16, u16, u16),
-
     /// EmptyArray(array_reg_id)
     /// Allocates a fresh empty array and stores its address in array_reg_id
     EmptyArray(u16),
 
-    /// CloneArray(src_reg, dest_reg, len)
+    /// CloneObj(src_reg, dest_reg, len)
     /// Allocates a fresh array with exact capacity len and clones the array in src_reg to dest_reg
-    CloneArray(u16, u16, u16),
+    CloneObj(u16, u16, u16),
 
-    CloneStruct(u16, u16),
-
-    /// SetElementArray(array_reg_id, new_elem_reg_id, idx)\
+    /// SetElementObj(array_reg_id, new_elem_reg_id, idx)\
     /// Replaces the idx-th element in the array located in array_reg_id with the element located in new_elem_reg_id
     SetElementObj(u16, u16, u16),
 
@@ -144,8 +114,8 @@ pub enum Instr {
     /// Replaces the idx-th char in the string located in string_reg_id with the string located in new_str_reg_id
     SetElementString(u16, u16, u16),
 
-    /// SetFieldStruct(struct_reg_id, new_elem_reg_id, idx)
-    SetFieldStruct(u16, u16, u16),
+    /// SetFieldObj(struct_reg_id, new_elem_reg_id, idx)
+    SetFieldObj(u16, u16, u16),
 
     /// GetIndexArray(array_reg_id, index_reg_id, output_reg_id)
     GetIndexArray(u16, u16, u16),
@@ -172,9 +142,6 @@ pub enum Instr {
 
     /// MapGet(map_pool_id, key_reg_id, dest_reg_id)
     MapGet(u16, u16, u16),
-    /// MapSet(map_pool_id, key_reg_id, val_reg_id)
-    MapInsert(u16, u16, u16),
-    /// MapSet(map_reg_id, key_reg_id, val_reg_id)
     MapInsertReg(u16, u16, u16),
     MapRemove {
         map_reg_id: u16,

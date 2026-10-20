@@ -57,8 +57,8 @@ const fn flip_jump(jump_instr: Instr) -> Option<Instr> {
     match jump_instr {
         Instr::NotEqJmp(a, b, jmp_size) => Some(Instr::EqJmp(a, b, jmp_size)),
         Instr::EqJmp(a, b, jmp_size) => Some(Instr::NotEqJmp(a, b, jmp_size)),
-        Instr::StrNotEqJmp(a, b, jmp_size) => Some(Instr::StrEqJmp(a, b, jmp_size)),
-        Instr::StrEqJmp(a, b, jmp_size) => Some(Instr::StrNotEqJmp(a, b, jmp_size)),
+        Instr::ObjNotEqJmp(a, b, jmp_size) => Some(Instr::ObjEqJmp(a, b, jmp_size)),
+        Instr::ObjEqJmp(a, b, jmp_size) => Some(Instr::ObjNotEqJmp(a, b, jmp_size)),
         _ => None,
     }
 }
@@ -166,7 +166,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                 let constant_reg =
                     cst.compile(self.ctx, self.state, self.output, None, false, true).unwrap_id();
                 self.false_arm(if constant_type == DataType::String {
-                    Instr::StrNotEqJmp(register_id, constant_reg, 0)
+                    Instr::ObjNotEqJmp(register_id, constant_reg, 0)
                 } else {
                     Instr::NotEqJmp(register_id, constant_reg, 0)
                 });
@@ -181,17 +181,19 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                 self.false_arm(if bound_type == DataType::Int {
                     Instr::InfIntJmp(register_id, lower_bound_reg_id, 0)
                 } else {
-                    Instr::InfFloatJmp(register_id, lower_bound_reg_id, 0)
+                    Instr::NotInfEqFloatJmp(lower_bound_reg_id, register_id, 0)
                 });
                 if let Some(upper_bound) = upper_bound {
                     let upper_bound_reg_id = upper_bound
                         .compile(self.ctx, self.state, self.output, None, false, true)
                         .unwrap_id();
                     self.false_arm(match (bound_type == DataType::Int, is_inclusive) {
-                        (true, true) => Instr::SupIntJmp(register_id, upper_bound_reg_id, 0),
-                        (true, false) => Instr::SupEqIntJmp(register_id, upper_bound_reg_id, 0),
-                        (false, true) => Instr::SupFloatJmp(register_id, upper_bound_reg_id, 0),
-                        (false, false) => Instr::SupEqFloatJmp(register_id, upper_bound_reg_id, 0),
+                        (true, true) => Instr::InfIntJmp(upper_bound_reg_id, register_id, 0),
+                        (true, false) => Instr::InfEqIntJmp(upper_bound_reg_id, register_id, 0),
+                        (false, true) => {
+                            Instr::NotInfEqFloatJmp(register_id, upper_bound_reg_id, 0)
+                        }
+                        (false, false) => Instr::NotInfFloatJmp(register_id, upper_bound_reg_id, 0),
                     });
                 }
                 bound_type

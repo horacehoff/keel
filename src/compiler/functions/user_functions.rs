@@ -309,11 +309,13 @@ pub fn compile_function<'arena>(
     let parsed = compile_expr(
         fn_code,
         Ctx {
+            in_function: true,
             is_compiling_recursive: is_recursive,
             file_idx: fn_file_idx,
             single_run: false,
             offset: ctx.offset + output.len() as u16,
-            ..ctx
+            try_depth: 0,
+            loop_try_depth: 0,
         },
         state,
     );
@@ -326,9 +328,7 @@ pub fn compile_function<'arena>(
     state.reserved_registers.extend(args_loc);
     for instr in &parsed {
         match instr {
-            Instr::CloneArray(template_reg, _, _)
-            | Instr::CloneStruct(template_reg, _)
-            | Instr::CloneMap(template_reg, _) => {
+            Instr::CloneObj(template_reg, _, _) | Instr::CloneMap(template_reg, _) => {
                 state.reserved_registers.insert(*template_reg);
             }
             _ => {}
@@ -339,7 +339,7 @@ pub fn compile_function<'arena>(
     if is_recursive {
         // For each recursive call, only save registers that are read between that call's return and the end of the function
         for (save_frame_instr_pos, instr) in parsed.iter().enumerate() {
-            if let Instr::SaveFrame(call_loc_relative, _, callsite_id) = *instr {
+            if let Instr::SaveFrame(call_loc_relative, return_reg_id, callsite_id) = *instr {
                 let pos = save_frame_instr_pos + call_loc_relative as usize;
                 let mut live_regs: Vec<u16> = Vec::new();
                 for after_instr in &parsed[pos + 1..] {
@@ -359,6 +359,9 @@ pub fn compile_function<'arena>(
                 }
                 live_regs.sort_unstable();
                 live_regs.dedup();
+                if return_reg_id != 0 {
+                    live_regs.retain(|&r| r != return_reg_id);
+                }
                 unsafe {
                     *state.fn_registers.get_unchecked_mut(callsite_id as usize) = live_regs;
                 }
@@ -374,7 +377,7 @@ pub fn compile_function<'arena>(
 
     output.extend(parsed);
 
-    output.push(Instr::VoidReturn);
+    output.push(if is_recursive { Instr::RecursiveVoidReturn } else { Instr::VoidReturn });
 
     // Fix the placeholder Jmp(0) to skip over the function body
     *output.get_mut(jump_idx).unwrap() = Instr::Jmp((output.len() - fn_start + 1) as u16);

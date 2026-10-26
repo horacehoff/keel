@@ -17,7 +17,6 @@ use crate::compiler::registers::get_tgt_ids;
 use crate::compiler::registers::move_value_to;
 use crate::compiler::type_system::collect_direct_fn_calls;
 use crate::data::Data;
-use crate::data::NULL;
 use crate::instr::Instr;
 use rustc_hash::FxHashSet;
 
@@ -204,7 +203,7 @@ pub fn handle_user_function<'arena>(
 
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
             let unit = state.functions[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.unit);
-            let fn_reg_id = state.new_reg(Data::function(unit));
+            let fn_reg_id = state.value_reg(Data::function(unit));
             if fn_reg_id != tgt_id {
                 output.push(Instr::Mov(fn_reg_id, tgt_id));
             }
@@ -268,7 +267,7 @@ pub fn compile_function<'arena>(
             // Allocate a registers slot for each func arg
             Variable {
                 name: x,
-                register_id: state.new_reg(NULL),
+                register_id: state.scratch_reg(),
                 declared_type: inferred_arg_types[i].clone(),
                 var_type: inferred_arg_types[i].clone(),
             }

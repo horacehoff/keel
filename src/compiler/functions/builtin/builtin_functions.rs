@@ -38,7 +38,7 @@ pub fn builtin_functions<'arena>(
             let infered = args[0].infer_type(ctx, state);
             let arg_type =
                 Data::comp_str(infered.format_detailed(state).as_str(), &mut state.pools.str_pool);
-            Some(state.new_reg(arg_type))
+            Some(state.value_reg(arg_type))
         }
         "float" => {
             check_args_length(args, 1, name, span, state.sources, ctx.file_idx);
@@ -101,12 +101,13 @@ pub fn builtin_functions<'arena>(
             check_args_range(args, 0, 1, name, arg_spans, ctx.file_idx, state.sources, span);
             let id = if args.is_empty() {
                 let data = Data::comp_str("", &mut state.pools.str_pool);
-                state.new_reg(data)
+                state.value_reg(data)
             } else {
                 check_arg_type(name, ctx, state, args, arg_spans, 0, &[DataType::String]);
-                args[0].compile(ctx, state, output, None, false, true).unwrap_id()
+                let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+                state.free_reg(id);
+                id
             };
-            state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
             output.push(Instr::CallLibFunc(LibFunc::Input, id, output_id));
             Some(output_id)

@@ -46,6 +46,7 @@ use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
 use crate::vm::RegisterFile;
+use crate::vm::StringPool;
 use crate::{data::Data, instr::Instr};
 use bumpalo::Bump;
 use compiler_data::Ctx;
@@ -334,17 +335,17 @@ fn compile_array_literal<'arena>(
         state.pools.obj_pool.len() - 1
     };
     if array_items.is_empty() && !ctx.single_run {
-        let array_reg = state.new_reg(Data::array(array_id as u32));
+        let array_reg = state.scratch_reg();
         output.push(Instr::EmptyArray(array_reg));
         return array_reg;
     }
     if ctx.single_run {
-        let array_reg = state.new_reg(Data::array(array_id as u32));
+        let array_reg = state.init_reg(Data::array(array_id as u32), ctx);
         for elem in array_items {
-            let id = elem.compile(ctx, state, output, None, false, true).unwrap_id();
-            if elem.is_constant_literal() {
-                state.pools.obj_pool.get_mut(array_id).push(state.registers[id as usize]);
+            if let Some(literal) = elem.literal_value(&mut state.pools.str_pool) {
+                state.pools.obj_pool.get_mut(array_id).push(literal);
             } else {
+                let id = elem.compile(ctx, state, output, None, false, true).unwrap_id();
                 output.push(Instr::SetFieldObj(
                     array_reg,
                     id,
@@ -354,40 +355,29 @@ fn compile_array_literal<'arena>(
             }
         }
         array_reg
+    } else if array_items.iter().all(Expr::is_constant_literal) {
+        for elem in array_items {
+            let Some(literal) = elem.literal_value(&mut state.pools.str_pool) else {
+                unsafe { unreachable_unchecked() }
+            };
+            state.pools.obj_pool.get_mut(array_id).push(literal);
+        }
+        // The template array is held by a register to prevent it from being freed by the GC
+        let template_reg = state.value_reg(Data::array(array_id as u32));
+        let dest_reg = state.scratch_reg();
+        output.push(Instr::CloneObj(template_reg, dest_reg, array_items.len() as u16));
+        dest_reg
     } else {
-        // Check if all elements are constant (no instructions emitted)
-        let mut constant_array = true;
         let mut elem_ids: Vec<u16> = Vec::with_capacity(array_items.len());
         for elem in array_items {
-            let id = elem.compile(ctx, state, output, None, false, true).unwrap_id();
-            if elem.is_constant_literal() {
-                state.pools.obj_pool.get_mut(array_id).push(state.registers[id as usize]);
-            } else {
-                constant_array = false;
-                state.pools.obj_pool.get_mut(array_id).push(NULL);
-            }
-            elem_ids.push(id);
+            elem_ids.push(elem.compile(ctx, state, output, None, false, true).unwrap_id());
         }
-
-        if constant_array {
-            // The template array is held by a register to prevent it from being freed by the GC
-            let template_reg = state.new_reg(Data::array(array_id as u32));
-            let dest_reg = state.new_reg(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
-
-            output.push(Instr::CloneObj(
-                template_reg,
-                dest_reg,
-                state.pools.obj_pool[array_id].len() as u16,
-            ));
-            dest_reg
-        } else {
-            let dest_reg = state.new_reg(Data::array(0)); // 0 is a placeholder that's overwritten by EmptyArray
-            output.push(Instr::EmptyArray(dest_reg));
-            for elem_reg in elem_ids {
-                output.push(Instr::Push(dest_reg, elem_reg));
-            }
-            dest_reg
+        let dest_reg = state.scratch_reg();
+        output.push(Instr::EmptyArray(dest_reg));
+        for elem_reg in elem_ids {
+            output.push(Instr::Push(dest_reg, elem_reg));
         }
+        dest_reg
     }
 }
 
@@ -429,7 +419,7 @@ fn compile_struct_literal<'arena>(
         state.pools.obj_pool.len() - 1
     };
     if ctx.single_run {
-        let struct_reg = state.new_reg(Data::struct_instance(type_id, struct_id as u32));
+        let struct_reg = state.init_reg(Data::struct_instance(type_id, struct_id as u32), ctx);
         for field_idx in 0..expected_fields_len {
             if let Some(StructFieldExpr { name: _, value, name_span: _, value_span }) =
                 fields.iter().find(|field| {
@@ -450,10 +440,10 @@ fn compile_struct_literal<'arena>(
                         state.sources,
                     );
                 }
-                let id = value.compile(ctx, state, output, None, false, true).unwrap_id();
-                if value.is_constant_literal() {
-                    state.pools.obj_pool.get_mut(struct_id).push(state.registers[id as usize]);
+                if let Some(literal) = value.literal_value(&mut state.pools.str_pool) {
+                    state.pools.obj_pool.get_mut(struct_id).push(literal);
                 } else {
+                    let id = value.compile(ctx, state, output, None, false, true).unwrap_id();
                     output.push(Instr::SetFieldObj(
                         struct_reg,
                         id,
@@ -504,10 +494,10 @@ fn compile_struct_literal<'arena>(
                         state.sources,
                     );
                 }
-                let id = value.compile(ctx, state, output, None, false, true).unwrap_id();
-                if value.is_constant_literal() {
-                    state.pools.obj_pool.get_mut(struct_id).push(state.registers[id as usize]);
+                if let Some(literal) = value.literal_value(&mut state.pools.str_pool) {
+                    state.pools.obj_pool.get_mut(struct_id).push(literal);
                 } else {
+                    let id = value.compile(ctx, state, output, None, false, true).unwrap_id();
                     state.pools.obj_pool.get_mut(struct_id).push(NULL);
                     dynamic.push((id, field_idx as u16));
                 }
@@ -531,9 +521,9 @@ fn compile_struct_literal<'arena>(
             }
         }
 
-        let template_reg = state.new_reg(Data::struct_instance(type_id, struct_id as u32));
+        let template_reg = state.value_reg(Data::struct_instance(type_id, struct_id as u32));
 
-        let dest_reg = state.new_reg(Data::struct_instance(type_id, 0));
+        let dest_reg = state.scratch_reg();
 
         output.push(Instr::CloneObj(template_reg, dest_reg, expected_fields_len as u16));
         for (val_reg, slot) in dynamic {
@@ -558,7 +548,11 @@ fn compile_map_literal<'arena>(
     let mut keys: Vec<(Data, Span)> = Vec::with_capacity(kv_pairs.len());
     let mut dynamic: Vec<(Data, u16)> =
         Vec::with_capacity(if ctx.single_run { 0 } else { kv_pairs.len() });
-    let map_reg = state.new_reg(Data::map(map_id as u32));
+    let map_reg = if ctx.single_run {
+        state.init_reg(Data::map(map_id as u32), ctx)
+    } else {
+        0 // placeholder that's never used
+    };
     for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
         let key_t = key.infer_type(ctx, state);
         let val_t = val.infer_type(ctx, state);
@@ -587,14 +581,16 @@ fn compile_map_literal<'arena>(
                 )
             }
         }
-        let output_len = output.len();
-        let key_val_id = key.compile(ctx, state, output, None, false, true).unwrap_id();
-        if !(key.is_constant_literal()
-            || matches!(key, Expr::Array(_, _)) && output_len == output.len())
-        {
-            error_not_literal_map_key(*key_span, map_span, ctx.file_idx, state.sources);
-        }
-        let key_val = state.registers[key_val_id as usize];
+        let key_val = if let Some(literal) = key.literal_value(&mut state.pools.str_pool) {
+            literal
+        } else {
+            let output_len = output.len();
+            let key_val_id = key.compile(ctx, state, output, None, false, true).unwrap_id();
+            if !(matches!(key, Expr::Array(_, _)) && output_len == output.len()) {
+                error_not_literal_map_key(*key_span, map_span, ctx.file_idx, state.sources);
+            }
+            state.register_value(key_val_id)
+        };
 
         if let Some((_, repeat_key_span)) = keys.iter().find(|(k, _)| *k == key_val) {
             error_duplicate_map_key(
@@ -607,13 +603,13 @@ fn compile_map_literal<'arena>(
         }
         keys.push((key_val, *key_span));
 
-        let val_id = val.compile(ctx, state, output, None, false, true).unwrap_id();
-        if val.is_constant_literal() {
-            state.pools.map_pool[map_id].insert(key_val, state.registers[val_id as usize]);
+        if let Some(literal) = val.literal_value(&mut state.pools.str_pool) {
+            state.pools.map_pool[map_id].insert(key_val, literal);
         } else {
+            let val_id: u16 = val.compile(ctx, state, output, None, false, true).unwrap_id();
             state.pools.map_pool[map_id].insert(key_val, NULL);
             if ctx.single_run {
-                output.push(Instr::MapInsertReg(map_reg, state.new_reg(key_val), val_id));
+                output.push(Instr::MapInsertReg(map_reg, state.value_reg(key_val), val_id));
             } else {
                 dynamic.push((key_val, val_id));
             }
@@ -622,8 +618,9 @@ fn compile_map_literal<'arena>(
     if ctx.single_run {
         map_reg
     } else {
-        let dest_reg = state.new_reg(Data::map(0));
-        output.push(Instr::CloneMap(map_reg, dest_reg));
+        let template_reg = state.value_reg(Data::map(map_id as u32));
+        let dest_reg = state.scratch_reg();
+        output.push(Instr::CloneMap(template_reg, dest_reg));
         for (key_val, val_id) in dynamic {
             let key_reg = state.new_const_reg(key_val);
             output.push(Instr::MapInsertReg(dest_reg, key_reg, val_id));
@@ -1375,7 +1372,7 @@ fn compile_for_loop<'arena>(
 
     // set up the id of the index variable (0..len)
     let index_id = if ctx.single_run {
-        state.new_reg(Data::int(0))
+        state.init_reg(Data::int(0), ctx)
     } else {
         let id = state.alloc_reg();
         output.push(Instr::SetInt(id, 0));
@@ -1486,7 +1483,7 @@ fn compile_int_for_loop<'arena>(
     let start_elem_id =
         lower_bound.compile(ctx, state, output, Some(elem_id), false, true).unwrap_id();
     if state.is_register_const(start_elem_id) {
-        move_reg_to_reg(output, start_elem_id, elem_id, state.registers[start_elem_id as usize]);
+        move_reg_to_reg(output, start_elem_id, elem_id, state.register_value(start_elem_id));
     } else {
         move_value_to(output, output_len, start_elem_id, elem_id);
     }
@@ -1624,7 +1621,7 @@ fn compile_var_declaration<'arena>(
         reg_id
     } else if !ctx.single_run && code_modifies_variable(name, remaining_code) {
         let var_id = state.alloc_reg();
-        move_reg_to_reg(output, src_id, var_id, state.registers[src_id as usize]);
+        move_reg_to_reg(output, src_id, var_id, state.register_value(src_id));
         var_id
     } else {
         src_id
@@ -1722,7 +1719,7 @@ fn compile_var_assignment<'arena>(
     let output_len = output.len();
     let obj_id = value.compile(ctx, state, output, Some(reg_id), false, true).unwrap_id();
     if state.is_register_const(obj_id) {
-        move_reg_to_reg(output, obj_id, reg_id, state.registers[obj_id as usize]);
+        move_reg_to_reg(output, obj_id, reg_id, state.register_value(obj_id));
     } else {
         move_value_to(output, output_len, obj_id, reg_id);
     }
@@ -1790,7 +1787,7 @@ fn compile_var_access(
 
     let fn_impl_idx = compile_function_impl(state, fn_id, &arg_types);
     let unit = state.functions[fn_id].impls[fn_impl_idx].unit;
-    state.new_reg(Data::function(unit))
+    state.value_reg(Data::function(unit))
 }
 
 fn compile_struct_definition<'arena>(
@@ -1963,6 +1960,16 @@ impl<'arena> Expr<'arena> {
     pub const fn is_constant_literal(&self) -> bool {
         matches!(self, Self::Int(_) | Self::Float(_) | Self::String(_) | Self::Bool(_) | Self::Null)
     }
+    pub fn literal_value(&self, str_pool: &mut StringPool) -> Option<Data> {
+        match self {
+            Self::Int(int) => Some(Data::int(*int)),
+            Self::Float(float) => Some(Data::float(*float)),
+            Self::String(s) => Some(Data::comp_str(s, str_pool)),
+            Self::Bool(bool) => Some(Data::bool(*bool)),
+            Self::Null => Some(NULL),
+            _ => None,
+        }
+    }
     #[inline(always)]
     pub fn compile(
         &'arena self,
@@ -1989,26 +1996,38 @@ impl<'arena> Expr<'arena> {
             Self::Int(num) => {
                 debug_assert!(uses_id);
                 let int = Data::int(*num);
-                Some(if var_assignment { state.new_reg(int) } else { state.new_const_reg(int) })
+                Some(if var_assignment {
+                    state.init_reg(int, ctx)
+                } else {
+                    state.new_const_reg(int)
+                })
             }
             Self::Float(num) => {
                 debug_assert!(uses_id);
                 let float = Data::float(*num);
-                Some(if var_assignment { state.new_reg(float) } else { state.new_const_reg(float) })
+                Some(if var_assignment {
+                    state.init_reg(float, ctx)
+                } else {
+                    state.new_const_reg(float)
+                })
             }
             Self::String(str) => {
                 debug_assert!(uses_id);
                 let s = Data::comp_str(str, &mut state.pools.str_pool);
-                Some(if var_assignment { state.new_reg(s) } else { state.new_const_reg(s) })
+                Some(if var_assignment { state.init_reg(s, ctx) } else { state.new_const_reg(s) })
             }
             Self::Null => {
                 debug_assert!(uses_id);
-                Some(if var_assignment { state.new_reg(NULL) } else { state.new_const_reg(NULL) })
+                Some(if var_assignment {
+                    state.init_reg(NULL, ctx)
+                } else {
+                    state.new_const_reg(NULL)
+                })
             }
             Self::Bool(bool) => {
                 debug_assert!(uses_id);
                 let b = Data::bool(*bool);
-                Some(if var_assignment { state.new_reg(b) } else { state.new_const_reg(b) })
+                Some(if var_assignment { state.init_reg(b, ctx) } else { state.new_const_reg(b) })
             }
             Self::Var(name, span) => {
                 debug_assert!(uses_id);
@@ -2249,7 +2268,7 @@ impl<'arena> Expr<'arena> {
             Self::AnonymousFunction(_, _, _) => {
                 debug_assert!(uses_id);
                 // This is replaced later on by `builtin_functions` when it's called
-                Some(state.new_reg(Data::function(0)))
+                Some(state.value_reg(Data::function(0)))
             }
 
             // ------------------

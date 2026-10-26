@@ -565,12 +565,12 @@ pub fn builtin_methods<'arena>(
             let unit = state.functions[fn_id].impls[fn_impl_idx].unit;
             let arg_reg = state.functions[fn_id].impls[fn_impl_idx].args_loc[0];
 
-            let fn_value_reg = state.new_reg(Data::function(unit));
+            let fn_value_reg = state.value_reg(Data::function(unit));
 
             let result_id = state.alloc_reg_tgt(tgt_id);
             if is_str {
                 let data = Data::comp_str("", &mut state.pools.str_pool);
-                let empty_str_id = state.new_reg(data);
+                let empty_str_id = state.value_reg(data);
                 if empty_str_id != result_id {
                     output.push(Instr::Mov(empty_str_id, result_id));
                 }
@@ -582,7 +582,7 @@ pub fn builtin_methods<'arena>(
             output.push(Instr::CallLibFunc(LibFunc::Len, receiver_id, len_id));
 
             let index_id = if ctx.single_run {
-                state.new_reg(Data::int(0))
+                state.init_reg(Data::int(0), ctx)
             } else {
                 let r = state.alloc_reg();
                 output.push(Instr::SetInt(r, 0));

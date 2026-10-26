@@ -264,7 +264,7 @@ impl<'arena> State<'arena, '_> {
     }
     /// Creates a brand new register containing `data` and returns its index.
     #[must_use]
-    pub fn new_reg(&mut self, data: Data) -> u16 {
+    fn new_reg(&mut self, data: Data) -> u16 {
         let register_id = self.registers.len();
         self.free_registers_bitset.grow(register_id + 1);
         self.const_registers_bitset.grow(register_id + 1);
@@ -283,6 +283,33 @@ impl<'arena> State<'arena, '_> {
             unsafe { self.const_registers_bitset.insert_unchecked(register_id as usize) };
             register_id
         }
+    }
+    /// Creates a new register holding the immutable compile-time value `data`.
+    /// It's never shared, so it may become a variable's storage.
+    #[must_use]
+    #[inline(always)]
+    pub fn value_reg(&mut self, data: Data) -> u16 {
+        self.new_reg(data)
+    }
+    /// Creates a new register whose initial value `data` is known to be modified at run time.
+    /// Only valid for top-level code that runs once.
+    #[must_use]
+    #[inline(always)]
+    pub fn init_reg(&mut self, data: Data, ctx: Ctx) -> u16 {
+        debug_assert!(ctx.single_run && !ctx.in_function);
+        self.new_reg(data)
+    }
+    /// Creates a new register whose initial content is never read.
+    #[must_use]
+    #[inline(always)]
+    pub fn scratch_reg(&mut self) -> u16 {
+        self.new_reg(NULL)
+    }
+    /// Returns the compile-time value of a const register or of a top-level initialized register.
+    #[must_use]
+    #[inline(always)]
+    pub fn register_value(&self, id: u16) -> Data {
+        self.registers[id as usize]
     }
     /// Marks a register as free, allowing it to later be reused by `alloc_reg`.
     /// The register is marked as free iff:

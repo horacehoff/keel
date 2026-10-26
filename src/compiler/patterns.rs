@@ -426,7 +426,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
 
             if false_jumps.is_empty() {
                 true_jumps.push(self.output.len());
-                self.output.push(Instr::Jmp(0));
+                self.output.push(Instr::jump(0));
                 break;
             }
 
@@ -437,7 +437,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                 *self.output.last_mut().unwrap() = success;
                 false_jumps.clear();
             } else {
-                self.output.push(Instr::Jmp(0));
+                self.output.push(Instr::jump(0));
             }
             true_jumps.push(self.output.len() - 1);
         }
@@ -554,11 +554,11 @@ pub fn compile_match_block<'arena>(
             false_jump_idxs.extend(guard_false_jump_idxs);
         }
         patch_jumps(output, pending_false_jmps, arm_start);
-        output.extend(compile_expr(arm.code, ctx.advance_offset(output.len() as u16), state));
+        output.extend(compile_expr(arm.code, ctx.advance_offset(output.len() as u32), state));
         state.v.truncate(v_len);
         state.free_scope_registers(0, &output[arm_start..pattern_end]);
         end_jumps.push(output.len());
-        output.push(Instr::Jmp(0));
+        output.push(Instr::jump(0));
         pending_false_jmps = false_jump_idxs;
         if pending_false_jmps.is_empty() {
             break;

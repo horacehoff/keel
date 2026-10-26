@@ -112,7 +112,6 @@ impl TypeExpr<'_> {
 }
 
 #[derive(Clone, Copy)]
-#[repr(u8)]
 pub enum VmType {
     Int,
     Float,

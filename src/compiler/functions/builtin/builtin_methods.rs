@@ -561,11 +561,11 @@ pub fn builtin_methods<'arena>(
             }
 
             let fn_impl_idx =
-                compile_function_impl(output, ctx, state, fn_id, core::slice::from_ref(&elem_type));
-            let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
+                compile_function_impl(state, fn_id, core::slice::from_ref(&elem_type));
+            let unit = state.functions[fn_id].impls[fn_impl_idx].unit;
             let arg_reg = state.functions[fn_id].impls[fn_impl_idx].args_loc[0];
 
-            let fn_value_reg = state.new_reg(Data::function(loc));
+            let fn_value_reg = state.new_reg(Data::function(unit));
 
             let result_id = state.alloc_reg_tgt(tgt_id);
             if is_str {

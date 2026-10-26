@@ -1,10 +1,24 @@
+// The jump value is stored using offset binary representation
+// In this case, the bias K = 65536 (u16) / 2 = 32768
+pub const JMP_OFFSET: u16 = 32768;
+
+impl Instr {
+    /// Use this instead of Instr::Jmp!!
+    #[must_use]
+    #[inline(always)]
+    pub const fn jump(offset: u16) -> Self {
+        Self::Jmp(offset.wrapping_add(JMP_OFFSET))
+    }
+}
+
+const _: () = debug_assert!(size_of::<Instr>() == 8);
+
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
-#[repr(u8)]
 pub enum Instr {
     Print(u16),
 
     // LOGIC
-    /// Jumps by x instructions (backward jumps are encoded with wrapping_neg)
+    /// Jumps by x instructions
     Jmp(u16),
     InfEqFloatJmp(u16, u16, u16),
     InfEqIntJmp(u16, u16, u16),
@@ -54,13 +68,14 @@ pub enum Instr {
     BoolAnd(u16, u16, u16),
     BoolOr(u16, u16, u16),
 
-    /// CallFunc(n,y)\
-    /// Jumps to the nth instruction, and adds y as a slot to be set by the Return instruction\
-    /// VoidReturn/Return will jump back to this location
-    CallFunc(u16, u16),
-    /// CallFuncRecursive(n, register_id)\
-    /// Jumps to the nth instruction, register_id is only used during parsing.
-    CallFuncRecursive(u16, u16),
+    CallFunc {
+        target: u32,
+        return_reg: u16,
+    },
+    CallFuncRecursive {
+        target: u32,
+        return_reg: u16,
+    },
     /// Jumps to the instruction right after the last CallFunc encountered by the interpreter
     VoidReturn,
     RecursiveVoidReturn,

@@ -36,7 +36,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     match matching_elem {
         Instr::Mov(_, id)
         | Instr::SetInt(id, _)
-        | Instr::CallFunc(_, id)
+        | Instr::CallFunc { return_reg: id, .. }
         | Instr::AddFloat(_, _, id)
         | Instr::AddInt(_, _, id)
         | Instr::AddArray(_, _, id)
@@ -77,7 +77,7 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::CloneObj(_, id, _)
         | Instr::MapRemove { dest_reg_id: id, .. }
         | Instr::CloneMap(_, id) => *id = tgt_id,
-        Instr::CallFuncRecursive(_, y_func) => {
+        Instr::CallFuncRecursive { return_reg: y_func, .. } => {
             *y_func = tgt_id;
             for i in 1..x.len() - 1 {
                 if let Some(Instr::SaveFrame(_, y_frame, _)) = x.get_mut(matching_elem_index - i) {
@@ -130,9 +130,9 @@ impl Instr {
             Self::Mov(_, y)
             | Self::SetInt(y, _)
             | Self::AddIntImm {dst: y, .. }
-            | Self::CallFunc(_, y)
+            | Self::CallFunc{ return_reg: y, .. }
             | Self::CallFuncDynamic(_, y)
-            | Self::CallFuncRecursive(_, y)
+            | Self::CallFuncRecursive{ return_reg: y, .. }
             | Self::SaveFrame(_, y, _)
             | Self::AddFloat(_, _, y)
             | Self::AddInt(_, _, y)
@@ -265,8 +265,8 @@ impl Instr {
             | Self::Jmp(_)
             | Self::VoidReturn
             | Self::RecursiveVoidReturn
-            | Self::CallFunc(_, _)
-            | Self::CallFuncRecursive(_, _)
+            | Self::CallFunc { .. }
+            | Self::CallFuncRecursive { .. }
             | Self::SaveFrame(_, _, _)
             | Self::EmptyArray(_)
             | Self::SetInt(_, _)

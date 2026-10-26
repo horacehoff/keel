@@ -22,10 +22,23 @@ use std::rc::Rc;
 use libloading::Library;
 
 pub struct ErrorCatch {
-    pub catch_loc: u16,
+    pub catch_loc: u32,
     pub error_reg: u16,
     pub call_frames_len: u16,
     pub args_len: u16,
+}
+
+pub struct InstrSrc {
+    pub instr_idx: u32,
+    pub span: Span,
+    pub file_id: u16,
+}
+
+/// One compiled function specialization
+#[derive(Default)]
+pub struct CodeUnit {
+    pub instructions: Vec<Instr>,
+    pub instr_src: Vec<InstrSrc>, // relative to the start of the unit
 }
 
 pub struct Function<'arena> {
@@ -43,7 +56,7 @@ pub struct Function<'arena> {
 }
 
 pub struct FunctionImpl<'arena> {
-    pub loc: u16,
+    pub unit: u32,
     pub args_loc: &'arena [u16],
     pub arg_types: Box<[DataType]>,
 }
@@ -122,9 +135,11 @@ pub struct Ctx {
     /// Index of the current file in State's `sources`
     pub file_idx: u16,
     /// Instruction offset that's only used when compiling a function
-    pub offset: u16,
+    pub offset: u32,
     pub try_depth: u16,
     pub loop_try_depth: u16,
+    /// None = top level code
+    pub current_unit: Option<u32>,
 }
 
 impl Ctx {
@@ -133,11 +148,11 @@ impl Ctx {
         Self { single_run: false, loop_try_depth: self.try_depth, ..self }
     }
     #[inline(always)]
-    pub const fn advance_offset(self, output_len: u16) -> Self {
+    pub const fn advance_offset(self, output_len: u32) -> Self {
         Self { offset: self.offset + output_len, ..self }
     }
     #[inline(always)]
-    pub const fn with_offset(self, offset: u16) -> Self {
+    pub const fn with_offset(self, offset: u32) -> Self {
         Self { offset, ..self }
     }
     #[inline(always)]
@@ -146,17 +161,12 @@ impl Ctx {
     }
 }
 
-pub struct InstrSrc {
-    pub instr_idx: u16,
-    pub span: Span,
-    pub file_id: u16,
-}
-
 pub struct State<'arena, 'compiler> {
     pub v: &'compiler mut Vec<Variable<'arena>>,
     pub globals: &'compiler mut Vec<Variable<'arena>>,
     pub registers: &'compiler mut Vec<Data>,
     pub functions: &'compiler mut Vec<Function<'arena>>,
+    pub code_units: &'compiler mut Vec<CodeUnit>,
     pub structs: &'compiler mut Vec<Struct<'arena>>,
     pub pools: &'compiler mut Pools,
     pub instr_src: &'compiler mut Vec<InstrSrc>,
@@ -365,11 +375,15 @@ impl<'arena> State<'arena, '_> {
     /// This allows runtime errors to be traced back to `span` in the source code.
     #[inline(always)]
     pub fn add_to_src(&mut self, ctx: Ctx, output: &[Instr], span: Span) {
-        self.instr_src.push(InstrSrc {
-            instr_idx: ctx.offset + (output.len() as u16) - 1,
+        let new_src = InstrSrc {
+            instr_idx: ctx.offset + output.len() as u32 - 1,
             span,
             file_id: ctx.file_idx,
-        });
+        };
+        match ctx.current_unit {
+            Some(unit) => self.code_units[unit as usize].instr_src.push(new_src),
+            None => self.instr_src.push(new_src),
+        }
     }
     pub fn add_arg_hint(&mut self, n: usize) {
         *self.allocated_arg_count += n;

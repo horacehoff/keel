@@ -5,6 +5,7 @@ use super::super::type_system::can_reach;
 use super::check_user_fn_arg_types;
 use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
+use crate::compiler::compiler_data::CodeUnit;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::FunctionImpl;
 use crate::compiler::compiler_data::State;
@@ -38,8 +39,6 @@ pub fn is_function_recursive(fn_id: usize, state: &mut State<'_, '_>) -> bool {
 /// Returns the index into `state.fns[fn_id].impls` for this specialization (those arg types)
 /// matching `inferred_arg_types`. If it doesn't exist yet, it's compiled via `compile_function`.
 pub fn compile_function_impl(
-    output: &mut Vec<Instr>,
-    ctx: Ctx,
     state: &mut State<'_, '_>,
     fn_id: usize,
     inferred_arg_types: &[DataType],
@@ -58,8 +57,6 @@ pub fn compile_function_impl(
     let is_recursive = is_function_recursive(fn_id, state);
     let fn_args = state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
     compile_function(
-        output,
-        ctx,
         state,
         fn_id,
         &fn_args,
@@ -168,8 +165,8 @@ pub fn handle_user_function<'arena>(
 
     check_user_fn_arg_types(function_idx, fn_name, &inferred_arg_types, arg_spans, ctx, state);
 
-    let fn_impl_idx = compile_function_impl(output, ctx, state, function_idx, &inferred_arg_types);
-    let loc = state.functions[function_idx].impls[fn_impl_idx].loc;
+    let fn_impl_idx = compile_function_impl(state, function_idx, &inferred_arg_types);
+    let unit = state.functions[function_idx].impls[fn_impl_idx].unit;
 
     let saveframe_loc = output.len();
     let callsite_id = if is_recursive {
@@ -206,8 +203,8 @@ pub fn handle_user_function<'arena>(
         let tgt_id = state.functions[function_idx].impls[fn_impl_idx].args_loc[i];
 
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
-            let loc = state.functions[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.loc);
-            let fn_reg_id = state.new_reg(Data::function(loc));
+            let unit = state.functions[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.unit);
+            let fn_reg_id = state.new_reg(Data::function(unit));
             if fn_reg_id != tgt_id {
                 output.push(Instr::Mov(fn_reg_id, tgt_id));
             }
@@ -236,9 +233,9 @@ pub fn handle_user_function<'arena>(
 
     let return_register_id = if fn_returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
     if is_recursive {
-        output.push(Instr::CallFuncRecursive(loc, return_register_id));
+        output.push(Instr::CallFuncRecursive { target: unit, return_reg: return_register_id });
     } else {
-        output.push(Instr::CallFunc(loc, return_register_id));
+        output.push(Instr::CallFunc { target: unit, return_reg: return_register_id });
         *state.allocated_call_depth += 2;
     }
 
@@ -254,8 +251,6 @@ pub fn handle_user_function<'arena>(
 }
 
 pub fn compile_function<'arena>(
-    output: &mut Vec<Instr>,
-    ctx: Ctx,
     state: &mut State<'arena, '_>,
     function_id: usize,
     fn_args: &[&'arena str],
@@ -286,18 +281,12 @@ pub fn compile_function<'arena>(
         args_loc.push(x.register_id);
     }
 
-    // Temporarily jump over function to prevent executing it right now
-    // This is a placeholder that's modified later on
-    output.push(Instr::Jmp(0));
-    let jump_idx = output.len() - 1;
-
-    // Record start location for the compiled func body
-    let fn_start = output.len();
-    let loc = fn_start as u16 + ctx.offset;
+    let unit = state.code_units.len() as u32;
+    state.code_units.push(CodeUnit::default());
     let args_loc = args_loc.into_bump_slice();
     // Add this func specialization to the func's metadata
     state.functions[function_id].impls.push(FunctionImpl {
-        loc,
+        unit,
         args_loc,
         arg_types: Box::from(inferred_arg_types),
     });
@@ -306,16 +295,17 @@ pub fn compile_function<'arena>(
     let hidden_symbols = state.enter_function_scope(fn_file_idx, function_id);
 
     // Compile the function into instructions using local vars
-    let parsed = compile_expr(
+    let mut parsed = compile_expr(
         fn_code,
         Ctx {
             in_function: true,
             is_compiling_recursive: is_recursive,
             file_idx: fn_file_idx,
             single_run: false,
-            offset: ctx.offset + output.len() as u16,
+            offset: 0,
             try_depth: 0,
             loop_try_depth: 0,
+            current_unit: Some(unit),
         },
         state,
     );
@@ -343,7 +333,7 @@ pub fn compile_function<'arena>(
                 let pos = save_frame_instr_pos + call_loc_relative as usize;
                 let mut live_regs: Vec<u16> = Vec::new();
                 for after_instr in &parsed[pos + 1..] {
-                    if let Instr::CallFuncRecursive(_, _) = after_instr {
+                    if let Instr::CallFuncRecursive { .. } = after_instr {
                         for reg in args_loc {
                             if unsafe { all_written_regs.contains_unchecked(*reg as usize) } {
                                 live_regs.push(*reg);
@@ -375,10 +365,6 @@ pub fn compile_function<'arena>(
             .extend(all_written_regs.ones().map(|id| id as u16));
     }
 
-    output.extend(parsed);
-
-    output.push(if is_recursive { Instr::RecursiveVoidReturn } else { Instr::VoidReturn });
-
-    // Fix the placeholder Jmp(0) to skip over the function body
-    *output.get_mut(jump_idx).unwrap() = Instr::Jmp((output.len() - fn_start + 1) as u16);
+    parsed.push(if is_recursive { Instr::RecursiveVoidReturn } else { Instr::VoidReturn });
+    state.code_units[unit as usize].instructions = parsed;
 }

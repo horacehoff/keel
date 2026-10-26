@@ -1,3 +1,4 @@
+use crate::compiler::compiler_data::CodeUnit;
 use crate::compiler::compiler_data::InstrSrc;
 use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::StructField;
@@ -40,6 +41,7 @@ use crate::errors::BOLD;
 use crate::errors::ERROR_PREFIX;
 use crate::errors::ErrorCtx;
 use crate::errors::RESET;
+use crate::instr::JMP_OFFSET;
 use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
@@ -163,8 +165,8 @@ fn add_cmp_true(condition_id: u16, true_reg: u16, output: &mut Vec<Instr>) {
 #[inline(always)]
 const fn set_jmp_size(instr: &mut Instr, size: u16) {
     match instr {
-        Instr::Jmp(jump_size)
-        | Instr::InfEqFloatJmp(_, _, jump_size)
+        Instr::Jmp(jump_size) => *jump_size = size.wrapping_add(JMP_OFFSET),
+        Instr::InfEqFloatJmp(_, _, jump_size)
         | Instr::InfEqIntJmp(_, _, jump_size)
         | Instr::InfFloatJmp(_, _, jump_size)
         | Instr::InfIntJmp(_, _, jump_size)
@@ -287,16 +289,16 @@ fn parse_loop_flow_control(
     loop_code.iter_mut().enumerate().for_each(|(i, x)| {
         if *x == Instr::NotEqJmp(LOOP_MARKER_REG, 0, LOOP_MARKER) {
             if for_loop && !indefinite {
-                *x = Instr::Jmp(code_length - i as u16 - 1);
+                *x = Instr::jump(code_length - i as u16 - 1);
             } else {
-                *x = Instr::Jmp(code_length - i as u16);
+                *x = Instr::jump(code_length - i as u16);
             }
         } else if *x == Instr::EqJmp(LOOP_MARKER_REG, 0, LOOP_MARKER) {
             if for_loop {
-                *x = Instr::Jmp(code_length - i as u16 - 3);
+                *x = Instr::jump(code_length - i as u16 - 3);
             } else {
                 // loop blocks and while loops only have 1 trailing instruction
-                *x = Instr::Jmp(code_length - i as u16 - 1);
+                *x = Instr::jump(code_length - i as u16 - 1);
             }
         }
     });
@@ -1220,12 +1222,12 @@ fn compile_if_block_branch<'arena>(
         let output_len = output.len();
         output.extend(compile_expr(
             &branch[..branch.len() - 1],
-            ctx.advance_offset(output.len() as u16),
+            ctx.advance_offset(output.len() as u32),
             state,
         ));
         let val_id = branch[branch.len() - 1]
             .compile(
-                ctx.advance_offset(output.len() as u16),
+                ctx.advance_offset(output.len() as u32),
                 state,
                 output,
                 Some(tgt_id),
@@ -1238,7 +1240,7 @@ fn compile_if_block_branch<'arena>(
             output.push(Instr::Mov(val_id, tgt_id));
         }
     } else {
-        output.extend(compile_expr(branch, ctx.advance_offset(output.len() as u16), state));
+        output.extend(compile_expr(branch, ctx.advance_offset(output.len() as u32), state));
     }
 }
 
@@ -1292,7 +1294,7 @@ fn compile_if_block<'arena>(
     let jump_over_instr_idx = if otherwise.is_empty() {
         0
     } else {
-        output.push(Instr::Jmp(0));
+        output.push(Instr::jump(0));
         output.len() - 1
     };
 
@@ -1336,7 +1338,7 @@ fn compile_while_loop<'arena>(
 
     // parse the code block, clone the vars to avoid overriding anything
     let mut cond_code =
-        compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u16), state);
+        compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u32), state);
 
     let exit = output.len() + cond_code.len() + 1;
     for j in false_jump_idxs {
@@ -1349,7 +1351,7 @@ fn compile_while_loop<'arena>(
     // Break/Continue offsets are relative to cond_code, so pass body_len+1 (body remaining + JmpBack)
     parse_loop_flow_control(&mut cond_code, body_len + 1, false, false);
     output.extend(cond_code);
-    output.push(Instr::Jmp(len.wrapping_neg()));
+    output.push(Instr::jump(len.wrapping_neg()));
 }
 
 fn compile_for_loop<'arena>(
@@ -1407,12 +1409,12 @@ fn compile_for_loop<'arena>(
     }
 
     // accounts for the GetIndexArray/GetIndexString instruction
-    let pending = u16::from(real_var);
+    let pending = u32::from(real_var);
 
     let regs_before = state.registers.len() as u16;
     let mut cond_code = compile_expr(
         code,
-        ctx.no_single_run().advance_offset(output.len() as u16 + pending),
+        ctx.no_single_run().advance_offset(output.len() as u32 + pending),
         state,
     );
     // Clean up variables
@@ -1420,7 +1422,7 @@ fn compile_for_loop<'arena>(
     state.free_loop_scope_registers(regs_before, &cond_code);
 
     // add the condition ('i < len') jumping logic
-    let mut len = (cond_code.len() + 3) as u16 + pending;
+    let mut len = (cond_code.len() + 3) as u16 + pending as u16;
     add_cmp_false(condition_id, state.new_const_reg(FALSE), &mut len, output, true);
 
     // make the current_element_id register actually hold the element's value
@@ -1439,7 +1441,7 @@ fn compile_for_loop<'arena>(
     output.push(Instr::AddIntImm { src: index_id, dst: index_id, imm: 1 });
 
     // jump back to the loop if still inside of it
-    output.push(Instr::Jmp(len.wrapping_neg()));
+    output.push(Instr::jump(len.wrapping_neg()));
 
     if ctx.single_run {
         state.free_reg(array_len_id);
@@ -1499,7 +1501,7 @@ fn compile_int_for_loop<'arena>(
 
     let regs_before = state.registers.len() as u16;
     let compiled_loop_code =
-        compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u16), state);
+        compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u32), state);
     state.free_loop_scope_registers(regs_before, &compiled_loop_code);
     let compiled_loop_code_len = compiled_loop_code.len() as u16;
 
@@ -1536,12 +1538,12 @@ fn compile_loop_block<'arena>(
 ) {
     let regs_before = state.registers.len() as u16;
     let mut compiled =
-        compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u16), state);
+        compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u32), state);
     state.free_loop_scope_registers(regs_before, &compiled);
     let code_length = compiled.len() as u16;
     parse_loop_flow_control(&mut compiled, code_length + 1, false, true);
     output.extend(compiled);
-    output.push(Instr::Jmp(code_length.wrapping_neg()));
+    output.push(Instr::jump(code_length.wrapping_neg()));
 }
 
 fn compile_try_catch_block<'arena>(
@@ -1556,12 +1558,12 @@ fn compile_try_catch_block<'arena>(
     let err_catch_instr = output.len() - 1;
     let main_code = compile_expr(
         e,
-        Ctx { try_depth: ctx.try_depth + 1, ..ctx }.advance_offset(output.len() as u16),
+        Ctx { try_depth: ctx.try_depth + 1, ..ctx }.advance_offset(output.len() as u32),
         state,
     );
     output.extend(main_code);
     output.push(Instr::StopErrorCatch);
-    output.push(Instr::Jmp(0)); // jumps over the catch handler if no error arises
+    output.push(Instr::jump(0)); // jumps over the catch handler if no error arises
     let jmp_catch_instr = output.len() - 1;
 
     let v_len = state.v.len();
@@ -1569,10 +1571,10 @@ fn compile_try_catch_block<'arena>(
     state.new_var(err_var, err_reg_id, DataType::String);
     output[err_catch_instr] =
         Instr::StartErrorCatch((output.len() - err_catch_instr) as u16, err_reg_id);
-    let catch_code = compile_expr(catch_code, ctx.advance_offset(output.len() as u16), state);
+    let catch_code = compile_expr(catch_code, ctx.advance_offset(output.len() as u32), state);
     state.v.truncate(v_len);
     output.extend(catch_code);
-    output[jmp_catch_instr] = Instr::Jmp((output.len() - jmp_catch_instr) as u16);
+    output[jmp_catch_instr] = Instr::jump((output.len() - jmp_catch_instr) as u16);
     state.free_reg(err_reg_id);
 }
 
@@ -1762,7 +1764,6 @@ fn compile_var_access(
     span: Span,
     ctx: Ctx,
     state: &mut State<'_, '_>,
-    output: &mut Vec<Instr>,
 ) -> u16 {
     // Local variable
     if path.is_empty()
@@ -1787,9 +1788,9 @@ fn compile_var_access(
     let arg_types: Vec<DataType> =
         state.functions[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
 
-    let fn_impl_idx = compile_function_impl(output, ctx, state, fn_id, &arg_types);
-    let loc = state.functions[fn_id].impls[fn_impl_idx].loc;
-    state.new_reg(Data::function(loc))
+    let fn_impl_idx = compile_function_impl(state, fn_id, &arg_types);
+    let unit = state.functions[fn_id].impls[fn_impl_idx].unit;
+    state.new_reg(Data::function(unit))
 }
 
 fn compile_struct_definition<'arena>(
@@ -1924,7 +1925,7 @@ fn compile_eval_block<'arena>(
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
-    output.extend(compile_expr(code, ctx.advance_offset(output.len() as u16), state));
+    output.extend(compile_expr(code, ctx.advance_offset(output.len() as u32), state));
 }
 
 pub fn compile_expr<'arena>(
@@ -2011,14 +2012,7 @@ impl<'arena> Expr<'arena> {
             }
             Self::Var(name, span) => {
                 debug_assert!(uses_id);
-                Some(compile_var_access(
-                    name.get_namespace(),
-                    name.get_name(),
-                    *span,
-                    ctx,
-                    state,
-                    output,
-                ))
+                Some(compile_var_access(name.get_namespace(), name.get_name(), *span, ctx, state))
             }
             Self::TypeEq(value, type_candidate, span) => {
                 debug_assert!(uses_id);
@@ -2893,6 +2887,7 @@ pub fn compile<'arena>(
     let mut instr_src: Vec<InstrSrc> = Vec::new();
     let mut fn_registers: Vec<Vec<u16>> = Vec::new();
     let mut functions: Vec<Function> = Vec::new();
+    let mut code_units: Vec<CodeUnit> = Vec::new();
     let mut structs: Vec<Struct> = Vec::new();
     let mut dyn_libs: Vec<Dylib> = Vec::new();
     let mut dylib_fns: Vec<DylibFn> = Vec::new();
@@ -2958,6 +2953,7 @@ pub fn compile<'arena>(
         offset: 0,
         try_depth: 0,
         loop_try_depth: 0,
+        current_unit: None,
     };
     let mut const_registers_bitset = FixedBitSet::new();
     let mut free_registers_bitset = FixedBitSet::new();
@@ -2966,6 +2962,7 @@ pub fn compile<'arena>(
         globals: &mut globals,
         registers: &mut registers,
         functions: &mut functions,
+        code_units: &mut code_units,
         structs: &mut structs,
         pools: &mut pools,
         instr_src: &mut instr_src,
@@ -3032,13 +3029,41 @@ pub fn compile<'arena>(
             })
             .code,
         // &mut variables,
-        ctx.with_offset(instructions.len() as u16),
+        ctx.with_offset(instructions.len() as u32),
         &mut state,
     );
     instructions.reserve_exact(program_instructions.len() + 1);
     instructions.extend(program_instructions);
     instructions.push(Instr::Halt(u16::MAX));
     fn_registers.push(Vec::new());
+
+    // Appends every code unit after the top-level code
+    // Resolves unit indices to actual addresses
+    let mut unit_addresses: Vec<u32> = Vec::with_capacity(code_units.len());
+    instructions.reserve_exact(code_units.iter().map(|unit| unit.instructions.len()).sum());
+    for CodeUnit { instructions: mut unit_instructions, instr_src: unit_instr_src } in code_units {
+        let base = instructions.len() as u32;
+        unit_addresses.push(base);
+        instr_src.extend(
+            unit_instr_src
+                .into_iter()
+                .map(|src| InstrSrc { instr_idx: src.instr_idx + base, ..src }),
+        );
+        instructions.append(&mut unit_instructions);
+    }
+    for instr in &mut instructions {
+        if let Instr::CallFunc { target, .. } | Instr::CallFuncRecursive { target, .. } = instr {
+            *target = unit_addresses[*target as usize];
+        }
+    }
+    for data in &mut registers {
+        if data.is_function()
+            && let Some(address) = unit_addresses.get(data.as_function())
+        // prevents a bug due to the Data::function(0) anonymous function placeholder
+        {
+            *data = Data::function(*address);
+        }
+    }
 
     #[cfg(debug_assertions)]
     if debug {

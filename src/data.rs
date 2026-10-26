@@ -293,13 +293,13 @@ impl Data {
             && (self.0 & (1 << 46)) == 0
     }
     #[inline(always)]
-    pub const fn function(fn_instruction_address: u16) -> Self {
+    pub const fn function(fn_instruction_address: u32) -> Self {
         Self(NAN_FUNCTION | fn_instruction_address as u64)
     }
     #[inline(always)]
     pub const fn as_function(self) -> usize {
         debug_assert!(self.is_function());
-        (self.0 & 0xFFFF) as usize
+        (self.0 & 0xFFFF_FFFF) as usize
     }
     /// True for STRING_LARGE, ARRAY, STRUCT, MAP, and FUNCTION.
     #[inline(always)]

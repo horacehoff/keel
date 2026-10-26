@@ -13,6 +13,7 @@ use crate::errors::ErrorCtx;
 use crate::errors::throw_error;
 use crate::fs;
 use crate::instr::Instr;
+use crate::instr::JMP_OFFSET;
 use crate::instr::LibFunc;
 use crate::instr::LibFuncVoid;
 use core::hint::cold_path;
@@ -130,9 +131,13 @@ fn data_matches_datatype(d: Data, t: &DataType, obj_pool: &ObjectPool, map_pool:
     }
 }
 
-#[repr(align(8))]
+#[inline(always)]
+const fn jump(i: usize, offset: u16) -> usize {
+    i.wrapping_add(offset as i16 as isize as usize)
+}
+
 struct CallFrame {
-    return_addr: u16,
+    return_addr: u32,
     return_reg: u16,
     callsite_id: u16,
 }
@@ -424,22 +429,18 @@ pub fn execute(
     'main: loop {
         match unsafe { *instructions.get_unchecked(i) } {
             Instr::Jmp(size) => {
-                i = (i as u16).wrapping_add(size) as usize;
+                i = i.wrapping_add(size as usize).wrapping_sub(JMP_OFFSET as usize);
                 continue;
             }
             Instr::Mov(tgt, dest) => r[dest] = r[tgt],
             Instr::SetInt(dest, n) => r[dest] = Data::int(n),
-            Instr::CallFunc(new_loc, return_id) => {
-                call_frames.push(CallFrame {
-                    return_addr: i as u16,
-                    return_reg: return_id,
-                    callsite_id: 0,
-                });
-                i = new_loc as usize;
+            Instr::CallFunc { target, return_reg } => {
+                call_frames.push(CallFrame { return_addr: i as u32, return_reg, callsite_id: 0 });
+                i = target as usize;
                 continue;
             }
-            Instr::CallFuncRecursive(new_loc, _) => {
-                i = new_loc as usize;
+            Instr::CallFuncRecursive { target, .. } => {
+                i = target as usize;
                 continue;
             }
             Instr::VoidReturn => {
@@ -448,7 +449,7 @@ pub fn execute(
             }
             Instr::SaveFrame(relative_func_loc, return_register, callsite_id) => {
                 call_frames.push(CallFrame {
-                    return_addr: (i as u16) + relative_func_loc,
+                    return_addr: i as u32 + u32::from(relative_func_loc),
                     return_reg: return_register,
                     callsite_id,
                 });
@@ -696,13 +697,13 @@ pub fn execute(
             }
             Instr::NotEqJmp(o1, o2, jump_size) => {
                 if r[o1] != r[o2] {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
             Instr::ObjNotEqJmp(o1, o2, jump_size) => {
                 if !obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
@@ -714,51 +715,51 @@ pub fn execute(
             }
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r[o1] == r[o2] {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
             Instr::ObjEqJmp(o1, o2, jump_size) => {
                 if obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
             Instr::InfEqFloatJmp(o1, o2, jump_size) => {
                 if r[o1].as_float() <= r[o2].as_float() {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
             Instr::InfEqIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() <= r[o2].as_int() {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
             Instr::InfFloatJmp(o1, o2, jump_size) => {
                 if r[o1].as_float() < r[o2].as_float() {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
             #[allow(clippy::neg_cmp_op_on_partial_ord)]
             Instr::NotInfFloatJmp(o1, o2, jump_size) => {
                 if !(r[o1].as_float() < r[o2].as_float()) {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
             #[allow(clippy::neg_cmp_op_on_partial_ord)]
             Instr::NotInfEqFloatJmp(o1, o2, jump_size) => {
                 if !(r[o1].as_float() <= r[o2].as_float()) {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
             Instr::InfIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() < r[o2].as_int() {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }
@@ -919,7 +920,7 @@ pub fn execute(
             }
             Instr::CallFuncDynamic(fn_reg_id, return_reg_id) => {
                 call_frames.push(CallFrame {
-                    return_addr: i as u16,
+                    return_addr: i as u32,
                     return_reg: return_reg_id,
                     callsite_id: dynamic_func_callsite,
                 });
@@ -1289,7 +1290,7 @@ pub fn execute(
             }
             Instr::StartErrorCatch(jmp_size, err_reg_id) => {
                 error_handles.push(ErrorCatch {
-                    catch_loc: (i as u16) + jmp_size,
+                    catch_loc: i as u32 + u32::from(jmp_size),
                     error_reg: err_reg_id,
                     call_frames_len: call_frames.len() as u16,
                     args_len: args.len() as u16,
@@ -1309,7 +1310,7 @@ pub fn execute(
                     obj_pool,
                     map_pool,
                 ) {
-                    i = (i as u16).wrapping_add(jump_size) as usize;
+                    i = jump(i, jump_size);
                     continue;
                 }
             }

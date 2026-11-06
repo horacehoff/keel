@@ -90,6 +90,7 @@ pub enum ErrType<'a> {
     DivisionByZero,
     ModuloByZero,
     IntegerNegativeExponent,
+    StackOverflow,
 }
 
 impl From<ErrType<'_>> for String {
@@ -147,6 +148,7 @@ impl From<ErrType<'_>> for String {
             ErrType::IntegerNegativeExponent => {
                 "Integers cannot be raised to a negative exponent".into()
             }
+            ErrType::StackOverflow => "Stack overflow".into(),
         }
     }
 }
@@ -180,6 +182,7 @@ impl ErrType<'_> {
             ErrType::NullByteInString => "null_byte_in_string",
             ErrType::UnknownMapKey(_) => "unknown_map_key",
             ErrType::IntegerNegativeExponent => "integer_negative_exponent",
+            ErrType::StackOverflow => "stack_overflow",
         }
     }
 }

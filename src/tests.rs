@@ -7,32 +7,14 @@ macro_rules! run_and_check_registers {
     ($contents:expr, $expected:expr) => {
         let filename = "test.kl";
         let bump = Bump::new();
-        let (
-            instructions,
-            mut registers,
-            mut pools,
-            err_ctx,
-            fn_registers,
-            _,
-            allocated_arg_count,
-            allocated_call_depth,
-            _,
-            types,
-        ) = compile($contents, filename, false, &bump);
-        crate::vm::execute(
-            &instructions,
-            &mut registers,
-            &mut pools,
-            &err_ctx,
-            &fn_registers,
-            &[],
-            &[],
-            &types,
-            allocated_arg_count,
-            allocated_call_depth,
-        );
-        assert!(instructions.iter().any(|x| {
-            if let Instr::Print(tgt) = x { registers[(*tgt) as usize] == $expected } else { false }
+        let mut program = compile($contents, filename, false, &bump);
+        let stack = crate::vm::execute(&mut program);
+        assert!(program.instructions[..program.top_level_len as usize].iter().any(|x| {
+            if let Instr::Print(tgt) = x {
+                stack[program.top_level_base as usize + *tgt as usize] == $expected
+            } else {
+                false
+            }
         }));
     };
 }
@@ -41,30 +23,8 @@ macro_rules! run {
     ($contents:expr) => {
         let filename = "test.kl";
         let bump = Bump::new();
-        let (
-            instructions,
-            mut registers,
-            mut pools,
-            err_ctx,
-            fn_registers,
-            _,
-            allocated_arg_count,
-            allocated_call_depth,
-            _,
-            types,
-        ) = compile($contents, filename, false, &bump);
-        crate::vm::execute(
-            &instructions,
-            &mut registers,
-            &mut pools,
-            &err_ctx,
-            &fn_registers,
-            &[],
-            &[],
-            &types,
-            allocated_arg_count,
-            allocated_call_depth,
-        );
+        let mut program = compile($contents, filename, false, &bump);
+        crate::vm::execute(&mut program);
     };
 }
 
@@ -1021,11 +981,11 @@ pub fn multi_loop_fn_called_twice() {
             let s = 0;
             for x in arr { s += x; }
             for x in arr { s += x; }
-            print(s);
+            return s;
         }
         fn main() {
-            run([1, 2, 3]);
-            run([1, 2, 3]);
+            print(run([1, 2, 3]));
+            print(run([1, 2, 3]));
         }
         ",
         Data::int(12)
@@ -2688,14 +2648,14 @@ pub fn reg_not_reused_post_sqrt() {
                     e -= (bim * bj.mass) / distance;
                 }
             }
-            print(e);
+            return e;
         }
         fn main() {
             let bodies = [
                 Body {x: 0.0, y: 0.0, z: 0.0, mass: 10.0},
                 Body {x: 3.0, y: 0.0, z: 0.0, mass: 2.0}
             ];
-            energy(bodies);
+            print(energy(bodies));
         }",
         (-20.0 / 3.0).into()
     );
@@ -3399,7 +3359,7 @@ pub fn nbody() {
             for body in bodies {
                 e += body.mass * (body.vx * body.vx + body.vy * body.vy + body.vz * body.vz) / 2.0;
             }
-            print(e);
+            return e;
         }
 
         fn offset_momentum(ref, bodies) {
@@ -3477,7 +3437,7 @@ pub fn nbody() {
             offset_momentum(sun, bodies);
             report_energy(bodies, pairs);
             advance(0.01, 10, bodies, pairs);
-            report_energy(bodies, pairs);
+            print(report_energy(bodies, pairs));
         }
         "#,
         (-0.1690730217146998).into()

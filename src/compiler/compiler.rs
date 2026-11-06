@@ -1,5 +1,7 @@
 use crate::compiler::compiler_data::CodeUnit;
+use crate::compiler::compiler_data::CodeUnitRegisters;
 use crate::compiler::compiler_data::InstrSrc;
+use crate::compiler::compiler_data::Program;
 use crate::compiler::compiler_data::Source;
 use crate::compiler::compiler_data::StructField;
 use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
@@ -32,6 +34,8 @@ use crate::compiler::expr::VariableDeclarationExpr;
 use crate::compiler::functions::user_functions::compile_function_impl;
 use crate::compiler::patterns::compile_match_block;
 use crate::compiler::registers::move_value_to;
+use crate::compiler::registers::relocate_register;
+use crate::compiler::registers::relocate_registers;
 use crate::compiler::type_system::var_type_is_compatible;
 use crate::data::FALSE;
 use crate::data::NULL;
@@ -41,11 +45,9 @@ use crate::errors::BOLD;
 use crate::errors::ERROR_PREFIX;
 use crate::errors::ErrorCtx;
 use crate::errors::RESET;
-use crate::instr::JMP_OFFSET;
 use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
-use crate::vm::RegisterFile;
 use crate::vm::StringPool;
 use crate::{data::Data, instr::Instr};
 use bumpalo::Bump;
@@ -63,7 +65,6 @@ use core::hint::unreachable_unchecked;
 use expr::Expr;
 use expr::Span;
 use expr::code_modifies_variable;
-use fixedbitset::FixedBitSet;
 use functions::compile_function_call;
 use hybrid_format::hformat;
 use indexmap::IndexMap;
@@ -71,7 +72,6 @@ use methods::compile_method_call;
 use registers::move_reg_to_reg;
 use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap;
-use rustc_hash::FxHashSet;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -134,31 +134,47 @@ const fn fused_jumps(instr: Instr, condition_id: u16) -> Option<(Instr, Instr)> 
 }
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is false)
-fn add_cmp_false(
-    condition_id: u16,
-    false_reg: u16,
-    len: &mut u16,
-    output: &mut Vec<Instr>,
-    jmp_backwards: bool,
-) {
-    let Some((_, mut jump_instr)) =
-        output.last().and_then(|&instr| fused_jumps(instr, condition_id))
+fn add_cmp_false(condition_id: u16, state: &mut State<'_, '_>, output: &mut Vec<Instr>) {
+    let Some((_, jump_instr)) = output.last().and_then(|&instr| fused_jumps(instr, condition_id))
     else {
-        return output.push(Instr::EqJmp(condition_id, false_reg, *len));
+        return output.push(Instr::EqJmp(condition_id, state.new_const_reg(FALSE), 0));
     };
-    set_jmp_size(&mut jump_instr, *len);
     *output.last_mut().unwrap() = jump_instr;
-    if jmp_backwards {
-        *len -= 1;
+}
+
+fn compile_int_imm_false_jump<'arena>(
+    condition: &'arena Expr,
+    ctx: Ctx,
+    state: &mut State<'arena, '_>,
+    output: &mut Vec<Instr>,
+) -> bool {
+    let (l, bound, jump): (_, _, fn(u16, u16, u16) -> Instr) = match condition {
+        Expr::Eq(l, Expr::Int(i)) => (l, Some(*i), Instr::NotEqIntImmJmp),
+        Expr::NotEq(l, Expr::Int(i)) => (l, Some(*i), Instr::EqIntImmJmp),
+        Expr::Inf(l, Expr::Int(i), _, _) => (l, Some(*i), Instr::SupEqIntImmJmp),
+        Expr::InfEq(l, Expr::Int(i), _, _) => (l, i.checked_add(1), Instr::SupEqIntImmJmp),
+        Expr::Sup(l, Expr::Int(i), _, _) => (l, i.checked_add(1), Instr::InfIntImmJmp),
+        Expr::SupEq(l, Expr::Int(i), _, _) => (l, Some(*i), Instr::InfIntImmJmp),
+        _ => return false,
+    };
+    if let Some(imm) = bound.and_then(|v| i16::try_from(v).ok())
+        && l.infer_type(ctx, state) == DataType::Int
+    {
+        let id = l.compile(ctx, state, output, None, false, true).unwrap_id();
+        state.free_reg(id);
+        output.push(jump(id, imm as u16, 0));
+        true
+    } else {
+        false
     }
 }
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is true)
 #[inline(always)]
-fn add_cmp_true(condition_id: u16, true_reg: u16, output: &mut Vec<Instr>) {
+fn add_cmp_true(condition_id: u16, state: &mut State<'_, '_>, output: &mut Vec<Instr>) {
     match output.last().and_then(|&instr| fused_jumps(instr, condition_id)) {
         Some((jump_instr, _)) => *output.last_mut().unwrap() = jump_instr,
-        None => output.push(Instr::EqJmp(condition_id, true_reg, 0)),
+        None => output.push(Instr::EqJmp(condition_id, state.new_const_reg(TRUE), 0)),
     }
 }
 
@@ -166,8 +182,8 @@ fn add_cmp_true(condition_id: u16, true_reg: u16, output: &mut Vec<Instr>) {
 #[inline(always)]
 const fn set_jmp_size(instr: &mut Instr, size: u16) {
     match instr {
-        Instr::Jmp(jump_size) => *jump_size = size.wrapping_add(JMP_OFFSET),
-        Instr::InfEqFloatJmp(_, _, jump_size)
+        Instr::Jmp(jump_size)
+        | Instr::InfEqFloatJmp(_, _, jump_size)
         | Instr::InfEqIntJmp(_, _, jump_size)
         | Instr::InfFloatJmp(_, _, jump_size)
         | Instr::InfIntJmp(_, _, jump_size)
@@ -177,8 +193,19 @@ const fn set_jmp_size(instr: &mut Instr, size: u16) {
         | Instr::EqJmp(_, _, jump_size)
         | Instr::ObjNotEqJmp(_, _, jump_size)
         | Instr::ObjEqJmp(_, _, jump_size)
+        | Instr::EqIntImmJmp(_, _, jump_size)
+        | Instr::NotEqIntImmJmp(_, _, jump_size)
+        | Instr::SupEqIntImmJmp(_, _, jump_size)
+        | Instr::InfIntImmJmp(_, _, jump_size)
+        | Instr::IncIntInfJmp { jump_size, .. }
         | Instr::IsNotTypeJmp { jump_size, .. } => *jump_size = size,
         _ => unsafe { unreachable_unchecked() },
+    }
+}
+
+fn patch_jumps(output: &mut [Instr], jump_idxs: impl IntoIterator<Item = usize>, target: usize) {
+    for jump_idx in jump_idxs {
+        set_jmp_size(&mut output[jump_idx], (target - jump_idx) as u16);
     }
 }
 
@@ -213,7 +240,7 @@ fn compile_short_circuit_condition<'arena>(
                 state.free_reg(id_r);
                 let id = state.alloc_reg();
                 output.push(Instr::BoolAnd(id_l, id_r, id));
-                add_cmp_true(id, state.new_const_reg(TRUE), output);
+                add_cmp_true(id, state, output);
                 state.free_reg(id);
                 (vec![output.len() - 1], Vec::new())
             } else {
@@ -227,13 +254,16 @@ fn compile_short_circuit_condition<'arena>(
             }
         }
         expr => {
+            if !bool_or_mode && compile_int_imm_false_jump(expr, ctx, state, output) {
+                return (Vec::new(), vec![output.len() - 1]);
+            }
             let cond_id = expr.compile(ctx, state, output, None, false, true).unwrap_id();
             if bool_or_mode {
-                add_cmp_true(cond_id, state.new_const_reg(TRUE), output);
+                add_cmp_true(cond_id, state, output);
                 state.free_reg(cond_id);
                 (vec![output.len() - 1], Vec::new())
             } else {
-                add_cmp_false(cond_id, state.new_const_reg(FALSE), &mut 0, output, false);
+                add_cmp_false(cond_id, state, output);
                 state.free_reg(cond_id);
                 (Vec::new(), vec![output.len() - 1])
             }
@@ -267,13 +297,16 @@ fn compile_condition<'arena>(
         return (None, true_jump_idxs, false_jmp_idxes);
     }
 
+    if compile_int_imm_false_jump(condition, ctx, state, output) {
+        return (None, Vec::new(), vec![output.len() - 1]);
+    }
     let cond_id = condition.compile(ctx, state, output, None, false, true).unwrap_id();
-    if state.const_registers.get(&TRUE) == Some(&cond_id) {
+    if state.regs.const_registers.get(&TRUE) == Some(&cond_id) {
         return (Some(true), Vec::new(), Vec::new());
-    } else if state.const_registers.get(&FALSE) == Some(&cond_id) {
+    } else if state.regs.const_registers.get(&FALSE) == Some(&cond_id) {
         return (Some(false), Vec::new(), Vec::new());
     }
-    add_cmp_false(cond_id, state.new_const_reg(FALSE), &mut 0, output, false);
+    add_cmp_false(cond_id, state, output);
     state.free_reg(cond_id);
     (None, Vec::new(), vec![output.len() - 1])
 }
@@ -281,26 +314,14 @@ fn compile_condition<'arena>(
 const LOOP_MARKER: u16 = u16::MAX;
 const LOOP_MARKER_REG: u16 = 1;
 
-fn parse_loop_flow_control(
-    loop_code: &mut [Instr],
-    code_length: u16,
-    for_loop: bool,
-    indefinite: bool,
-) {
+fn parse_loop_flow_control(loop_code: &mut [Instr]) {
+    let body_len = loop_code.len() as u16;
     loop_code.iter_mut().enumerate().for_each(|(i, x)| {
         if *x == Instr::NotEqJmp(LOOP_MARKER_REG, 0, LOOP_MARKER) {
-            if for_loop && !indefinite {
-                *x = Instr::jump(code_length - i as u16 - 1);
-            } else {
-                *x = Instr::jump(code_length - i as u16);
-            }
+            *x = Instr::Jmp(body_len + 1 - i as u16);
         } else if *x == Instr::EqJmp(LOOP_MARKER_REG, 0, LOOP_MARKER) {
-            if for_loop {
-                *x = Instr::jump(code_length - i as u16 - 3);
-            } else {
-                // loop blocks and while loops only have 1 trailing instruction
-                *x = Instr::jump(code_length - i as u16 - 1);
-            }
+            // loop blocks and while loops only have 1 trailing instruction
+            *x = Instr::Jmp(body_len - i as u16);
         }
     });
 }
@@ -343,7 +364,7 @@ fn compile_array_literal<'arena>(
         let array_reg = state.init_reg(Data::array(array_id as u32), ctx);
         for elem in array_items {
             if let Some(literal) = elem.literal_value(&mut state.pools.str_pool) {
-                state.pools.obj_pool.get_mut(array_id).push(literal);
+                state.pools.obj_pool[array_id].push(literal);
             } else {
                 let id = elem.compile(ctx, state, output, None, false, true).unwrap_id();
                 output.push(Instr::SetFieldObj(
@@ -351,7 +372,7 @@ fn compile_array_literal<'arena>(
                     id,
                     state.pools.obj_pool[array_id].len() as u16,
                 ));
-                state.pools.obj_pool.get_mut(array_id).push(NULL);
+                state.pools.obj_pool[array_id].push(NULL);
             }
         }
         array_reg
@@ -360,7 +381,7 @@ fn compile_array_literal<'arena>(
             let Some(literal) = elem.literal_value(&mut state.pools.str_pool) else {
                 unsafe { unreachable_unchecked() }
             };
-            state.pools.obj_pool.get_mut(array_id).push(literal);
+            state.pools.obj_pool[array_id].push(literal);
         }
         // The template array is held by a register to prevent it from being freed by the GC
         let template_reg = state.value_reg(Data::array(array_id as u32));
@@ -418,119 +439,66 @@ fn compile_struct_literal<'arena>(
         state.pools.obj_pool.push(Vec::with_capacity(fields.len()));
         state.pools.obj_pool.len() - 1
     };
-    if ctx.single_run {
-        let struct_reg = state.init_reg(Data::struct_instance(type_id, struct_id as u32), ctx);
-        for field_idx in 0..expected_fields_len {
-            if let Some(StructFieldExpr { name: _, value, name_span: _, value_span }) =
-                fields.iter().find(|field| {
-                    field.name == state.structs[expected_struct_idx].fields[field_idx].name
-                })
-            {
-                let field_type = value.infer_type(ctx, state);
-                let field = &state.structs[expected_struct_idx].fields[field_idx];
-                if !struct_field_type_matches(&field.field_type, &field_type) {
-                    compiler_errors::error_struct_field_invalid_type(
-                        ctx.file_idx,
-                        struct_name,
-                        field.span,
-                        field.name,
-                        &field.field_type,
-                        *value_span,
-                        &field_type,
-                        state.sources,
-                    );
-                }
-                if let Some(literal) = value.literal_value(&mut state.pools.str_pool) {
-                    state.pools.obj_pool.get_mut(struct_id).push(literal);
-                } else {
-                    let id = value.compile(ctx, state, output, None, false, true).unwrap_id();
-                    output.push(Instr::SetFieldObj(
-                        struct_reg,
-                        id,
-                        state.pools.obj_pool[struct_id].len() as u16,
-                    ));
-                    state.pools.obj_pool.get_mut(struct_id).push(NULL);
-                }
-            } else {
-                let missing_elems = (0..expected_fields_len)
-                    .into_iter()
-                    .filter(|i| {
-                        !fields.iter().any(|field| {
-                            field.name == state.structs[expected_struct_idx].fields[*i].name
-                        })
-                    })
-                    .map(|i| state.structs[struct_id].fields[i].name)
-                    .collect::<Vec<&str>>();
-                compiler_errors::error_struct_missing_fields(
+    let struct_data = Data::struct_instance(type_id, struct_id as u32);
+    let struct_reg = ctx.single_run.then(|| state.init_reg(struct_data, ctx));
+    let mut dynamic: Vec<(u16, u16)> = Vec::with_capacity(expected_fields_len);
+    for field_idx in 0..expected_fields_len {
+        if let Some(StructFieldExpr { name: _, value, name_span: _, value_span }) = fields
+            .iter()
+            .find(|field| field.name == state.structs[expected_struct_idx].fields[field_idx].name)
+        {
+            let field_type = value.infer_type(ctx, state);
+            let field = &state.structs[expected_struct_idx].fields[field_idx];
+            if !struct_field_type_matches(&field.field_type, &field_type) {
+                compiler_errors::error_struct_field_invalid_type(
                     ctx.file_idx,
-                    state.structs[expected_struct_idx].name_span,
-                    span,
+                    struct_name,
+                    field.span,
+                    field.name,
+                    &field.field_type,
+                    *value_span,
+                    &field_type,
                     state.sources,
-                    &missing_elems,
-                )
-            }
-        }
-
-        struct_reg
-    } else {
-        let mut dynamic: Vec<(u16, u16)> = Vec::with_capacity(expected_fields_len);
-        for field_idx in 0..expected_fields_len {
-            if let Some(StructFieldExpr { name: _, value, name_span: _, value_span }) =
-                fields.iter().find(|field| {
-                    field.name == state.structs[expected_struct_idx].fields[field_idx].name
-                })
-            {
-                let field_type = value.infer_type(ctx, state);
-                let field = &state.structs[expected_struct_idx].fields[field_idx];
-                if !struct_field_type_matches(&field.field_type, &field_type) {
-                    compiler_errors::error_struct_field_invalid_type(
-                        ctx.file_idx,
-                        struct_name,
-                        field.span,
-                        field.name,
-                        &field.field_type,
-                        *value_span,
-                        &field_type,
-                        state.sources,
-                    );
-                }
-                if let Some(literal) = value.literal_value(&mut state.pools.str_pool) {
-                    state.pools.obj_pool.get_mut(struct_id).push(literal);
-                } else {
-                    let id = value.compile(ctx, state, output, None, false, true).unwrap_id();
-                    state.pools.obj_pool.get_mut(struct_id).push(NULL);
-                    dynamic.push((id, field_idx as u16));
-                }
-            } else {
-                let missing_elems = (0..expected_fields_len)
-                    .into_iter()
-                    .filter(|i| {
-                        !fields.iter().any(|field| {
-                            field.name == state.structs[expected_struct_idx].fields[*i].name
-                        })
-                    })
-                    .map(|i| state.structs[struct_id].fields[i].name)
-                    .collect::<Vec<&str>>();
-                compiler_errors::error_struct_missing_fields(
-                    ctx.file_idx,
-                    state.structs[expected_struct_idx].name_span,
-                    span,
-                    state.sources,
-                    &missing_elems,
                 );
             }
+            if let Some(literal) = value.literal_value(&mut state.pools.str_pool) {
+                state.pools.obj_pool[struct_id].push(literal);
+            } else {
+                let id = value.compile(ctx, state, output, None, false, true).unwrap_id();
+                state.pools.obj_pool[struct_id].push(NULL);
+                dynamic.push((id, field_idx as u16));
+            }
+        } else {
+            let missing_elems = (0..expected_fields_len)
+                .into_iter()
+                .filter(|i| {
+                    !fields.iter().any(|field| {
+                        field.name == state.structs[expected_struct_idx].fields[*i].name
+                    })
+                })
+                .map(|i| state.structs[struct_id].fields[i].name)
+                .collect::<Vec<&str>>();
+            compiler_errors::error_struct_missing_fields(
+                ctx.file_idx,
+                state.structs[expected_struct_idx].name_span,
+                span,
+                state.sources,
+                &missing_elems,
+            );
         }
-
-        let template_reg = state.value_reg(Data::struct_instance(type_id, struct_id as u32));
-
-        let dest_reg = state.scratch_reg();
-
-        output.push(Instr::CloneObj(template_reg, dest_reg, expected_fields_len as u16));
-        for (val_reg, slot) in dynamic {
-            output.push(Instr::SetFieldObj(dest_reg, val_reg, slot));
-        }
-        dest_reg
     }
+
+    let dest_reg = struct_reg.unwrap_or_else(|| {
+        let template_reg = state.value_reg(Data::struct_instance(type_id, struct_id as u32));
+        let dest_reg = state.scratch_reg();
+        output.push(Instr::CloneObj(template_reg, dest_reg, expected_fields_len as u16));
+        dest_reg
+    });
+
+    for (val_reg, slot) in dynamic {
+        output.push(Instr::SetFieldObj(dest_reg, val_reg, slot));
+    }
+    dest_reg
 }
 
 #[must_use]
@@ -745,21 +713,20 @@ fn compile_array_slice<'arena>(
 }
 
 #[must_use]
-fn uniform_op<'arena>(
+fn bool_op<'arena>(
     instr: fn(u16, u16, u16) -> Instr,
     symbol: &'static str,
     l: &'arena Expr,
     r: &'arena Expr,
     span_l: Span,
     span_r: Span,
-    t: &DataType,
     tgt_id: Option<u16>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(ctx, state), r.infer_type(ctx, state));
-    if &t_l != t || &t_r != t {
+    if t_l != DataType::Bool || t_r != DataType::Bool {
         compiler_errors::error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.file_idx, state.sources);
     }
 
@@ -774,11 +741,9 @@ fn uniform_op<'arena>(
 
 #[inline]
 #[must_use]
-fn uniform_op2<'arena>(
-    instr: fn(u16, u16, u16) -> Instr,
-    t_1: &'static DataType,
-    instr2: fn(u16, u16, u16) -> Instr,
-    t_2: &'static DataType,
+fn numeric_op<'arena>(
+    float_instr: fn(u16, u16, u16) -> Instr,
+    int_instr: fn(u16, u16, u16) -> Instr,
     symbol: &'static str,
     l: &'arena Expr,
     r: &'arena Expr,
@@ -790,7 +755,7 @@ fn uniform_op2<'arena>(
     output: &mut Vec<Instr>,
 ) -> u16 {
     let (t_l, t_r) = (l.infer_type(ctx, state), r.infer_type(ctx, state));
-    if !((&t_l == t_1 && &t_r == t_1) || (&t_l == t_2 && &t_r == t_2)) {
+    if t_l != t_r || !matches!(t_l, DataType::Float | DataType::Int) {
         compiler_errors::error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.file_idx, state.sources);
     }
     let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
@@ -798,7 +763,11 @@ fn uniform_op2<'arena>(
     state.free_reg(id_l);
     state.free_reg(id_r);
     let id = state.alloc_reg_tgt(tgt_id);
-    output.push(if &t_l == t_1 { instr(id_l, id_r, id) } else { instr2(id_l, id_r, id) });
+    output.push(if t_l == DataType::Float {
+        float_instr(id_l, id_r, id)
+    } else {
+        int_instr(id_l, id_r, id)
+    });
     id
 }
 
@@ -818,11 +787,9 @@ fn compile_div_op<'arena>(
     {
         error_division_by_zero(false, span_l.extend(span_r), ctx.file_idx, state.sources);
     }
-    let id = uniform_op2(
+    let id = numeric_op(
         Instr::DivFloat,
-        &DataType::Float,
         Instr::DivInt,
-        &DataType::Int,
         "/",
         l,
         r,
@@ -859,15 +826,15 @@ fn compile_add_op<'arena>(
     }
     // var+1 or 1+var use the dedicated IncInt/IncIntTo instructions
     if t_l == DataType::Int
-        && let Some((Expr::Var(src_name, _), imm)) = match (l, r) {
+        && let Some((src_expr, imm)) = match (l, r) {
             (_, Expr::Int(i)) => i16::try_from(*i).ok().map(|i| (l, i)),
             (Expr::Int(i), _) => i16::try_from(*i).ok().map(|i| (r, i)),
             _ => None,
         }
-        && let Some(src_var) = state.find_var(src_name.get_name())
     {
-        let src_id = src_var.register_id;
-        let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
+        let src_id = src_expr.compile(ctx, state, output, None, false, true).unwrap_id();
+        state.free_reg(src_id);
+        let id = state.alloc_reg_tgt(tgt_id);
         output.push(Instr::AddIntImm { src: src_id, dst: id, imm: imm as u16 });
         return id;
     }
@@ -902,20 +869,17 @@ fn compile_sub_op<'arena>(
     // var-1 uses the dedicated DecInt/DecIntTo instructions
     if let Expr::Int(i) = r
         && let Some(imm) = i.checked_neg().and_then(|i| i16::try_from(i).ok())
-        && let Expr::Var(src_name, _) = l
-        && let Some(src_var) = state.find_var(src_name.get_name())
-        && src_var.var_type == DataType::Int
+        && l.infer_type(ctx, state) == DataType::Int
     {
-        let src_id = src_var.register_id;
-        let id = tgt_id.unwrap_or_else(|| state.alloc_reg());
+        let src_id = l.compile(ctx, state, output, None, false, true).unwrap_id();
+        state.free_reg(src_id);
+        let id = state.alloc_reg_tgt(tgt_id);
         output.push(Instr::AddIntImm { src: src_id, dst: id, imm: imm as u16 });
         return id;
     }
-    uniform_op2(
+    numeric_op(
         Instr::SubFloat,
-        &DataType::Float,
         Instr::SubInt,
-        &DataType::Int,
         "-",
         l,
         r,
@@ -944,11 +908,9 @@ fn compile_mod_op<'arena>(
     {
         error_division_by_zero(true, span_l.extend(span_r), ctx.file_idx, state.sources);
     }
-    let id = uniform_op2(
+    let id = numeric_op(
         Instr::ModFloat,
-        &DataType::Float,
         Instr::ModInt,
-        &DataType::Int,
         "%",
         l,
         r,
@@ -1135,6 +1097,21 @@ fn compile_array_index_assignment<'arena>(
     };
     output.push(to_push);
     state.add_to_src(ctx, output, index_span);
+    if array_type == DataType::String
+        && ctx.in_function
+        && let Expr::Var(var_name, var_span) = array
+        && !(var_name.is_namespace_empty() && state.find_var(var_name.get_name()).is_some())
+        && let Some(global_idx) = state.scope(ctx.file_idx).find_global(
+            var_name.get_namespace(),
+            var_name.get_name(),
+            *var_span,
+            ctx.file_idx,
+            state.sources,
+        )
+    {
+        let reg = u32::from(state.globals[global_idx].register_id);
+        output.push(Instr::StoreGlobal { src_reg: id, reg });
+    }
     state.free_reg(id);
 }
 
@@ -1215,7 +1192,7 @@ fn compile_if_block_branch<'arena>(
     output: &mut Vec<Instr>,
 ) {
     if let Some(tgt_id) = tgt_id {
-        let regs_len = state.registers.len() as u16;
+        let regs_len = state.regs.temp_count;
         let output_len = output.len();
         output.extend(compile_expr(
             &branch[..branch.len() - 1],
@@ -1250,9 +1227,7 @@ fn compile_if_block<'arena>(
     output: &mut Vec<Instr>,
 ) {
     let condition_start = output.len();
-    for j in previous_jumps {
-        set_jmp_size(&mut output[j], (condition_start - j) as u16);
-    }
+    patch_jumps(output, previous_jumps, condition_start);
 
     let condition_type = condition.infer_type(ctx, state);
     if condition_type != DataType::Bool {
@@ -1282,38 +1257,28 @@ fn compile_if_block<'arena>(
 
     // Modify true jump instructions to point to body_start
     let body_start = output.len();
-    for j in true_jump_idxs {
-        set_jmp_size(&mut output[j], (body_start - j) as u16);
-    }
+    patch_jumps(output, true_jump_idxs, body_start);
 
     compile_if_block_branch(then, tgt_id, ctx, state, output);
 
-    let jump_over_instr_idx = if otherwise.is_empty() {
-        0
-    } else {
-        output.push(Instr::jump(0));
-        output.len() - 1
-    };
-
-    let branch_start = output.len();
     if otherwise.is_empty() {
-        // single if block
-        for j in false_jump_idxs {
-            set_jmp_size(&mut output[j], (branch_start - j) as u16);
-        }
-    } else if let [Expr::IfBlock(if_block)] = otherwise {
+        let body_end = output.len();
+        patch_jumps(output, false_jump_idxs, body_end);
+        return;
+    }
+
+    let jump_over_idx = output.len();
+    output.push(Instr::Jmp(0));
+    if let [Expr::IfBlock(if_block)] = otherwise {
         compile_if_block(if_block, false_jump_idxs, tgt_id, ctx, state, output);
     } else {
-        for j in false_jump_idxs {
-            set_jmp_size(&mut output[j], (branch_start - j) as u16);
-        }
+        let branch_start = output.len();
+        patch_jumps(output, false_jump_idxs, branch_start);
         compile_if_block_branch(otherwise, tgt_id, ctx, state, output);
     }
 
-    if !otherwise.is_empty() {
-        let output_len = output.len();
-        set_jmp_size(&mut output[jump_over_instr_idx], (output_len - jump_over_instr_idx) as u16);
-    }
+    let condition_end = output.len();
+    patch_jumps(output, [jump_over_idx], condition_end);
 }
 
 fn compile_while_loop<'arena>(
@@ -1329,26 +1294,22 @@ fn compile_while_loop<'arena>(
         compile_short_circuit_condition(condition, ctx, state, output, false);
 
     let body_start = output.len();
-    for j in true_jump_idxs {
-        set_jmp_size(&mut output[j], (body_start - j) as u16);
-    }
+    patch_jumps(output, true_jump_idxs, body_start);
 
     // parse the code block, clone the vars to avoid overriding anything
     let mut cond_code =
         compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u32), state);
 
     let exit = output.len() + cond_code.len() + 1;
-    for j in false_jump_idxs {
-        set_jmp_size(&mut output[j], (exit - j) as u16);
-    }
+    patch_jumps(output, false_jump_idxs, exit);
 
     let cond_len = (output.len() - output_len_before) as u16;
     let body_len = cond_code.len() as u16;
     let len = cond_len + body_len; // full span used by JmpBack
     // Break/Continue offsets are relative to cond_code, so pass body_len+1 (body remaining + JmpBack)
-    parse_loop_flow_control(&mut cond_code, body_len + 1, false, false);
+    parse_loop_flow_control(&mut cond_code);
     output.extend(cond_code);
-    output.push(Instr::jump(len.wrapping_neg()));
+    output.push(Instr::Jmp(len.wrapping_neg()));
 }
 
 fn compile_for_loop<'arena>(
@@ -1379,10 +1340,8 @@ fn compile_for_loop<'arena>(
         id
     };
 
-    // do the 'i < len' condition, set up the condition's id (true/false)
-    let condition_id = state.alloc_reg();
-
-    output.push(Instr::InfInt(index_id, array_len_id, condition_id));
+    let jmp_idx = output.len();
+    output.push(Instr::InfEqIntJmp(array_len_id, index_id, 0));
 
     // set up the variable for the current element (for current_element_id in ... {}) => current_element_id = array[index]
     let current_element_id = if real_var { state.alloc_reg() } else { 0 };
@@ -1408,19 +1367,15 @@ fn compile_for_loop<'arena>(
     // accounts for the GetIndexArray/GetIndexString instruction
     let pending = u32::from(real_var);
 
-    let regs_before = state.registers.len() as u16;
-    let mut cond_code = compile_expr(
+    let regs_before = state.regs.temp_count;
+    let mut loop_code: Vec<Instr> = compile_expr(
         code,
         ctx.no_single_run().advance_offset(output.len() as u32 + pending),
         state,
     );
     // Clean up variables
     state.v.truncate(v_len);
-    state.free_loop_scope_registers(regs_before, &cond_code);
-
-    // add the condition ('i < len') jumping logic
-    let mut len = (cond_code.len() + 3) as u16 + pending as u16;
-    add_cmp_false(condition_id, state.new_const_reg(FALSE), &mut len, output, true);
+    state.free_scope_registers(regs_before, &loop_code);
 
     // make the current_element_id register actually hold the element's value
     if real_var {
@@ -1430,20 +1385,22 @@ fn compile_for_loop<'arena>(
             output.push(Instr::GetIndexArray(array, index_id, current_element_id));
         }
     }
-    parse_loop_flow_control(&mut cond_code, len, true, false);
-    // then add the condition code
-    output.extend(cond_code);
-    // add 1 to the index (i+=1) so that the next loop iteration will have the next element in the array
-    // output.push(Instr::IncInt(index_id));
-    output.push(Instr::AddIntImm { src: index_id, dst: index_id, imm: 1 });
+    parse_loop_flow_control(&mut loop_code);
+    output.extend(loop_code);
 
-    // jump back to the loop if still inside of it
-    output.push(Instr::jump(len.wrapping_neg()));
+    let body_len = (output.len() - jmp_idx - 1) as u16;
+    output.push(Instr::IncIntInfJmp {
+        counter_reg: index_id,
+        limit_reg: array_len_id,
+        jump_size: body_len.wrapping_neg(),
+    });
+
+    let exit_size = (output.len() - jmp_idx) as u16;
+    output[jmp_idx] = Instr::InfEqIntJmp(array_len_id, index_id, exit_size);
 
     if ctx.single_run {
         state.free_reg(array_len_id);
         state.free_reg(index_id);
-        state.free_reg(condition_id);
         if real_var {
             state.free_reg(current_element_id);
         }
@@ -1496,29 +1453,28 @@ fn compile_int_for_loop<'arena>(
     let jmp_idx = output.len();
     output.push(Instr::InfEqIntJmp(end_elem_id, elem_id, 0));
 
-    let regs_before = state.registers.len() as u16;
+    let regs_before = state.regs.temp_count;
     let compiled_loop_code =
         compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u32), state);
-    state.free_loop_scope_registers(regs_before, &compiled_loop_code);
+    state.free_scope_registers(regs_before, &compiled_loop_code);
     let compiled_loop_code_len = compiled_loop_code.len() as u16;
 
     // (2) loop_body
     output.extend(compiled_loop_code);
 
     // (3) i+= 1
-    output.push(Instr::AddIntImm { src: elem_id, dst: elem_id, imm: 1 });
-
-    // (4) if i < end_elem jump back to body
-    output.push(Instr::InfIntJmp(
-        elem_id,
-        end_elem_id,
-        (compiled_loop_code_len + 1).wrapping_neg(),
-    ));
+    output.push(Instr::IncIntInfJmp {
+        counter_reg: elem_id,
+        limit_reg: end_elem_id,
+        jump_size: compiled_loop_code_len.wrapping_neg(),
+    });
 
     let exit_size = (output.len() - jmp_idx) as u16;
     output[jmp_idx] = Instr::InfEqIntJmp(end_elem_id, elem_id, exit_size);
 
-    parse_loop_flow_control(&mut output[jmp_idx + 1..], exit_size, true, false);
+    parse_loop_flow_control(
+        &mut output[jmp_idx + 1..jmp_idx + 1 + compiled_loop_code_len as usize],
+    );
     state.v.truncate(v_len);
 
     if ctx.single_run {
@@ -1533,14 +1489,14 @@ fn compile_loop_block<'arena>(
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
-    let regs_before = state.registers.len() as u16;
+    let regs_before = state.regs.temp_count;
     let mut compiled =
         compile_expr(code, ctx.no_single_run().advance_offset(output.len() as u32), state);
-    state.free_loop_scope_registers(regs_before, &compiled);
+    state.free_scope_registers(regs_before, &compiled);
     let code_length = compiled.len() as u16;
-    parse_loop_flow_control(&mut compiled, code_length + 1, false, true);
+    parse_loop_flow_control(&mut compiled);
     output.extend(compiled);
-    output.push(Instr::jump(code_length.wrapping_neg()));
+    output.push(Instr::Jmp(code_length.wrapping_neg()));
 }
 
 fn compile_try_catch_block<'arena>(
@@ -1560,7 +1516,7 @@ fn compile_try_catch_block<'arena>(
     );
     output.extend(main_code);
     output.push(Instr::StopErrorCatch);
-    output.push(Instr::jump(0)); // jumps over the catch handler if no error arises
+    output.push(Instr::Jmp(0)); // jumps over the catch handler if no error arises
     let jmp_catch_instr = output.len() - 1;
 
     let v_len = state.v.len();
@@ -1571,7 +1527,7 @@ fn compile_try_catch_block<'arena>(
     let catch_code = compile_expr(catch_code, ctx.advance_offset(output.len() as u32), state);
     state.v.truncate(v_len);
     output.extend(catch_code);
-    output[jmp_catch_instr] = Instr::jump((output.len() - jmp_catch_instr) as u16);
+    output[jmp_catch_instr] = Instr::Jmp((output.len() - jmp_catch_instr) as u16);
     state.free_reg(err_reg_id);
 }
 
@@ -1682,6 +1638,9 @@ fn compile_var_assignment<'arena>(
         state.globals[unsafe { global_var_idx.unwrap_unchecked() }].register_id
     };
 
+    let global_reg = (ctx.in_function && local_var_idx.is_none()).then_some(u32::from(reg_id));
+    let reg_id = if global_reg.is_some() { state.alloc_reg() } else { reg_id };
+
     if var_type == DataType::Int {
         // (is_inc, src_register_id)
         let inc_dec: Option<(bool, u16)> = match value {
@@ -1712,6 +1671,10 @@ fn compile_var_assignment<'arena>(
                 dst: reg_id,
                 imm: if is_inc { 1 } else { (-1i16) as u16 },
             });
+            if let Some(global_reg) = global_reg {
+                output.push(Instr::StoreGlobal { src_reg: reg_id, reg: global_reg });
+                state.free_reg(reg_id);
+            }
             return;
         }
     }
@@ -1722,6 +1685,10 @@ fn compile_var_assignment<'arena>(
         move_reg_to_reg(output, obj_id, reg_id, state.register_value(obj_id));
     } else {
         move_value_to(output, output_len, obj_id, reg_id);
+    }
+    if let Some(global_reg) = global_reg {
+        output.push(Instr::StoreGlobal { src_reg: reg_id, reg: global_reg });
+        state.free_reg(reg_id);
     }
     if !state.v.iter().any(|var| var.name != name && var.register_id == obj_id) {
         state.free_reg(obj_id);
@@ -1744,6 +1711,9 @@ fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_, '_>) -> Option<u16> {
     {
         return (var.var_type == DataType::Int).then_some(var.register_id);
     }
+    if ctx.in_function {
+        return None;
+    }
     let global_var = &state.globals[state.scope(ctx.file_idx).find_global(
         namespace,
         name,
@@ -1756,12 +1726,14 @@ fn int_var_register(e: &Expr, ctx: Ctx, state: &State<'_, '_>) -> Option<u16> {
 
 #[must_use]
 fn compile_var_access(
-    path: &[&str],
-    name: &str,
+    qualified_name: &QualifiedName,
     span: Span,
     ctx: Ctx,
     state: &mut State<'_, '_>,
+    output: &mut Vec<Instr>,
 ) -> u16 {
+    let name = qualified_name.get_name();
+    let path = qualified_name.get_namespace();
     // Local variable
     if path.is_empty()
         && let Some(Variable { register_id, .. }) = state.find_var(name)
@@ -1772,7 +1744,14 @@ fn compile_var_access(
     if let Some(idx) =
         state.scope(ctx.file_idx).find_global(path, name, span, ctx.file_idx, state.sources)
     {
-        return state.globals[idx].register_id;
+        // Global variables live in the top-level frame
+        let register_id = state.globals[idx].register_id;
+        if !ctx.in_function {
+            return register_id;
+        }
+        let reg = state.alloc_reg();
+        output.push(Instr::LoadGlobal { dest_reg: reg, reg: u32::from(register_id) });
+        return reg;
     }
 
     // Function referenced by name
@@ -1806,7 +1785,6 @@ fn compile_struct_definition<'arena>(
         name_span: span,
         src_file_idx: ctx.file_idx,
     });
-    let struct_id = (state.structs.len() - 1) as u16;
     if let Some(struct_id) =
         state.scope_mut(ctx.file_idx).symbols.insert((name, Symbol::Struct), struct_id)
     {
@@ -1868,14 +1846,12 @@ fn compile_function_definition<'arena>(
             .into_boxed_slice(),
         code: fn_code,
         impls: Vec::new(),
-        is_recursive: None,
         returns_null: check_if_returns_void(fn_code),
         src_file_idx: ctx.file_idx,
         return_type_cache: Vec::new(),
         direct_calls: state.bump.alloc_slice_copy(&callees),
         name_span: span,
     });
-    state.fn_registers.push(Vec::new());
 }
 
 fn compile_return<'arena>(
@@ -1884,16 +1860,22 @@ fn compile_return<'arena>(
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
 ) {
-    let id = return_value.map(|x| x.compile(ctx, state, output, None, false, true).unwrap_id());
+    let id = return_value.map(|x| match x {
+        Expr::Int(n) if ctx.in_function => {
+            let reg_id = state.alloc_reg();
+            output.push(Instr::SetInt(reg_id, *n));
+            state.free_reg(reg_id);
+            reg_id
+        }
+        _ => x.compile(ctx, state, output, None, false, true).unwrap_id(),
+    });
     if ctx.in_function {
         output.extend(core::iter::repeat_n(Instr::StopErrorCatch, ctx.try_depth as usize));
     }
-    output.push(match (ctx.in_function, ctx.is_compiling_recursive, id) {
+    output.push(match (ctx.in_function, id) {
         (false, ..) => Instr::Halt(u16::MAX),
-        (true, true, Some(id)) => Instr::RecursiveReturn(id),
-        (true, true, None) => Instr::RecursiveVoidReturn,
-        (true, false, Some(id)) => Instr::Return(id),
-        (true, false, None) => Instr::VoidReturn,
+        (true, Some(id)) => Instr::Return(id),
+        (true, None) => Instr::VoidReturn,
     });
 }
 
@@ -1993,45 +1975,19 @@ impl<'arena> Expr<'arena> {
         uses_id: bool,
     ) -> Option<u16> {
         match self {
-            Self::Int(num) => {
+            Self::Int(_) | Self::Float(_) | Self::String(_) | Self::Null | Self::Bool(_) => {
                 debug_assert!(uses_id);
-                let int = Data::int(*num);
+                let data =
+                    unsafe { self.literal_value(&mut state.pools.str_pool).unwrap_unchecked() };
                 Some(if var_assignment {
-                    state.init_reg(int, ctx)
+                    state.init_reg(data, ctx)
                 } else {
-                    state.new_const_reg(int)
+                    state.new_const_reg(data)
                 })
-            }
-            Self::Float(num) => {
-                debug_assert!(uses_id);
-                let float = Data::float(*num);
-                Some(if var_assignment {
-                    state.init_reg(float, ctx)
-                } else {
-                    state.new_const_reg(float)
-                })
-            }
-            Self::String(str) => {
-                debug_assert!(uses_id);
-                let s = Data::comp_str(str, &mut state.pools.str_pool);
-                Some(if var_assignment { state.init_reg(s, ctx) } else { state.new_const_reg(s) })
-            }
-            Self::Null => {
-                debug_assert!(uses_id);
-                Some(if var_assignment {
-                    state.init_reg(NULL, ctx)
-                } else {
-                    state.new_const_reg(NULL)
-                })
-            }
-            Self::Bool(bool) => {
-                debug_assert!(uses_id);
-                let b = Data::bool(*bool);
-                Some(if var_assignment { state.init_reg(b, ctx) } else { state.new_const_reg(b) })
             }
             Self::Var(name, span) => {
                 debug_assert!(uses_id);
-                Some(compile_var_access(name.get_namespace(), name.get_name(), *span, ctx, state))
+                Some(compile_var_access(name, *span, ctx, state, output))
             }
             Self::TypeEq(value, type_candidate, span) => {
                 debug_assert!(uses_id);
@@ -2071,14 +2027,37 @@ impl<'arena> Expr<'arena> {
                 debug_assert!(uses_id);
                 Some(compile_array_slice(array, idx_start, idx_end, *span, ctx, state, output))
             }
-            Self::Mul(l, r, span1, span2) => {
+            Self::Mul(l, r, span1, span2)
+            | Self::Pow(l, r, span1, span2)
+            | Self::Sup(l, r, span1, span2)
+            | Self::SupEq(l, r, span1, span2)
+            | Self::Inf(l, r, span1, span2)
+            | Self::InfEq(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(uniform_op2(
-                    Instr::MulFloat,
-                    &DataType::Float,
-                    Instr::MulInt,
-                    &DataType::Int,
-                    "*",
+                let (float_instr, int_instr, symbol): (
+                    fn(u16, u16, u16) -> Instr,
+                    fn(u16, u16, u16) -> Instr,
+                    &'static str,
+                ) = match self {
+                    Self::Mul(..) => (Instr::MulFloat, Instr::MulInt, "*"),
+                    Self::Pow(..) => (Instr::PowFloat, Instr::PowInt, "^"),
+                    Self::Sup(..) => (
+                        |a, b, jmp| Instr::InfFloat(b, a, jmp),
+                        |a, b, jmp| Instr::InfInt(b, a, jmp),
+                        ">",
+                    ),
+                    Self::SupEq(..) => (
+                        |a, b, jmp| Instr::InfEqFloat(b, a, jmp),
+                        |a, b, jmp| Instr::InfEqInt(b, a, jmp),
+                        ">=",
+                    ),
+                    Self::Inf(..) => (Instr::InfFloat, Instr::InfInt, "<"),
+                    _ => (Instr::InfEqFloat, Instr::InfEqInt, "<="),
+                };
+                Some(numeric_op(
+                    float_instr,
+                    int_instr,
+                    symbol,
                     l,
                     r,
                     *span1,
@@ -2105,24 +2084,6 @@ impl<'arena> Expr<'arena> {
                 debug_assert!(uses_id);
                 Some(compile_mod_op(l, r, *span1, *span2, tgt_id, ctx, state, output))
             }
-            Self::Pow(l, r, span1, span2) => {
-                debug_assert!(uses_id);
-                Some(uniform_op2(
-                    Instr::PowFloat,
-                    &DataType::Float,
-                    Instr::PowInt,
-                    &DataType::Int,
-                    "^",
-                    l,
-                    r,
-                    *span1,
-                    *span2,
-                    tgt_id,
-                    ctx,
-                    state,
-                    output,
-                ))
-            }
             Self::Eq(l, r) => {
                 debug_assert!(uses_id);
                 Some(compile_eq_op(l, r, false, tgt_id, ctx, state, output))
@@ -2131,109 +2092,13 @@ impl<'arena> Expr<'arena> {
                 debug_assert!(uses_id);
                 Some(compile_eq_op(l, r, true, tgt_id, ctx, state, output))
             }
-            Self::Sup(l, r, span1, span2) => {
+            Self::BoolAnd(l, r, s1, s2) => {
                 debug_assert!(uses_id);
-                Some(uniform_op2(
-                    |a, b, dst| Instr::InfFloat(b, a, dst),
-                    &DataType::Float,
-                    |a, b, dst| Instr::InfInt(b, a, dst),
-                    &DataType::Int,
-                    ">",
-                    l,
-                    r,
-                    *span1,
-                    *span2,
-                    tgt_id,
-                    ctx,
-                    state,
-                    output,
-                ))
-            }
-            Self::SupEq(l, r, span1, span2) => {
-                debug_assert!(uses_id);
-                Some(uniform_op2(
-                    |a, b, dst| Instr::InfEqFloat(b, a, dst),
-                    &DataType::Float,
-                    |a, b, dst| Instr::InfEqInt(b, a, dst),
-                    &DataType::Int,
-                    ">=",
-                    l,
-                    r,
-                    *span1,
-                    *span2,
-                    tgt_id,
-                    ctx,
-                    state,
-                    output,
-                ))
-            }
-            Self::Inf(l, r, span1, span2) => {
-                debug_assert!(uses_id);
-                Some(uniform_op2(
-                    Instr::InfFloat,
-                    &DataType::Float,
-                    Instr::InfInt,
-                    &DataType::Int,
-                    "<",
-                    l,
-                    r,
-                    *span1,
-                    *span2,
-                    tgt_id,
-                    ctx,
-                    state,
-                    output,
-                ))
-            }
-            Self::InfEq(l, r, span1, span2) => {
-                debug_assert!(uses_id);
-                Some(uniform_op2(
-                    Instr::InfEqFloat,
-                    &DataType::Float,
-                    Instr::InfEqInt,
-                    &DataType::Int,
-                    "<=",
-                    l,
-                    r,
-                    *span1,
-                    *span2,
-                    tgt_id,
-                    ctx,
-                    state,
-                    output,
-                ))
-            }
-            Self::BoolAnd(l, r, span1, span2) => {
-                debug_assert!(uses_id);
-                Some(uniform_op(
-                    Instr::BoolAnd,
-                    "&&",
-                    l,
-                    r,
-                    *span1,
-                    *span2,
-                    &DataType::Bool,
-                    tgt_id,
-                    ctx,
-                    state,
-                    output,
-                ))
+                Some(bool_op(Instr::BoolAnd, "&&", l, r, *s1, *s2, tgt_id, ctx, state, output))
             }
             Self::BoolOr(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(uniform_op(
-                    Instr::BoolOr,
-                    "||",
-                    l,
-                    r,
-                    *span1,
-                    *span2,
-                    &DataType::Bool,
-                    tgt_id,
-                    ctx,
-                    state,
-                    output,
-                ))
+                Some(bool_op(Instr::BoolOr, "||", l, r, *span1, *span2, tgt_id, ctx, state, output))
             }
             Self::Neg(l, span1, span2) => {
                 debug_assert!(uses_id);
@@ -2502,7 +2367,6 @@ fn parse_toplevel<'a>(
     src_file_idx: u16,
     fns: &mut Vec<Function<'a>>,
     structs: &mut Vec<Struct<'a>>,
-    fn_registers: &mut Vec<Vec<u16>>,
     dynamic_libs: &mut Vec<Dylib<'a>>,
     sources: &mut Vec<Source<'a>>,
     scope: &mut Scope<'a>,
@@ -2540,7 +2404,6 @@ fn parse_toplevel<'a>(
                         sources,
                     );
                 }
-                fn_registers.push(Vec::new());
                 let returns_void = check_if_returns_void(fn_code);
                 let mut callees = Vec::new();
                 collect_direct_fn_calls(fn_code, &mut callees);
@@ -2551,7 +2414,6 @@ fn parse_toplevel<'a>(
                     args: Box::new([]),
                     code: fn_code,
                     impls: Vec::new(),
-                    is_recursive: None,
                     returns_null: returns_void,
                     src_file_idx,
                     return_type_cache: Vec::new(),
@@ -2702,7 +2564,6 @@ fn parse_toplevel<'a>(
                     child_src_idx,
                     fns,
                     structs,
-                    fn_registers,
                     dynamic_libs,
                     sources,
                     &mut child_scope,
@@ -2869,18 +2730,7 @@ pub fn compile<'arena>(
     filename: &'arena str,
     debug: bool,
     bump: &'arena Bump,
-) -> (
-    Vec<Instr>,
-    RegisterFile,
-    Pools,
-    ErrorCtx<'arena>,
-    Vec<Vec<u16>>,
-    Vec<DylibFn>,
-    usize,
-    usize,
-    Vec<Struct<'arena>>,
-    Vec<DataType>,
-) {
+) -> Program<'arena> {
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let now = std::time::Instant::now();
 
@@ -2897,14 +2747,12 @@ pub fn compile<'arena>(
 
     let mut variables: Vec<Variable> = Vec::new();
     let mut globals: Vec<Variable> = Vec::new();
-    let mut registers: Vec<Data> = Vec::new();
     let mut pools: Pools = Pools {
         obj_pool: Pool::with_capacity(5),
         map_pool: Pool::with_capacity(0),
         str_pool: Pool::with_capacity(5),
     };
     let mut instr_src: Vec<InstrSrc> = Vec::new();
-    let mut fn_registers: Vec<Vec<u16>> = Vec::new();
     let mut functions: Vec<Function> = Vec::new();
     let mut code_units: Vec<CodeUnit> = Vec::new();
     let mut structs: Vec<Struct> = Vec::new();
@@ -2912,9 +2760,6 @@ pub fn compile<'arena>(
     let mut dylib_fns: Vec<DylibFn> = Vec::new();
     let mut allocated_arg_count_peak = 0;
     let mut allocated_arg_count = 0;
-    let mut allocated_call_depth = 0;
-    let mut const_registers: FxHashMap<Data, u16> = FxHashMap::default();
-    let mut free_registers = Vec::new();
     let mut types: Vec<DataType> = Vec::new();
 
     let mut sources: Vec<Source> = vec![main_src];
@@ -2938,7 +2783,6 @@ pub fn compile<'arena>(
         0,
         &mut functions,
         &mut structs,
-        &mut fn_registers,
         &mut dyn_libs,
         &mut sources,
         &mut scope,
@@ -2966,7 +2810,6 @@ pub fn compile<'arena>(
 
     let ctx = Ctx {
         in_function: false,
-        is_compiling_recursive: false,
         file_idx: 0,
         single_run: true,
         offset: 0,
@@ -2974,28 +2817,21 @@ pub fn compile<'arena>(
         loop_try_depth: 0,
         current_unit: None,
     };
-    let mut const_registers_bitset = FixedBitSet::new();
-    let mut free_registers_bitset = FixedBitSet::new();
     let mut state = State {
         v: &mut variables,
         globals: &mut globals,
-        registers: &mut registers,
+        regs: CodeUnitRegisters::default(),
         functions: &mut functions,
         code_units: &mut code_units,
         structs: &mut structs,
         pools: &mut pools,
         instr_src: &mut instr_src,
-        fn_registers: &mut fn_registers,
         dylibs: &mut dyn_libs,
         allocated_arg_count: &mut allocated_arg_count,
         allocated_arg_count_peak: &mut allocated_arg_count_peak,
-        allocated_call_depth: &mut allocated_call_depth,
-        const_registers: &mut const_registers,
-        const_registers_bitset: &mut const_registers_bitset,
-        free_registers: &mut free_registers,
-        free_registers_bitset: &mut free_registers_bitset,
+        function_constants: Vec::new(),
+        max_frame_regs: 0,
         sources: &mut sources,
-        reserved_registers: FxHashSet::default(),
         file_scopes: &mut file_scopes,
         types: &mut types,
         bump,
@@ -3015,7 +2851,7 @@ pub fn compile<'arena>(
                     None,
                     None,
                     file_idx,
-                    &sources,
+                    state.sources,
                 );
             }
             declared_var_type
@@ -3026,7 +2862,7 @@ pub fn compile<'arena>(
             .value
             .compile(var_ctx, &mut state, &mut instructions, None, true, true)
             .unwrap_id();
-        state.reserved_registers.insert(register_id);
+        state.reserve_register(register_id);
         state.globals.push(Variable {
             name: var_declaration.name,
             register_id,
@@ -3054,10 +2890,17 @@ pub fn compile<'arena>(
     instructions.reserve_exact(program_instructions.len() + 1);
     instructions.extend(program_instructions);
     instructions.push(Instr::Halt(u16::MAX));
-    fn_registers.push(Vec::new());
 
+    let CodeUnitRegisters { temp_count, permanent_values: mut top_level_values, .. } = state.regs;
+    let mut initial_stack = state.function_constants;
+    let top_level_permanent_count = top_level_values.len() as u16;
+    let max_frame_regs =
+        state.max_frame_regs.max(u32::from(temp_count + top_level_permanent_count));
+    relocate_registers(&mut instructions, 0, top_level_permanent_count);
+    let top_level_len = instructions.len() as u32;
+
+    let top_level_base = initial_stack.len() as u32;
     // Appends every code unit after the top-level code
-    // Resolves unit indices to actual addresses
     let mut unit_addresses: Vec<u32> = Vec::with_capacity(code_units.len());
     instructions.reserve_exact(code_units.iter().map(|unit| unit.instructions.len()).sum());
     for CodeUnit { instructions: mut unit_instructions, instr_src: unit_instr_src } in code_units {
@@ -3071,18 +2914,19 @@ pub fn compile<'arena>(
         instructions.append(&mut unit_instructions);
     }
     for instr in &mut instructions {
-        if let Instr::CallFunc { target, .. } | Instr::CallFuncRecursive { target, .. } = instr {
-            *target = unit_addresses[*target as usize];
+        match instr {
+            Instr::CallFunc { target, .. } => *target = unit_addresses[*target as usize],
+            Instr::LoadGlobal { reg, .. } | Instr::StoreGlobal { reg, .. } => {
+                *reg = top_level_base
+                    + u32::from(relocate_register(*reg as u16, 0, top_level_permanent_count));
+            }
+            _ => {}
         }
     }
-    for data in &mut registers {
-        if data.is_function()
-            && let Some(address) = unit_addresses.get(data.as_function())
-        // prevents a bug due to the Data::function(0) anonymous function placeholder
-        {
-            *data = Data::function(*address);
-        }
-    }
+
+    initial_stack.reserve_exact(top_level_values.len() + temp_count as usize);
+    initial_stack.append(&mut top_level_values);
+    initial_stack.resize(initial_stack.len() + temp_count as usize, NULL);
 
     #[cfg(debug_assertions)]
     if debug {
@@ -3094,7 +2938,7 @@ pub fn compile<'arena>(
             }
         }
         println!("-- REGISTERS --");
-        for (i, data) in registers.iter().enumerate() {
+        for (i, data) in initial_stack.iter().enumerate() {
             println!(
                 " [{i}] {}",
                 data.format(&pools.obj_pool, &pools.str_pool, &pools.map_pool, &structs, true)
@@ -3109,18 +2953,19 @@ pub fn compile<'arena>(
         println!("------------------");
     }
 
-    (
+    Program {
         instructions,
-        RegisterFile(registers),
+        top_level_len,
+        initial_stack,
+        top_level_base,
+        max_frame_regs,
         pools,
-        ErrorCtx { instr_src, sources },
-        fn_registers,
+        err_ctx: ErrorCtx { instr_src, sources },
         dylib_fns,
-        allocated_arg_count_peak,
-        allocated_call_depth,
+        allocated_arg_count: allocated_arg_count_peak,
         structs,
         types,
-    )
+    }
 
     // VmData {
     //     instructions,

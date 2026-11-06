@@ -41,30 +41,8 @@ pub fn get_output() -> String {
 pub fn run(code: String) {
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let bump = Bump::with_capacity(code.len() * 10);
-    let (
-        instructions,
-        mut registers,
-        mut pools,
-        err_ctx,
-        fn_registers,
-        fn_dyn_libs,
-        allocated_arg_count,
-        allocated_call_depth,
-        struct_fields,
-        types,
-    ) = compile(&code, "playground.kl", false, &bump);
-    vm::execute(
-        &instructions,
-        &mut registers,
-        &mut pools,
-        &err_ctx,
-        &fn_registers,
-        &fn_dyn_libs,
-        &struct_fields,
-        &types,
-        allocated_arg_count,
-        allocated_call_depth,
-    );
+    let mut program = compile(&code, "playground.kl", false, &bump);
+    vm::execute(&mut program);
 }
 
 #[cfg(feature = "embed")]
@@ -76,30 +54,8 @@ pub unsafe extern "C" fn keel_run(code: *const c_char) -> *mut c_char {
     captured_output::CAPTURED_OUTPUT.with(|o| o.borrow_mut().clear());
     let _ = catch_unwind(|| {
         let bump = Bump::with_capacity(code.len() * 10);
-        let (
-            instructions,
-            mut registers,
-            mut pools,
-            err_ctx,
-            fn_registers,
-            fn_dyn_libs,
-            allocated_arg_count,
-            allocated_call_depth,
-            struct_fields,
-            types,
-        ) = compile(&code, "embedded.kl", false, &bump);
-        vm::execute(
-            &instructions,
-            &mut registers,
-            &mut pools,
-            &err_ctx,
-            &fn_registers,
-            &fn_dyn_libs,
-            &struct_fields,
-            &types,
-            allocated_arg_count,
-            allocated_call_depth,
-        );
+        let mut program = compile(&code, "embedded.kl", false, &bump);
+        vm::execute(&mut program);
     });
     let output = captured_output::CAPTURED_OUTPUT.with(|o| o.take());
     CString::new(output).unwrap_or_default().into_raw()
@@ -241,60 +197,16 @@ pub fn main() {
                 let next = args.next();
                 if next == Some(String::from("--debug")) {
                     let now = std::time::Instant::now();
-                    let (
-                        instructions,
-                        mut registers,
-                        mut pools,
-                        err_ctx,
-                        fn_registers,
-                        fn_dyn_libs,
-                        allocated_arg_count,
-                        allocated_call_depth,
-                        struct_fields,
-                        types,
-                    ) = compile(&contents, file, true, &bump);
+                    let mut program = compile(&contents, file, true, &bump);
                     println!("COMPILATION TIME: {:.2?}", now.elapsed());
                     let now = std::time::Instant::now();
-                    vm::execute(
-                        &instructions,
-                        &mut registers,
-                        &mut pools,
-                        &err_ctx,
-                        &fn_registers,
-                        &fn_dyn_libs,
-                        &struct_fields,
-                        &types,
-                        allocated_arg_count,
-                        allocated_call_depth,
-                    );
+                    vm::execute(&mut program);
                     println!("EXECUTION TIME: {:.3}ms", now.elapsed().as_nanos() / 1_000_000);
                     return;
                 }
             }
-            let (
-                instructions,
-                mut registers,
-                mut arrays,
-                err_ctx,
-                fn_registers,
-                fn_dyn_libs,
-                allocated_arg_count,
-                allocated_call_depth,
-                struct_fields,
-                types,
-            ) = compile(&contents, file, false, &bump);
-            vm::execute(
-                &instructions,
-                &mut registers,
-                &mut arrays,
-                &err_ctx,
-                &fn_registers,
-                &fn_dyn_libs,
-                &struct_fields,
-                &types,
-                allocated_arg_count,
-                allocated_call_depth,
-            );
+            let mut program = compile(&contents, file, false, &bump);
+            vm::execute(&mut program);
         }
     }
 }

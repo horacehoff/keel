@@ -1,17 +1,4 @@
-// The jump value is stored using offset binary representation
-// In this case, the bias K = 65536 (u16) / 2 = 32768
-pub const JMP_OFFSET: u16 = 32768;
-
-impl Instr {
-    /// Use this instead of Instr::Jmp!!
-    #[must_use]
-    #[inline(always)]
-    pub const fn jump(offset: u16) -> Self {
-        Self::Jmp(offset.wrapping_add(JMP_OFFSET))
-    }
-}
-
-const _: () = debug_assert!(size_of::<Instr>() == 8);
+const _: () = assert!(size_of::<Instr>() == 8);
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum Instr {
@@ -30,6 +17,18 @@ pub enum Instr {
     EqJmp(u16, u16, u16),
     ObjNotEqJmp(u16, u16, u16),
     ObjEqJmp(u16, u16, u16),
+
+    EqIntImmJmp(u16, u16, u16),
+    NotEqIntImmJmp(u16, u16, u16),
+    InfIntImmJmp(u16, u16, u16),
+    SupEqIntImmJmp(u16, u16, u16),
+
+    /// Adds 1 to counter_reg and jumps if counter_reg < limit_reg
+    IncIntInfJmp {
+        counter_reg: u16,
+        limit_reg: u16,
+        jump_size: u16,
+    },
 
     Mov(u16, u16),
     /// SetInt(dest_reg_id, val)\
@@ -70,23 +69,31 @@ pub enum Instr {
 
     CallFunc {
         target: u32,
-        return_reg: u16,
-    },
-    CallFuncRecursive {
-        target: u32,
-        return_reg: u16,
+        frame_offset: u16,
     },
     /// Jumps to the instruction right after the last CallFunc encountered by the interpreter
     VoidReturn,
-    RecursiveVoidReturn,
     /// Return(n)\
     /// Returns the data located in register n
     Return(u16),
-    /// RecursiveReturn(n,function_id)\
-    /// Returns the data located in register n, and restores the function's register state
-    RecursiveReturn(u16),
-    /// SaveFrame(function_location, return_register, function_id)
-    SaveFrame(u16, u16, u16),
+    /// Copies the absolute register `reg` into `dest_reg`
+    LoadGlobal {
+        dest_reg: u16,
+        reg: u32,
+    },
+    /// Copies `src_reg` into the absolute register `reg`
+    StoreGlobal {
+        src_reg: u16,
+        reg: u32,
+    },
+
+    /// Copies `count` function constants from absolute register `src` into registers `dst..dst + count`.
+    CopyConstants {
+        /// Bits 0..24 are src\
+        /// Bits 24..32 are count
+        count_src: u32,
+        dst: u16,
+    },
 
     /// CallDynamicLibFunc(fn_id, dest_register_id)
     CallDynamicLibFunc {
@@ -109,9 +116,6 @@ pub enum Instr {
     /// ThrowError(error_register_id)
     /// Throws the error (a string) located in error_register_id
     ThrowError(u16),
-
-    /// CallFuncDynamic(fn_reg_id, return_reg_id)
-    CallFuncDynamic(u16, u16),
 
     /// EmptyArray(array_reg_id)
     /// Allocates a fresh empty array and stores its address in array_reg_id
@@ -178,6 +182,7 @@ pub enum Instr {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
 pub enum LibFunc {
     Uppercase = 0,
     Lowercase = 1,
@@ -216,6 +221,7 @@ pub enum LibFunc {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
 pub enum LibFuncVoid {
     Reverse = 0,
     FsWrite = 1,

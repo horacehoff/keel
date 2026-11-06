@@ -4,9 +4,12 @@ use super::type_system::DataType;
 use crate::compiler::Scope;
 use crate::compiler::Symbol;
 use crate::compiler::expr::QualifiedName;
+use crate::compiler::registers::PERMANENT_REG_FLAG;
+use crate::compiler::registers::is_permanent_register;
 use crate::compiler::type_system::VmType;
 use crate::data::Data;
 use crate::data::NULL;
+use crate::errors::ErrorCtx;
 use crate::instr::Instr;
 use crate::vm::MapPool;
 use crate::vm::ObjectPool;
@@ -15,7 +18,6 @@ use bumpalo::Bump;
 use core::hint::unreachable_unchecked;
 use fixedbitset::FixedBitSet;
 use rustc_hash::FxHashMap;
-use rustc_hash::FxHashSet;
 use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -23,9 +25,9 @@ use libloading::Library;
 
 pub struct ErrorCatch {
     pub catch_loc: u32,
-    pub error_reg: u16,
-    pub call_frames_len: u16,
+    pub frame_ptr: *mut Data,
     pub args_len: u16,
+    pub error_reg: u16,
 }
 
 pub struct InstrSrc {
@@ -45,8 +47,7 @@ pub struct Function<'arena> {
     pub name: &'arena str,
     pub args: Box<[(&'arena str, Option<DataType>)]>,
     pub code: &'arena [Expr<'arena>],
-    pub impls: Vec<FunctionImpl<'arena>>,
-    pub is_recursive: Option<bool>,
+    pub impls: Vec<FunctionImpl>,
     pub returns_null: bool,
     pub src_file_idx: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
@@ -55,9 +56,8 @@ pub struct Function<'arena> {
     pub name_span: Span,
 }
 
-pub struct FunctionImpl<'arena> {
+pub struct FunctionImpl {
     pub unit: u32,
-    pub args_loc: &'arena [u16],
     pub arg_types: Box<[DataType]>,
 }
 
@@ -112,6 +112,21 @@ pub struct Struct<'arena> {
     pub src_file_idx: u16,
 }
 
+pub struct Program<'arena> {
+    pub instructions: Vec<Instr>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub top_level_len: u32,
+    pub initial_stack: Vec<Data>,
+    pub top_level_base: u32,
+    pub max_frame_regs: u32,
+    pub pools: Pools,
+    pub err_ctx: ErrorCtx<'arena>,
+    pub dylib_fns: Vec<DylibFn>,
+    pub allocated_arg_count: usize,
+    pub structs: Vec<Struct<'arena>>,
+    pub types: Vec<DataType>,
+}
+
 #[allow(clippy::struct_field_names)]
 pub struct Pools {
     pub obj_pool: ObjectPool,
@@ -128,8 +143,6 @@ pub struct Source<'a> {
 #[derive(Clone, Copy)]
 pub struct Ctx {
     pub in_function: bool,
-    /// Whether the code being compiled is within a recursive function
-    pub is_compiling_recursive: bool,
     /// Whether the code being compiled is guaranteed to run at most once
     pub single_run: bool,
     /// Index of the current file in State's `sources`
@@ -161,26 +174,32 @@ impl Ctx {
     }
 }
 
+#[derive(Default)]
+pub struct CodeUnitRegisters {
+    pub temp_count: u16,
+    pub permanent_values: Vec<Data>,
+    pub const_registers: FxHashMap<Data, u16>,
+    pub const_registers_bitset: FixedBitSet,
+    pub free_registers: Vec<u16>,
+    pub free_registers_bitset: FixedBitSet,
+    pub reserved_registers: FixedBitSet,
+}
+
 pub struct State<'arena, 'compiler> {
     pub v: &'compiler mut Vec<Variable<'arena>>,
     pub globals: &'compiler mut Vec<Variable<'arena>>,
-    pub registers: &'compiler mut Vec<Data>,
+    pub regs: CodeUnitRegisters,
     pub functions: &'compiler mut Vec<Function<'arena>>,
     pub code_units: &'compiler mut Vec<CodeUnit>,
     pub structs: &'compiler mut Vec<Struct<'arena>>,
     pub pools: &'compiler mut Pools,
     pub instr_src: &'compiler mut Vec<InstrSrc>,
-    pub fn_registers: &'compiler mut Vec<Vec<u16>>,
     pub dylibs: &'compiler mut Vec<Dylib<'arena>>,
     pub allocated_arg_count: &'compiler mut usize,
     pub allocated_arg_count_peak: &'compiler mut usize,
-    pub allocated_call_depth: &'compiler mut usize,
-    pub const_registers: &'compiler mut FxHashMap<Data, u16>,
-    pub const_registers_bitset: &'compiler mut FixedBitSet,
-    pub free_registers: &'compiler mut Vec<u16>,
-    pub free_registers_bitset: &'compiler mut FixedBitSet,
+    pub function_constants: Vec<Data>,
+    pub max_frame_regs: u32,
     pub sources: &'compiler mut Vec<Source<'arena>>,
-    pub reserved_registers: FxHashSet<u16>,
     pub file_scopes: &'compiler mut Vec<Scope<'arena>>,
     pub types: &'compiler mut Vec<DataType>,
     pub bump: &'arena Bump,
@@ -262,25 +281,41 @@ impl<'arena> State<'arena, '_> {
     ) {
         self.v.push(Variable { name, register_id, declared_type, var_type });
     }
-    /// Creates a brand new register containing `data` and returns its index.
+    /// Creates a brand new register and returns its index.
     #[must_use]
-    fn new_reg(&mut self, data: Data) -> u16 {
-        let register_id = self.registers.len();
-        self.free_registers_bitset.grow(register_id + 1);
-        self.const_registers_bitset.grow(register_id + 1);
-        self.registers.push(data);
-        register_id as u16
+    pub fn scratch_reg(&mut self) -> u16 {
+        let register_id = self.regs.temp_count;
+        assert!(register_id < PERMANENT_REG_FLAG, "Your program is too big. Please report this.");
+        self.regs.temp_count += 1;
+        self.regs.free_registers_bitset.grow(register_id as usize + 1);
+        self.regs.reserved_registers.grow(register_id as usize + 1);
+        register_id
+    }
+    /// Creates a brand new permanent register holding the compile-time value `data`.
+    /// Permanent registers are placed before every temp register once the unit is compiled, so a call can never overwrite them.
+    /// Functions copy them into their frame on frame initialization.
+    #[must_use]
+    fn new_permanent_reg(&mut self, data: Data, is_const: bool) -> u16 {
+        let idx = self.regs.permanent_values.len();
+        assert!(
+            idx < (u16::MAX - PERMANENT_REG_FLAG) as usize,
+            "Your program is too big. Please report this."
+        );
+        // Don't grow `free_registers` because permanent registers can never be freed
+        self.regs.permanent_values.push(data);
+        self.regs.const_registers_bitset.grow(idx + 1);
+        self.regs.const_registers_bitset.set(idx, is_const);
+        PERMANENT_REG_FLAG + idx as u16
     }
     /// Allocates a brand new constant register containing `data` and returns its index.
     /// If a constant register containing `data` already exists, it simply returns its index and doesn't create a new register.
     #[must_use]
     pub fn new_const_reg(&mut self, data: Data) -> u16 {
-        if let Some(&id) = self.const_registers.get(&data) {
+        if let Some(&id) = self.regs.const_registers.get(&data) {
             id
         } else {
-            let register_id = self.new_reg(data);
-            self.const_registers.insert(data, register_id);
-            unsafe { self.const_registers_bitset.insert_unchecked(register_id as usize) };
+            let register_id = self.new_permanent_reg(data, true);
+            self.regs.const_registers.insert(data, register_id);
             register_id
         }
     }
@@ -289,7 +324,7 @@ impl<'arena> State<'arena, '_> {
     #[must_use]
     #[inline(always)]
     pub fn value_reg(&mut self, data: Data) -> u16 {
-        self.new_reg(data)
+        self.new_permanent_reg(data, false)
     }
     /// Creates a new register whose initial value `data` is known to be modified at run time.
     /// Only valid for top-level code that runs once.
@@ -297,46 +332,50 @@ impl<'arena> State<'arena, '_> {
     #[inline(always)]
     pub fn init_reg(&mut self, data: Data, ctx: Ctx) -> u16 {
         debug_assert!(ctx.single_run && !ctx.in_function);
-        self.new_reg(data)
-    }
-    /// Creates a new register whose initial content is never read.
-    #[must_use]
-    #[inline(always)]
-    pub fn scratch_reg(&mut self) -> u16 {
-        self.new_reg(NULL)
+        self.new_permanent_reg(data, false)
     }
     /// Returns the compile-time value of a const register or of a top-level initialized register.
     #[must_use]
     #[inline(always)]
     pub fn register_value(&self, id: u16) -> Data {
-        self.registers[id as usize]
+        if is_permanent_register(id) {
+            self.regs.permanent_values[(id - PERMANENT_REG_FLAG) as usize]
+        } else {
+            NULL
+        }
     }
     /// Marks a register as free, allowing it to later be reused by `alloc_reg`.
     /// The register is marked as free iff:
     /// - the register isn't tied to any variable
-    /// - the register isn't a constant register
+    /// - the register isn't permanent (a constant or compile-time value)
     /// - the register isn't reserved in `reserved_registers`
     /// - the register isn't already marked as free
     pub fn free_reg(&mut self, id: u16) {
-        if unsafe { !self.free_registers_bitset.contains_unchecked(id as usize) }
-            && unsafe { !self.const_registers_bitset.contains_unchecked(id as usize) }
-            && !self.reserved_registers.contains(&id)
+        if !is_permanent_register(id)
+            && unsafe { !self.regs.free_registers_bitset.contains_unchecked(id as usize) }
+            && unsafe { !self.regs.reserved_registers.contains_unchecked(id as usize) }
             && !self.v.iter().any(|var| var.register_id == id)
         {
-            unsafe { self.free_registers_bitset.insert_unchecked(id as usize) };
-            self.free_registers.push(id);
+            unsafe { self.regs.free_registers_bitset.insert_unchecked(id as usize) };
+            self.regs.free_registers.push(id);
         }
     }
     /// Allocates a register. It `free_registers` isn't empty, it will reuse the latest one. Else, it will allocate a new one.
     #[must_use]
     pub fn alloc_reg(&mut self) -> u16 {
-        if let Some(reg) = self.free_registers.pop() {
+        if let Some(reg) = self.regs.free_registers.pop() {
             unsafe {
-                self.free_registers_bitset.remove_unchecked(reg as usize);
+                self.regs.free_registers_bitset.remove_unchecked(reg as usize);
             };
             reg
         } else {
-            self.new_reg(NULL)
+            self.scratch_reg()
+        }
+    }
+    /// Prevents `free_reg` from freeing `id`.
+    pub fn reserve_register(&mut self, id: u16) {
+        if !is_permanent_register(id) {
+            unsafe { self.regs.reserved_registers.insert_unchecked(id as usize) };
         }
     }
     /// Allocates a register, reusing `tgt_id` if it holds some register id.
@@ -358,45 +397,40 @@ impl<'arena> State<'arena, '_> {
     }
     /// Unfree register `id` if it's been freed (if it hasn't, do nothing).
     pub fn unfree_register(&mut self, id: u16) {
-        if unsafe { self.free_registers_bitset.contains_unchecked(id as usize) } {
-            unsafe { self.free_registers_bitset.remove_unchecked(id as usize) };
+        if !is_permanent_register(id)
+            && unsafe { self.regs.free_registers_bitset.contains_unchecked(id as usize) }
+        {
+            unsafe { self.regs.free_registers_bitset.remove_unchecked(id as usize) };
             let Some(free_reg_id_pos) =
-                self.free_registers.iter().rposition(|&reg_id| reg_id == id)
+                self.regs.free_registers.iter().rposition(|&reg_id| reg_id == id)
             else {
                 unsafe { unreachable_unchecked() }
             };
-            self.free_registers.swap_remove(free_reg_id_pos);
+            self.regs.free_registers.swap_remove(free_reg_id_pos);
         }
-    }
-    /// Unfree all the registers in `free_registers` who are also in `reserved_registers`.
-    pub fn unfree_reserved_registers(&mut self) {
-        self.free_registers.retain(|reg| {
-            if self.reserved_registers.contains(reg) {
-                unsafe {
-                    self.free_registers_bitset.remove_unchecked(*reg as usize);
-                }
-                false
-            } else {
-                true
-            }
-        });
     }
     #[inline(always)]
     #[must_use]
-    pub fn is_register_const(&mut self, id: u16) -> bool {
-        unsafe { self.const_registers_bitset.contains_unchecked(id as usize) }
+    pub fn is_register_const(&self, id: u16) -> bool {
+        is_permanent_register(id)
+            && self.regs.const_registers_bitset.contains((id - PERMANENT_REG_FLAG) as usize)
     }
-    /// Similar to free_scope_registers, but also frees CloneArray template registers. Only call this after a loop ends.
-    pub fn free_loop_scope_registers(&mut self, regs_before: u16, scope_instrs: &[Instr]) {
-        self.free_scope_registers(regs_before, scope_instrs);
-        // Free CloneArray template registers
-        for instr in scope_instrs {
-            if let Instr::CloneObj(template_reg, _, _) = instr
-                && *template_reg >= regs_before
-            {
-                self.free_reg(*template_reg);
+    pub fn reserve_call_window(&mut self, first: u16, len: u16) {
+        for id in first..first + len {
+            if id < self.regs.temp_count {
+                self.unfree_register(id);
+            } else {
+                let new_id = self.scratch_reg();
+                debug_assert_eq!(new_id, id);
             }
         }
+    }
+    #[must_use]
+    pub fn call_frame_offset(&self) -> u16 {
+        (0..self.regs.temp_count)
+            .rev()
+            .find(|&id| unsafe { !self.regs.free_registers_bitset.contains_unchecked(id as usize) })
+            .map_or(0, |id| id + 1)
     }
     /// Associates the last instruction in `output` with `span` and adds the `InstrSrc` to `instr_src`.
     /// This allows runtime errors to be traced back to `span` in the source code.

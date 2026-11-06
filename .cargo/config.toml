@@ -1,3 +1,8 @@
 [build]
-rustflags = ["-C", "llvm-args=-enable-tail-merge=false", "-C", "llvm-args=-tail-dup-size=16"]
-# target="wasm32-unknown-unknown"
+rustflags = [
+    "-C",
+    "llvm-args=-enable-tail-merge=false",
+    "-C",
+    "llvm-args=-tail-dup-size=16",
+]
+# target = "wasm32-unknown-unknown"

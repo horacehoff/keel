@@ -9,7 +9,7 @@ use crate::{
         expr::{
             ArrayPattern, Expr, MatchExpr, Pattern, Span, StructPattern, code_modifies_variable,
         },
-        set_jmp_size,
+        patch_jumps,
         type_system::{DataType, var_type_is_compatible},
     },
     data::{Data, NULL},
@@ -60,12 +60,6 @@ const fn flip_jump(jump_instr: Instr) -> Option<Instr> {
         Instr::ObjNotEqJmp(a, b, jmp_size) => Some(Instr::ObjEqJmp(a, b, jmp_size)),
         Instr::ObjEqJmp(a, b, jmp_size) => Some(Instr::ObjNotEqJmp(a, b, jmp_size)),
         _ => None,
-    }
-}
-
-fn patch_jumps(output: &mut [Instr], jump_idxs: impl IntoIterator<Item = usize>, target: usize) {
-    for jump_idx in jump_idxs {
-        set_jmp_size(&mut output[jump_idx], (target - jump_idx) as u16);
     }
 }
 
@@ -426,7 +420,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
 
             if false_jumps.is_empty() {
                 true_jumps.push(self.output.len());
-                self.output.push(Instr::jump(0));
+                self.output.push(Instr::Jmp(0));
                 break;
             }
 
@@ -437,7 +431,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                 *self.output.last_mut().unwrap() = success;
                 false_jumps.clear();
             } else {
-                self.output.push(Instr::jump(0));
+                self.output.push(Instr::Jmp(0));
             }
             true_jumps.push(self.output.len() - 1);
         }
@@ -558,7 +552,7 @@ pub fn compile_match_block<'arena>(
         state.v.truncate(v_len);
         state.free_scope_registers(0, &output[arm_start..pattern_end]);
         end_jumps.push(output.len());
-        output.push(Instr::jump(0));
+        output.push(Instr::Jmp(0));
         pending_false_jmps = false_jump_idxs;
         if pending_false_jmps.is_empty() {
             break;

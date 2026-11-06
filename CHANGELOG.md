@@ -15,9 +15,11 @@
 - Runtime memory usage has been significantly lowered for allocation-heavy programs
 - Compilation is substantially faster
 - Multiple relatively minor VM/FFI optimizations
-- Recursion is faster
 - Optimized the emitted bytecode in some cases
 - Added an actual match block with patterns and struct destructuring
+- Execution is substantially faster thanks to an improved VM design
+- Stack overflow now raises a catchable `StackOverflow` error
+- Program size is no longer limited to 65,536 total registers
 
 ## 0.4.0 (07/30/2026)
 - Function arguments can now be typed with the syntax `arg: T`

@@ -563,9 +563,6 @@ pub fn builtin_methods<'arena>(
             let fn_impl_idx =
                 compile_function_impl(state, fn_id, core::slice::from_ref(&elem_type));
             let unit = state.functions[fn_id].impls[fn_impl_idx].unit;
-            let arg_reg = state.functions[fn_id].impls[fn_impl_idx].args_loc[0];
-
-            let fn_value_reg = state.value_reg(Data::function(unit));
 
             let result_id = state.alloc_reg_tgt(tgt_id);
             if is_str {
@@ -589,34 +586,45 @@ pub fn builtin_methods<'arena>(
                 r
             };
 
+            let elem_id = if is_filter { state.alloc_reg() } else { u16::MAX };
+            let false_reg = if is_filter { state.new_const_reg(FALSE) } else { u16::MAX };
+            let frame_offset = state.call_frame_offset();
+            state.reserve_call_window(frame_offset, 2);
+            let arg_reg = frame_offset + 1;
+
             // Basically the same thing as compile_for_loop
             let jmp_start_idx = output.len();
             output.push(Instr::InfEqIntJmp(len_id, index_id, 0));
 
             let body_start = output.len();
+            let elem_dest = if is_filter { elem_id } else { arg_reg };
             if is_str {
-                output.push(Instr::GetIndexString(receiver_id, index_id, arg_reg));
+                output.push(Instr::GetIndexString(receiver_id, index_id, elem_dest));
             } else {
-                output.push(Instr::GetIndexArray(receiver_id, index_id, arg_reg));
+                output.push(Instr::GetIndexArray(receiver_id, index_id, elem_dest));
             }
-            let fn_return_val_id = state.alloc_reg();
-            output.push(Instr::CallFuncDynamic(fn_value_reg, fn_return_val_id));
+            if is_filter {
+                output.push(Instr::Mov(elem_id, arg_reg));
+            }
+            output.push(Instr::CallFunc { target: unit, frame_offset });
             let dest_reg_id = if is_filter {
-                let false_reg = state.new_const_reg(FALSE);
-                output.push(Instr::EqJmp(fn_return_val_id, false_reg, 2));
-                arg_reg
+                output.push(Instr::EqJmp(frame_offset, false_reg, 2));
+                elem_id
             } else {
-                fn_return_val_id
+                frame_offset
             };
             if is_str {
                 output.push(Instr::AddStr(result_id, dest_reg_id, result_id));
             } else {
                 output.push(Instr::Push(result_id, dest_reg_id));
             }
-            let jump_size = (output.len() - body_start + 1) as u16;
+            let jump_size = (output.len() - body_start) as u16;
 
-            output.push(Instr::AddIntImm { src: index_id, dst: index_id, imm: 1 });
-            output.push(Instr::InfIntJmp(index_id, len_id, jump_size.wrapping_neg()));
+            output.push(Instr::IncIntInfJmp {
+                counter_reg: index_id,
+                limit_reg: len_id,
+                jump_size: jump_size.wrapping_neg(),
+            });
 
             let exit_size = (output.len() - jmp_start_idx) as u16;
             output[jmp_start_idx] = Instr::InfEqIntJmp(len_id, index_id, exit_size);
@@ -624,7 +632,11 @@ pub fn builtin_methods<'arena>(
             if ctx.single_run {
                 state.free_reg(len_id);
                 state.free_reg(index_id);
-                state.free_reg(fn_return_val_id);
+                state.free_reg(frame_offset);
+                state.free_reg(arg_reg);
+                if is_filter {
+                    state.free_reg(elem_id);
+                }
             }
 
             Some(result_id)

@@ -472,33 +472,6 @@ pub fn c_arg_matches(inferred: &DataType, declared: &DataType) -> bool {
     }
 }
 
-/// Check if the function `src_fn_idx` can call `target_fn_idx` (index is in `fns`)
-pub fn can_reach(
-    src_fn_idx: usize,
-    target_fn_idx: usize,
-    fns: &[Function],
-    visited: &mut FxHashSet<usize>,
-    file_scopes: &[Scope],
-) -> bool {
-    let function = &fns[src_fn_idx];
-    for callee in function.direct_calls {
-        if let Some(callee_fn_idx) =
-            if callee.is_namespace_empty() && callee.get_name() == function.name {
-                Some(src_fn_idx)
-            } else {
-                file_scopes[function.src_file_idx as usize]
-                    .find_function_fallible(callee.get_namespace(), callee.get_name())
-            }
-            && ((callee_fn_idx == target_fn_idx)
-                || (visited.insert(callee_fn_idx)
-                    && can_reach(callee_fn_idx, target_fn_idx, fns, visited, file_scopes)))
-        {
-            return true;
-        }
-    }
-    false
-}
-
 pub fn check_if_returns_void(content: &[Expr]) -> bool {
     for content in content {
         match content {
@@ -1284,14 +1257,12 @@ impl<'arena> Expr<'arena> {
                         .into_boxed_slice(),
                     code,
                     impls: Vec::new(),
-                    is_recursive: None,
                     returns_null,
                     src_file_idx: ctx.file_idx,
                     return_type_cache: Vec::new(),
                     direct_calls: state.bump.alloc_slice_copy(&callees),
                     name_span: *span,
                 });
-                state.fn_registers.push(Vec::new());
                 DataType::Fn(id)
             }
             _ => unsafe { unreachable_unchecked() },

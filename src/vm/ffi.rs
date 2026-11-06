@@ -4,7 +4,6 @@ use super::Gc;
 use super::MapPool;
 use super::NULL;
 use super::ObjectPool;
-use super::RegisterFile;
 use super::StringPool;
 use super::Struct;
 use super::UncheckedSliceOps;
@@ -235,37 +234,34 @@ pub fn keel_struct_to_c_struct(
 pub fn c_struct_to_keel_struct(
     c_struct: &[u8],
     field_offsets: &[usize],
+    struct_id: u32,
     obj_pool: &mut ObjectPool,
     map_pool: &MapPool,
     string_pool: &mut StringPool,
     struct_fields: &[StructField],
-    r: &mut RegisterFile,
-    recursion_stack: &RegisterFile,
+    roots: &[Data],
     gc: &mut Gc,
     structs: &[Struct],
-) -> Vec<Data> {
-    let mut buf: Vec<Data> = Vec::new();
-    buf.reserve_exact(struct_fields.len());
+) {
+    obj_pool[struct_id as usize].reserve_exact(struct_fields.len());
     for (i, StructField { name: _, field_type, span: _ }) in struct_fields.iter().enumerate() {
         let field_offset = *unsafe { field_offsets.get_unchecked(i) };
-        match field_type {
+        let field = match field_type {
             DataType::Float => {
                 let mut bytes: [u8; 8] = [0; 8];
                 unsafe {
                     bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 8)]);
                 }
-                buf.push(Data::float(f64::from_ne_bytes(bytes)));
+                Data::float(f64::from_ne_bytes(bytes))
             }
-            DataType::Bool => {
-                buf.push(Data::bool(c_struct[field_offset] != 0));
-            }
+            DataType::Bool => Data::bool(c_struct[field_offset] != 0),
             DataType::String => {
                 let mut bytes: [u8; 8] = [0; 8];
                 unsafe {
                     bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 8)]);
                 }
                 let ptr = usize::from_ne_bytes(bytes) as *const core::ffi::c_char;
-                buf.push(if ptr.is_null() {
+                if ptr.is_null() {
                     NULL
                 } else {
                     Data::string(
@@ -273,30 +269,30 @@ pub fn c_struct_to_keel_struct(
                         obj_pool,
                         map_pool,
                         string_pool,
-                        r,
-                        recursion_stack,
+                        roots,
                         gc,
                     )
-                });
+                }
             }
             DataType::Struct(nested_struct_id) => {
                 let s = unsafe { structs.get_unchecked(*nested_struct_id as usize) };
                 let (_, _, inner_offsets) = get_struct_size_datatype(&s.fields, structs);
-                let new_struct_id =
-                    gc.alloc_array(obj_pool, map_pool, string_pool, r, recursion_stack);
-                obj_pool[new_struct_id as usize] = c_struct_to_keel_struct(
+                let new_struct_id = gc.alloc_array(obj_pool, map_pool, string_pool, roots);
+                obj_pool[new_struct_id as usize]
+                    .push(Data::struct_instance(*nested_struct_id, new_struct_id));
+                c_struct_to_keel_struct(
                     &c_struct[field_offset..],
                     &inner_offsets,
+                    new_struct_id,
                     obj_pool,
                     map_pool,
                     string_pool,
                     &s.fields,
-                    r,
-                    recursion_stack,
+                    roots,
                     gc,
                     structs,
                 );
-                buf.push(Data::struct_instance(*nested_struct_id, new_struct_id));
+                continue;
             }
             _ => {
                 // can only be an int here
@@ -304,9 +300,9 @@ pub fn c_struct_to_keel_struct(
                 unsafe {
                     bytes.copy_from_slice_unchecked(&c_struct[field_offset..(field_offset + 4)]);
                 }
-                buf.push(Data::int(i32::from_ne_bytes(bytes)));
+                Data::int(i32::from_ne_bytes(bytes))
             }
-        }
+        };
+        obj_pool[struct_id as usize].push(field);
     }
-    buf
 }

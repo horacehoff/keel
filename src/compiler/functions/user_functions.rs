@@ -1,11 +1,11 @@
 use super::super::expr::Expr;
 use super::super::type_system::DataType;
 use super::super::type_system::c_arg_matches;
-use super::super::type_system::can_reach;
 use super::check_user_fn_arg_types;
 use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
 use crate::compiler::compiler_data::CodeUnit;
+use crate::compiler::compiler_data::CodeUnitRegisters;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::FunctionImpl;
 use crate::compiler::compiler_data::State;
@@ -13,27 +13,11 @@ use crate::compiler::compiler_data::Variable;
 use crate::compiler::compiler_errors::check_args_user_fn;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::expr::FunctionCallExpr;
-use crate::compiler::registers::get_tgt_ids;
 use crate::compiler::registers::move_value_to;
-use crate::compiler::type_system::collect_direct_fn_calls;
+use crate::compiler::registers::relocate_registers;
 use crate::data::Data;
+use crate::data::NULL;
 use crate::instr::Instr;
-use rustc_hash::FxHashSet;
-
-/// Computes whether the function `state.fns[fn_id]` is recursive.
-/// This is only computed once per function.
-pub fn is_function_recursive(fn_id: usize, state: &mut State<'_, '_>) -> bool {
-    if let Some(is_recursive) = state.functions[fn_id].is_recursive {
-        is_recursive
-    } else {
-        let mut visited = FxHashSet::default();
-        visited.insert(fn_id);
-        let is_recursive =
-            can_reach(fn_id, fn_id, state.functions, &mut visited, state.file_scopes);
-        state.functions[fn_id].is_recursive = Some(is_recursive);
-        is_recursive
-    }
-}
 
 /// Returns the index into `state.fns[fn_id].impls` for this specialization (those arg types)
 /// matching `inferred_arg_types`. If it doesn't exist yet, it's compiled via `compile_function`.
@@ -53,7 +37,6 @@ pub fn compile_function_impl(
         return idx;
     }
     // If it hasn't, compile a new specialization of this function
-    let is_recursive = is_function_recursive(fn_id, state);
     let fn_args = state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
     compile_function(
         state,
@@ -61,8 +44,6 @@ pub fn compile_function_impl(
         &fn_args,
         inferred_arg_types,
         state.functions[fn_id].code,
-        fn_id as u16,
-        is_recursive,
         state.functions[fn_id].src_file_idx,
     );
     unsafe { get_fn_impl(state).unwrap_unchecked() }
@@ -80,7 +61,6 @@ pub fn handle_user_function<'arena>(
     let fn_name = function_call.qualified_name.get_name();
     let span = function_call.get_call_span();
     let arg_spans = &function_call.get_arg_spans();
-    let is_recursive = is_function_recursive(function_idx, state);
 
     let fn_returns_null = state.functions[function_idx].returns_null;
 
@@ -151,7 +131,8 @@ pub fn handle_user_function<'arena>(
             u16::MAX
         };
 
-        let dest_reg_id = if returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
+        let dest_reg_id =
+            if returns_null { state.alloc_reg() } else { state.alloc_reg_tgt(tgt_id) };
         output.push(Instr::CallDynamicLibFunc { fn_id: dyn_id, dest_reg_id, last_arg_reg_id });
         state.add_to_src(ctx, output, span);
         state.sub_arg_hint(args.len());
@@ -166,87 +147,36 @@ pub fn handle_user_function<'arena>(
 
     let fn_impl_idx = compile_function_impl(state, function_idx, &inferred_arg_types);
     let unit = state.functions[function_idx].impls[fn_impl_idx].unit;
-
-    let saveframe_loc = output.len();
-    let callsite_id = if is_recursive {
-        let id = state.fn_registers.len() as u16;
-        state.fn_registers.push(Vec::new());
-        output.push(Instr::SaveFrame(0, 0, 0));
-        *state.allocated_call_depth += 2;
-        Some(id)
-    } else {
-        None
-    };
-    // Move evaluated call args into the expected arg slots
-    // This is a VERY bad temporary fix
-    // This is tthe index of the last argument that can run user code, only earlier arguments are at risk of being overwritten
-    let last_harmless_arg = args
-        .iter()
-        .rposition(|arg| {
-            let mut calls = Vec::new();
-            collect_direct_fn_calls(core::slice::from_ref(arg), &mut calls);
-            calls.iter().any(|call| {
-                let fn_name = call.get_name();
-                fn_name == "map"
-                    || fn_name == "filter"
-                    || state
-                        .scope(ctx.file_idx)
-                        .find_function_fallible(call.get_namespace(), fn_name)
-                        .is_some()
-                    || (call.is_namespace_empty() && state.find_var(fn_name).is_some())
-            })
-        })
-        .unwrap_or(0);
-    let mut deferred_args: Vec<(u16, u16)> = Vec::new();
+    let frame_offset = state.call_frame_offset();
+    state.reserve_call_window(frame_offset, args.len() as u16 + 1);
     for (i, arg_expr) in args.iter().enumerate() {
-        let tgt_id = state.functions[function_idx].impls[fn_impl_idx].args_loc[i];
-
+        let tgt_id = frame_offset + 1 + i as u16;
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
             let unit = state.functions[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.unit);
             let fn_reg_id = state.value_reg(Data::function(unit));
-            if fn_reg_id != tgt_id {
-                output.push(Instr::Mov(fn_reg_id, tgt_id));
-            }
+            output.push(Instr::Mov(fn_reg_id, tgt_id));
             continue;
         }
-        if i < last_harmless_arg {
-            let arg_id = arg_expr.compile(ctx, state, output, None, false, true).unwrap_id();
-            deferred_args.push((arg_id, tgt_id));
-            continue;
-        }
-
         let start_len = output.len();
         let arg_id = arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
         move_value_to(output, start_len, arg_id, tgt_id);
-    }
-    for (arg_id, tgt_id) in deferred_args {
         if arg_id != tgt_id {
-            output.push(Instr::Mov(arg_id, tgt_id));
+            state.free_reg(arg_id);
         }
     }
-    if !is_recursive {
-        state.fn_registers.get_mut(function_idx).unwrap().extend(
-            get_tgt_ids(&output[saveframe_loc..], state.registers.len()).ones().map(|id| id as u16),
-        );
+    output.push(Instr::CallFunc { target: unit, frame_offset });
+    // Makes overflow report at the failing call
+    state.add_to_src(ctx, output, span);
+    for i in 0..args.len() as u16 {
+        state.free_reg(frame_offset + 1 + i);
     }
 
-    let return_register_id = if fn_returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
-    if is_recursive {
-        output.push(Instr::CallFuncRecursive { target: unit, return_reg: return_register_id });
+    if fn_returns_null {
+        state.free_reg(frame_offset);
+        None
     } else {
-        output.push(Instr::CallFunc { target: unit, return_reg: return_register_id });
-        *state.allocated_call_depth += 2;
+        Some(frame_offset)
     }
-
-    if is_recursive {
-        output[saveframe_loc] = Instr::SaveFrame(
-            (output.len() - 1 - saveframe_loc) as u16,
-            return_register_id,
-            callsite_id.unwrap(),
-        );
-    }
-
-    if fn_returns_null { None } else { Some(return_register_id) }
 }
 
 pub fn compile_function<'arena>(
@@ -255,11 +185,12 @@ pub fn compile_function<'arena>(
     fn_args: &[&'arena str],
     inferred_arg_types: &[DataType],
     fn_code: &'arena [Expr],
-    fn_id: u16,
-    is_recursive: bool,
     fn_file_idx: u16,
 ) {
     // Local vector vars and recorded_types to allow the inner body to type-check correctly
+    let caller_registers = core::mem::take(&mut state.regs);
+    let return_reg = state.scratch_reg();
+    state.reserve_register(return_reg);
     let mut v_temp: Vec<Variable> = fn_args
         .iter()
         .enumerate()
@@ -273,32 +204,24 @@ pub fn compile_function<'arena>(
             }
         })
         .collect();
-
-    // Get the arg destination ids
-    let mut args_loc = bumpalo::collections::Vec::with_capacity_in(v_temp.len(), state.bump);
-    for x in &v_temp {
-        args_loc.push(x.register_id);
-    }
+    let fixed_count = 1 + fn_args.len() as u16;
 
     let unit = state.code_units.len() as u32;
     state.code_units.push(CodeUnit::default());
-    let args_loc = args_loc.into_bump_slice();
+
     // Add this func specialization to the func's metadata
-    state.functions[function_id].impls.push(FunctionImpl {
-        unit,
-        args_loc,
-        arg_types: Box::from(inferred_arg_types),
-    });
+    state.functions[function_id]
+        .impls
+        .push(FunctionImpl { unit, arg_types: Box::from(inferred_arg_types) });
 
     core::mem::swap(state.v, &mut v_temp);
     let hidden_symbols = state.enter_function_scope(fn_file_idx, function_id);
 
     // Compile the function into instructions using local vars
-    let mut parsed = compile_expr(
+    let parsed = compile_expr(
         fn_code,
         Ctx {
             in_function: true,
-            is_compiling_recursive: is_recursive,
             file_idx: fn_file_idx,
             single_run: false,
             offset: 0,
@@ -311,59 +234,35 @@ pub fn compile_function<'arena>(
     core::mem::swap(state.v, &mut v_temp);
     state.exit_function_scope(fn_file_idx, hidden_symbols);
 
-    let all_written_regs = get_tgt_ids(&parsed, state.registers.len());
+    let CodeUnitRegisters { temp_count, permanent_values, .. } =
+        core::mem::replace(&mut state.regs, caller_registers);
+    let permanent_count = permanent_values.len() as u16;
+    let frame_size = temp_count + permanent_count;
+    state.max_frame_regs = state
+        .max_frame_regs
+        .max(u32::from(frame_size))
+        .max(u32::from(fixed_count + permanent_count + 7));
 
-    state.reserved_registers.extend(all_written_regs.ones().map(|id| id as u16));
-    state.reserved_registers.extend(args_loc);
-    for instr in &parsed {
-        match instr {
-            Instr::CloneObj(template_reg, _, _) | Instr::CloneMap(template_reg, _) => {
-                state.reserved_registers.insert(*template_reg);
-            }
-            _ => {}
-        }
+    let mut instructions =
+        Vec::with_capacity(permanent_values.len().div_ceil(u8::MAX as usize) + parsed.len() + 1);
+
+    for (chunk_idx, chunk) in permanent_values.chunks(u8::MAX as usize).enumerate() {
+        let src = state.function_constants.len();
+        instructions.push(Instr::CopyConstants {
+            count_src: (chunk.len() as u32) << 24 | src as u32,
+            dst: fixed_count + (chunk_idx * u8::MAX as usize) as u16,
+        });
+        state.function_constants.extend_from_slice(chunk);
+        state.function_constants.resize(src + chunk.len().max(8), NULL);
     }
-    state.unfree_reserved_registers();
+    let len = instructions.len() as u32;
+    instructions.extend(parsed);
+    instructions.push(Instr::VoidReturn);
+    relocate_registers(&mut instructions[len as usize..], fixed_count, permanent_count);
 
-    if is_recursive {
-        // For each recursive call, only save registers that are read between that call's return and the end of the function
-        for (save_frame_instr_pos, instr) in parsed.iter().enumerate() {
-            if let Instr::SaveFrame(call_loc_relative, return_reg_id, callsite_id) = *instr {
-                let pos = save_frame_instr_pos + call_loc_relative as usize;
-                let mut live_regs: Vec<u16> = Vec::new();
-                for after_instr in &parsed[pos + 1..] {
-                    if let Instr::CallFuncRecursive { .. } = after_instr {
-                        for reg in args_loc {
-                            if unsafe { all_written_regs.contains_unchecked(*reg as usize) } {
-                                live_regs.push(*reg);
-                            }
-                        }
-                    } else {
-                        after_instr.for_each_read_reg(|reg| {
-                            if unsafe { all_written_regs.contains_unchecked(reg as usize) } {
-                                live_regs.push(reg);
-                            }
-                        });
-                    }
-                }
-                live_regs.sort_unstable();
-                live_regs.dedup();
-                if return_reg_id != 0 {
-                    live_regs.retain(|&r| r != return_reg_id);
-                }
-                unsafe {
-                    *state.fn_registers.get_unchecked_mut(callsite_id as usize) = live_regs;
-                }
-            }
-        }
-    } else {
-        state
-            .fn_registers
-            .get_mut(fn_id as usize)
-            .unwrap()
-            .extend(all_written_regs.ones().map(|id| id as u16));
+    let code_unit = &mut state.code_units[unit as usize];
+    for src in &mut code_unit.instr_src {
+        src.instr_idx += len;
     }
-
-    parsed.push(if is_recursive { Instr::RecursiveVoidReturn } else { Instr::VoidReturn });
-    state.code_units[unit as usize].instructions = parsed;
+    code_unit.instructions = instructions;
 }

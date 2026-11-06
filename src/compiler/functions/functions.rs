@@ -147,11 +147,17 @@ pub fn compile_function_call<'arena>(
             u16::MAX
         };
 
-        let dest_reg_id = if returns_null { 0 } else { state.alloc_reg_tgt(tgt_id) };
+        let dest_reg_id =
+            if returns_null { state.alloc_reg() } else { state.alloc_reg_tgt(tgt_id) };
         output.push(Instr::CallDynamicLibFunc { fn_id: dyn_fn_id, dest_reg_id, last_arg_reg_id });
         state.add_to_src(ctx, output, function_call.get_call_span());
         state.sub_arg_hint(function_call.args.len());
-        if returns_null { None } else { Some(dest_reg_id) }
+        if returns_null {
+            state.free_reg(dest_reg_id);
+            None
+        } else {
+            Some(dest_reg_id)
+        }
     } else if let Some(fn_id) = state.scope(ctx.file_idx).find_function(
         namespace,
         function_call.qualified_name.get_name(),

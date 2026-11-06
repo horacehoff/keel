@@ -1,7 +1,7 @@
 use crate::compiler::compiler_data::Struct;
 use crate::vm::ObjectPool;
 use crate::vm::gc::Gc;
-use crate::vm::{MapPool, RegisterFile, StringPool};
+use crate::vm::{MapPool, StringPool};
 use lexical_core::FormattedSize;
 
 const NAN_BASE: u64 =
@@ -170,11 +170,11 @@ impl Data {
         if s.len() <= 6 {
             Self::small_str(s)
         } else if let Some(id) = str_pool.iter().position(|existing| existing == s) {
-            Self(NAN_STRING_LARGE | id as u64)
+            Self::large_str_id(id as u64)
         } else {
             let string_pool_id = str_pool.len() as u64;
             str_pool.push(s.to_owned());
-            Self(NAN_STRING_LARGE | string_pool_id)
+            Self::large_str_id(string_pool_id)
         }
     }
     /// Allocates a string, storing it directly inside the u64 if it's <= 6 characters or inside string_pool if it's bigger
@@ -183,43 +183,14 @@ impl Data {
         obj_pool: &ObjectPool,
         map_pool: &MapPool,
         str_pool: &mut StringPool,
-        registers: &RegisterFile,
-        recursion_stack: &RegisterFile,
+        roots: &[Self],
         gc: &mut Gc,
     ) -> Self {
         if s.str_len() <= 6 {
             Self::small_str(s.pool_as_str())
         } else {
-            if gc.str_pool_needs_gc(str_pool.len()) {
-                gc.collect_free_strings(
-                    obj_pool,
-                    map_pool,
-                    str_pool.len(),
-                    registers,
-                    recursion_stack,
-                );
-            }
-            if let Some(id) = gc.free_strings.pop() {
-                s.move_to_slot(str_pool.get_mut(id as usize));
-                Self(NAN_STRING_LARGE | u64::from(id))
-            } else {
-                let string_pool_id = str_pool.len() as u64;
-                s.push_to_pool(str_pool);
-                Self(NAN_STRING_LARGE | string_pool_id)
-            }
-        }
-    }
-    #[inline(always)]
-    pub fn string_no_gc(s: &str, str_pool: &mut StringPool, gc: &mut Gc) -> Self {
-        if s.len() <= 6 {
-            Self::small_str(s)
-        } else if let Some(id) = gc.free_strings.pop() {
-            s.clone_into(str_pool.get_mut(id as usize));
-            Self(NAN_STRING_LARGE | u64::from(id))
-        } else {
-            let string_pool_id = str_pool.len() as u64;
-            str_pool.push(s.to_owned());
-            Self(NAN_STRING_LARGE | string_pool_id)
+            let id = gc.alloc_string(s, obj_pool, map_pool, str_pool, roots);
+            Self::large_str_id(u64::from(id))
         }
     }
     #[inline(always)]
@@ -296,11 +267,6 @@ impl Data {
     pub const fn function(fn_instruction_address: u32) -> Self {
         Self(NAN_FUNCTION | fn_instruction_address as u64)
     }
-    #[inline(always)]
-    pub const fn as_function(self) -> usize {
-        debug_assert!(self.is_function());
-        (self.0 & 0xFFFF_FFFF) as usize
-    }
     /// True for STRING_LARGE, ARRAY, STRUCT, MAP, and FUNCTION.
     #[inline(always)]
     pub const fn is_heap(self) -> bool {
@@ -309,6 +275,16 @@ impl Data {
     #[inline(always)]
     pub const fn is_function(self) -> bool {
         self.0 >= NAN_FUNCTION
+    }
+    #[inline(always)]
+    #[must_use]
+    pub const fn return_point(return_addr: u32, frame_offset: u16) -> Self {
+        Self(NAN_INT | ((frame_offset as u64) << 32) | return_addr as u64)
+    }
+    #[inline(always)]
+    #[must_use]
+    pub const fn as_return_point(self) -> (u32, u16) {
+        (self.0 as u32, (self.0 >> 32) as u16)
     }
     pub fn format(
         self,

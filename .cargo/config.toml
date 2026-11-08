@@ -1,2 +1,4 @@
 [build]
 # target = "wasm32-unknown-unknown"
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-features=+tail-call"]

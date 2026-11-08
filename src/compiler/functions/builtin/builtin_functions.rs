@@ -11,7 +11,6 @@ use crate::compiler::compiler_errors::error_unknown_function;
 use crate::compiler::expr::FunctionCallExpr;
 use crate::data::Data;
 use crate::instr::Instr;
-use crate::instr::LibFunc;
 
 pub fn builtin_functions<'arena>(
     output: &mut Vec<Instr>,
@@ -54,7 +53,7 @@ pub fn builtin_functions<'arena>(
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
-            output.push(Instr::CallLibFunc(LibFunc::Float, id, output_id));
+            output.push(Instr::Float(id, output_id));
             state.add_to_src(ctx, output, span);
             Some(output_id)
         }
@@ -72,7 +71,7 @@ pub fn builtin_functions<'arena>(
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
-            output.push(Instr::CallLibFunc(LibFunc::Int, id, output_id));
+            output.push(Instr::Int(id, output_id));
             state.add_to_src(ctx, output, span);
             Some(output_id)
         }
@@ -84,7 +83,7 @@ pub fn builtin_functions<'arena>(
             }
             state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
-            output.push(Instr::CallLibFunc(LibFunc::Str, id, output_id));
+            output.push(Instr::Str(id, output_id));
             Some(output_id)
         }
         "bool" => {
@@ -93,7 +92,7 @@ pub fn builtin_functions<'arena>(
             let id = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
             state.free_reg(id);
             let output_id = state.alloc_reg_tgt(tgt_id);
-            output.push(Instr::CallLibFunc(LibFunc::Bool, id, output_id));
+            output.push(Instr::Bool(id, output_id));
             state.add_to_src(ctx, output, span);
             Some(output_id)
         }
@@ -109,7 +108,7 @@ pub fn builtin_functions<'arena>(
                 id
             };
             let output_id = state.alloc_reg_tgt(tgt_id);
-            output.push(Instr::CallLibFunc(LibFunc::Input, id, output_id));
+            output.push(Instr::Input(id, output_id));
             Some(output_id)
         }
         "range" => {
@@ -119,33 +118,28 @@ pub fn builtin_functions<'arena>(
                 check_arg_type(name, ctx, state, args, arg_spans, 1, &[DataType::Int]);
             }
 
-            let id_first_arg = args[0].compile(ctx, state, output, None, false, true).unwrap_id();
-            let source_reg_id = if args.len() == 1 {
-                id_first_arg
+            let (min_reg, max_expr) = if args.len() == 1 {
+                (state.new_const_reg(Data::int(0)), &args[0])
             } else {
-                let id_second_arg =
-                    args[1].compile(ctx, state, output, None, false, true).unwrap_id();
-                output.push(Instr::StoreFuncArg(id_first_arg));
-                state.add_arg_hint(1);
-                state.sub_arg_hint(1);
-                id_second_arg
+                (args[0].compile(ctx, state, output, None, false, true).unwrap(), &args[1])
             };
-            state.free_reg(id_first_arg);
-            state.free_reg(source_reg_id);
+            let max_reg = max_expr.compile(ctx, state, output, None, false, true).unwrap_id();
+            state.free_reg(min_reg);
+            state.free_reg(max_reg);
             let output_id = state.alloc_reg_tgt(tgt_id);
-            output.push(Instr::CallLibFunc(LibFunc::Range, source_reg_id, output_id));
+            output.push(Instr::Range(min_reg, max_reg, output_id));
             Some(output_id)
         }
         "the_answer" => {
             check_args_length(args, 0, name, span, state.sources, ctx.file_idx);
             let output_id = state.alloc_reg_tgt(tgt_id);
-            output.push(Instr::CallLibFunc(LibFunc::TheAnswer, 0, output_id));
+            output.push(Instr::TheAnswer(output_id));
             Some(output_id)
         }
         "argv" => {
             check_args_length(args, 0, name, span, state.sources, ctx.file_idx);
             let output_id = state.alloc_reg_tgt(tgt_id);
-            output.push(Instr::CallLibFunc(LibFunc::Argv, 0, output_id));
+            output.push(Instr::Argv(output_id));
             Some(output_id)
         }
         "exit" => {

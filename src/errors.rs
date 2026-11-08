@@ -148,7 +148,7 @@ impl From<ErrType<'_>> for String {
             ErrType::IntegerNegativeExponent => {
                 "Integers cannot be raised to a negative exponent".into()
             }
-            ErrType::StackOverflow => "Stack overflow".into(),
+            ErrType::StackOverflow => "Stack overflow. Help!".into(),
         }
     }
 }

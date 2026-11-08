@@ -66,7 +66,6 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          components: llvm-tools-preview
           target: ${{ matrix.target }}
 
       - name: Install cargo-pgo
@@ -75,7 +74,7 @@ jobs:
       - name: Build instrumented binary
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo pgo build -- --target ${{ matrix.target }}
+        run: cargo pgo build -- --target ${{ matrix.target }} -Zbuild-std=std
 
       - name: Build PGO dylib (macOS)
         if: runner.os == 'macOS'
@@ -125,7 +124,7 @@ jobs:
       - name: Build final binary
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo pgo optimize -- --target ${{ matrix.target }}
+        run: cargo pgo optimize -- --target ${{ matrix.target }} -Zbuild-std=std
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
@@ -149,7 +148,7 @@ jobs:
       - name: Build final binary (LIB)
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo pgo optimize build -- --target ${{ matrix.target }} --profile embed --features embed
+        run: cargo pgo optimize build -- --target ${{ matrix.target }} --profile embed --features embed -Zbuild-std=std
 
       - name: Package (Unix) (LIB)
         if: runner.os != 'Windows'

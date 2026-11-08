@@ -13,7 +13,7 @@ use crate::{
         type_system::{DataType, var_type_is_compatible},
     },
     data::{Data, NULL},
-    instr::{Instr, LibFunc},
+    instr::Instr,
 };
 
 struct PatternCompiler<'a, 'arena, 'compiler> {
@@ -312,7 +312,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         };
 
         let array_length_reg = self.state.alloc_reg();
-        self.output.push(Instr::CallLibFunc(LibFunc::Len, register_id, array_length_reg));
+        self.output.push(Instr::Len(register_id, array_length_reg));
         let min_match_len = prefix.len() + suffix.len();
         let min_match_len_reg = self.state.new_const_reg(Data::int(min_match_len as i32));
         if rest.is_none() {
@@ -320,6 +320,12 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         } else if min_match_len > 0 {
             self.false_arm(Instr::InfIntJmp(array_length_reg, min_match_len_reg, 0));
         }
+
+        let reg_window =
+            matches!(rest, Some(Pattern::Binding(..))).then(|| self.state.alloc_reg_window(2));
+        let last_reg = reg_window.map(|i| i + 1);
+        let array_length_reg =
+            last_reg.filter(|_| suffix.is_empty()).unwrap_or_else(|| self.state.alloc_reg());
 
         let mut suffix_start = suffix.is_empty().then_some(array_length_reg);
         for (i, elem) in prefix.iter().chain(*suffix).enumerate() {
@@ -329,7 +335,9 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
             let idx_reg_id = if i < prefix.len() {
                 self.state.new_const_reg(Data::int(i as i32))
             } else {
-                let dest_reg = self.state.alloc_reg();
+                let dest_reg = last_reg
+                    .filter(|_| i == prefix.len())
+                    .unwrap_or_else(|| self.state.alloc_reg());
                 self.output.push(Instr::SubInt(
                     array_length_reg,
                     self.state.new_const_reg(Data::int((min_match_len - i) as i32)),
@@ -345,21 +353,18 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
             self.compile(elem, elem_reg_id, &elem_type);
         }
         if let Some(rest @ Pattern::Binding(..)) = rest {
-            let start_reg_id = self.state.new_const_reg(Data::int(prefix.len() as i32));
-            let end_reg_id = suffix_start.unwrap_or_else(|| {
-                let dest_reg_id = self.state.alloc_reg();
+            let reg_window = unsafe { reg_window.unwrap_unchecked() };
+            if suffix_start.is_none() {
                 self.output.push(Instr::SubInt(
                     array_length_reg,
                     self.state.new_const_reg(Data::int(suffix.len() as i32)),
-                    dest_reg_id,
+                    reg_window + 1,
                 ));
-                dest_reg_id
-            });
-            self.output.push(Instr::StoreFuncArg(end_reg_id));
-            self.state.add_arg_hint(1);
+            }
+            self.output.push(Instr::SetInt(reg_window, prefix.len() as i32));
             let rest_reg_id = self.state.alloc_reg();
-            self.output.push(Instr::GetSliceArray(register_id, start_reg_id, rest_reg_id));
-            self.state.sub_arg_hint(1);
+            self.output.push(Instr::GetSliceArray(register_id, reg_window, rest_reg_id));
+            self.state.free_reg_window(reg_window, 2);
             self.compile(rest, rest_reg_id, &array_type);
         }
         array_type

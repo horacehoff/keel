@@ -87,7 +87,7 @@ keel -h/--help     # Print help
 Make sure [Rust](https://rustup.rs/) is installed.
 
 ```sh
-git clone https://github.com/horacehoff/keel && cd keel && cargo build --release
+git clone https://github.com/horacehoff/keel && cd keel && rustup toolchain install && cargo build --release
 ./target/release/keel myfile.kl
 ```
 

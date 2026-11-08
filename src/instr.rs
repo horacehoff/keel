@@ -1,6 +1,7 @@
 const _: () = assert!(size_of::<Instr>() == 8);
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[repr(u8)]
 pub enum Instr {
     Print(u16),
 
@@ -68,11 +69,9 @@ pub enum Instr {
     BoolOr(u16, u16, u16),
 
     CallFunc {
-        target: u32,
         frame_offset: u16,
+        target: u32,
     },
-    /// Jumps to the instruction right after the last CallFunc encountered by the interpreter
-    VoidReturn,
     /// Return(n)\
     /// Returns the data located in register n
     Return(u16),
@@ -89,25 +88,98 @@ pub enum Instr {
 
     /// Copies `count` function constants from absolute register `src` into registers `dst..dst + count`.
     CopyConstants {
+        dst: u16,
         /// Bits 0..24 are src\
         /// Bits 24..32 are count
         count_src: u32,
-        dst: u16,
     },
 
     /// CallDynamicLibFunc(fn_id, dest_register_id)
     CallDynamicLibFunc {
         fn_id: u16,
-        dest_reg_id: u16,
-        last_arg_reg_id: u16,
+        dst: u16,
+        first_arg: u16,
     },
 
-    StoreFuncArg(u16),
-    /// CallLibFunc(function, src_register_id, dest_register_id)
-    CallLibFunc(LibFunc, u16, u16),
-    /// CallLibFuncVoid(function, src_register_1, src_register_2)
-    /// For single-source ops, src register 2 is unused
-    CallLibFuncVoid(LibFuncVoid, u16, u16),
+    // LibFunc
+    Uppercase(u16, u16),
+    Lowercase(u16, u16),
+    Contains {
+        src: u16,
+        needle: u16,
+        dst: u16,
+    },
+    Trim(u16, u16),
+    TrimSequence {
+        src: u16,
+        seq: u16,
+        dst: u16,
+    },
+    Find {
+        src: u16,
+        needle: u16,
+        dst: u16,
+    },
+    IsFloat(u16, u16),
+    IsInt(u16, u16),
+    TrimLeft(u16, u16),
+    TrimRight(u16, u16),
+    TrimSequenceLeft {
+        src: u16,
+        seq: u16,
+        dst: u16,
+    },
+    TrimSequenceRight {
+        src: u16,
+        seq: u16,
+        dst: u16,
+    },
+    Repeat {
+        src: u16,
+        count: u16,
+        dst: u16,
+    },
+    Round(u16, u16),
+    Abs(u16, u16),
+    Argv(u16),
+    SqrtFloat(u16, u16),
+    Float(u16, u16),
+    Int(u16, u16),
+    Str(u16, u16),
+    Bool(u16, u16),
+    Input(u16, u16),
+    Floor(u16, u16),
+    TheAnswer(u16),
+    Len(u16, u16),
+    StartsWith {
+        src: u16,
+        prefix: u16,
+        dst: u16,
+    },
+    EndsWith {
+        src: u16,
+        suffix: u16,
+        dst: u16,
+    },
+    Replace(u16, u16, u16),
+    Split {
+        src: u16,
+        sep: u16,
+        dst: u16,
+    },
+    Range(u16, u16, u16),
+    JoinStringArray(u16, u16, u16),
+    ReverseString(u16, u16),
+    FsRead(u16, u16),
+    FsExists(u16, u16),
+
+    // LibFuncVoid
+    ReverseArray(u16),
+    FsWrite(u16, u16),
+    FsAppend(u16, u16),
+    FsDelete(u16),
+    FsDeleteDir(u16),
+    Sort(u16),
 
     /// StartErrorCatch(jump_size, error_register_id)
     StartErrorCatch(u16, u16),
@@ -181,52 +253,38 @@ pub enum Instr {
     Halt(u16),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u16)]
-pub enum LibFunc {
-    Uppercase = 0,
-    Lowercase = 1,
-    Contains = 2,
-    Trim = 3,
-    TrimSequence = 4,
-    Find = 5,
-    IsFloat = 6,
-    IsInt = 7,
-    TrimLeft = 8,
-    TrimRight = 9,
-    TrimSequenceLeft = 10,
-    TrimSequenceRight = 11,
-    Repeat = 12,
-    Round = 13,
-    Abs = 14,
-    Argv = 15,
-    SqrtFloat = 16,
-    Float = 17,
-    Int = 18,
-    Str = 19,
-    Bool = 20,
-    Input = 21,
-    Floor = 22,
-    TheAnswer = 23,
-    Len = 24,
-    StartsWith = 25,
-    EndsWith = 26,
-    Replace = 27,
-    Split = 28,
-    Range = 29,
-    JoinStringArray = 30,
-    Reverse = 31,
-    FsRead = 32,
-    FsExists = 33,
+impl Instr {
+    /// Returns the discriminant of `instr`
+    /// From https://doc.rust-lang.org/reference/items/enumerations.html#r-items.enum.discriminant.access-memory
+    #[inline(always)]
+    #[must_use]
+    pub const fn discriminant(&self) -> u8 {
+        unsafe { *core::ptr::from_ref(self).cast() }
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u16)]
-pub enum LibFuncVoid {
-    Reverse = 0,
-    FsWrite = 1,
-    FsAppend = 2,
-    FsDelete = 3,
-    FsDeleteDir = 4,
-    Sort = 5,
+#[macro_export]
+macro_rules! lib_func {
+    ($a: pat, $b: pat) => {
+        Instr::Uppercase($a, $b)
+            | Instr::Lowercase($a, $b)
+            | Instr::Trim($a, $b)
+            | Instr::IsFloat($a, $b)
+            | Instr::IsInt($a, $b)
+            | Instr::TrimLeft($a, $b)
+            | Instr::TrimRight($a, $b)
+            | Instr::Round($a, $b)
+            | Instr::Abs($a, $b)
+            | Instr::SqrtFloat($a, $b)
+            | Instr::Float($a, $b)
+            | Instr::Int($a, $b)
+            | Instr::Str($a, $b)
+            | Instr::Bool($a, $b)
+            | Instr::Input($a, $b)
+            | Instr::Floor($a, $b)
+            | Instr::Len($a, $b)
+            | Instr::ReverseString($a, $b)
+            | Instr::FsRead($a, $b)
+            | Instr::FsExists($a, $b)
+    };
 }

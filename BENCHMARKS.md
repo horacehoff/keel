@@ -14,7 +14,7 @@ Native binaries are built with `-O2`. The compiler used is Clang.
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [iter_fib.kl](/examples/iter_fib/iter_fib.kl) | [iter_fib.py](/examples/iter_fib/iter_fib.py) | [iter_fib.lua](/examples/iter_fib/iter_fib.lua) | [iter_fib.c](/examples/iter_fib/iter_fib.c) |
-| 73.4ms | 740ms | 72.5ms | 12.4ms |
+| 44.9ms | 740ms | 72.5ms | 12.4ms |
 
 
 ## Recursive fib(10,15,20,25,30,33)
@@ -22,7 +22,7 @@ Native binaries are built with `-O2`. The compiler used is Clang.
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [fib.kl](/examples/fib/fib.kl) | [fib.py](/examples/fib/fib.py) | [fib.lua](/examples/fib/fib.lua) | [fib.c](/examples/fib/fib.c) |
-| 178.9ms | 507.4ms | 183.4ms | 16.3ms |
+| 99.7ms | 507.4ms | 183.4ms | 16.3ms |
 
 
 ## N-body (N=500000)
@@ -31,7 +31,7 @@ Based on [this benchmark from The Computer Language Benchmarks Game](https://ben
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [nbody.kl](/examples/nbody/nbody.kl) | [nbody.py](/examples/nbody/nbody.py) | [nbody.lua](/examples/nbody/nbody.lua) | [nbody.c](/examples/nbody/nbody.c) |
-| 451.5ms | 2649ms | 458.5ms | 48.9ms |
+| 389.2ms | 2649ms | 458.5ms | 48.9ms |
 
 ## Binary trees (N=16)
 Based on [this benchmark from The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/binarytrees.html#binarytrees).\
@@ -40,7 +40,7 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [binary-trees.kl](/examples/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/binary-trees/binary-trees.lua) | [binary-trees.c](/examples/binary-trees/binary-trees.c) |
-| 449.2ms | 1264ms | 1005ms | 247.4ms |
+| 321.0ms | 1264ms | 1005ms | 247.4ms |
 
 
 ## Quicksort (N=10000)
@@ -48,14 +48,14 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | Keel | Python 3.14.6 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [quicksort.kl](/examples/quicksort/quicksort.kl) | [quicksort.py](/examples/quicksort/quicksort.py) | [quicksort.lua](/examples/quicksort/quicksort.lua) |
-| 344.5ms | 730.9ms | 1755ms |
+| 315.4ms | 730.9ms | 1755ms |
 
 ## Sqrt (N=0 to 9999999)
 
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [sqrt.kl](/examples/sqrt/sqrt.kl) | [sqrt.py](/examples/sqrt/sqrt.py) | [sqrt.lua](/examples/sqrt/sqrt.lua) | [sqrt.c](/examples/sqrt/sqrt.c) |
-| 105.1ms | 1164ms | 167ms | 2.1ms |
+| 51.3ms | 1164ms | 167ms | 2.1ms |
 
 ## String.split(), Array.contains() * 50 000
 
@@ -110,13 +110,13 @@ print(count)</code></pre></td>
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [fizzbuzz.kl](/examples/fizzbuzz/fizzbuzz.kl) | [fizzbuzz.py](/examples/fizzbuzz/fizzbuzz.py) | [fizzbuzz.lua](/examples/fizzbuzz/fizzbuzz.lua) | [fizzbuzz.c](/examples/fizzbuzz/fizzbuzz.c) |
-| 1821ms | 2765ms | 2179ms | 2158 |
+| 1770ms | 2765ms | 2179ms | 2158 |
 
 ### Default
 | Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [fizzbuzz.kl](/examples/fizzbuzz/fizzbuzz.kl) | [fizzbuzz.py](/examples/fizzbuzz/fizzbuzz.py) | [fizzbuzz.lua](/examples/fizzbuzz/fizzbuzz.lua) | [fizzbuzz.c](/examples/fizzbuzz/fizzbuzz.c) |
-| 32.5ms | 304.8ms | 124.3ms | 71.5ms |
+| 29.3ms | 304.8ms | 124.3ms | 71.5ms |
 
 
 ## Standard library operations * 100 000
@@ -162,7 +162,7 @@ Almost all the functions from the standard library are tested, except file syste
         let fab = (-3.14).abs();
         let to_f = float(42);
         let to_i = int(3.14);
-        let to_s = str(42);
+        let to_s = string(42);
         let to_b = bool("true");
         let rng = range(10);
         let arr = [3, 1, 4, 1, 5];
@@ -264,7 +264,7 @@ end
 print(count)</code></pre></td>
 </tr>
 <tr>
-  <td><b>46.6ms</b></td>
+  <td><b>39.2ms</b></td>
   <td>191.9ms</td>
   <td>253.3ms</td>
 </tr>
@@ -284,8 +284,8 @@ int increment(int x) { return x + 1; }
 | Keel | Python 3.14.6 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [ffi_baseline.kl](/examples/ffi/ffi_baseline.kl) | [ffi_baseline.py](/examples/ffi/ffi_baseline.py) | [ffi_baseline.lua](/examples/ffi/ffi_baseline.lua) |
-| 48.4ms | 485.7ms | 62.8ms |
+| 33.4ms | 485.7ms | 62.8ms |
 | [ffi.kl](/examples/ffi/ffi.kl) | [ffi.py](/examples/ffi/ffi.py) | [ffi.lua](/examples/ffi/ffi.lua) |
-| 177.4ms | 2860ms | 511.6ms |
+| 171.3ms | 2860ms | 511.6ms |
 | **FFI OVERHEAD** | **FFI OVERHEAD** | **FFI OVERHEAD** |
-| 129ms | 2374.3ms | 448.8ms |
+| 139ms | 2374.3ms | 448.8ms |

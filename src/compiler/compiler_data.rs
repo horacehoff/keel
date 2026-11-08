@@ -26,7 +26,6 @@ use libloading::Library;
 pub struct ErrorCatch {
     pub catch_loc: u32,
     pub frame_ptr: *mut Data,
-    pub args_len: u16,
     pub error_reg: u16,
 }
 
@@ -122,7 +121,6 @@ pub struct Program<'arena> {
     pub pools: Pools,
     pub err_ctx: ErrorCtx<'arena>,
     pub dylib_fns: Vec<DylibFn>,
-    pub allocated_arg_count: usize,
     pub structs: Vec<Struct<'arena>>,
     pub types: Vec<DataType>,
 }
@@ -195,8 +193,6 @@ pub struct State<'arena, 'compiler> {
     pub pools: &'compiler mut Pools,
     pub instr_src: &'compiler mut Vec<InstrSrc>,
     pub dylibs: &'compiler mut Vec<Dylib<'arena>>,
-    pub allocated_arg_count: &'compiler mut usize,
-    pub allocated_arg_count_peak: &'compiler mut usize,
     pub function_constants: Vec<Data>,
     pub max_frame_regs: u32,
     pub sources: &'compiler mut Vec<Source<'arena>>,
@@ -425,6 +421,19 @@ impl<'arena> State<'arena, '_> {
             }
         }
     }
+    #[inline(always)]
+    #[must_use]
+    pub fn alloc_reg_window(&mut self, len: u16) -> u16 {
+        let first = self.call_frame_offset();
+        self.reserve_call_window(first, len);
+        first
+    }
+    #[inline(always)]
+    pub fn free_reg_window(&mut self, first: u16, len: u16) {
+        for id in first..first + len {
+            self.free_reg(id);
+        }
+    }
     #[must_use]
     pub fn call_frame_offset(&self) -> u16 {
         (0..self.regs.temp_count)
@@ -445,15 +454,6 @@ impl<'arena> State<'arena, '_> {
             Some(unit) => self.code_units[unit as usize].instr_src.push(new_src),
             None => self.instr_src.push(new_src),
         }
-    }
-    pub fn add_arg_hint(&mut self, n: usize) {
-        *self.allocated_arg_count += n;
-        *self.allocated_arg_count_peak =
-            (*self.allocated_arg_count_peak).max(*self.allocated_arg_count);
-    }
-    #[inline]
-    pub const fn sub_arg_hint(&mut self, n: usize) {
-        *self.allocated_arg_count -= n;
     }
 }
 

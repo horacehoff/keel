@@ -45,7 +45,6 @@ use crate::errors::BOLD;
 use crate::errors::ERROR_PREFIX;
 use crate::errors::ErrorCtx;
 use crate::errors::RESET;
-use crate::instr::LibFunc;
 use crate::parser;
 use crate::vm::Pool;
 use crate::vm::StringPool;
@@ -207,6 +206,27 @@ fn patch_jumps(output: &mut [Instr], jump_idxs: impl IntoIterator<Item = usize>,
     for jump_idx in jump_idxs {
         set_jmp_size(&mut output[jump_idx], (target - jump_idx) as u16);
     }
+}
+
+/// Compiles `exprs` in contiguous registers
+#[must_use]
+pub fn compile_reg_window<'arena>(
+    exprs: impl ExactSizeIterator<Item = &'arena Expr<'arena>>,
+    ctx: Ctx,
+    state: &mut State<'arena, '_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let first = state.alloc_reg_window(exprs.len() as u16);
+    for (i, expr) in exprs.enumerate() {
+        let tgt = first + i as u16;
+        let start_len = output.len();
+        let reg = expr.compile(ctx, state, output, Some(tgt), false, true).unwrap_id();
+        move_value_to(output, start_len, reg, tgt);
+        if reg != tgt {
+            state.free_reg(reg);
+        }
+    }
+    first
 }
 
 /// Compiles short-circuit && and || conditions
@@ -690,25 +710,20 @@ fn compile_array_slice<'arena>(
     if idx_start_inferred != DataType::Int {
         error_invalid_index_type(&idx_start_inferred, span, ctx.file_idx, state.sources);
     }
-    let idx_start_id = idx_start.compile(ctx, state, output, None, false, true).unwrap_id();
     let idx_end_inferred = idx_end.infer_type(ctx, state);
     if idx_end_inferred != DataType::Int {
         error_invalid_index_type(&idx_end_inferred, span, ctx.file_idx, state.sources);
     }
-    let idx_end_id = idx_end.compile(ctx, state, output, None, false, true).unwrap_id();
-    output.push(Instr::StoreFuncArg(idx_end_id));
-    state.add_arg_hint(1);
-    state.free_reg(idx_start_id);
-    state.free_reg(idx_end_id);
+    let reg_window = compile_reg_window([idx_start, idx_end].into_iter(), ctx, state, output);
     let dest_reg_id = state.alloc_reg();
     let to_push = if inferred == DataType::String {
-        Instr::GetSliceString(id, idx_start_id, dest_reg_id)
+        Instr::GetSliceString(id, reg_window, dest_reg_id)
     } else {
-        Instr::GetSliceArray(id, idx_start_id, dest_reg_id)
+        Instr::GetSliceArray(id, reg_window, dest_reg_id)
     };
     output.push(to_push);
     state.add_to_src(ctx, output, span);
-    state.sub_arg_hint(1);
+    state.free_reg_window(reg_window, 2);
     dest_reg_id
 }
 
@@ -1329,7 +1344,7 @@ fn compile_for_loop<'arena>(
 
     let array_len_id = state.alloc_reg();
 
-    output.push(Instr::CallLibFunc(LibFunc::Len, array, array_len_id));
+    output.push(Instr::Len(array, array_len_id));
 
     // set up the id of the index variable (0..len)
     let index_id = if ctx.single_run {
@@ -1875,7 +1890,7 @@ fn compile_return<'arena>(
     output.push(match (ctx.in_function, id) {
         (false, ..) => Instr::Halt(u16::MAX),
         (true, Some(id)) => Instr::Return(id),
-        (true, None) => Instr::VoidReturn,
+        (true, None) => Instr::Return(0),
     });
 }
 
@@ -2758,8 +2773,6 @@ pub fn compile<'arena>(
     let mut structs: Vec<Struct> = Vec::new();
     let mut dyn_libs: Vec<Dylib> = Vec::new();
     let mut dylib_fns: Vec<DylibFn> = Vec::new();
-    let mut allocated_arg_count_peak = 0;
-    let mut allocated_arg_count = 0;
     let mut types: Vec<DataType> = Vec::new();
 
     let mut sources: Vec<Source> = vec![main_src];
@@ -2827,8 +2840,6 @@ pub fn compile<'arena>(
         pools: &mut pools,
         instr_src: &mut instr_src,
         dylibs: &mut dyn_libs,
-        allocated_arg_count: &mut allocated_arg_count,
-        allocated_arg_count_peak: &mut allocated_arg_count_peak,
         function_constants: Vec::new(),
         max_frame_regs: 0,
         sources: &mut sources,
@@ -2962,7 +2973,6 @@ pub fn compile<'arena>(
         pools,
         err_ctx: ErrorCtx { instr_src, sources },
         dylib_fns,
-        allocated_arg_count: allocated_arg_count_peak,
         structs,
         types,
     }

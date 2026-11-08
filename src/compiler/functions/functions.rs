@@ -3,7 +3,7 @@ use super::expr::Span;
 use super::type_system::DataType;
 use super::type_system::c_arg_matches;
 use super::type_system::fn_matches_signature;
-use crate::compiler::UnwrapId;
+use crate::compiler::compile_reg_window;
 use crate::compiler::compiler_data::Ctx;
 use crate::compiler::compiler_data::State;
 use crate::compiler::compiler_errors::check_args_length;
@@ -133,25 +133,12 @@ pub fn compile_function_call<'arena>(
             }
         }
 
-        state.add_arg_hint(function_call.args.len());
-        for arg in function_call.args.iter().take(function_call.args.len().saturating_sub(1)) {
-            let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
-            output.push(Instr::StoreFuncArg(arg_id));
-            state.free_reg(arg_id);
-        }
-        let last_arg_reg_id = if let Some(arg) = function_call.args.last() {
-            let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
-            state.free_reg(arg_id);
-            arg_id
-        } else {
-            u16::MAX
-        };
-
+        let first_arg = compile_reg_window(function_call.args.iter(), ctx, state, output);
         let dest_reg_id =
             if returns_null { state.alloc_reg() } else { state.alloc_reg_tgt(tgt_id) };
-        output.push(Instr::CallDynamicLibFunc { fn_id: dyn_fn_id, dest_reg_id, last_arg_reg_id });
+        output.push(Instr::CallDynamicLibFunc { fn_id: dyn_fn_id, dst: dest_reg_id, first_arg });
         state.add_to_src(ctx, output, function_call.get_call_span());
-        state.sub_arg_hint(function_call.args.len());
+        state.free_reg_window(first_arg, function_call.args.len() as u16);
         if returns_null {
             state.free_reg(dest_reg_id);
             None

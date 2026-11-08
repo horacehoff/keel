@@ -1,3 +1,4 @@
+use crate::compiler::compiler_data::DylibFn;
 use crate::compiler::compiler_data::ErrorCatch;
 use crate::compiler::compiler_data::Pools;
 use crate::compiler::compiler_data::Program;
@@ -13,15 +14,17 @@ use crate::errors::ErrorCtx;
 use crate::errors::throw_error;
 use crate::fs;
 use crate::instr::Instr;
-use crate::instr::LibFunc;
-use crate::instr::LibFuncVoid;
+use core::hint::assert_unchecked;
 use core::hint::cold_path;
+use core::ops::Deref;
+use core::ops::DerefMut;
 use core::ops::Index;
 use core::ops::IndexMut;
 use gc::Gc;
 use lexical_core::FormattedSize;
 use memchr::memmem;
 use rustc_hash::FxBuildHasher;
+use seq_macro::seq;
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -50,13 +53,8 @@ fn container_eq(
     if x.is_array() || x.is_struct() {
         let x_obj = &obj_pool[x.as_array()];
         let y_obj = &obj_pool[y.as_array()];
-        if x_obj.len() != y_obj.len() {
-            return false;
-        }
-        if x_obj == y_obj {
-            return true;
-        }
-        x_obj.iter().zip(y_obj).all(|(x, y)| obj_eq(*x, *y, obj_pool, map_pool, string_pool))
+        x_obj.len() == y_obj.len()
+            && x_obj.iter().zip(y_obj).all(|(x, y)| obj_eq(*x, *y, obj_pool, map_pool, string_pool))
     } else if x.is_map() {
         let x_map = &map_pool[x.as_map()];
         let y_map = &map_pool[y.as_map()];
@@ -139,9 +137,9 @@ const MAX_STACK_LEN: usize = 16_000_000 / 8;
 
 struct Stack {
     #[cfg(not(target_arch = "wasm32"))]
-    buf: virtual_buffer::vec::Vec<Data>,
+    _buf: virtual_buffer::vec::Vec<Data>,
     #[cfg(target_arch = "wasm32")]
-    buf: Vec<Data>,
+    _buf: Vec<Data>,
     ptr: *mut Data,
     frame_limit: Frame,
     max_frame_regs: usize,
@@ -149,18 +147,16 @@ struct Stack {
 
 impl Stack {
     fn new(initial_stack: &[Data], max_frame_regs: usize) -> Self {
-        let len = initial_stack.len() + max_frame_regs;
+        let len = initial_stack.len() + MAX_STACK_LEN;
 
         let mut buf = {
             #[cfg(target_arch = "wasm32")]
             {
-                let mut buf = vec![Data(0); MAX_STACK_LEN.max(len)];
-                buf[..initial_stack.len()].copy_from_slice(initial_stack);
-                buf
+                unsafe { Box::<[Data]>::new_zeroed_slice(len).assume_init() }.into_vec()
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let mut buf = virtual_buffer::vec::Vec::new(MAX_STACK_LEN.max(len));
+                let mut buf = virtual_buffer::vec::Vec::new(len);
                 buf.reserve_exact(len);
                 buf
             }
@@ -169,29 +165,7 @@ impl Stack {
         let ptr: *mut Data = buf.as_mut_ptr();
         unsafe { core::ptr::copy_nonoverlapping(initial_stack.as_ptr(), ptr, initial_stack.len()) };
         let frame_limit = Frame(unsafe { ptr.add(buf.capacity() - max_frame_regs) });
-        Self { buf, ptr, frame_limit, max_frame_regs }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[cold]
-    #[inline(never)]
-    #[must_use]
-    fn grow(&mut self, frame: Frame) -> bool {
-        let new_len = unsafe { frame.0.offset_from(self.ptr) as usize } + self.max_frame_regs;
-        if self.buf.try_reserve(new_len).is_err() {
-            cold_path();
-            return false;
-        }
-        self.frame_limit =
-            Frame(unsafe { self.ptr.add(self.buf.capacity() - self.max_frame_regs) });
-        true
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    #[inline(always)]
-    #[must_use]
-    const fn grow(&mut self, _frame: Frame) -> bool {
-        false
+        Self { _buf: buf, ptr, frame_limit, max_frame_regs }
     }
 
     #[inline(always)]
@@ -246,28 +220,34 @@ pub struct Pool<T>(pub Vec<T>);
 
 impl<T> Pool<T> {
     #[inline(always)]
-    pub const fn len(&self) -> usize {
-        self.0.len()
-    }
-    #[inline(always)]
-    pub fn push(&mut self, value: T) {
-        self.0.push(value);
-    }
-    #[inline(always)]
     pub fn with_capacity(capacity: usize) -> Self {
         Self(Vec::with_capacity(capacity))
     }
-    #[inline(always)]
-    pub fn iter(&self) -> core::slice::Iter<'_, T> {
-        self.0.iter()
+}
+
+impl<T> Deref for Pool<T> {
+    type Target = Vec<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
-    #[inline(always)]
-    pub const fn as_mut_ptr(&mut self) -> *mut T {
-        self.0.as_mut_ptr()
+}
+impl<T> DerefMut for Pool<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
+}
+
+impl<T> Index<usize> for Pool<T> {
+    type Output = T;
     #[inline(always)]
-    pub const fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    fn index(&self, index: usize) -> &Self::Output {
+        unsafe { self.0.get_unchecked(index) }
+    }
+}
+impl<T> IndexMut<usize> for Pool<T> {
+    #[inline(always)]
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        unsafe { self.0.get_unchecked_mut(index) }
     }
 }
 
@@ -308,20 +288,6 @@ impl ObjectPool {
     }
 }
 
-impl<T> Index<usize> for Pool<T> {
-    type Output = T;
-    #[inline(always)]
-    fn index(&self, index: usize) -> &Self::Output {
-        unsafe { self.0.get_unchecked(index) }
-    }
-}
-impl<T> IndexMut<usize> for Pool<T> {
-    #[inline(always)]
-    fn index_mut(&mut self, index: usize) -> &mut T {
-        unsafe { self.0.get_unchecked_mut(index) }
-    }
-}
-
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Frame(*mut Data);
@@ -342,33 +308,48 @@ impl IndexMut<u16> for Frame {
 
 #[cold]
 #[inline(never)]
-fn error_with_catch(
-    err: ErrType,
-    roots: &[Data],
-    obj_pool: &ObjectPool,
-    map_pool: &MapPool,
-    string_pool: &mut StringPool,
-    gc: &mut Gc,
-    args: &mut Vec<u16>,
-    error_handles: &mut Vec<ErrorCatch>,
-    err_ctx: &ErrorCtx,
-    i: usize,
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))] handle: &mut std::io::BufWriter<
-        StdoutLock,
-    >,
-    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    handle: &mut crate::captured_output::CapturedOutputWriter,
-) -> (usize, Frame) {
-    if error_handles.is_empty() {
-        throw_error(err_ctx, i, err, handle);
+fn error_with_catch(err: ErrType, i: usize, ctx: *mut VmCtx<'static>) -> (usize, Frame) {
+    let ctx = unsafe { &mut *ctx };
+    if ctx.error_handles.is_empty() {
+        throw_error(ctx.err_ctx, i, err, &mut ctx.handle);
     }
-    let err_handle = error_handles.pop_unchecked();
-    unsafe {
-        args.set_len(err_handle.args_len as usize);
-    }
+    let err_handle = ctx.error_handles.pop_unchecked();
     let mut r = Frame(err_handle.frame_ptr);
-    r[err_handle.error_reg] = Data::string(err.kind(), obj_pool, map_pool, string_pool, roots, gc);
+    r[err_handle.error_reg] = Data::string(
+        err.kind(),
+        ctx.obj_pool,
+        ctx.map_pool,
+        ctx.str_pool,
+        ctx.stack.roots(r),
+        &mut ctx.gc,
+    );
     (err_handle.catch_loc as usize, r)
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+type Handle = std::io::BufWriter<StdoutLock<'static>>;
+#[cfg(any(target_arch = "wasm32", feature = "embed"))]
+type Handle = crate::captured_output::CapturedOutputWriter;
+
+#[allow(clippy::struct_field_names)]
+struct VmCtx<'a> {
+    stack: Stack,
+    handle: Handle,
+    output: String,
+    gc: Gc,
+    #[cfg(not(target_arch = "wasm32"))]
+    ffi_args: Vec<libffi::middle::Arg<'a>>,
+    dyn_lib_args: Vec<u64>,
+    keep_alive: Vec<Box<[u8]>>,
+    error_handles: Vec<ErrorCatch>,
+    obj_pool: &'a mut ObjectPool,
+    map_pool: &'a mut MapPool,
+    str_pool: &'a mut StringPool,
+    err_ctx: &'a ErrorCtx<'a>,
+    dyn_libs: &'a [DylibFn],
+    structs: &'a [Struct<'a>],
+    types: &'a [DataType],
+    stdout_is_terminal: bool,
 }
 
 #[cfg(test)]
@@ -386,103 +367,128 @@ pub fn execute(program: &mut Program) -> VmReturnType {
         pools: Pools { ref mut obj_pool, ref mut map_pool, ref mut str_pool },
         ref err_ctx,
         dylib_fns: ref dyn_libs,
-        allocated_arg_count,
         ref structs,
         ref types,
         ..
     } = *program;
-    let mut i: usize = 0;
 
-    let mut args: Vec<u16> = Vec::with_capacity(allocated_arg_count);
-
-    let mut stack = Stack::new(initial_stack, max_frame_regs as usize);
-    let mut r = Frame(unsafe { stack.ptr.add(top_level_base as usize) });
+    let stack = Stack::new(initial_stack, max_frame_regs as usize);
+    let r = Frame(unsafe { stack.ptr.add(top_level_base as usize) });
 
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     let stdout = std::io::stdout();
 
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    let stdout_is_terminal = stdout.is_terminal();
+    let mut ctx = VmCtx {
+        stack,
+        #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+        handle: std::io::BufWriter::with_capacity(8 * 1024, stdout.lock()),
+        #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+        handle: crate::captured_output::CapturedOutputWriter,
+        output: String::with_capacity(256),
+        gc: Gc::new(obj_pool, map_pool, str_pool),
+        #[cfg(not(target_arch = "wasm32"))]
+        // Args converted from Data to libffi args are stored here
+        ffi_args: Vec::new(),
+        dyn_lib_args: Vec::new(),
+        keep_alive: Vec::new(),
+        error_handles: Vec::new(),
+        obj_pool,
+        map_pool,
+        str_pool,
+        err_ctx,
+        dyn_libs,
+        structs,
+        types,
+        #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+        stdout_is_terminal: stdout.is_terminal(),
+        #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+        stdout_is_terminal: false,
+    };
 
-    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    const stdout_is_terminal: bool = false;
+    execute_at(0, r, instructions.as_ptr(), (&raw mut ctx).cast());
 
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    let mut handle = std::io::BufWriter::with_capacity(8 * 1024, stdout.lock());
+    #[cfg(test)]
+    unsafe { core::slice::from_raw_parts(ctx.stack.ptr, initial_stack.len()) }.to_vec()
+}
 
-    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    let mut handle = crate::captured_output::CapturedOutputWriter;
+static INSTR_TABLE: [fn(usize, Frame, *const Instr, *mut VmCtx<'static>); 112] =
+    seq!(N in 0..112 {[#(execute_instr::<N>,)*]});
 
-    let mut output = String::with_capacity(256);
+#[inline(always)]
+fn execute_at(i: usize, r: Frame, instr: *const Instr, ctx: *mut VmCtx<'static>) {
+    unsafe {
+        let handler = *INSTR_TABLE.get_unchecked((*instr.add(i)).discriminant() as usize);
+        become handler(i, r, instr, ctx)
+    }
+}
 
-    let mut gc = Gc::new(obj_pool, map_pool, str_pool);
-
-    // Args converted from Data to libffi args are stored here
-    #[cfg(not(target_arch = "wasm32"))]
-    let mut ffi_args: Vec<libffi::middle::Arg> = Vec::new();
-    let mut dyn_lib_args: Vec<u64> = Vec::new();
-    let mut keep_alive: Vec<Box<[u8]>> = Vec::new();
-
-    let mut error_handles: Vec<ErrorCatch> = Vec::new();
+fn execute_instr<const DISCRIMINANT: u8>(
+    mut i: usize,
+    mut r: Frame,
+    instr: *const Instr,
+    ctx: *mut VmCtx<'static>,
+) {
+    let VmCtx {
+        stack,
+        handle,
+        output,
+        gc,
+        #[cfg(not(target_arch = "wasm32"))]
+        ffi_args,
+        dyn_lib_args,
+        keep_alive,
+        error_handles,
+        obj_pool,
+        map_pool,
+        str_pool,
+        dyn_libs,
+        structs,
+        types,
+        stdout_is_terminal,
+        ..
+    } = unsafe { &mut *ctx };
 
     macro_rules! string {
         ($e: expr) => {
-            Data::string($e, obj_pool, map_pool, str_pool, stack.roots(r), &mut gc)
+            Data::string($e, obj_pool, map_pool, str_pool, stack.roots(r), gc)
         };
     }
 
     macro_rules! error_with_catch {
-        ($err:expr $(, $label:lifetime)?) => {
+        ($err:expr) => {
             cold_path();
-            (i, r) = error_with_catch(
-                $err,
-                stack.roots(r),
-                obj_pool,
-                map_pool,
-                str_pool,
-                &mut gc,
-                &mut args,
-                &mut error_handles,
-                err_ctx,
-                i,
-                &mut handle,
-            );
-            continue $($label)?;
+            (i, r) = error_with_catch($err, i, ctx);
+            become execute_at(i, r, instr, ctx);
         };
     }
 
-    'main: loop {
-        match unsafe { *instructions.get_unchecked(i) } {
+    unsafe {
+        assert_unchecked((*instr.add(i)).discriminant() == DISCRIMINANT);
+        match *instr.add(i) {
             Instr::Jmp(size) => {
                 i = jump(i, size);
-                continue;
+                become execute_at(i, r, instr, ctx);
             }
             Instr::Mov(tgt, dest) => r[dest] = r[tgt],
             Instr::SetInt(dest, n) => r[dest] = Data::int(n),
             Instr::CallFunc { target, frame_offset } => {
-                let new_frame = Frame(unsafe { r.0.add(frame_offset as usize) });
-                if new_frame.0 > stack.frame_limit.0 && !stack.grow(new_frame) {
+                let new_frame = Frame(r.0.add(frame_offset as usize));
+                if new_frame.0 > stack.frame_limit.0 {
                     error_with_catch!(ErrType::StackOverflow);
                 }
                 r = new_frame;
                 // The return point is always placed in the target function's first register
                 r[0] = Data::return_point(i as u32, frame_offset);
                 i = target as usize;
-                continue;
-            }
-            Instr::VoidReturn => {
-                // Simply jump back to the callsite, since there's nothing to return
-                let (return_addr, frame_offset) = r[0].as_return_point();
-                r = Frame(unsafe { r.0.sub(frame_offset as usize) });
-                i = return_addr as usize;
+                become execute_at(i, r, instr, ctx);
             }
             Instr::Return(src) => {
                 let (return_addr, frame_offset) = r[0].as_return_point();
                 r[0] = r[src];
-                r = Frame(unsafe { r.0.sub(frame_offset as usize) });
+                r = Frame(r.0.sub(frame_offset as usize));
                 i = return_addr as usize;
             }
-            Instr::CopyConstants { count_src, dst } => unsafe {
+            Instr::CopyConstants { count_src, dst } => {
                 let count = count_src >> 24;
                 let src = stack.ptr.add((count_src & 0xFF_FFFF) as usize);
                 let dst = r.0.add(dst as usize);
@@ -492,64 +498,44 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     cold_path();
                     core::ptr::copy_nonoverlapping(src.add(8), dst.add(8), count as usize - 8);
                 }
-            },
-            Instr::LoadGlobal { dest_reg, reg } => {
-                r[dest_reg] = unsafe { *stack.ptr.add(reg as usize) };
             }
-            Instr::StoreGlobal { src_reg, reg } => unsafe {
+            Instr::LoadGlobal { dest_reg, reg } => {
+                r[dest_reg] = *stack.ptr.add(reg as usize);
+            }
+            Instr::StoreGlobal { src_reg, reg } => {
                 *stack.ptr.add(reg as usize) = r[src_reg];
-            },
+            }
             #[cfg(target_arch = "wasm32")]
-            Instr::CallDynamicLibFunc { .. } => unsafe { std::hint::unreachable_unchecked() },
+            Instr::CallDynamicLibFunc { .. } => std::hint::unreachable_unchecked(),
             #[cfg(not(target_arch = "wasm32"))]
-            Instr::CallDynamicLibFunc { fn_id, dest_reg_id, last_arg_reg_id: last_arg_red_id } => {
-                let func = unsafe { dyn_libs.get_unchecked(fn_id as usize) };
+            Instr::CallDynamicLibFunc { fn_id, dst, first_arg } => {
+                let func = dyn_libs.get_unchecked(fn_id as usize);
                 let args_len = func.args_len;
                 ffi_args.clear();
                 ffi_args.reserve_exact(args_len);
                 keep_alive.clear();
 
-                args.push_unchecked(last_arg_red_id);
-                let args_base = args.len() - args_len;
-
                 dyn_lib_args.reserve_exact(args_len);
                 let args_ptr = dyn_lib_args.as_mut_ptr();
                 for idx in 0..args_len {
-                    let data = r[unsafe { *args.get_unchecked(args_base + idx) }];
-                    ffi_args.push_unchecked(match func.get_argument_type(idx) {
-                        VmType::Int => unsafe {
-                            args_ptr.add(idx).write(data.as_int() as u64);
-                            libffi::middle::Arg::new(&*args_ptr.add(idx))
-                        },
-                        VmType::Float => unsafe {
-                            args_ptr.add(idx).write(data.as_float().to_bits());
-                            libffi::middle::Arg::new(&*args_ptr.add(idx))
-                        },
+                    let data = r[first_arg + idx as u16];
+                    let data_ffi = match func.get_argument_type(idx) {
+                        VmType::Int => data.as_int() as u64,
+                        VmType::Float => data.as_float().to_bits(),
+                        VmType::Bool => u64::from(data.as_bool()),
                         VmType::String => {
                             if let Ok(b) = std::ffi::CString::new(data.as_str(str_pool)) {
                                 let bytes = b.into_bytes_with_nul().into_boxed_slice();
                                 let ptr = bytes.as_ptr() as u64;
                                 keep_alive.push(bytes);
-                                unsafe {
-                                    args_ptr.add(idx).write(ptr);
-                                    libffi::middle::Arg::new(&*args_ptr.add(idx))
-                                }
+                                ptr
                             } else {
-                                error_with_catch!(ErrType::NullByteInString, 'main);
+                                error_with_catch!(ErrType::NullByteInString);
                             }
                         }
                         VmType::Array => {
-                            let ptr = ffi::array_to_c_ptr(data, obj_pool, str_pool, &mut keep_alive)
-                                as u64;
-                            unsafe {
-                                args_ptr.add(idx).write(ptr);
-                                libffi::middle::Arg::new(&*args_ptr.add(idx))
-                            }
+                            ffi::array_to_c_ptr(data, obj_pool, str_pool, keep_alive) as u64
                         }
-                        VmType::Bool => unsafe {
-                            args_ptr.add(idx).write(u64::from(data.as_bool()));
-                            libffi::middle::Arg::new(&*args_ptr.add(idx))
-                        },
                         _ => {
                             debug_assert!(data.is_struct());
                             // can only be a struct at this point
@@ -557,43 +543,45 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                                 data.as_struct(),
                                 obj_pool,
                                 str_pool,
-                                &mut keep_alive,
+                                keep_alive,
                             )
                             .into_boxed_slice();
                             let ptr = &raw const *b;
                             keep_alive.push(b);
-                            libffi::middle::Arg::new(unsafe { &*ptr })
+                            ffi_args.push_unchecked(libffi::middle::Arg::new(&*ptr));
+                            continue;
                         }
-                    });
+                    };
+                    args_ptr.add(idx).write(data_ffi);
+                    ffi_args.push_unchecked(libffi::middle::Arg::new(&*args_ptr.add(idx)));
                 }
 
-                unsafe { args.set_len(args_base) }
-
                 // Call the function, and convert the result back into Data
-                r[dest_reg_id] = unsafe {
+                r[dst] = {
                     match func.get_return_type() {
-                        VmType::Int => Data::int(func.cif.call::<i32>(func.ptr, &ffi_args)),
-                        VmType::Float => Data::float(func.cif.call::<f64>(func.ptr, &ffi_args)),
+                        VmType::Int => Data::int(func.cif.call::<i32>(func.ptr, ffi_args)),
+                        VmType::Float => Data::float(func.cif.call::<f64>(func.ptr, ffi_args)),
                         VmType::String => {
-                            let ptr =
-                                func.cif.call::<*const core::ffi::c_char>(func.ptr, &ffi_args);
+                            let ptr = func.cif.call::<*const core::ffi::c_char>(func.ptr, ffi_args);
                             if ptr.is_null() {
                                 cold_path();
                                 NULL
                             } else {
-                                string!(core::ffi::CStr::from_ptr(ptr).to_string_lossy().as_ref())
+                                match core::ffi::CStr::from_ptr(ptr).to_string_lossy() {
+                                    std::borrow::Cow::Borrowed(s) => string!(s),
+                                    std::borrow::Cow::Owned(s) => string!(s),
+                                }
                             }
                         }
-                        VmType::Bool => func.cif.call::<bool>(func.ptr, &ffi_args).into(),
+                        VmType::Bool => func.cif.call::<bool>(func.ptr, ffi_args).into(),
                         VmType::Struct { struct_id } => {
-                            let struct_fields =
-                                unsafe { &structs.get_unchecked(struct_id as usize).fields };
+                            let struct_fields = &structs.get_unchecked(struct_id as usize).fields;
                             let (struct_size, _, field_offsets) =
                                 ffi::get_struct_size_datatype(struct_fields, structs);
                             let mut return_buf: Vec<u8> = vec![0; struct_size];
                             func.cif.call_return_into(
                                 func.ptr,
-                                &ffi_args,
+                                ffi_args,
                                 libffi::middle::ret(&mut return_buf[..]),
                             );
 
@@ -610,13 +598,16 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                                 str_pool,
                                 struct_fields,
                                 stack.roots(r),
-                                &mut gc,
+                                gc,
                                 structs,
                             );
                             gc.unpin();
                             new_struct
                         }
-                        _ => NULL,
+                        _ => {
+                            func.cif.call::<usize>(func.ptr, ffi_args);
+                            NULL
+                        }
                     }
                 };
             }
@@ -646,10 +637,9 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 let src_ptr = obj_pool[src_id].as_ptr();
                 let dst = &mut obj_pool[new_id];
                 dst.reserve_exact(len as usize);
-                unsafe {
-                    dst.set_len(len as usize);
-                    core::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len as usize);
-                }
+                dst.set_len(len as usize);
+                core::ptr::copy_nonoverlapping(src_ptr, dst.as_mut_ptr(), len as usize);
+
                 r[dest_reg] = Data(r[src_reg].tag() | new_id as u64);
             }
             Instr::AddArray(o1, o2, dest) => {
@@ -657,16 +647,14 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 let array2_id = r[o2].as_array();
                 let output_array_id = gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r));
                 let array_idx = output_array_id as usize;
-                unsafe {
-                    let array_pool_ptr = obj_pool.as_mut_ptr();
-                    let arr_a = &*array_pool_ptr.add(array1_id);
-                    let arr_b = &*array_pool_ptr.add(array2_id);
-                    let combined = &mut *array_pool_ptr.add(array_idx);
+                let array_pool_ptr = obj_pool.as_mut_ptr();
+                let arr_a = &*array_pool_ptr.add(array1_id);
+                let arr_b = &*array_pool_ptr.add(array2_id);
+                let combined = &mut *array_pool_ptr.add(array_idx);
 
-                    combined.reserve(arr_a.len() + arr_b.len());
-                    combined.extend_from_slice(arr_a);
-                    combined.extend_from_slice(arr_b);
-                }
+                combined.reserve(arr_a.len() + arr_b.len());
+                combined.extend_from_slice(arr_a);
+                combined.extend_from_slice(arr_b);
                 r[dest] = Data::array(output_array_id);
             }
             Instr::AddIntImm { src, dst, imm } => r[dst] = r[src].add_int_imm(imm as i16),
@@ -721,13 +709,13 @@ pub fn execute(program: &mut Program) -> VmReturnType {
             Instr::NotEqJmp(o1, o2, jump_size) => {
                 if r[o1] != r[o2] {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::ObjNotEqJmp(o1, o2, jump_size) => {
                 if !obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::NotEq(o1, o2, dest) => {
@@ -739,51 +727,51 @@ pub fn execute(program: &mut Program) -> VmReturnType {
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r[o1] == r[o2] {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::ObjEqJmp(o1, o2, jump_size) => {
                 if obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::InfEqFloatJmp(o1, o2, jump_size) => {
                 if r[o1].as_float() <= r[o2].as_float() {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::InfEqIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() <= r[o2].as_int() {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::InfFloatJmp(o1, o2, jump_size) => {
                 if r[o1].as_float() < r[o2].as_float() {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             #[allow(clippy::neg_cmp_op_on_partial_ord)]
             Instr::NotInfFloatJmp(o1, o2, jump_size) => {
                 if !(r[o1].as_float() < r[o2].as_float()) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             #[allow(clippy::neg_cmp_op_on_partial_ord)]
             Instr::NotInfEqFloatJmp(o1, o2, jump_size) => {
                 if !(r[o1].as_float() <= r[o2].as_float()) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::InfIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() < r[o2].as_int() {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::IncIntInfJmp { counter_reg, limit_reg, jump_size } => {
@@ -791,31 +779,31 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 r[counter_reg] = next;
                 if next.as_int() < r[limit_reg].as_int() {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::EqIntImmJmp(src, imm, jump_size) => {
                 if r[src].as_int() == i32::from(imm as i16) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::NotEqIntImmJmp(src, imm, jump_size) => {
                 if r[src].as_int() != i32::from(imm as i16) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::InfIntImmJmp(src, imm, jump_size) => {
                 if r[src].as_int() < i32::from(imm as i16) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::SupEqIntImmJmp(src, imm, jump_size) => {
                 if r[src].as_int() >= i32::from(imm as i16) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::InfFloat(o1, o2, dest) => {
@@ -831,48 +819,46 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 r[dest] = (r[o1].as_int() <= r[o2].as_int()).into();
             }
             Instr::BoolAnd(o1, o2, dest) => {
-                r[dest] = (r[o1].as_bool() && r[o2].as_bool()).into();
+                debug_assert!(r[o1].is_bool() && r[o2].is_bool());
+                r[dest] = Data(r[o1].0 & r[o2].0);
             }
             Instr::BoolOr(o1, o2, dest) => {
-                r[dest] = (r[o1].as_bool() || r[o2].as_bool()).into();
+                debug_assert!(r[o1].is_bool() && r[o2].is_bool());
+                r[dest] = Data(r[o1].0 | r[o2].0);
             }
             Instr::Print(tgt) => {
-                r[tgt].format_to(&mut output, obj_pool, str_pool, map_pool, structs, false);
+                r[tgt].format_to(output, obj_pool, str_pool, map_pool, structs, false);
                 output.push('\n');
                 handle.write_all(output.as_bytes()).unwrap();
                 output.clear();
-                if stdout_is_terminal {
+                if *stdout_is_terminal {
                     handle.flush().unwrap();
                 }
             }
-            Instr::StoreFuncArg(id) => unsafe { args.push_unchecked(id) },
             Instr::SetElementObj(array_reg_id, new_elem_reg_id, idx) => {
                 let array = &mut obj_pool[r[array_reg_id].as_array()];
                 let index = r[idx].as_int();
                 if (index as usize) >= array.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(array.len(), index));
                 }
-                unsafe {
-                    *array.get_unchecked_mut(index as usize) = r[new_elem_reg_id];
-                }
+                *array.get_unchecked_mut(index as usize) = r[new_elem_reg_id];
             }
             Instr::SetElementString(string_reg_id, new_str_reg_id, idx) => {
                 let index = r[idx].as_int();
-                let temp_str_reg_id = r[string_reg_id];
-                let source_string = temp_str_reg_id.as_str(str_pool);
+                let source_string = r[string_reg_id].as_str(str_pool);
                 if (index as usize) >= source_string.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(source_string.len(), index));
                 }
-                let mut temp = source_string.to_owned();
-                temp.remove(index as usize);
-                temp.insert_str(index as usize, r[new_str_reg_id].as_str(str_pool));
+                let mut temp: String = source_string.to_owned();
+                temp.replace_range(
+                    index as usize..=index as usize,
+                    r[new_str_reg_id].as_str(str_pool),
+                );
                 r[string_reg_id] = string!(temp);
             }
             Instr::SetFieldObj(struct_reg_id, new_elem_reg_id, idx) => {
                 let s = &mut obj_pool[r[struct_reg_id].as_array()];
-                unsafe {
-                    *s.get_unchecked_mut(idx as usize) = r[new_elem_reg_id];
-                }
+                *s.get_unchecked_mut(idx as usize) = r[new_elem_reg_id];
             }
             Instr::GetIndexArray(array_reg_id, index, dest) => {
                 let idx = r[index].as_int();
@@ -881,16 +867,16 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 if (idx as usize) >= array.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(array.len(), idx));
                 }
-                r[dest] = unsafe { *array.get_unchecked(idx as usize) };
+                r[dest] = *array.get_unchecked(idx as usize);
             }
             Instr::GetFieldStruct(struct_reg_id, index, dest) => {
                 let struct_id = r[struct_reg_id].as_struct();
                 let s = &obj_pool[struct_id];
-                r[dest] = unsafe { *s.get_unchecked(index as usize) }
+                r[dest] = *s.get_unchecked(index as usize);
             }
             Instr::GetSliceArray(array_reg_id, idx_start_id, dest_reg_id) => {
                 let idx_start = r[idx_start_id].as_int();
-                let idx_end = r[args.pop_unchecked()].as_int();
+                let idx_end = r[idx_start_id + 1].as_int();
                 let arr_id = r[array_reg_id].as_array();
                 let array = &obj_pool[arr_id];
                 if (idx_end as usize) > array.len()
@@ -916,15 +902,13 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 if (idx as usize) >= bytes.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(bytes.len(), idx));
                 }
-                r[dest] = Data::small_str(unsafe {
-                    core::str::from_utf8_unchecked(core::slice::from_ref(
-                        bytes.get_unchecked(idx as usize),
-                    ))
-                });
+                r[dest] = Data::small_str(core::str::from_utf8_unchecked(core::slice::from_ref(
+                    bytes.get_unchecked(idx as usize),
+                )));
             }
             Instr::GetSliceString(str_reg_id, idx_start, dest_reg_id) => {
+                let idx_end = r[idx_start + 1].as_int();
                 let idx_start = r[idx_start].as_int();
-                let idx_end = r[args.pop_unchecked()].as_int();
                 let s = r[str_reg_id].as_str(str_pool);
                 if (idx_end as usize) > s.len()
                     || (idx_start as usize) > s.len()
@@ -932,8 +916,7 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 {
                     error_with_catch!(ErrType::SliceOutOfBounds(s.len(), idx_start, idx_end));
                 }
-                r[dest_reg_id] =
-                    string!(unsafe { s.get_unchecked((idx_start as usize)..(idx_end as usize)) });
+                r[dest_reg_id] = string!(s.get_unchecked((idx_start as usize)..(idx_end as usize)));
             }
             Instr::Push(array, element) => {
                 obj_pool[r[array].as_array()].push(r[element]);
@@ -953,7 +936,6 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 {
                     *elem
                 } else {
-                    cold_path();
                     error_with_catch!(ErrType::UnknownMapKey(
                         r[key_reg_id].format(obj_pool, str_pool, map_pool, structs, false).as_str()
                     ));
@@ -965,23 +947,23 @@ pub fn execute(program: &mut Program) -> VmReturnType {
             Instr::CloneMap(src_reg, dest_reg) => {
                 let new_id = gc.alloc_map(obj_pool, map_pool, str_pool, stack.roots(r));
                 let ptr = map_pool.as_mut_ptr();
-                unsafe { (*ptr.add(new_id as usize)).clone_from(&*ptr.add(r[src_reg].as_map())) };
+                (*ptr.add(new_id as usize)).clone_from(&*ptr.add(r[src_reg].as_map()));
                 r[dest_reg] = Data::map(new_id);
             }
             Instr::MapRemove { map_reg_id, key_reg_id, dest_reg_id } => {
                 r[dest_reg_id] =
                     Data::bool(map_pool[r[map_reg_id].as_map()].remove(&r[key_reg_id]).is_some());
             }
-            Instr::CallLibFunc(LibFunc::Uppercase, source_string_reg_id, dest_reg_id) => {
+            Instr::Uppercase(source_string_reg_id, dest_reg_id) => {
                 r[dest_reg_id] = string!(r[source_string_reg_id].as_str(str_pool).to_uppercase());
             }
-            Instr::CallLibFunc(LibFunc::Lowercase, source_string_reg_id, dest_reg_id) => {
+            Instr::Lowercase(source_string_reg_id, dest_reg_id) => {
                 r[dest_reg_id] = string!(r[source_string_reg_id].as_str(str_pool).to_lowercase());
             }
-            Instr::CallLibFunc(LibFunc::Contains, tgt, dest) => {
-                let collection = r[tgt];
-                let arg = r[args.pop_unchecked()];
-                r[dest] = Data::bool(if collection.is_string() {
+            Instr::Contains { src, needle, dst } => {
+                let collection = r[src];
+                let arg = r[needle];
+                r[dst] = Data::bool(if collection.is_string() {
                     memmem::find(
                         collection.as_str(str_pool).as_bytes(),
                         arg.as_str(str_pool).as_bytes(),
@@ -992,19 +974,17 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     obj_pool[collection.as_array()].contains(&arg)
                 });
             }
-            Instr::CallLibFunc(LibFunc::Trim, tgt, dest) => {
+            Instr::Trim(tgt, dest) => {
                 r[dest] = string!(r[tgt].as_str(str_pool).trim());
             }
-            Instr::CallLibFunc(LibFunc::TrimSequence, tgt, dest) => {
-                let temp_arg = r[args.pop_unchecked()];
-                let arg = temp_arg.as_str(str_pool);
-                let chars: Vec<char> = arg.chars().collect();
-                r[dest] = string!(r[tgt].as_str(str_pool).trim_matches(&chars[..]));
+            Instr::TrimSequence { src, seq, dst } => {
+                let arg = r[seq].as_str(str_pool);
+                r[dst] = string!(r[src].as_str(str_pool).trim_matches(|c| arg.contains(c)));
             }
-            Instr::CallLibFunc(LibFunc::Find, tgt, dest) => {
-                let collection = r[tgt];
-                let element = r[args.pop_unchecked()];
-                r[dest] = {
+            Instr::Find { src, needle, dst } => {
+                let collection = r[src];
+                let element = r[needle];
+                r[dst] = {
                     if let Some(idx) = if collection.is_string() {
                         memmem::find(
                             collection.as_str(str_pool).as_bytes(),
@@ -1020,32 +1000,31 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     }
                 }
             }
-            Instr::CallLibFunc(LibFunc::IsFloat, tgt, dest) => {
-                let temp_tgt = r[tgt];
-                let num = temp_tgt.as_str(str_pool);
+            Instr::IsFloat(tgt, dest) => {
+                let num = r[tgt].as_str(str_pool);
                 r[dest] = (num.parse::<i64>().is_err() && num.parse::<f64>().is_ok()).into();
             }
-            Instr::CallLibFunc(LibFunc::IsInt, tgt, dest) => {
+            Instr::IsInt(tgt, dest) => {
                 r[dest] = r[tgt].as_str(str_pool).parse::<i64>().is_ok().into();
             }
-            Instr::CallLibFunc(LibFunc::TrimLeft, tgt, dest) => {
+            Instr::TrimLeft(tgt, dest) => {
                 r[dest] = string!(r[tgt].as_str(str_pool).trim_start());
             }
-            Instr::CallLibFunc(LibFunc::TrimRight, tgt, dest) => {
+            Instr::TrimRight(tgt, dest) => {
                 r[dest] = string!(r[tgt].as_str(str_pool).trim_end());
             }
-            Instr::CallLibFunc(LibFunc::TrimSequenceLeft, tgt, dest) => {
-                let chars: Vec<char> = r[args.pop_unchecked()].as_str(str_pool).chars().collect();
-                r[dest] = string!(r[tgt].as_str(str_pool).trim_start_matches(&chars[..]));
+            Instr::TrimSequenceLeft { src, seq, dst } => {
+                let arg = r[seq].as_str(str_pool);
+                r[dst] = string!(r[src].as_str(str_pool).trim_start_matches(|c| arg.contains(c)));
             }
-            Instr::CallLibFunc(LibFunc::TrimSequenceRight, tgt, dest) => {
-                let chars: Vec<char> = r[args.pop_unchecked()].as_str(str_pool).chars().collect();
-                r[dest] = string!(r[tgt].as_str(str_pool).trim_end_matches(&chars[..]));
+            Instr::TrimSequenceRight { src, seq, dst } => {
+                let arg = r[seq].as_str(str_pool);
+                r[dst] = string!(r[src].as_str(str_pool).trim_end_matches(|c| arg.contains(c)));
             }
-            Instr::CallLibFunc(LibFunc::Repeat, tgt, dest) => {
-                let reg = r[tgt];
-                let repeat_count = r[args.pop_unchecked()].as_int().max(0) as usize;
-                r[dest] = if reg.is_string() {
+            Instr::Repeat { src, count, dst } => {
+                let reg = r[src];
+                let repeat_count = r[count].as_int().max(0) as usize;
+                r[dst] = if reg.is_string() {
                     string!(reg.as_str(str_pool).repeat(repeat_count))
                 } else {
                     let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r));
@@ -1053,10 +1032,10 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     Data::array(array_id)
                 };
             }
-            Instr::CallLibFunc(LibFunc::Round, tgt, dest) => {
+            Instr::Round(tgt, dest) => {
                 r[dest] = r[tgt].as_float().round().into();
             }
-            Instr::CallLibFunc(LibFunc::Abs, tgt, dest) => {
+            Instr::Abs(tgt, dest) => {
                 let tgt = r[tgt];
                 r[dest] = if tgt.is_float() {
                     tgt.as_float().abs().into()
@@ -1064,16 +1043,16 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     Data::int(tgt.as_int().abs())
                 }
             }
-            Instr::CallLibFunc(LibFunc::Reverse, tgt, dest) => {
+            Instr::ReverseString(tgt, dest) => {
                 r[dest] = string!(r[tgt].as_str(str_pool).chars().rev().collect::<String>());
             }
-            Instr::CallLibFuncVoid(LibFuncVoid::Reverse, tgt, _) => {
-                obj_pool[r[tgt].as_array()].reverse();
+            Instr::ReverseArray(src) => {
+                obj_pool[r[src].as_array()].reverse();
             }
-            Instr::CallLibFunc(LibFunc::SqrtFloat, tgt, dest) => {
+            Instr::SqrtFloat(tgt, dest) => {
                 r[dest] = r[tgt].as_float().sqrt().into();
             }
-            Instr::CallLibFunc(LibFunc::Float, tgt, dest) => {
+            Instr::Float(tgt, dest) => {
                 let reg = r[tgt];
                 r[dest] = Data::float(if reg.is_int() {
                     f64::from(reg.as_int())
@@ -1083,7 +1062,7 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     error_with_catch!(ErrType::InvalidFloat);
                 });
             }
-            Instr::CallLibFunc(LibFunc::Int, tgt, dest) => {
+            Instr::Int(tgt, dest) => {
                 let reg = r[tgt];
                 r[dest] = Data::int(if reg.is_float() {
                     reg.as_float() as i32
@@ -1093,12 +1072,12 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     error_with_catch!(ErrType::InvalidInt);
                 });
             }
-            Instr::CallLibFunc(LibFunc::Str, tgt, dest) => {
+            Instr::Str(tgt, dest) => {
                 let value = r[tgt];
                 r[dest] = if value.is_int() {
                     let mut buffer = [0u8; i32::FORMATTED_SIZE_DECIMAL];
                     let digits = lexical_core::write(value.as_int(), &mut buffer);
-                    string!(unsafe { str::from_utf8_unchecked(digits) })
+                    string!(str::from_utf8_unchecked(digits))
                 } else if value.is_float() {
                     string!(zmij::Buffer::new().format(value.as_float()))
                 } else if value.is_bool() {
@@ -1107,42 +1086,39 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     string!(value.format(obj_pool, str_pool, map_pool, structs, false))
                 };
             }
-            Instr::CallLibFunc(LibFunc::Bool, tgt, dest) => {
+            Instr::Bool(tgt, dest) => {
                 let str = r[tgt].as_str(str_pool);
                 r[dest] = if str == "true" {
                     TRUE
                 } else if str == "false" {
                     FALSE
                 } else {
-                    cold_path();
                     error_with_catch!(ErrType::InvalidBool);
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            Instr::CallLibFunc(LibFunc::Input, _, _) => wasm_error("WASM does not support input()"),
+            Instr::Input(_, _) => wasm_error("WASM does not support input()"),
             #[cfg(not(target_arch = "wasm32"))]
-            Instr::CallLibFunc(LibFunc::Input, tgt, dest) => {
-                let temp_tgt = r[tgt];
-                let str_msg = temp_tgt.as_str(str_pool);
-                handle.write_all(str_msg.as_bytes()).unwrap();
+            Instr::Input(tgt, dest) => {
+                handle.write_all(r[tgt].as_str(str_pool).as_bytes()).unwrap();
                 handle.flush().unwrap();
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line).unwrap();
                 r[dest] = string!(line.trim_end_matches(['\n', '\r']));
             }
-            Instr::CallLibFunc(LibFunc::Floor, tgt, dest) => {
+            Instr::Floor(tgt, dest) => {
                 r[dest] = r[tgt].as_float().floor().into();
             }
             #[allow(unused_must_use)]
-            Instr::CallLibFunc(LibFunc::TheAnswer, _, dest) => {
+            Instr::TheAnswer(dst) => {
                 cold_path();
                 writeln!(
                     handle,
                     "The answer to the Ultimate Question of Life, the Universe, and Everything is 42."
                 );
-                r[dest] = Data::int(42);
+                r[dst] = Data::int(42);
             }
-            Instr::CallLibFunc(LibFunc::Len, tgt, dest) => {
+            Instr::Len(tgt, dest) => {
                 let reg = r[tgt];
                 r[dest] = Data::int(if reg.is_array() {
                     obj_pool[reg.as_array()].len()
@@ -1153,28 +1129,23 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     map_pool[reg.as_map()].len()
                 } as i32);
             }
-            Instr::CallLibFunc(LibFunc::StartsWith, source_register, dest_register) => {
-                r[dest_register] = r[source_register]
-                    .as_str(str_pool)
-                    .starts_with(r[args.pop_unchecked()].as_str(str_pool))
-                    .into();
+            Instr::StartsWith { src, prefix, dst } => {
+                r[dst] = r[src].as_str(str_pool).starts_with(r[prefix].as_str(str_pool)).into();
             }
-            Instr::CallLibFunc(LibFunc::EndsWith, source_register, dest_register) => {
-                r[dest_register] = r[source_register]
-                    .as_str(str_pool)
-                    .ends_with(r[args.pop_unchecked()].as_str(str_pool))
-                    .into();
+            Instr::EndsWith { src, suffix, dst } => {
+                r[dst] = r[src].as_str(str_pool).ends_with(r[suffix].as_str(str_pool)).into();
             }
             #[allow(clippy::no_effect_replace)]
-            Instr::CallLibFunc(LibFunc::Replace, source_register, dest_register) => {
-                r[dest_register] = string!(r[source_register].as_str(str_pool).replace(
-                    r[args.pop_unchecked()].as_str(str_pool),
-                    r[args.pop_unchecked()].as_str(str_pool),
-                ));
+            Instr::Replace(src, old, dst) => {
+                r[dst] = string!(
+                    r[src]
+                        .as_str(str_pool)
+                        .replace(r[old].as_str(str_pool), r[old + 1].as_str(str_pool))
+                );
             }
-            Instr::CallLibFunc(LibFunc::Split, source_register, dest_register) => {
-                let source = r[source_register];
-                let separator = r[args.pop_unchecked()];
+            Instr::Split { src, sep, dst } => {
+                let source = r[src];
+                let separator = r[sep];
                 let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r));
                 gc.pin(Data::array(array_id));
                 let mut start_idx = 0;
@@ -1184,49 +1155,40 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     obj_pool[array_id as usize].reserve(source.len() / 4);
                     let separator_len = separator.len();
                     for part_i in memmem::find_iter(source.as_bytes(), separator.as_bytes()) {
-                        let part = string!(unsafe { source.get_unchecked(start_idx..part_i) });
+                        let part = string!(source.get_unchecked(start_idx..part_i));
                         obj_pool[array_id as usize].push(part);
                         start_idx = part_i + separator_len;
                     }
-                    let part = string!(unsafe { source.get_unchecked(start_idx..) });
+                    let part = string!(source.get_unchecked(start_idx..));
                     obj_pool[array_id as usize].push(part);
                 } else {
                     // it can only be an array in this case
                     let source_array_id = source.as_array();
-                    let source_array = &obj_pool[source_array_id];
+                    let len = obj_pool[source_array_id].len();
 
-                    let mut split_ranges: Vec<(usize, usize)> =
-                        Vec::with_capacity(source_array.len());
-
-                    for (idx, item) in source_array.iter().enumerate() {
-                        if *item == separator {
-                            split_ranges.push((start_idx, idx));
+                    for idx in 0..=len {
+                        if idx == len || obj_pool[source_array_id][idx] == separator {
+                            let dest_array_id =
+                                gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r))
+                                    as usize;
+                            obj_pool.extend_within(source_array_id, dest_array_id, start_idx, idx);
+                            obj_pool[array_id as usize].push(Data::array(dest_array_id as u32));
                             start_idx = idx + 1;
                         }
                     }
-                    split_ranges.push((start_idx, source_array.len()));
-
-                    // alloc one array per range
-                    for (start, end) in split_ranges {
-                        let dest_array_id =
-                            gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r)) as usize;
-                        obj_pool.extend_within(source_array_id, dest_array_id, start, end);
-                        obj_pool[array_id as usize].push(Data::array(dest_array_id as u32));
-                    }
                 }
                 gc.unpin();
-                r[dest_register] = Data::array(array_id);
+                r[dst] = Data::array(array_id);
             }
-            Instr::CallLibFunc(LibFunc::Range, max, dest) => {
-                let min = args.pop().map_or(0, |reg_id| r[reg_id].as_int());
+            Instr::Range(min, max, dest) => {
+                let min = r[min].as_int();
                 let max = r[max].as_int();
                 let output_array_id = gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r));
                 obj_pool[output_array_id as usize].extend((min..max).map(Data::int));
                 r[dest] = Data::array(output_array_id);
             }
-            Instr::CallLibFunc(LibFunc::JoinStringArray, tgt, dest) => {
-                let temp_separator: Option<Data> = args.pop().map(|arg| r[arg]);
-                let separator = temp_separator.as_ref().map_or("", |d| d.as_str(str_pool));
+            Instr::JoinStringArray(tgt, sep, dest) => {
+                let separator = r[sep].as_str(str_pool);
                 let array = &obj_pool[r[tgt].as_array()];
                 let total_len: usize =
                     array.iter().map(|x| x.as_str(str_pool).len()).sum::<usize>()
@@ -1243,16 +1205,15 @@ pub fn execute(program: &mut Program) -> VmReturnType {
             // -----
             // FILE SYSTEM FUNCTIONS
             // -----
-            Instr::CallLibFunc(LibFunc::FsRead, path, dest_reg_id) => {
+            Instr::FsRead(path, dest_reg_id) => {
                 r[dest_reg_id] = string!(match fs::read_to_string(r[path].as_str(str_pool)) {
                     Ok(p) => p,
                     Err(e) => {
-                        cold_path();
                         error_with_catch!(ErrType::from(e.kind()));
                     }
                 });
             }
-            Instr::CallLibFunc(LibFunc::FsExists, path, dest_reg_id) => {
+            Instr::FsExists(path, dest_reg_id) => {
                 r[dest_reg_id] = match fs::exists(r[path].as_str(str_pool)) {
                     Ok(b) => b.into(),
                     Err(e) => {
@@ -1261,13 +1222,13 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 }
             }
             // Overwrites a file, will create it if it doesn't exist
-            Instr::CallLibFuncVoid(LibFuncVoid::FsWrite, path, contents) => {
+            Instr::FsWrite(path, contents) => {
                 if let Err(e) = fs::write(r[path].as_str(str_pool), r[contents].as_str(str_pool)) {
                     error_with_catch!(ErrType::from(e.kind()));
                 }
             }
             // Appends to a file, will create if it doesn't exist
-            Instr::CallLibFuncVoid(LibFuncVoid::FsAppend, path, contents) => {
+            Instr::FsAppend(path, contents) => {
                 match fs::OpenOptions::new().append(true).open(r[path].as_str(str_pool)) {
                     Ok(mut f) => {
                         if let Err(e) = f.write_all(r[contents].as_str(str_pool).as_bytes()) {
@@ -1280,23 +1241,23 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 }
             }
             // Deletes the file located at `path`, throwing an error if it doesn't exist.
-            Instr::CallLibFuncVoid(LibFuncVoid::FsDelete, path, _) => {
+            Instr::FsDelete(path) => {
                 if let Err(e) = fs::remove_file(r[path].as_str(str_pool)) {
                     error_with_catch!(ErrType::from(e.kind()));
                 }
             }
             // Deletes the empty directory located at `path`
-            Instr::CallLibFuncVoid(LibFuncVoid::FsDeleteDir, path, _) => {
+            Instr::FsDeleteDir(path) => {
                 if let Err(e) = fs::remove_dir(r[path].as_str(str_pool)) {
                     error_with_catch!(ErrType::from(e.kind()));
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
-                r[dest] = Data::array(gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r)))
+            Instr::Argv(dst) => {
+                r[dst] = Data::array(gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r)))
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Instr::CallLibFunc(LibFunc::Argv, _, dest) => {
+            Instr::Argv(dst) => {
                 let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r));
                 gc.pin(Data::array(array_id));
                 for arg in std::env::args().skip(1) {
@@ -1304,13 +1265,13 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     obj_pool[array_id as usize].push(arg_str);
                 }
                 gc.unpin();
-                r[dest] = Data::array(array_id);
+                r[dst] = Data::array(array_id);
             }
-            Instr::CallLibFuncVoid(LibFuncVoid::Sort, tgt, _) => {
-                let array = &mut obj_pool[r[tgt].as_array()];
+            Instr::Sort(src) => {
+                let array = &mut obj_pool[r[src].as_array()];
                 if !array.is_empty() {
                     'sort: {
-                        let first_elem = unsafe { array.get_unchecked(0) };
+                        let first_elem = array.get_unchecked(0);
                         let t: u8 = if first_elem.is_int() {
                             0
                         } else if first_elem.is_float() {
@@ -1336,13 +1297,12 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                 error_handles.push(ErrorCatch {
                     catch_loc: i as u32 + u32::from(jmp_size),
                     frame_ptr: r.0,
-                    args_len: args.len() as u16,
                     error_reg: err_reg_id,
                 });
             }
-            Instr::StopErrorCatch => unsafe {
+            Instr::StopErrorCatch => {
                 error_handles.pop_unchecked();
-            },
+            }
             Instr::ThrowError(error_reg_id) => {
                 let error_data = r[error_reg_id];
                 error_with_catch!(ErrType::Custom(error_data.as_str(str_pool)));
@@ -1350,18 +1310,18 @@ pub fn execute(program: &mut Program) -> VmReturnType {
             Instr::IsNotTypeJmp { src_reg_id, type_idx, jump_size } => {
                 if !data_matches_datatype(
                     r[src_reg_id],
-                    unsafe { types.get_unchecked(type_idx as usize) },
+                    types.get_unchecked(type_idx as usize),
                     obj_pool,
                     map_pool,
                 ) {
                     i = jump(i, jump_size);
-                    continue;
+                    become execute_at(i, r, instr, ctx);
                 }
             }
             Instr::IsType(src, type_idx, dest) => {
                 r[dest] = data_matches_datatype(
                     r[src],
-                    unsafe { types.get_unchecked(type_idx as usize) },
+                    types.get_unchecked(type_idx as usize),
                     obj_pool,
                     map_pool,
                 )
@@ -1377,13 +1337,9 @@ pub fn execute(program: &mut Program) -> VmReturnType {
                     std::process::exit(r[code].as_int());
                 }
 
-                break;
+                return;
             }
         }
-        i += 1;
-    }
-    #[cfg(test)]
-    {
-        unsafe { core::slice::from_raw_parts(stack.ptr, initial_stack.len()) }.to_vec()
+        become execute_at(i + 1, r, instr, ctx);
     }
 }

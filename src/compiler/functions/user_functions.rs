@@ -4,6 +4,7 @@ use super::super::type_system::c_arg_matches;
 use super::check_user_fn_arg_types;
 use crate::compiler::UnwrapId;
 use crate::compiler::compile_expr;
+use crate::compiler::compile_reg_window;
 use crate::compiler::compiler_data::CodeUnit;
 use crate::compiler::compiler_data::CodeUnitRegisters;
 use crate::compiler::compiler_data::Ctx;
@@ -117,25 +118,12 @@ pub fn handle_user_function<'arena>(
             }
         }
 
-        state.add_arg_hint(args.len());
-        for arg in args.iter().take(args.len().saturating_sub(1)) {
-            let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
-            output.push(Instr::StoreFuncArg(arg_id));
-            state.free_reg(arg_id);
-        }
-        let last_arg_reg_id = if let Some(arg) = args.last() {
-            let arg_id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
-            state.free_reg(arg_id);
-            arg_id
-        } else {
-            u16::MAX
-        };
-
+        let first_arg = compile_reg_window(args.iter(), ctx, state, output);
         let dest_reg_id =
             if returns_null { state.alloc_reg() } else { state.alloc_reg_tgt(tgt_id) };
-        output.push(Instr::CallDynamicLibFunc { fn_id: dyn_id, dest_reg_id, last_arg_reg_id });
+        output.push(Instr::CallDynamicLibFunc { fn_id: dyn_id, dst: dest_reg_id, first_arg });
         state.add_to_src(ctx, output, span);
-        state.sub_arg_hint(args.len());
+        state.free_reg_window(first_arg, args.len() as u16);
         return Some(dest_reg_id);
     }
 
@@ -257,7 +245,7 @@ pub fn compile_function<'arena>(
     }
     let len = instructions.len() as u32;
     instructions.extend(parsed);
-    instructions.push(Instr::VoidReturn);
+    instructions.push(Instr::Return(0));
     relocate_registers(&mut instructions[len as usize..], fixed_count, permanent_count);
 
     let code_unit = &mut state.code_units[unit as usize];

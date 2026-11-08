@@ -16,7 +16,7 @@ jobs:
         features: ["", "--features embed"]
     steps:
       - uses: actions/checkout@v6
-      - run: rustup update stable && rustup default stable
+      - run: rustup toolchain install
       - run: cargo build --verbose ${{ matrix.features }}
       - run: cargo test --verbose ${{ matrix.features }}
   build_and_test_wasm:
@@ -24,5 +24,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: rustup update stable && rustup default stable && rustup target add wasm32-unknown-unknown
+      - run: rustup toolchain install && rustup target add wasm32-unknown-unknown
       - run: cargo build --verbose --target wasm32-unknown-unknown

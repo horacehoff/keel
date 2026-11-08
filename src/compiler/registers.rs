@@ -1,6 +1,6 @@
 use crate::data::Data;
 use crate::instr::Instr;
-use crate::instr::LibFuncVoid;
+use crate::lib_func;
 use core::hint::unreachable_unchecked;
 
 pub fn move_value_to(output: &mut Vec<Instr>, src_instr_idx: usize, value_idx: u16, tgt_idx: u16) {
@@ -60,13 +60,27 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::BoolOr(_, _, id)
         | Instr::AddIntImm { dst: id, .. }
         | Instr::EmptyArray(id)
-        | Instr::CallLibFunc(_, _, id)
+        | lib_func!(_, id)
+        | Instr::Argv(id)
+        | Instr::TheAnswer(id)
+        | Instr::Contains { dst: id, .. }
+        | Instr::TrimSequence { dst: id, .. }
+        | Instr::Find { dst: id, .. }
+        | Instr::TrimSequenceLeft { dst: id, .. }
+        | Instr::TrimSequenceRight { dst: id, .. }
+        | Instr::Repeat { dst: id, .. }
+        | Instr::StartsWith { dst: id, .. }
+        | Instr::EndsWith { dst: id, .. }
+        | Instr::Split { dst: id, .. }
         | Instr::GetIndexArray(_, _, id)
         | Instr::GetFieldStruct(_, _, id)
         | Instr::GetSliceArray(_, _, id)
         | Instr::GetIndexString(_, _, id)
         | Instr::GetSliceString(_, _, id)
-        | Instr::CallDynamicLibFunc { dest_reg_id: id, .. }
+        | Instr::Replace(_, _, id)
+        | Instr::Range(_, _, id)
+        | Instr::JoinStringArray(_, _, id)
+        | Instr::CallDynamicLibFunc { dst: id, .. }
         | Instr::LoadGlobal { dest_reg: id, .. }
         | Instr::MapGet(_, _, id)
         | Instr::IsType(_, _, id)
@@ -102,17 +116,20 @@ impl Instr {
             | Self::SupEqIntImmJmp(..)
             | Self::InfIntImmJmp(..)
             | Self::IncIntInfJmp {..}
-            | Self::StoreFuncArg(_)
             | Self::SetElementObj(_, _, _)
             | Self::SetFieldObj(_, _, _)
             | Self::MapInsertReg(_, _, _)
             | Self::Push(_, _)
             | Self::Return(_) // Modifies a register, but this function doesn't know which one
-            | Self::VoidReturn
             | Self::StoreGlobal { .. }
             | Self::CopyConstants { .. }
             | Self::Remove(_, _)
-            | Self::CallLibFuncVoid(_, _, _)
+            | Self::ReverseArray(_)
+            | Self::FsWrite(_, _)
+            | Self::FsAppend(_, _)
+            | Self::FsDelete(_)
+            | Self::FsDeleteDir(_)
+            | Self::Sort(_)
             | Self::Halt(_)
             | Self::StopErrorCatch
             | Self::ThrowError(_)
@@ -150,7 +167,18 @@ impl Instr {
             | Self::BoolAnd(_, _, y)
             | Self::BoolOr(_, _, y)
             | Self::EmptyArray(y)
-            | Self::CallLibFunc(_, _, y)
+            | lib_func!(_, y)
+            | Self::Argv(y)
+            | Self::TheAnswer(y)
+            | Self::Contains { dst: y, .. }
+            | Self::TrimSequence { dst: y, .. }
+            | Self::Find { dst: y, .. }
+            | Self::TrimSequenceLeft { dst: y, .. }
+            | Self::TrimSequenceRight { dst: y, .. }
+            | Self::Repeat { dst: y, .. }
+            | Self::StartsWith { dst: y, .. }
+            | Self::EndsWith { dst: y, .. }
+            | Self::Split { dst: y, .. }
             | Self::IsType(_, _, y)
             | Self::GetIndexArray(_, _, y)
             | Self::GetFieldStruct(_, _, y)
@@ -160,7 +188,10 @@ impl Instr {
             | Self::GetIndexString(_, _, y)
             | Self::GetSliceString(_, _, y)
             | Self::SetElementString(y, _, _)
-            | Self::CallDynamicLibFunc {dest_reg_id: y,..}
+            | Self::Replace(_, _, y)
+            | Self::Range(_, _, y)
+            | Self::JoinStringArray(_, _, y)
+            | Self::CallDynamicLibFunc {dst: y,..}
             | Self::StartErrorCatch(_,y)
             | Self::CloneMap(_, y)
             | Self::CloneObj(_, y, _) => Some(y),
@@ -188,7 +219,9 @@ impl Instr {
             | Self::Remove(a, b)
             | Self::CloneMap(a, b)
             | Self::IsType(a, _, b)
-            | Self::CallLibFunc(_, a, b) => {
+            | lib_func!(a, b)
+            | Self::FsWrite(a, b)
+            | Self::FsAppend(a, b) => {
                 f(a);
                 f(b);
             }
@@ -222,13 +255,28 @@ impl Instr {
             | Self::GetIndexString(a, b, c)
             | Self::GetSliceArray(a, b, c)
             | Self::GetSliceString(a, b, c)
+            | Self::Replace(a, b, c)
+            | Self::Range(a, b, c)
+            | Self::JoinStringArray(a, b, c)
             | Self::MapGet(a, b, c)
             | Self::MapInsertReg(a, b, c)
-            | Self::MapRemove { map_reg_id: a, key_reg_id: b, dest_reg_id: c } => {
+            | Self::MapRemove { map_reg_id: a, key_reg_id: b, dest_reg_id: c }
+            | Self::Contains { src: a, needle: b, dst: c }
+            | Self::Find { src: a, needle: b, dst: c }
+            | Self::TrimSequence { src: a, seq: b, dst: c }
+            | Self::TrimSequenceLeft { src: a, seq: b, dst: c }
+            | Self::TrimSequenceRight { src: a, seq: b, dst: c }
+            | Self::Repeat { src: a, count: b, dst: c }
+            | Self::StartsWith { src: a, prefix: b, dst: c }
+            | Self::EndsWith { src: a, suffix: b, dst: c }
+            | Self::Split { src: a, sep: b, dst: c } => {
                 f(a);
                 f(b);
                 f(c);
             }
+
+            Self::Return(a) if *a == 0 => {}
+
             Self::Print(a)
             | Self::SetInt(a, _)
             | Self::CallFunc { frame_offset: a, .. }
@@ -236,7 +284,8 @@ impl Instr {
             | Self::LoadGlobal { dest_reg: a, .. }
             | Self::StoreGlobal { src_reg: a, .. }
             | Self::CopyConstants { dst: a, .. }
-            | Self::StoreFuncArg(a)
+            | Self::Argv(a)
+            | Self::TheAnswer(a)
             | Self::ThrowError(a)
             | Self::EmptyArray(a)
             | Self::EqIntImmJmp(a, _, _)
@@ -244,24 +293,19 @@ impl Instr {
             | Self::InfIntImmJmp(a, _, _)
             | Self::SupEqIntImmJmp(a, _, _)
             | Self::IsNotTypeJmp { src_reg_id: a, .. } => f(a),
-            Self::CallDynamicLibFunc { dest_reg_id, last_arg_reg_id, .. } => {
-                f(dest_reg_id);
-                if *last_arg_reg_id != u16::MAX {
-                    f(last_arg_reg_id);
-                }
+            Self::CallDynamicLibFunc { dst, first_arg, .. } => {
+                f(dst);
+                f(first_arg);
             }
-            Self::CallLibFuncVoid(func, a, b) => {
+            Self::ReverseArray(a) | Self::FsDelete(a) | Self::FsDeleteDir(a) | Self::Sort(a) => {
                 f(a);
-                if matches!(func, LibFuncVoid::FsWrite | LibFuncVoid::FsAppend) {
-                    f(b);
-                }
             }
             Self::StartErrorCatch(_, a) | Self::Halt(a) => {
                 if *a != u16::MAX {
                     f(a);
                 }
             }
-            Self::Jmp(_) | Self::VoidReturn | Self::StopErrorCatch => {}
+            Self::Jmp(_) | Self::StopErrorCatch => {}
         }
     }
 }

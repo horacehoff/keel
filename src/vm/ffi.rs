@@ -46,7 +46,10 @@ pub fn array_to_c_ptr(
     keep_alive: &mut Vec<Box<[u8]>>,
 ) -> usize {
     let elems = &obj_pool[data.as_array()];
-    let first_array_element = unsafe { elems.get_unchecked(0) };
+    // Returns a null pointer if the array is empty
+    let Some(first_array_element) = elems.first() else {
+        return 0;
+    };
     if first_array_element.is_int() {
         // C expects [u8; 4] for ints
         let mut bytes = Box::new_uninit_slice(elems.len() * 4);

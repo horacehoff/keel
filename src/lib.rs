@@ -1,3 +1,6 @@
+#![feature(explicit_tail_calls)]
+#![allow(incomplete_features)]
+
 use crate::compiler::compile;
 use crate::errors::BOLD;
 use crate::errors::ERROR_PREFIX;

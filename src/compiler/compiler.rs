@@ -36,6 +36,7 @@ use crate::compiler::patterns::compile_match_block;
 use crate::compiler::registers::move_value_to;
 use crate::compiler::registers::relocate_register;
 use crate::compiler::registers::relocate_registers;
+use crate::compiler::registers::to_nested_operand;
 use crate::compiler::type_system::var_type_is_compatible;
 use crate::data::FALSE;
 use crate::data::NULL;
@@ -166,6 +167,155 @@ fn compile_int_imm_false_jump<'arena>(
     } else {
         false
     }
+}
+
+enum StrRegUse {
+    // safe to append in place!
+    AppendInPlace,
+    // aliases or escapes the reg => can't rewrite in-place
+    Unsafe,
+    Neutral,
+}
+
+fn compile_str_concat_chain<'arena>(
+    l: &'arena Expr,
+    r: &'arena Expr,
+    tgt_id: Option<u16>,
+    ctx: Ctx,
+    state: &mut State<'arena, '_>,
+    output: &mut Vec<Instr>,
+) -> u16 {
+    let mut operands = vec![r];
+    let mut current_node = l;
+    while let Expr::Add(add_l, add_r, _, _) = current_node
+        && add_l.infer_type(ctx, state) == DataType::String
+        && add_r.infer_type(ctx, state) == DataType::String
+    {
+        operands.push(add_r);
+        current_node = add_l;
+    }
+    operands.push(current_node);
+    let ids: Vec<u16> = operands
+        .iter()
+        .rev()
+        .map(|e| e.compile(ctx, state, output, None, false, true).unwrap_id())
+        .collect();
+    // the first two elements are filtered out because they require an AddStr
+    let dst = tgt_id.filter(|t| !ids[2..].contains(t)).unwrap_or_else(|| state.alloc_reg());
+    output.push(Instr::AddStr(ids[0], ids[1], dst));
+    output.extend(ids[2..].iter().map(|&id| Instr::AddStrInPlace(dst, id)));
+    ids.iter().filter(|&&id| id != dst).for_each(|&id| state.free_reg(id));
+    if let Some(t) = tgt_id
+        && t != dst
+    {
+        output.push(Instr::Mov(dst, t));
+        state.free_reg(dst);
+        t
+    } else {
+        dst
+    }
+}
+
+fn categorize_str_reg_use(instr: Instr, reg: u16) -> StrRegUse {
+    let is_safe = match instr {
+        Instr::AddStr(o1, o2, dst) if o1 == reg && o2 != reg && dst == reg => {
+            return StrRegUse::AppendInPlace;
+        }
+        Instr::AddStr(..) | Instr::AddStrInPlace(..) | Instr::Return(_) => true,
+        Instr::Print(_)
+        | Instr::EqJmp(..)
+        | Instr::NotEqJmp(..)
+        | Instr::ObjEqJmp(..)
+        | Instr::ObjNotEqJmp(..)
+        | Instr::Len(..)
+        | Instr::Eq(..)
+        | Instr::NotEq(..)
+        | Instr::ObjEq(..)
+        | Instr::ObjNotEq(..)
+        | Instr::GetIndexString(..)
+        | Instr::Contains { .. }
+        | Instr::Find { .. }
+        | Instr::StartsWith { .. }
+        | Instr::EndsWith { .. } => instr.get_tgt_id() != Some(reg),
+        Instr::Mov(src, dst) => src == dst || dst == reg,
+        _ => false,
+    };
+    if is_safe || !instr.uses_reg(reg) { StrRegUse::Neutral } else { StrRegUse::Unsafe }
+}
+
+#[inline]
+fn is_eligible_for_in_place_append(code: &[Instr], reg: u16) -> bool {
+    let mut can_append = false;
+    for &instr in code {
+        match categorize_str_reg_use(instr, reg) {
+            StrRegUse::Unsafe => return false,
+            StrRegUse::AppendInPlace => can_append = true,
+            StrRegUse::Neutral => {}
+        }
+    }
+    can_append
+}
+
+fn rewrite_str_concats(code: &mut [Instr], regs: &[u16], state: &mut State<'_, '_>) -> u16 {
+    let empty_str = Data::comp_str("", &mut state.pools.str_pool);
+    let empty_str_reg = state.new_const_reg(empty_str);
+    for instr in code {
+        *instr = match *instr {
+            Instr::AddStr(o1, o2, dst)
+                if o1 == dst && o2 == empty_str_reg && regs.contains(&dst) =>
+            {
+                Instr::Mov(dst, dst)
+            }
+            Instr::AddStr(o1, o2, dst) if o1 == dst && o2 != dst && regs.contains(&dst) => {
+                Instr::AddStrInPlace(dst, o2)
+            }
+            Instr::Mov(src, dst)
+                if src != dst
+                    && regs.contains(&dst)
+                    && (!state.is_register_const(src)
+                        || state.register_value(src).is_large_str()) =>
+            {
+                Instr::AddStr(src, empty_str_reg, dst)
+            }
+            i => i,
+        };
+    }
+    empty_str_reg
+}
+
+fn apply_loop_in_place_str_appends(
+    loop_start: usize,
+    ctx: Ctx,
+    state: &mut State<'_, '_>,
+    output: &mut Vec<Instr>,
+) {
+    let body = &output[loop_start..];
+    let globals: &[Variable] = if ctx.in_function
+        || body
+            .iter()
+            .any(|i| matches!(i, Instr::CallFunc { .. } | Instr::CallDynamicLibFunc { .. }))
+    {
+        &[]
+    } else {
+        state.globals
+    };
+    let regs: Vec<u16> = state
+        .v
+        .iter()
+        .chain(globals)
+        .filter(|v| v.declared_type == DataType::String)
+        .map(|v| v.register_id)
+        .filter(|&reg| is_eligible_for_in_place_append(body, reg))
+        .collect();
+    if regs.is_empty() {
+        return;
+    }
+    let empty_str_reg = rewrite_str_concats(&mut output[loop_start..], &regs, state);
+    output.splice(
+        loop_start..loop_start,
+        regs.iter().map(|&reg| Instr::AddStr(reg, empty_str_reg, reg)),
+    );
+    state.shift_instr_src(ctx, ctx.offset + loop_start as u32, regs.len() as u32);
 }
 
 /// Fuses the last comparison instruction into a jump instruction (jumps when condition is true)
@@ -672,6 +822,7 @@ fn compile_array_indexing<'arena>(
     }
 
     let id = array.compile(ctx, state, output, None, false, true).unwrap_id();
+    let len_after_array = output.len();
 
     let index_inferred = index.infer_type(ctx, state);
     if index_inferred != DataType::Int {
@@ -681,12 +832,26 @@ fn compile_array_indexing<'arena>(
     state.free_reg(index_id);
     let dest_reg_id = state.alloc_reg();
 
-    let to_push = if inferred == DataType::String {
-        Instr::GetIndexString(id, index_id, dest_reg_id)
+    // Fuses two ArrayGetIndex into a single ArrayNestedGet
+    if inferred != DataType::String
+        && matches!(array, Expr::ArrayGetIndex(..))
+        && output.len() == len_after_array
+        && let Some(last) = output.last_mut()
+        && let Instr::GetIndexArray(outer_id, outer_index_id, inner_id) = *last
+        && inner_id == id
+        && let (Some(o1), Some(o2), Some(o3), Some(o4)) = (
+            to_nested_operand(outer_id),
+            to_nested_operand(outer_index_id),
+            to_nested_operand(index_id),
+            to_nested_operand(dest_reg_id),
+        )
+    {
+        *last = Instr::nested_index_array_instr((o1, o2, o3, o4));
+    } else if inferred == DataType::String {
+        output.push(Instr::GetIndexString(id, index_id, dest_reg_id));
     } else {
-        Instr::GetIndexArray(id, index_id, dest_reg_id)
-    };
-    output.push(to_push);
+        output.push(Instr::GetIndexArray(id, index_id, dest_reg_id));
+    }
     state.add_to_src(ctx, output, span);
     dest_reg_id
 }
@@ -852,6 +1017,9 @@ fn compile_add_op<'arena>(
         let id = state.alloc_reg_tgt(tgt_id);
         output.push(Instr::AddIntImm { src: src_id, dst: id, imm: imm as u16 });
         return id;
+    }
+    if t_l == DataType::String && matches!(l, Expr::Add(..)) {
+        return compile_str_concat_chain(l, r, tgt_id, ctx, state, output);
     }
     let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
     let id_r = r.compile(ctx, state, output, None, false, true).unwrap_id();
@@ -1931,7 +2099,9 @@ pub fn compile_expr<'arena>(
     let fn_len = state.functions.len();
     let symbols_len = state.scope(ctx.file_idx).symbols.len();
     let mut output: Vec<Instr> = Vec::with_capacity(input.len());
+    let mut str_regs = Vec::new();
     for (idx, x) in input.iter().enumerate() {
+        let v_len = state.v.len();
         if let Some(id) = x.compile_with_code_context(
             ctx,
             state,
@@ -1942,6 +2112,21 @@ pub fn compile_expr<'arena>(
             false,
         ) {
             state.free_reg(id);
+        }
+        if let Some(v) = state.v[v_len..].last()
+            && v.declared_type == DataType::String
+        {
+            let v_reg = v.register_id;
+            if matches!(output.last(), Some(&Instr::Mov(_, dst)) if dst == v_reg) {
+                str_regs.push((v_reg, output.len() - 1));
+            } else if ctx.single_run && !state.is_register_const(v_reg) {
+                str_regs.push((v_reg, output.len()));
+            }
+        }
+    }
+    for (reg, start) in str_regs {
+        if is_eligible_for_in_place_append(&output[start..], reg) {
+            rewrite_str_concats(&mut output[start..], &[reg], state);
         }
     }
     for var_idx in v_len..state.v.len() {
@@ -2183,22 +2368,30 @@ impl<'arena> Expr<'arena> {
             }
             Self::WhileBlock(condition, code) => {
                 debug_assert!(!uses_id);
+                let loop_start = output.len();
                 compile_while_loop(condition, code, ctx, state, output);
+                apply_loop_in_place_str_appends(loop_start, ctx, state, output);
                 None
             }
             Self::ForLoop(var_name, array, code, span) => {
                 debug_assert!(!uses_id);
+                let loop_start = output.len();
                 compile_for_loop(var_name, array, code, *span, ctx, state, output);
+                apply_loop_in_place_str_appends(loop_start, ctx, state, output);
                 None
             }
             Self::IntForLoop(int_for_loop) => {
                 debug_assert!(!uses_id);
+                let loop_start = output.len();
                 compile_int_for_loop(int_for_loop, ctx, state, output);
+                apply_loop_in_place_str_appends(loop_start, ctx, state, output);
                 None
             }
             Self::LoopBlock(code) => {
                 debug_assert!(!uses_id);
+                let loop_start = output.len();
                 compile_loop_block(code, ctx, state, output);
+                apply_loop_in_place_str_appends(loop_start, ctx, state, output);
                 None
             }
             Self::TryCatchBlock(e, err_var, catch_code) => {
@@ -2743,7 +2936,7 @@ fn resolve_types<'arena>(
 pub fn compile<'arena>(
     contents: &str,
     filename: &'arena str,
-    debug: bool,
+    #[allow(unused_variables)] debug: bool,
     bump: &'arena Bump,
 ) -> Program<'arena> {
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]

@@ -20,9 +20,10 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
     if x.is_empty()
         || matches!(
             x.last().unwrap(),
-            Instr::SetFieldObj(_, _, _)
-                | Instr::SetElementString(_, _, _)
-                | Instr::StartErrorCatch(_, _)
+            Instr::SetFieldObj(..)
+                | Instr::SetElementString(..)
+                | Instr::StartErrorCatch(..)
+                | Instr::AddStrInPlace(..)
         )
         || matches!(x.last().unwrap(), Instr::AddIntImm { src, dst, .. } if src==dst)
     {
@@ -87,6 +88,13 @@ pub fn move_to_id(x: &mut [Instr], tgt_id: u16) {
         | Instr::CloneObj(_, id, _)
         | Instr::MapRemove { dest_reg_id: id, .. }
         | Instr::CloneMap(_, id) => *id = tgt_id,
+        Instr::GetNestedIndexArray(o1, o2, o3) => {
+            if let Some(dest) = to_nested_operand(tgt_id) {
+                let mut regs = Instr::nested_index_registers(*o1, *o2, *o3);
+                regs.3 = dest;
+                *matching_elem = Instr::nested_index_array_instr(regs);
+            }
+        }
         Instr::CallFunc { .. } => {}
         _ => unsafe { unreachable_unchecked() },
     }
@@ -146,6 +154,7 @@ impl Instr {
             | Self::AddInt(_, _, y)
             | Self::AddArray(_, _, y)
             | Self::AddStr(_, _, y)
+            | Self::AddStrInPlace(y, _)
             | Self::MulFloat(_, _, y)
             | Self::MulInt(_, _, y)
             | Self::SubFloat(_, _, y)
@@ -195,6 +204,9 @@ impl Instr {
             | Self::StartErrorCatch(_,y)
             | Self::CloneMap(_, y)
             | Self::CloneObj(_, y, _) => Some(y),
+            Self::GetNestedIndexArray(o1, o2, o3) => {
+                Some(from_nested_operand(Self::nested_index_registers(o1, o2, o3).3))
+            }
         }
     }
     pub fn for_each_reg_mut(&mut self, mut f: impl FnMut(&mut u16)) {
@@ -210,6 +222,7 @@ impl Instr {
             | Self::ObjNotEqJmp(a, b, _)
             | Self::ObjEqJmp(a, b, _)
             | Self::Mov(a, b)
+            | Self::AddStrInPlace(a, b)
             | Self::AddIntImm { src: a, dst: b, .. }
             | Self::IncIntInfJmp { counter_reg: a, limit_reg: b, .. }
             | Self::CloneObj(a, b, _)
@@ -305,8 +318,33 @@ impl Instr {
                     f(a);
                 }
             }
+            Self::GetNestedIndexArray(o1, o2, o3) => {
+                let (o1, o2, o3, o4) = Self::nested_index_registers(*o1, *o2, *o3);
+                let original = (
+                    from_nested_operand(o1),
+                    from_nested_operand(o2),
+                    from_nested_operand(o3),
+                    from_nested_operand(o4),
+                );
+                let mut regs = original;
+                f(&mut regs.0);
+                f(&mut regs.1);
+                f(&mut regs.2);
+                f(&mut regs.3);
+                if regs != original {
+                    *self = Self::nested_index_array_instr(regs);
+                }
+            }
             Self::Jmp(_) | Self::StopErrorCatch => {}
         }
+    }
+    #[inline]
+    #[must_use]
+    pub fn uses_reg(self, register: u16) -> bool {
+        let mut myself = self;
+        let mut used = false;
+        myself.for_each_reg_mut(|id| used |= *id == register);
+        used
     }
 }
 
@@ -343,4 +381,18 @@ pub fn relocate_registers(instructions: &mut [Instr], fixed_count: u16, permanen
     for instr in instructions {
         instr.for_each_reg_mut(|id| *id = relocate_register(*id, fixed_count, permanent_count));
     }
+}
+
+#[must_use]
+#[inline(always)]
+/// Converts the given register id into a 12-bit operand and moves the permanent-register flag bit from bit 15 to bit 11. It returns None if the register id does not fit.
+pub const fn to_nested_operand(id: u16) -> Option<u16> {
+    if (id & 0x7FFF) < (1 << 11) { Some(id & 0x7FF | ((id >> 4) & 0x800)) } else { None }
+}
+
+#[inline(always)]
+#[must_use]
+/// Does the reverse of to_nested_operand.
+pub const fn from_nested_operand(operand: u16) -> u16 {
+    operand & 0x7FF | (operand & 0x800) << 4
 }

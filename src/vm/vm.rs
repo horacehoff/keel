@@ -1,6 +1,5 @@
 use crate::compiler::compiler_data::DylibFn;
 use crate::compiler::compiler_data::ErrorCatch;
-use crate::compiler::compiler_data::Pools;
 use crate::compiler::compiler_data::Program;
 use crate::compiler::compiler_data::Struct;
 use crate::compiler::type_system::DataType;
@@ -317,9 +316,9 @@ fn error_with_catch(err: ErrType, i: usize, ctx: *mut VmCtx<'static>) -> (usize,
     let mut r = Frame(err_handle.frame_ptr);
     r[err_handle.error_reg] = Data::string(
         err.kind(),
-        ctx.obj_pool,
-        ctx.map_pool,
-        ctx.str_pool,
+        &ctx.obj_pool,
+        &ctx.map_pool,
+        &mut ctx.str_pool,
         ctx.stack.roots(r),
         &mut ctx.gc,
     );
@@ -342,9 +341,9 @@ struct VmCtx<'a> {
     dyn_lib_args: Vec<u64>,
     keep_alive: Vec<Box<[u8]>>,
     error_handles: Vec<ErrorCatch>,
-    obj_pool: &'a mut ObjectPool,
-    map_pool: &'a mut MapPool,
-    str_pool: &'a mut StringPool,
+    obj_pool: ObjectPool,
+    map_pool: MapPool,
+    str_pool: StringPool,
     err_ctx: &'a ErrorCtx<'a>,
     dyn_libs: &'a [DylibFn],
     structs: &'a [Struct<'a>],
@@ -359,12 +358,14 @@ type VmReturnType = ();
 
 #[allow(unused_unsafe)]
 pub fn execute(program: &mut Program) -> VmReturnType {
+    let obj_pool = core::mem::replace(&mut program.pools.obj_pool, Pool(Vec::new()));
+    let map_pool = core::mem::replace(&mut program.pools.map_pool, Pool(Vec::new()));
+    let str_pool = core::mem::replace(&mut program.pools.str_pool, Pool(Vec::new()));
     let Program {
         ref instructions,
         ref initial_stack,
         top_level_base,
         max_frame_regs,
-        pools: Pools { ref mut obj_pool, ref mut map_pool, ref mut str_pool },
         ref err_ctx,
         dylib_fns: ref dyn_libs,
         ref structs,
@@ -385,7 +386,7 @@ pub fn execute(program: &mut Program) -> VmReturnType {
         #[cfg(any(target_arch = "wasm32", feature = "embed"))]
         handle: crate::captured_output::CapturedOutputWriter,
         output: String::with_capacity(256),
-        gc: Gc::new(obj_pool, map_pool, str_pool),
+        gc: Gc::new(&obj_pool, &map_pool, &str_pool),
         #[cfg(not(target_arch = "wasm32"))]
         // Args converted from Data to libffi args are stored here
         ffi_args: Vec::new(),
@@ -407,12 +408,23 @@ pub fn execute(program: &mut Program) -> VmReturnType {
 
     execute_at(0, r, instructions.as_ptr(), (&raw mut ctx).cast());
 
+    #[cfg(not(any(test, target_arch = "wasm32", feature = "embed")))]
+    {
+        core::mem::forget(ctx.obj_pool);
+        core::mem::forget(ctx.map_pool);
+        core::mem::forget(ctx.str_pool);
+    }
     #[cfg(test)]
-    unsafe { core::slice::from_raw_parts(ctx.stack.ptr, initial_stack.len()) }.to_vec()
+    {
+        program.pools.obj_pool = ctx.obj_pool;
+        program.pools.map_pool = ctx.map_pool;
+        program.pools.str_pool = ctx.str_pool;
+        unsafe { core::slice::from_raw_parts(ctx.stack.ptr, initial_stack.len()) }.to_vec()
+    }
 }
 
-static INSTR_TABLE: [fn(usize, Frame, *const Instr, *mut VmCtx<'static>); 112] =
-    seq!(N in 0..112 {[#(execute_instr::<N>,)*]});
+static INSTR_TABLE: [fn(usize, Frame, *const Instr, *mut VmCtx<'static>);
+    Instr::Halt(0).discriminant() as usize + 1] = seq!(N in 0..114 {[#(execute_instr::<N>,)*]});
 
 #[inline(always)]
 fn execute_at(i: usize, r: Frame, instr: *const Instr, ctx: *mut VmCtx<'static>) {
@@ -452,6 +464,32 @@ fn execute_instr<const DISCRIMINANT: u8>(
         ($e: expr) => {
             Data::string($e, obj_pool, map_pool, str_pool, stack.roots(r), gc)
         };
+    }
+
+    macro_rules! concat_string {
+        ($s1: expr, $s2: expr) => {{
+            let s1: Data = $s1;
+            let s2: Data = $s2;
+            let s1_str = s1.as_str(str_pool);
+            let s1_len = s1_str.len();
+            let s2_str = s2.as_str(str_pool);
+            let s2_len = s2_str.len();
+            let len = s1_len + s2_len;
+            if len <= 6 {
+                Data(s1.0 | ((s2.0 & crate::data::PAYLOAD_MASK) << (8 * s1_len)))
+            } else {
+                let id = gc.alloc_string_slot(obj_pool, map_pool, str_pool, stack.roots(r));
+                let slot = str_pool[id as usize].as_mut_vec();
+                if slot.capacity() < len {
+                    *slot = Vec::with_capacity(len.next_power_of_two().max(16));
+                }
+                let buf = slot.as_mut_ptr();
+                core::ptr::copy_nonoverlapping(s1_str.as_ptr(), buf, s1_len);
+                core::ptr::copy_nonoverlapping(s2_str.as_ptr(), buf.add(s1_len), s2_len);
+                slot.set_len(len);
+                Data::large_str_id(u64::from(id))
+            }
+        }};
     }
 
     macro_rules! error_with_catch {
@@ -617,15 +655,21 @@ fn execute_instr<const DISCRIMINANT: u8>(
             Instr::AddInt(o1, o2, dest) => {
                 r[dest] = Data::int(r[o1].as_int().wrapping_add(r[o2].as_int()));
             }
-            Instr::AddStr(o1, o2, dest) => {
-                let d1 = r[o1];
-                let d2 = r[o2];
-                let left = d1.as_str(str_pool);
-                let right = d2.as_str(str_pool);
-                let mut s = String::with_capacity(left.len() + right.len());
-                s.push_str(left);
-                s.push_str(right);
-                r[dest] = string!(s);
+            Instr::AddStr(o1, o2, dst) => r[dst] = concat_string!(r[o1], r[o2]),
+            Instr::AddStrInPlace(dst, src) => {
+                let src = r[src];
+                let dst_str = r[dst];
+                if dst_str.is_large_str() {
+                    let dst_id = dst_str.get_str_pool_id();
+                    if src.is_large_str() && src.get_str_pool_id() == dst_id {
+                        str_pool[dst_id].as_mut_vec().extend_from_within(..);
+                    } else {
+                        let s = src.as_str(str_pool).as_bytes();
+                        str_pool[dst_id].as_mut_vec().extend_from_slice(s);
+                    }
+                } else {
+                    r[dst] = concat_string!(dst_str, src);
+                }
             }
             Instr::EmptyArray(arr_reg_id) => {
                 let array_id = gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r));
@@ -862,12 +906,25 @@ fn execute_instr<const DISCRIMINANT: u8>(
             }
             Instr::GetIndexArray(array_reg_id, index, dest) => {
                 let idx = r[index].as_int();
-                let arr_id = r[array_reg_id].as_array();
-                let array = &obj_pool[arr_id];
+                let array = &obj_pool[r[array_reg_id].as_array()];
                 if (idx as usize) >= array.len() {
                     error_with_catch!(ErrType::IndexOutOfBounds(array.len(), idx));
                 }
                 r[dest] = *array.get_unchecked(idx as usize);
+            }
+            Instr::GetNestedIndexArray(..) => {
+                let word = instr.add(i).cast::<u64>().read_unaligned() >> 16;
+                let idx = r[(word >> 12 & 0xFFF) as u16].as_int();
+                let inner_idx = r[(word >> 24 & 0xFFF) as u16].as_int();
+                let outer = &obj_pool[r[(word & 0xFFF) as u16].as_array()];
+                if (idx as usize) >= outer.len() {
+                    error_with_catch!(ErrType::IndexOutOfBounds(outer.len(), idx));
+                }
+                let inner = &obj_pool[outer.get_unchecked(idx as usize).as_array()];
+                if (inner_idx as usize) >= inner.len() {
+                    error_with_catch!(ErrType::IndexOutOfBounds(inner.len(), inner_idx));
+                }
+                r[(word >> 36) as u16] = *inner.get_unchecked(inner_idx as usize);
             }
             Instr::GetFieldStruct(struct_reg_id, index, dest) => {
                 let struct_id = r[struct_reg_id].as_struct();

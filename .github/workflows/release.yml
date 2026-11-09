@@ -91,9 +91,10 @@ jobs:
       - name: Gather PGO profiles
         run: |
           target/${{ matrix.target }}/release/${{ matrix.bin }} pgo/pgo-std-library.kl
-          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/nbody/nbody_lua.kl 10000
-          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/nbody/nbody_py.kl 10000
-          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/binary-trees/binary-trees.kl 10
+          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/nbody/nbody_lua.kl 50000
+          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/nbody/nbody_py.kl 50000
+          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/nbody/nbody.kl 50000
+          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/binary-trees/binary-trees.kl 14
           target/${{ matrix.target }}/release/${{ matrix.bin }} examples/fib/fib.kl
           target/${{ matrix.target }}/release/${{ matrix.bin }} examples/iter_fib/iter_fib.kl
           target/${{ matrix.target }}/release/${{ matrix.bin }} pgo/pgo-fizzbuzz.kl

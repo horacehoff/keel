@@ -184,4 +184,25 @@ impl Gc {
         s.push_to_pool(str_pool);
         id
     }
+    #[inline]
+    pub fn alloc_string_slot(
+        &mut self,
+        obj_pool: &ObjectPool,
+        map_pool: &MapPool,
+        str_pool: &mut StringPool,
+        roots: &[Data],
+    ) -> u32 {
+        if let Some(id) = self.free_strings.pop() {
+            return id;
+        }
+        if str_pool.len() >= self.string_threshold as usize {
+            self.collect(obj_pool, map_pool, str_pool, roots);
+            if let Some(id) = self.free_strings.pop() {
+                return id;
+            }
+        }
+        let id = str_pool.len() as u32;
+        str_pool.push(String::new());
+        id
+    }
 }

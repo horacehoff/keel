@@ -41,6 +41,7 @@ pub enum Instr {
     AddInt(u16, u16, u16),
     AddArray(u16, u16, u16),
     AddStr(u16, u16, u16),
+    AddStrInPlace(u16, u16),
     MulFloat(u16, u16, u16),
     MulInt(u16, u16, u16),
     SubFloat(u16, u16, u16),
@@ -210,6 +211,9 @@ pub enum Instr {
 
     /// GetIndexArray(array_reg_id, index_reg_id, output_reg_id)
     GetIndexArray(u16, u16, u16),
+    /// GetNestedIndexArray(array_reg_id, index_1_reg_id, index_2_reg_id, output_reg_id)
+    /// Holds 4 12-bit register ids
+    GetNestedIndexArray(u16, u16, u16),
 
     /// GetIndexString(str_reg_id, index_reg_id, output_reg_id)
     GetIndexString(u16, u16, u16),
@@ -260,6 +264,25 @@ impl Instr {
     #[must_use]
     pub const fn discriminant(&self) -> u8 {
         unsafe { *core::ptr::from_ref(self).cast() }
+    }
+    #[inline(always)]
+    #[must_use]
+    pub const fn nested_index_array_instr(regs: (u16, u16, u16, u16)) -> Self {
+        assert!(regs.0 | regs.1 | regs.2 | regs.3 < 1 << 12, "Please report this bug.");
+        let word =
+            regs.0 as u64 | (regs.1 as u64) << 12 | (regs.2 as u64) << 24 | (regs.3 as u64) << 36;
+        Self::GetNestedIndexArray(word as u16, (word >> 16) as u16, (word >> 32) as u16)
+    }
+    #[inline(always)]
+    #[must_use]
+    pub const fn nested_index_registers(o1: u16, o2: u16, o3: u16) -> (u16, u16, u16, u16) {
+        let word = o1 as u64 | (o2 as u64) << 16 | (o3 as u64) << 32;
+        (
+            (word & 0xFFF) as u16,
+            (word >> 12 & 0xFFF) as u16,
+            (word >> 24 & 0xFFF) as u16,
+            (word >> 36) as u16,
+        )
     }
 }
 

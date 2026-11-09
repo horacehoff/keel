@@ -450,10 +450,26 @@ impl<'arena> State<'arena, '_> {
             span,
             file_id: ctx.file_idx,
         };
-        match ctx.current_unit {
-            Some(unit) => self.code_units[unit as usize].instr_src.push(new_src),
-            None => self.instr_src.push(new_src),
+        let instr_sources = match ctx.current_unit {
+            Some(unit) => &mut self.code_units[unit as usize].instr_src,
+            None => self.instr_src,
+        };
+        // Makes it so an instruction rewritten in place (GetNestedIndexArray for example) keeps a single source
+        match instr_sources.last_mut() {
+            Some(last) if last.instr_idx == new_src.instr_idx => *last = new_src,
+            _ => instr_sources.push(new_src),
         }
+    }
+    /// Shifts instruction sources starting at `start_idx` by `shift`
+    pub fn shift_instr_src(&mut self, ctx: Ctx, start_idx: u32, shift: u32) {
+        let instr_sources = match ctx.current_unit {
+            Some(unit) => &mut self.code_units[unit as usize].instr_src,
+            None => self.instr_src,
+        };
+        instr_sources
+            .iter_mut()
+            .filter(|src| src.instr_idx >= start_idx)
+            .for_each(|src| src.instr_idx += shift);
     }
 }
 

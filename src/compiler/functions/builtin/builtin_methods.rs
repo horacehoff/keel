@@ -602,7 +602,7 @@ pub fn builtin_methods<'arena>(
                 frame_offset
             };
             if is_str {
-                output.push(Instr::AddStr(result_id, dest_reg_id, result_id));
+                output.push(Instr::AddStrInPlace(result_id, dest_reg_id));
             } else {
                 output.push(Instr::Push(result_id, dest_reg_id));
             }

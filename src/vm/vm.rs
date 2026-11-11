@@ -320,7 +320,7 @@ fn error_with_catch(
     let err_handle = ctx.error_handles.pop_unchecked();
     let mut r = Frame(err_handle.frame_ptr);
     r[err_handle.error_reg] = Data::string(
-        err.kind(),
+        err.kind().into(),
         &ctx.obj_pool,
         &ctx.map_pool,
         &mut ctx.str_pool,
@@ -499,6 +499,11 @@ fn execute_at(ip: *const Instr, r: Frame, ctx: *mut VmCtx<'static>) {
     }
 }
 
+#[inline(never)]
+fn parse_float(s: &str) -> Option<f64> {
+    lexical_core::parse::<f64>(s.as_bytes()).ok()
+}
+
 fn execute_instr<const DISCRIMINANT: u8>(
     mut ip: *const Instr,
     mut r: Frame,
@@ -526,7 +531,7 @@ fn execute_instr<const DISCRIMINANT: u8>(
 
     macro_rules! string {
         ($e: expr) => {
-            Data::string($e, obj_pool, map_pool, str_pool, stack.roots(r), gc)
+            Data::string($e.into(), obj_pool, map_pool, str_pool, stack.roots(r), gc)
         };
     }
 
@@ -564,13 +569,22 @@ fn execute_instr<const DISCRIMINANT: u8>(
         };
     }
 
+    macro_rules! jump {
+        ($jump_size: expr) => {{
+            ip = jump(ip, $jump_size);
+            become execute_at(ip, r, ctx);
+        }};
+        ($condition: expr, $jump_size: expr) => {
+            if $condition {
+                jump!($jump_size);
+            }
+        };
+    }
+
     unsafe {
         assert_unchecked((*ip).discriminant() == DISCRIMINANT);
         match *ip {
-            Instr::Jmp(size) => {
-                ip = jump(ip, size);
-                become execute_at(ip, r, ctx);
-            }
+            Instr::Jmp(size) => jump!(size),
             Instr::Mov(tgt, dest) => r[dest] = r[tgt],
             Instr::SetInt(dest, n) => r[dest] = Data::int(n),
             Instr::CallFunc { target, frame_offset } => {
@@ -669,10 +683,7 @@ fn execute_instr<const DISCRIMINANT: u8>(
                                 cold_path();
                                 NULL
                             } else {
-                                match core::ffi::CStr::from_ptr(ptr).to_string_lossy() {
-                                    std::borrow::Cow::Borrowed(s) => string!(s),
-                                    std::borrow::Cow::Owned(s) => string!(s),
-                                }
+                                string!(core::ffi::CStr::from_ptr(ptr).to_string_lossy())
                             }
                         }
                         VmType::Bool => func.cif.call::<bool>(func.ptr, ffi_args).into(),
@@ -814,17 +825,9 @@ fn execute_instr<const DISCRIMINANT: u8>(
             Instr::ObjEq(o1, o2, dest) => {
                 r[dest] = obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool).into();
             }
-            Instr::NotEqJmp(o1, o2, jump_size) => {
-                if r[o1] != r[o2] {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
-            }
+            Instr::NotEqJmp(o1, o2, jump_size) => jump!(r[o1] != r[o2], jump_size),
             Instr::ObjNotEqJmp(o1, o2, jump_size) => {
-                if !obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(!obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool), jump_size);
             }
             Instr::NotEq(o1, o2, dest) => {
                 r[dest] = (r[o1] != r[o2]).into();
@@ -832,49 +835,26 @@ fn execute_instr<const DISCRIMINANT: u8>(
             Instr::ObjNotEq(o1, o2, dest) => {
                 r[dest] = (!obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool)).into();
             }
-            Instr::EqJmp(o1, o2, jump_size) => {
-                if r[o1] == r[o2] {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
-            }
+            Instr::EqJmp(o1, o2, jump_size) => jump!(r[o1] == r[o2], jump_size),
             Instr::ObjEqJmp(o1, o2, jump_size) => {
-                if obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool), jump_size);
             }
             Instr::InfEqFloatJmp(o1, o2, jump_size) => {
-                if r[o1].as_float() <= r[o2].as_float() {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(r[o1].as_float() <= r[o2].as_float(), jump_size);
             }
             Instr::InfEqIntJmp(o1, o2, jump_size) => {
-                if r[o1].as_int() <= r[o2].as_int() {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(r[o1].as_int() <= r[o2].as_int(), jump_size);
             }
             Instr::InfFloatJmp(o1, o2, jump_size) => {
-                if r[o1].as_float() < r[o2].as_float() {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(r[o1].as_float() < r[o2].as_float(), jump_size);
             }
             #[allow(clippy::neg_cmp_op_on_partial_ord)]
             Instr::NotInfFloatJmp(o1, o2, jump_size) => {
-                if !(r[o1].as_float() < r[o2].as_float()) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(!(r[o1].as_float() < r[o2].as_float()), jump_size);
             }
             #[allow(clippy::neg_cmp_op_on_partial_ord)]
             Instr::NotInfEqFloatJmp(o1, o2, jump_size) => {
-                if !(r[o1].as_float() <= r[o2].as_float()) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(!(r[o1].as_float() <= r[o2].as_float()), jump_size);
             }
             Instr::InfIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() < r[o2].as_int() {
@@ -885,34 +865,19 @@ fn execute_instr<const DISCRIMINANT: u8>(
             Instr::IncIntInfJmp { counter_reg, limit_reg, jump_size } => {
                 let next = r[counter_reg].add_int_imm(1);
                 r[counter_reg] = next;
-                if next.as_int() < r[limit_reg].as_int() {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(next.as_int() < r[limit_reg].as_int(), jump_size);
             }
             Instr::EqIntImmJmp(src, imm, jump_size) => {
-                if r[src].as_int() == i32::from(imm as i16) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(r[src].as_int() == i32::from(imm as i16), jump_size);
             }
             Instr::NotEqIntImmJmp(src, imm, jump_size) => {
-                if r[src].as_int() != i32::from(imm as i16) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(r[src].as_int() != i32::from(imm as i16), jump_size);
             }
             Instr::InfIntImmJmp(src, imm, jump_size) => {
-                if r[src].as_int() < i32::from(imm as i16) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(r[src].as_int() < i32::from(imm as i16), jump_size);
             }
             Instr::SupEqIntImmJmp(src, imm, jump_size) => {
-                if r[src].as_int() >= i32::from(imm as i16) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(r[src].as_int() >= i32::from(imm as i16), jump_size);
             }
             Instr::InfFloat(o1, o2, dest) => {
                 r[dest] = (r[o1].as_float() < r[o2].as_float()).into();
@@ -1190,7 +1155,7 @@ fn execute_instr<const DISCRIMINANT: u8>(
                 let reg = r[tgt];
                 r[dest] = Data::float(if reg.is_int() {
                     f64::from(reg.as_int())
-                } else if let Ok(f) = lexical_core::parse::<f64>(reg.as_str(str_pool).as_bytes()) {
+                } else if let Some(f) = parse_float(reg.as_str(str_pool)) {
                     f
                 } else {
                     error_with_catch!(ErrType::InvalidFloat);
@@ -1442,15 +1407,15 @@ fn execute_instr<const DISCRIMINANT: u8>(
                 error_with_catch!(ErrType::Custom(error_data.as_str(str_pool)));
             }
             Instr::IsNotTypeJmp { src_reg_id, type_idx, jump_size } => {
-                if !data_matches_datatype(
-                    r[src_reg_id],
-                    types.get_unchecked(type_idx as usize),
-                    obj_pool,
-                    map_pool,
-                ) {
-                    ip = jump(ip, jump_size);
-                    become execute_at(ip, r, ctx);
-                }
+                jump!(
+                    !data_matches_datatype(
+                        r[src_reg_id],
+                        types.get_unchecked(type_idx as usize),
+                        obj_pool,
+                        map_pool,
+                    ),
+                    jump_size
+                );
             }
             Instr::IsType(src, type_idx, dest) => {
                 r[dest] = data_matches_datatype(

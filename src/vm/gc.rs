@@ -1,4 +1,4 @@
-use crate::data::{Data, PoolString};
+use crate::data::Data;
 use crate::vm::{MapPool, ObjectPool, StringPool, UncheckedVecOps};
 use fixedbitset::FixedBitSet;
 use std::collections::HashMap;
@@ -126,6 +126,7 @@ impl Gc {
     }
 
     /// Allocates a new array in the array pool. If reusing an array, it clears it.
+    #[inline(always)]
     pub fn alloc_array(
         &mut self,
         obj_pool: &mut ObjectPool,
@@ -133,18 +134,33 @@ impl Gc {
         str_pool: &StringPool,
         roots: &[Data],
     ) -> u32 {
-        if self.free_arrays.is_empty() && obj_pool.len() >= self.array_threshold as usize {
-            self.collect(obj_pool, map_pool, str_pool, roots);
-        }
         if let Some(id) = self.free_arrays.pop() {
             obj_pool[id as usize].clear();
             return id;
+        }
+        self.alloc_array_slow(obj_pool, map_pool, str_pool, roots)
+    }
+    #[inline(never)]
+    pub fn alloc_array_slow(
+        &mut self,
+        obj_pool: &mut ObjectPool,
+        map_pool: &MapPool,
+        str_pool: &StringPool,
+        roots: &[Data],
+    ) -> u32 {
+        if obj_pool.len() >= self.array_threshold as usize {
+            self.collect(obj_pool, map_pool, str_pool, roots);
+            if let Some(id) = self.free_arrays.pop() {
+                obj_pool[id as usize].clear();
+                return id;
+            }
         }
         let id = obj_pool.len() as u32;
         obj_pool.push(Vec::new());
         id
     }
 
+    #[inline(always)]
     pub fn alloc_map(
         &mut self,
         obj_pool: &ObjectPool,
@@ -152,39 +168,32 @@ impl Gc {
         str_pool: &StringPool,
         roots: &[Data],
     ) -> u32 {
-        if self.free_maps.is_empty() && map_pool.len() >= self.map_threshold as usize {
-            self.collect(obj_pool, map_pool, str_pool, roots);
-        }
         if let Some(id) = self.free_maps.pop() {
             map_pool[id as usize].clear();
             return id;
+        }
+        self.alloc_map_slow(obj_pool, map_pool, str_pool, roots)
+    }
+    #[inline(never)]
+    pub fn alloc_map_slow(
+        &mut self,
+        obj_pool: &ObjectPool,
+        map_pool: &mut MapPool,
+        str_pool: &StringPool,
+        roots: &[Data],
+    ) -> u32 {
+        if map_pool.len() >= self.map_threshold as usize {
+            self.collect(obj_pool, map_pool, str_pool, roots);
+            if let Some(id) = self.free_maps.pop() {
+                map_pool[id as usize].clear();
+                return id;
+            }
         }
         let id = map_pool.len() as u32;
         map_pool.push(HashMap::default());
         id
     }
-
-    #[inline]
-    pub fn alloc_string<S: PoolString>(
-        &mut self,
-        s: S,
-        obj_pool: &ObjectPool,
-        map_pool: &MapPool,
-        str_pool: &mut StringPool,
-        roots: &[Data],
-    ) -> u32 {
-        if self.free_strings.is_empty() && str_pool.len() >= self.string_threshold as usize {
-            self.collect(obj_pool, map_pool, str_pool, roots);
-        }
-        if let Some(id) = self.free_strings.pop() {
-            s.move_to_slot(&mut str_pool[id as usize]);
-            return id;
-        }
-        let id = str_pool.len() as u32;
-        s.push_to_pool(str_pool);
-        id
-    }
-    #[inline]
+    #[inline(always)]
     pub fn alloc_string_slot(
         &mut self,
         obj_pool: &ObjectPool,
@@ -195,6 +204,16 @@ impl Gc {
         if let Some(id) = self.free_strings.pop() {
             return id;
         }
+        self.alloc_string_slot_slow(obj_pool, map_pool, str_pool, roots)
+    }
+    #[inline(never)]
+    pub fn alloc_string_slot_slow(
+        &mut self,
+        obj_pool: &ObjectPool,
+        map_pool: &MapPool,
+        str_pool: &mut StringPool,
+        roots: &[Data],
+    ) -> u32 {
         if str_pool.len() >= self.string_threshold as usize {
             self.collect(obj_pool, map_pool, str_pool, roots);
             if let Some(id) = self.free_strings.pop() {

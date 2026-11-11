@@ -3,6 +3,7 @@ use crate::vm::ObjectPool;
 use crate::vm::gc::Gc;
 use crate::vm::{MapPool, StringPool};
 use lexical_core::FormattedSize;
+use std::borrow::Cow;
 
 const NAN_BASE: u64 =
     0b1111_1111_1111_1000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000;
@@ -49,50 +50,6 @@ const MATCH_TAG_STRUCT_MAP_FUNCTION: u64 = NAN_STRUCT >> 48;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Data(pub u64);
-
-pub trait PoolString {
-    fn pool_as_str(&self) -> &str;
-    fn move_to_slot(self, slot: &mut String);
-    fn push_to_pool(self, str_pool: &mut StringPool);
-    fn str_len(&self) -> usize;
-}
-
-impl PoolString for String {
-    #[inline(always)]
-    fn pool_as_str(&self) -> &str {
-        self.as_str()
-    }
-    #[inline(always)]
-    fn move_to_slot(self, slot: &mut String) {
-        *slot = self;
-    }
-    #[inline(always)]
-    fn push_to_pool(self, pool: &mut StringPool) {
-        pool.push(self);
-    }
-    #[inline(always)]
-    fn str_len(&self) -> usize {
-        self.len()
-    }
-}
-impl PoolString for &str {
-    #[inline(always)]
-    fn pool_as_str(&self) -> &str {
-        self
-    }
-    #[inline(always)]
-    fn move_to_slot(self, slot: &mut String) {
-        self.clone_into(slot);
-    }
-    #[inline(always)]
-    fn push_to_pool(self, str_pool: &mut StringPool) {
-        str_pool.push(self.to_owned());
-    }
-    #[inline(always)]
-    fn str_len(&self) -> usize {
-        self.len()
-    }
-}
 
 impl Data {
     #[inline(always)]
@@ -198,18 +155,24 @@ impl Data {
         }
     }
     /// Allocates a string, storing it directly inside the u64 if it's <= 6 characters or inside string_pool if it's bigger
-    pub fn string<S: PoolString>(
-        s: S,
+    #[inline(always)]
+    pub fn string(
+        s: Cow<str>,
         obj_pool: &ObjectPool,
         map_pool: &MapPool,
         str_pool: &mut StringPool,
         roots: &[Self],
         gc: &mut Gc,
     ) -> Self {
-        if s.str_len() <= 6 {
-            Self::small_str(s.pool_as_str())
+        if s.len() <= 6 {
+            Self::small_str(&s)
         } else {
-            let id = gc.alloc_string(s, obj_pool, map_pool, str_pool, roots);
+            let id = gc.alloc_string_slot(obj_pool, map_pool, str_pool, roots);
+            let slot = unsafe { str_pool.get_unchecked_mut(id as usize) };
+            match s {
+                Cow::Borrowed(s) => s.clone_into(slot),
+                Cow::Owned(s) => *slot = s,
+            }
             Self::large_str_id(u64::from(id))
         }
     }

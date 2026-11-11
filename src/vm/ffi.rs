@@ -268,7 +268,7 @@ pub fn c_struct_to_keel_struct(
                     NULL
                 } else {
                     Data::string(
-                        unsafe { core::ffi::CStr::from_ptr(ptr) }.to_string_lossy().as_ref(),
+                        unsafe { core::ffi::CStr::from_ptr(ptr) }.to_string_lossy(),
                         obj_pool,
                         map_pool,
                         string_pool,

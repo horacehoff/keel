@@ -3,9 +3,6 @@ use crate::compiler::expr::Span;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use hybrid_format::hformat;
-#[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-use std::io::StdoutLock;
-use std::io::Write;
 
 pub const ARIADNE_ERROR_KIND: ReportKind<'static> = ReportKind::Custom("[ERROR]", Color::Red);
 pub const ERROR_PREFIX: &str = hformat!("{RED}[ERROR]:{RESET}");
@@ -93,66 +90,6 @@ pub enum ErrType<'a> {
     StackOverflow,
 }
 
-impl From<ErrType<'_>> for String {
-    fn from(value: ErrType) -> Self {
-        match value {
-            ErrType::Custom(m) => m.to_owned(),
-            ErrType::InvalidFloat => "Invalid float".into(),
-            ErrType::IndexOutOfBounds(length, index) => hformat!(
-                "Tried to get index {RED}{BOLD}{index}{RESET} but the length is {BLUE}{BOLD}{length}{RESET}",
-            ),
-            ErrType::SliceOutOfBounds(length, idx_start, idx_end) => hformat!(
-                "Invalid range {RED}{BOLD}{idx_start}{RESET}..{RED}{BOLD}{idx_end}{RESET} for collection with length {BLUE}{BOLD}{length}{RESET}",
-            ),
-            ErrType::InvalidBool => "The string could not be parsed into a boolean".into(),
-            ErrType::InvalidInt => "Invalid integer".into(),
-            ErrType::FsAlreadyExists => "The entity (directory, file, ...) already exists".into(),
-            ErrType::FsDeadlock => "This operation would result in a deadlock".into(),
-            ErrType::FsFileTooLarge => "The file is too large".into(),
-            ErrType::FsInterrupted => "This operation was interrupted".into(),
-            ErrType::FsInvalidData => "Malformed or invalid data were encountered".into(),
-            ErrType::FsInvalidFilename => "The filename is invalid or too long".into(),
-            ErrType::FsIsADirectory => {
-                "This operation encountered a directory, when a non-directory was expected".into()
-            }
-            ErrType::FsNotADirectory => {
-                "This operation encountered a non-directory, when a directory was expected".into()
-            }
-            ErrType::FsNotFound => "The entity (directory, file, ...) was not found".into(),
-            ErrType::FsPermissionDenied => {
-                "This operation lacked the necessary privileges to complete".into()
-            }
-            ErrType::FsOutOfMemory => {
-                "This operation could not be completed, because it failed to allocate enough memory"
-                    .into()
-            }
-            ErrType::FsReadOnlyFilesystem => {
-                "The filesystem or storage medium is read-only, but a write operation was attempted"
-                    .into()
-            }
-            ErrType::FsStorageFull => "Storage is full".into(),
-            ErrType::FsTimedOut => "This operation timed out".into(),
-            ErrType::FsOther => "File system operation failed".into(),
-            ErrType::DivisionByZero => {
-                "Division by zero. I'm sorry Dave, I'm afraid I can't do that.".into()
-            }
-            ErrType::ModuloByZero => {
-                "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.".into()
-            }
-            ErrType::NullByteInString => {
-                "String passed to dynamic library function contains an interior null byte".into()
-            }
-            ErrType::UnknownMapKey(key) => {
-                hformat!("Unknown key {RED}{BOLD}{key}{RESET}")
-            }
-            ErrType::IntegerNegativeExponent => {
-                "Integers cannot be raised to a negative exponent".into()
-            }
-            ErrType::StackOverflow => "Stack overflow. Help!".into(),
-        }
-    }
-}
-
 impl ErrType<'_> {
     pub const fn kind(&self) -> &str {
         match self {
@@ -189,32 +126,74 @@ impl ErrType<'_> {
 
 #[cold]
 #[inline(never)]
-pub fn throw_error(
-    ctx: &ErrorCtx,
-    instr_idx: usize,
-    t: ErrType,
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))] handle: &mut std::io::BufWriter<
-        StdoutLock,
-    >,
-    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-    handle: &mut crate::captured_output::CapturedOutputWriter,
-) -> ! {
-    handle.flush().unwrap();
-    let InstrSrc { instr_idx: _, span: Span { start, end }, file_id } = ctx
+pub fn throw_error(ctx: &ErrorCtx, instr_idx: usize, t: &ErrType) -> ! {
+    let InstrSrc { span: Span { start, end }, file_id, .. } = ctx
         .instr_src
         .iter()
         .find(|s| s.instr_idx as usize == instr_idx)
-        .unwrap_or(&InstrSrc { instr_idx: 0, span: Span { start: 0, end: 0 }, file_id: 0 });
+        .expect("Please report this bug.");
     let src = &ctx.sources[*file_id as usize];
-    let err_message: String = t.into();
+    let formatted: String;
+    let error_message: &str = match t {
+        ErrType::Custom(s) => s,
+        ErrType::InvalidFloat => "Invalid float",
+        ErrType::IndexOutOfBounds(length, index) => {
+            formatted = hformat!(
+                "Tried to get index {RED}{BOLD}{index}{RESET} but the length is {BLUE}{BOLD}{length}{RESET}",
+            );
+            formatted.as_str()
+        }
+        ErrType::SliceOutOfBounds(length, idx_start, idx_end) => {
+            formatted = hformat!(
+                "Invalid range {RED}{BOLD}{idx_start}{RESET}..{RED}{BOLD}{idx_end}{RESET} for collection with length {BLUE}{BOLD}{length}{RESET}",
+            );
+            formatted.as_str()
+        }
+        ErrType::InvalidBool => "The string could not be parsed into a boolean",
+        ErrType::InvalidInt => "Invalid integer",
+        ErrType::FsAlreadyExists => "The entity (directory, file, ...) already exists",
+        ErrType::FsDeadlock => "This operation would result in a deadlock",
+        ErrType::FsFileTooLarge => "The file is too large",
+        ErrType::FsInterrupted => "This operation was interrupted",
+        ErrType::FsInvalidData => "Malformed or invalid data were encountered",
+        ErrType::FsInvalidFilename => "The filename is invalid or too long",
+        ErrType::FsIsADirectory => {
+            "This operation encountered a directory, when a non-directory was expected"
+        }
+        ErrType::FsNotADirectory => {
+            "This operation encountered a non-directory, when a directory was expected"
+        }
+        ErrType::FsNotFound => "The entity (directory, file, ...) was not found",
+        ErrType::FsPermissionDenied => "This operation lacked the necessary privileges to complete",
+        ErrType::FsOutOfMemory => {
+            "This operation could not be completed, because it failed to allocate enough memory"
+        }
+        ErrType::FsReadOnlyFilesystem => {
+            "The filesystem or storage medium is read-only, but a write operation was attempted"
+        }
+        ErrType::FsStorageFull => "Storage is full",
+        ErrType::FsTimedOut => "This operation timed out",
+        ErrType::FsOther => "File system operation failed",
+        ErrType::DivisionByZero => "Division by zero. I'm sorry Dave, I'm afraid I can't do that.",
+        ErrType::ModuloByZero => "Modulo by zero. I'm sorry Dave, I'm afraid I can't do that.",
+        ErrType::NullByteInString => {
+            "String passed to dynamic library function contains an interior null byte"
+        }
+        ErrType::UnknownMapKey(key) => {
+            formatted = hformat!("Unknown key {RED}{BOLD}{key}{RESET}");
+            formatted.as_str()
+        }
+        ErrType::IntegerNegativeExponent => "Integers cannot be raised to a negative exponent",
+        ErrType::StackOverflow => "Stack overflow. Help!",
+    };
     let report =
         Report::build(ARIADNE_ERROR_KIND, (src.filename, (*start as usize)..(*end as usize)))
             .with_label(
                 Label::new((src.filename, (*start as usize)..(*end as usize)))
-                    .with_message(err_message.as_str())
+                    .with_message(error_message)
                     .with_color(Color::Red),
             )
-            .with_message(err_message.as_str())
+            .with_message(error_message)
             .finish();
 
     print_error_report(&report, &ctx.sources);

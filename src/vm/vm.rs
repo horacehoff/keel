@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::io::Write;
 
 #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-use std::io::{IsTerminal, StdoutLock};
+use std::io::IsTerminal;
 
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
@@ -128,8 +128,8 @@ fn data_matches_datatype(d: Data, t: &DataType, obj_pool: &ObjectPool, map_pool:
 }
 
 #[inline(always)]
-const fn jump(i: usize, offset: u16) -> usize {
-    i.wrapping_add(offset as i16 as isize as usize)
+const fn jump(ip: *const Instr, offset: u16) -> *const Instr {
+    ip.wrapping_offset(offset as i16 as isize)
 }
 
 const MAX_STACK_LEN: usize = 16_000_000 / 8;
@@ -307,10 +307,15 @@ impl IndexMut<u16> for Frame {
 
 #[cold]
 #[inline(never)]
-fn error_with_catch(err: ErrType, i: usize, ctx: *mut VmCtx<'static>) -> (usize, Frame) {
+fn error_with_catch(
+    err: &ErrType,
+    ip: *const Instr,
+    ctx: *mut VmCtx<'static>,
+) -> (*const Instr, Frame) {
     let ctx = unsafe { &mut *ctx };
     if ctx.error_handles.is_empty() {
-        throw_error(ctx.err_ctx, i, err, &mut ctx.handle);
+        flush_output(&mut ctx.output);
+        throw_error(ctx.err_ctx, unsafe { ip.offset_from(ctx.instr_base) } as usize, err);
     }
     let err_handle = ctx.error_handles.pop_unchecked();
     let mut r = Frame(err_handle.frame_ptr);
@@ -322,18 +327,84 @@ fn error_with_catch(err: ErrType, i: usize, ctx: *mut VmCtx<'static>) -> (usize,
         ctx.stack.roots(r),
         &mut ctx.gc,
     );
-    (err_handle.catch_loc as usize, r)
+    (unsafe { ctx.instr_base.add(err_handle.catch_loc as usize) }, r)
 }
 
-#[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-type Handle = std::io::BufWriter<StdoutLock<'static>>;
-#[cfg(any(target_arch = "wasm32", feature = "embed"))]
-type Handle = crate::captured_output::CapturedOutputWriter;
+const OUTPUT_FLUSH_THRESHOLD: usize = 64 * 1024;
+
+#[inline(never)]
+fn flush_output(output: &mut String) {
+    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
+    {
+        let mut stdout = std::io::stdout().lock();
+        stdout.write_all(output.as_bytes()).unwrap();
+        stdout.flush().unwrap();
+    }
+    #[cfg(any(target_arch = "wasm32", feature = "embed"))]
+    crate::captured_output::print(output);
+    output.clear();
+}
+
+#[must_use]
+#[inline(never)]
+fn get_heap_array_position(
+    array: &[Data],
+    needle: Data,
+    obj_pool: &ObjectPool,
+    map_pool: &MapPool,
+    str_pool: &StringPool,
+) -> Option<usize> {
+    if needle.is_large_str() {
+        let needle = str_pool[needle.get_str_pool_id()].as_bytes();
+        array.iter().position(|e| {
+            e.is_large_str() && {
+                let bytes = str_pool[e.get_str_pool_id()].as_bytes();
+                bytes.len() == needle.len() && bytes == needle
+            }
+        })
+    } else {
+        debug_assert!(
+            needle.is_array() || needle.is_struct() || needle.is_map() || needle.is_function()
+        );
+        array.iter().position(|e| obj_eq(*e, needle, obj_pool, map_pool, str_pool))
+    }
+}
+
+#[must_use]
+#[inline(always)]
+fn get_array_position(
+    array: &[Data],
+    needle: Data,
+    obj_pool: &ObjectPool,
+    map_pool: &MapPool,
+    str_pool: &StringPool,
+) -> Option<usize> {
+    if needle.is_heap() {
+        return get_heap_array_position(array, needle, obj_pool, map_pool, str_pool);
+    }
+    let Some(tail) = array.last_chunk::<8>() else {
+        return array.iter().position(|e| *e == needle);
+    };
+    let find_first_match = |start_idx: usize, data_window: &[Data; 8]| {
+        let mask = data_window
+            .iter()
+            .enumerate()
+            .fold(0u8, |mask, (i, e)| mask | (u8::from(*e == needle) << i));
+        (mask != 0).then(|| start_idx + mask.trailing_zeros() as usize)
+    };
+    array
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .enumerate()
+        .find_map(|(i, window)| find_first_match(i * 8, window))
+        // Checks the remaining array.len() % 8 elements
+        .or_else(|| find_first_match(array.len() - 8, tail))
+}
 
 #[allow(clippy::struct_field_names)]
 struct VmCtx<'a> {
     stack: Stack,
-    handle: Handle,
     output: String,
     gc: Gc,
     #[cfg(not(target_arch = "wasm32"))]
@@ -348,7 +419,8 @@ struct VmCtx<'a> {
     dyn_libs: &'a [DylibFn],
     structs: &'a [Struct<'a>],
     types: &'a [DataType],
-    stdout_is_terminal: bool,
+    flush_threshold: usize,
+    instr_base: *const Instr,
 }
 
 #[cfg(test)]
@@ -356,7 +428,6 @@ type VmReturnType = Vec<Data>;
 #[cfg(not(test))]
 type VmReturnType = ();
 
-#[allow(unused_unsafe)]
 pub fn execute(program: &mut Program) -> VmReturnType {
     let obj_pool = core::mem::replace(&mut program.pools.obj_pool, Pool(Vec::new()));
     let map_pool = core::mem::replace(&mut program.pools.map_pool, Pool(Vec::new()));
@@ -376,16 +447,9 @@ pub fn execute(program: &mut Program) -> VmReturnType {
     let stack = Stack::new(initial_stack, max_frame_regs as usize);
     let r = Frame(unsafe { stack.ptr.add(top_level_base as usize) });
 
-    #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-    let stdout = std::io::stdout();
-
     let mut ctx = VmCtx {
         stack,
-        #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-        handle: std::io::BufWriter::with_capacity(8 * 1024, stdout.lock()),
-        #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-        handle: crate::captured_output::CapturedOutputWriter,
-        output: String::with_capacity(256),
+        output: String::with_capacity(OUTPUT_FLUSH_THRESHOLD),
         gc: Gc::new(&obj_pool, &map_pool, &str_pool),
         #[cfg(not(target_arch = "wasm32"))]
         // Args converted from Data to libffi args are stored here
@@ -401,12 +465,13 @@ pub fn execute(program: &mut Program) -> VmReturnType {
         structs,
         types,
         #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
-        stdout_is_terminal: stdout.is_terminal(),
+        flush_threshold: if std::io::stdout().is_terminal() {0} else {OUTPUT_FLUSH_THRESHOLD},
         #[cfg(any(target_arch = "wasm32", feature = "embed"))]
-        stdout_is_terminal: false,
+        flush_threshold: OUTPUT_FLUSH_THRESHOLD,
+        instr_base: instructions.as_ptr(),
     };
 
-    execute_at(0, r, instructions.as_ptr(), (&raw mut ctx).cast());
+    execute_at(instructions.as_ptr(), r, (&raw mut ctx).cast());
 
     #[cfg(not(any(test, target_arch = "wasm32", feature = "embed")))]
     {
@@ -423,26 +488,24 @@ pub fn execute(program: &mut Program) -> VmReturnType {
     }
 }
 
-static INSTR_TABLE: [fn(usize, Frame, *const Instr, *mut VmCtx<'static>);
+static INSTR_TABLE: [fn(*const Instr, Frame, *mut VmCtx<'static>);
     Instr::Halt(0).discriminant() as usize + 1] = seq!(N in 0..114 {[#(execute_instr::<N>,)*]});
 
 #[inline(always)]
-fn execute_at(i: usize, r: Frame, instr: *const Instr, ctx: *mut VmCtx<'static>) {
+fn execute_at(ip: *const Instr, r: Frame, ctx: *mut VmCtx<'static>) {
     unsafe {
-        let handler = *INSTR_TABLE.get_unchecked((*instr.add(i)).discriminant() as usize);
-        become handler(i, r, instr, ctx)
+        let handler = *INSTR_TABLE.get_unchecked((*ip).discriminant() as usize);
+        become handler(ip, r, ctx)
     }
 }
 
 fn execute_instr<const DISCRIMINANT: u8>(
-    mut i: usize,
+    mut ip: *const Instr,
     mut r: Frame,
-    instr: *const Instr,
     ctx: *mut VmCtx<'static>,
 ) {
     let VmCtx {
         stack,
-        handle,
         output,
         gc,
         #[cfg(not(target_arch = "wasm32"))]
@@ -456,7 +519,8 @@ fn execute_instr<const DISCRIMINANT: u8>(
         dyn_libs,
         structs,
         types,
-        stdout_is_terminal,
+        flush_threshold,
+        instr_base,
         ..
     } = unsafe { &mut *ctx };
 
@@ -495,17 +559,17 @@ fn execute_instr<const DISCRIMINANT: u8>(
     macro_rules! error_with_catch {
         ($err:expr) => {
             cold_path();
-            (i, r) = error_with_catch($err, i, ctx);
-            become execute_at(i, r, instr, ctx);
+            (ip, r) = error_with_catch(&$err, ip, ctx);
+            become execute_at(ip, r, ctx);
         };
     }
 
     unsafe {
-        assert_unchecked((*instr.add(i)).discriminant() == DISCRIMINANT);
-        match *instr.add(i) {
+        assert_unchecked((*ip).discriminant() == DISCRIMINANT);
+        match *ip {
             Instr::Jmp(size) => {
-                i = jump(i, size);
-                become execute_at(i, r, instr, ctx);
+                ip = jump(ip, size);
+                become execute_at(ip, r, ctx);
             }
             Instr::Mov(tgt, dest) => r[dest] = r[tgt],
             Instr::SetInt(dest, n) => r[dest] = Data::int(n),
@@ -516,15 +580,15 @@ fn execute_instr<const DISCRIMINANT: u8>(
                 }
                 r = new_frame;
                 // The return point is always placed in the target function's first register
-                r[0] = Data::return_point(i as u32, frame_offset);
-                i = target as usize;
-                become execute_at(i, r, instr, ctx);
+                r[0] = Data::return_point(ip.offset_from(*instr_base) as u32, frame_offset);
+                ip = instr_base.add(target as usize);
+                become execute_at(ip, r, ctx);
             }
             Instr::Return(src) => {
                 let (return_addr, frame_offset) = r[0].as_return_point();
                 r[0] = r[src];
                 r = Frame(r.0.sub(frame_offset as usize));
-                i = return_addr as usize;
+                ip = instr_base.add(return_addr as usize);
             }
             Instr::CopyConstants { count_src, dst } => {
                 let count = count_src >> 24;
@@ -752,14 +816,14 @@ fn execute_instr<const DISCRIMINANT: u8>(
             }
             Instr::NotEqJmp(o1, o2, jump_size) => {
                 if r[o1] != r[o2] {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::ObjNotEqJmp(o1, o2, jump_size) => {
                 if !obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::NotEq(o1, o2, dest) => {
@@ -770,84 +834,84 @@ fn execute_instr<const DISCRIMINANT: u8>(
             }
             Instr::EqJmp(o1, o2, jump_size) => {
                 if r[o1] == r[o2] {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::ObjEqJmp(o1, o2, jump_size) => {
                 if obj_eq(r[o1], r[o2], obj_pool, map_pool, str_pool) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::InfEqFloatJmp(o1, o2, jump_size) => {
                 if r[o1].as_float() <= r[o2].as_float() {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::InfEqIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() <= r[o2].as_int() {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::InfFloatJmp(o1, o2, jump_size) => {
                 if r[o1].as_float() < r[o2].as_float() {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             #[allow(clippy::neg_cmp_op_on_partial_ord)]
             Instr::NotInfFloatJmp(o1, o2, jump_size) => {
                 if !(r[o1].as_float() < r[o2].as_float()) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             #[allow(clippy::neg_cmp_op_on_partial_ord)]
             Instr::NotInfEqFloatJmp(o1, o2, jump_size) => {
                 if !(r[o1].as_float() <= r[o2].as_float()) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::InfIntJmp(o1, o2, jump_size) => {
                 if r[o1].as_int() < r[o2].as_int() {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::IncIntInfJmp { counter_reg, limit_reg, jump_size } => {
                 let next = r[counter_reg].add_int_imm(1);
                 r[counter_reg] = next;
                 if next.as_int() < r[limit_reg].as_int() {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::EqIntImmJmp(src, imm, jump_size) => {
                 if r[src].as_int() == i32::from(imm as i16) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::NotEqIntImmJmp(src, imm, jump_size) => {
                 if r[src].as_int() != i32::from(imm as i16) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::InfIntImmJmp(src, imm, jump_size) => {
                 if r[src].as_int() < i32::from(imm as i16) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::SupEqIntImmJmp(src, imm, jump_size) => {
                 if r[src].as_int() >= i32::from(imm as i16) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::InfFloat(o1, o2, dest) => {
@@ -871,12 +935,13 @@ fn execute_instr<const DISCRIMINANT: u8>(
                 r[dest] = Data(r[o1].0 | r[o2].0);
             }
             Instr::Print(tgt) => {
-                r[tgt].format_to(output, obj_pool, str_pool, map_pool, structs, false);
-                output.push('\n');
-                handle.write_all(output.as_bytes()).unwrap();
-                output.clear();
-                if *stdout_is_terminal {
-                    handle.flush().unwrap();
+                let value = r[tgt];
+                if !value.format_scalar_to(output, str_pool, true) {
+                    value.format_to(output, obj_pool, str_pool, map_pool, structs, false);
+                    output.push('\n');
+                }
+                if output.len() >= *flush_threshold {
+                    flush_output(output);
                 }
             }
             Instr::SetElementObj(array_reg_id, new_elem_reg_id, idx) => {
@@ -913,7 +978,7 @@ fn execute_instr<const DISCRIMINANT: u8>(
                 r[dest] = *array.get_unchecked(idx as usize);
             }
             Instr::GetNestedIndexArray(..) => {
-                let word = instr.add(i).cast::<u64>().read_unaligned() >> 16;
+                let word = ip.cast::<u64>().read_unaligned() >> 16;
                 let idx = r[(word >> 12 & 0xFFF) as u16].as_int();
                 let inner_idx = r[(word >> 24 & 0xFFF) as u16].as_int();
                 let outer = &obj_pool[r[(word & 0xFFF) as u16].as_array()];
@@ -1019,16 +1084,22 @@ fn execute_instr<const DISCRIMINANT: u8>(
             }
             Instr::Contains { src, needle, dst } => {
                 let collection = r[src];
-                let arg = r[needle];
+                let needle = r[needle];
                 r[dst] = Data::bool(if collection.is_string() {
                     memmem::find(
                         collection.as_str(str_pool).as_bytes(),
-                        arg.as_str(str_pool).as_bytes(),
+                        needle.as_str(str_pool).as_bytes(),
                     )
                     .is_some()
                 } else {
-                    // can only be an array in this case
-                    obj_pool[collection.as_array()].contains(&arg)
+                    debug_assert!(collection.is_array());
+                    let array = &obj_pool[collection.as_array()];
+                    if needle.is_heap() {
+                        get_heap_array_position(array, needle, obj_pool, map_pool, str_pool)
+                            .is_some()
+                    } else {
+                        array.contains(&needle)
+                    }
                 });
             }
             Instr::Trim(tgt, dest) => {
@@ -1048,7 +1119,13 @@ fn execute_instr<const DISCRIMINANT: u8>(
                             element.as_str(str_pool).as_bytes(),
                         )
                     } else {
-                        obj_pool[collection.as_array()].iter().position(|x| x == &element)
+                        get_array_position(
+                            &obj_pool[collection.as_array()],
+                            element,
+                            obj_pool,
+                            map_pool,
+                            str_pool,
+                        )
                     } {
                         Data::int(idx as i32)
                     } else {
@@ -1154,11 +1231,14 @@ fn execute_instr<const DISCRIMINANT: u8>(
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            Instr::Input(_, _) => wasm_error("WASM does not support input()"),
+            Instr::Input(_, _) => {
+                flush_output(output);
+                wasm_error("WASM does not support input()")
+            }
             #[cfg(not(target_arch = "wasm32"))]
             Instr::Input(tgt, dest) => {
-                handle.write_all(r[tgt].as_str(str_pool).as_bytes()).unwrap();
-                handle.flush().unwrap();
+                output.push_str(r[tgt].as_str(str_pool));
+                flush_output(output);
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line).unwrap();
                 r[dest] = string!(line.trim_end_matches(['\n', '\r']));
@@ -1166,13 +1246,10 @@ fn execute_instr<const DISCRIMINANT: u8>(
             Instr::Floor(tgt, dest) => {
                 r[dest] = r[tgt].as_float().floor().into();
             }
-            #[allow(unused_must_use)]
             Instr::TheAnswer(dst) => {
                 cold_path();
-                writeln!(
-                    handle,
-                    "The answer to the Ultimate Question of Life, the Universe, and Everything is 42."
-                );
+                output.push_str("The answer to the Ultimate Question of Life, the Universe, and Everything is 42.");
+                flush_output(output);
                 r[dst] = Data::int(42);
             }
             Instr::Len(tgt, dest) => {
@@ -1209,7 +1286,6 @@ fn execute_instr<const DISCRIMINANT: u8>(
                 if source.is_string() {
                     let source = source.as_str(str_pool);
                     let separator = separator.as_str(str_pool);
-                    obj_pool[array_id as usize].reserve(source.len() / 4);
                     let separator_len = separator.len();
                     for part_i in memmem::find_iter(source.as_bytes(), separator.as_bytes()) {
                         let part = string!(source.get_unchecked(start_idx..part_i));
@@ -1224,7 +1300,8 @@ fn execute_instr<const DISCRIMINANT: u8>(
                     let len = obj_pool[source_array_id].len();
 
                     for idx in 0..=len {
-                        if idx == len || obj_pool[source_array_id][idx] == separator {
+                        if idx == len || *obj_pool[source_array_id].get_unchecked(idx) == separator
+                        {
                             let dest_array_id =
                                 gc.alloc_array(obj_pool, map_pool, str_pool, stack.roots(r))
                                     as usize;
@@ -1352,7 +1429,7 @@ fn execute_instr<const DISCRIMINANT: u8>(
             }
             Instr::StartErrorCatch(jmp_size, err_reg_id) => {
                 error_handles.push(ErrorCatch {
-                    catch_loc: i as u32 + u32::from(jmp_size),
+                    catch_loc: ip.offset_from(*instr_base) as u32 + u32::from(jmp_size),
                     frame_ptr: r.0,
                     error_reg: err_reg_id,
                 });
@@ -1371,8 +1448,8 @@ fn execute_instr<const DISCRIMINANT: u8>(
                     obj_pool,
                     map_pool,
                 ) {
-                    i = jump(i, jump_size);
-                    become execute_at(i, r, instr, ctx);
+                    ip = jump(ip, jump_size);
+                    become execute_at(ip, r, ctx);
                 }
             }
             Instr::IsType(src, type_idx, dest) => {
@@ -1387,7 +1464,7 @@ fn execute_instr<const DISCRIMINANT: u8>(
             Instr::Halt(code) => {
                 cold_path();
 
-                handle.flush().unwrap();
+                flush_output(output);
 
                 #[cfg(not(target_arch = "wasm32"))]
                 if code != u16::MAX {
@@ -1397,6 +1474,6 @@ fn execute_instr<const DISCRIMINANT: u8>(
                 return;
             }
         }
-        become execute_at(i + 1, r, instr, ctx);
+        become execute_at(ip.add(1), r, ctx);
     }
 }

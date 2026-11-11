@@ -11,58 +11,58 @@ Native binaries are built with `-O2`. The compiler used is Clang.
 
 ## Iterative fib(46) x 200000
 
-| Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [iter_fib.kl](/examples/iter_fib/iter_fib.kl) | [iter_fib.py](/examples/iter_fib/iter_fib.py) | [iter_fib.lua](/examples/iter_fib/iter_fib.lua) | [iter_fib.c](/examples/iter_fib/iter_fib.c) |
-| 44.9ms | 740ms | 72.5ms | 12.4ms |
+| 40.9ms | 1029ms | 69.4ms | 12.4ms |
 
 
 ## Recursive fib(10,15,20,25,30,33)
 
-| Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [fib.kl](/examples/fib/fib.kl) | [fib.py](/examples/fib/fib.py) | [fib.lua](/examples/fib/fib.lua) | [fib.c](/examples/fib/fib.c) |
-| 99.7ms | 507.4ms | 183.4ms | 16.3ms |
+| 92.0ms | 403.1ms | 181.7ms | 16.3ms |
 
 
 ## N-body (N=500000)
 Based on [this benchmark from The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/nbody.html#nbody) and [the fastest Lua implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-lua-2.html).
 
-| Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [nbody.kl](/examples/nbody/nbody.kl) | [nbody.py](/examples/nbody/nbody.py) | [nbody.lua](/examples/nbody/nbody.lua) | [nbody.c](/examples/nbody/nbody.c) |
-| 389.2ms | 2649ms | 458.5ms | 48.9ms |
+| 373.4ms | 2509ms | 458.5ms | 48.9ms |
 
 ## Binary trees (N=16)
 Based on [this benchmark from The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/binarytrees.html#binarytrees).\
 Based on [this Python implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-python3-2.html) and [this Lua implementation](https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-lua-2.html).
 
-| Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [binary-trees.kl](/examples/binary-trees/binary-trees.kl) | [binary-trees.py](/examples/binary-trees/binary-trees.py) | [binary-trees.lua](/examples/binary-trees/binary-trees.lua) | [binary-trees.c](/examples/binary-trees/binary-trees.c) |
-| 321.0ms | 1264ms | 1005ms | 247.4ms |
+| 305.6ms | 1149ms | 1005ms | 247.4ms |
 
 
 ## Quicksort (N=10000)
 
-| Keel | Python 3.14.6 | LuaJIT (-joff) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [quicksort.kl](/examples/quicksort/quicksort.kl) | [quicksort.py](/examples/quicksort/quicksort.py) | [quicksort.lua](/examples/quicksort/quicksort.lua) |
-| 315.4ms | 730.9ms | 1755ms |
+| 278.5ms | 698.8ms | 1755ms |
 
 ## Sqrt (N=0 to 9999999)
 
-| Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [sqrt.kl](/examples/sqrt/sqrt.kl) | [sqrt.py](/examples/sqrt/sqrt.py) | [sqrt.lua](/examples/sqrt/sqrt.lua) | [sqrt.c](/examples/sqrt/sqrt.c) |
-| 51.3ms | 1164ms | 167ms | 2.1ms |
+| 47.5ms | 1039ms | 167ms | 2.1ms |
 
 ## String.split(), Array.contains() * 50 000
 
 <table>
 <tr>
   <th>Keel</th>
-  <th>Python 3</th>
+  <th>Python 3.15.2</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -94,9 +94,9 @@ end
 print(count)</code></pre></td>
 </tr>
 <tr>
-  <td><b>5.8ms</b></td>
-  <td>28.2ms</td>
-  <td>27.6ms</td>
+  <td><b>4.2ms</b></td>
+  <td>32.6ms</td>
+  <td>4.1ms</td>
 </tr>
 </table>
 
@@ -107,16 +107,16 @@ print(count)</code></pre></td>
 > The C program uses a per-line `printf`.
 
 ### With `--show-output`
-| Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [fizzbuzz.kl](/examples/fizzbuzz/fizzbuzz.kl) | [fizzbuzz.py](/examples/fizzbuzz/fizzbuzz.py) | [fizzbuzz.lua](/examples/fizzbuzz/fizzbuzz.lua) | [fizzbuzz.c](/examples/fizzbuzz/fizzbuzz.c) |
-| 1770ms | 2765ms | 2179ms | 2158 |
+| 1770ms | 2200ms | 1874ms | 2158 |
 
 ### Default
-| Keel | Python 3.14.6 | LuaJIT (-joff) | Native (C) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [fizzbuzz.kl](/examples/fizzbuzz/fizzbuzz.kl) | [fizzbuzz.py](/examples/fizzbuzz/fizzbuzz.py) | [fizzbuzz.lua](/examples/fizzbuzz/fizzbuzz.lua) | [fizzbuzz.c](/examples/fizzbuzz/fizzbuzz.c) |
-| 29.3ms | 304.8ms | 124.3ms | 71.5ms |
+| 15.8ms | 317.9ms | 99.1ms | 71.5ms |
 
 
 ## Standard library operations * 100 000
@@ -126,7 +126,7 @@ Almost all the functions from the standard library are tested, except file syste
 <table>
 <tr>
   <th>Keel</th>
-  <th>Python 3</th>
+  <th>Python 3.15.2</th>
   <th>LuaJIT (-joff)</th>
 </tr>
 <tr>
@@ -264,8 +264,8 @@ end
 print(count)</code></pre></td>
 </tr>
 <tr>
-  <td><b>39.2ms</b></td>
-  <td>191.9ms</td>
+  <td><b>31.6ms</b></td>
+  <td>207.5ms</td>
   <td>253.3ms</td>
 </tr>
 </table>
@@ -281,11 +281,11 @@ The C function is intentionally trivial so that the measured time reflects the c
 int increment(int x) { return x + 1; }
 ```
 
-| Keel | Python 3.14.6 | LuaJIT (-joff) |
+| Keel | Python 3.15.2 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [ffi_baseline.kl](/examples/ffi/ffi_baseline.kl) | [ffi_baseline.py](/examples/ffi/ffi_baseline.py) | [ffi_baseline.lua](/examples/ffi/ffi_baseline.lua) |
-| 33.4ms | 485.7ms | 62.8ms |
+| 29.2ms | 574.1ms | 62.8ms |
 | [ffi.kl](/examples/ffi/ffi.kl) | [ffi.py](/examples/ffi/ffi.py) | [ffi.lua](/examples/ffi/ffi.lua) |
-| 171.3ms | 2860ms | 511.6ms |
+| 154.8ms | 3420ms | 511.6ms |
 | **FFI OVERHEAD** | **FFI OVERHEAD** | **FFI OVERHEAD** |
-| 139ms | 2374.3ms | 448.8ms |
+| 125.6ms | 2845.9ms | 448.8ms |

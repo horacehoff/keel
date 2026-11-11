@@ -20,6 +20,14 @@ pub const NULL: Data = Data(NAN_NULL);
 pub const FALSE: Data = Data(NAN_BOOL);
 pub const TRUE: Data = Data(NAN_BOOL | 1);
 
+const MATCH_TAG_BOOL: u64 = NAN_BOOL >> 48;
+const MATCH_TAG_NULL: u64 = NAN_NULL >> 48;
+const MATCH_TAG_INT: u64 = NAN_INT >> 48;
+const MATCH_TAG_STRING_SMALL: u64 = NAN_STRING_SMALL >> 48;
+const MATCH_TAG_STRING_LARGE: u64 = NAN_STRING_LARGE >> 48;
+const MATCH_TAG_ARRAY: u64 = NAN_ARRAY >> 48;
+const MATCH_TAG_STRUCT_MAP_FUNCTION: u64 = NAN_STRUCT >> 48;
+
 /// NaN-boxed u64.
 /// ### Layout:
 /// - first 13 bits are NaN
@@ -39,6 +47,7 @@ pub const TRUE: Data = Data(NAN_BOOL | 1);
 /// Strings are inlined if they're 6 bytes long or less.
 /// If they're longer, they're stored in `string_pool`.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Data(pub u64);
 
 pub trait PoolString {
@@ -154,11 +163,22 @@ impl Data {
     #[inline(always)]
     pub const fn small_str(s: &str) -> Self {
         debug_assert!(s.len() <= 6);
-        let mut payload = [0u8; 8];
-        unsafe {
-            core::ptr::copy_nonoverlapping(s.as_ptr(), payload.as_mut_ptr(), s.len());
-        }
-        Self(NAN_STRING_SMALL | (u64::from_le_bytes(payload) & PAYLOAD_MASK))
+        let b: &[u8] = s.as_bytes();
+        let len = b.len();
+        // This avoids a memcpy
+        let payload = if len >= 4 {
+            (u32::from_ne_bytes([b[0], b[1], b[2], b[3]]) as u64)
+                | ((u32::from_ne_bytes([b[len - 4], b[len - 3], b[len - 2], b[len - 1]]) as u64)
+                    << ((len - 4) * 8))
+        } else if len >= 2 {
+            (u16::from_ne_bytes([b[0], b[1]]) as u64)
+                | ((u16::from_ne_bytes([b[len - 2], b[len - 1]]) as u64) << ((len - 2) * 8))
+        } else if len == 1 {
+            b[0] as u64
+        } else {
+            0
+        };
+        Self(NAN_STRING_SMALL | payload)
     }
     #[inline(always)]
     pub const fn large_str_id(id: u64) -> Self {
@@ -220,7 +240,7 @@ impl Data {
     #[must_use]
     pub const fn add_int_imm(self, imm: i16) -> Self {
         debug_assert!(self.is_int());
-        Self((self.0 & !0xFFFF_FFFF) | (self.0 as u32).wrapping_add(imm as u32) as u64)
+        Self::int(self.as_int().wrapping_add(imm as i32))
     }
     #[inline(always)]
     pub const fn is_large_str(self) -> bool {
@@ -305,6 +325,45 @@ impl Data {
         );
         output
     }
+    #[inline(always)]
+    pub fn format_scalar_to(
+        self,
+        output: &mut String,
+        str_pool: &StringPool,
+        append_newline: bool,
+    ) -> bool {
+        let mut buffer = [0u8; i32::FORMATTED_SIZE_DECIMAL];
+        let mut float_buffer = zmij::Buffer::new();
+        let text = match self.0 >> 48 {
+            MATCH_TAG_INT => unsafe {
+                str::from_utf8_unchecked(lexical_core::write(self.as_int(), &mut buffer))
+            },
+            MATCH_TAG_BOOL => {
+                if self.as_bool() {
+                    "true"
+                } else {
+                    "false"
+                }
+            }
+            MATCH_TAG_STRING_SMALL | MATCH_TAG_STRING_LARGE => self.as_str(str_pool),
+            MATCH_TAG_NULL => "null",
+            MATCH_TAG_STRUCT_MAP_FUNCTION if self.is_function() => "function",
+            MATCH_TAG_ARRAY | MATCH_TAG_STRUCT_MAP_FUNCTION => return false,
+            _ => {
+                debug_assert!(self.is_float());
+                float_buffer.format(self.as_float())
+            }
+        };
+        unsafe {
+            let bytes = output.as_mut_vec();
+            bytes.reserve(text.len() + 1); // text.len() + newline
+            let end = bytes.as_mut_ptr().add(bytes.len());
+            core::ptr::copy_nonoverlapping(text.as_ptr(), end, text.len());
+            end.add(text.len()).write(b'\n');
+            bytes.set_len(bytes.len() + text.len() + usize::from(append_newline));
+        }
+        true
+    }
     /// Formats the `Data` into the given output (it's only used for printing right now)
     #[inline(never)]
     pub fn format_to(
@@ -316,22 +375,11 @@ impl Data {
         structs: &[Struct],
         show_str_quotation_marks: bool,
     ) {
-        if self.is_float() {
-            output.push_str(zmij::Buffer::new().format(self.as_float()));
-        } else if self.is_int() {
-            let mut buffer = [0u8; i32::FORMATTED_SIZE_DECIMAL];
-            let digits = lexical_core::write(self.as_int(), &mut buffer);
-            output.push_str(unsafe { str::from_utf8_unchecked(digits) });
-        } else if self.is_bool() {
-            output.push_str(if self.as_bool() { "true" } else { "false" });
-        } else if self.is_string() {
-            if show_str_quotation_marks {
-                output.push('"');
-                output.push_str(self.as_str(str_pool));
-                output.push('"');
-            } else {
-                output.push_str(self.as_str(str_pool));
-            }
+        if show_str_quotation_marks && self.is_string() {
+            output.push('"');
+            output.push_str(self.as_str(str_pool));
+            output.push('"');
+        } else if self.format_scalar_to(output, str_pool, false) {
         } else if self.is_array() {
             output.push('[');
             let mut show_comma = false;
@@ -345,20 +393,30 @@ impl Data {
             }
             output.push(']');
         } else if self.is_struct() {
-            let s_name = unsafe { &structs.get_unchecked(self.struct_type_id() as usize).name };
-            output.push_str(s_name);
+            output.push_str(unsafe { structs.get_unchecked(self.struct_type_id() as usize).name });
             output.push_str(" {");
-            let mut show_comma = false;
-            for value in &obj_pool[self.as_struct()] {
-                if show_comma {
-                    output.push(',');
-                } else {
-                    show_comma = true;
+            if let Some((first, rest)) = obj_pool[self.as_struct()].split_first() {
+                if first.is_string() {
+                    output.push('"');
+                    output.push_str(first.as_str(str_pool));
+                    output.push('"');
+                } else if !first.format_scalar_to(output, str_pool, false) {
+                    first.format_to(output, obj_pool, str_pool, map_pool, structs, true);
                 }
-                value.format_to(output, obj_pool, str_pool, map_pool, structs, true);
+                for value in rest {
+                    output.push(',');
+                    if value.is_string() {
+                        output.push('"');
+                        output.push_str(value.as_str(str_pool));
+                        output.push('"');
+                    } else if !value.format_scalar_to(output, str_pool, false) {
+                        value.format_to(output, obj_pool, str_pool, map_pool, structs, true);
+                    }
+                }
             }
             output.push('}');
-        } else if self.is_map() {
+        } else {
+            debug_assert!(self.is_map());
             output.push('{');
             let mut show_comma = false;
             for (key, value) in &map_pool[self.as_map()] {
@@ -372,11 +430,6 @@ impl Data {
                 value.format_to(output, obj_pool, str_pool, map_pool, structs, true);
             }
             output.push('}');
-        } else if self.is_function() {
-            output.push_str("function");
-        } else {
-            debug_assert!(self.is_null());
-            output.push_str("null");
         }
     }
 }

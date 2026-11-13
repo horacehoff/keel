@@ -41,6 +41,7 @@ use crate::errors::ErrorCtx;
 use crate::errors::RESET;
 use crate::instr::Instr;
 use crate::parser;
+use crate::vm::Pool;
 use bumpalo::Bump;
 pub use codegen::compile_expr;
 use core::cell::LazyCell;

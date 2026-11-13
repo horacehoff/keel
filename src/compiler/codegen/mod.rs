@@ -1,13 +1,11 @@
 use crate::ast::Expr;
-use crate::compiler::codegen::strings::is_eligible_for_in_place_append;
-use crate::compiler::codegen::strings::rewrite_str_concats;
+use crate::compiler::DataType;
 use crate::compiler::functions::compile_function_call;
 use crate::compiler::methods::compile_method_call;
 use crate::compiler::registers::UnwrapId;
 use crate::compiler::registers::move_value_to;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
-use crate::compiler::types::DataType;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
@@ -47,7 +45,11 @@ use operators::compile_neg_op;
 use operators::compile_sub_op;
 use operators::compile_type_eq_op;
 use operators::numeric_op;
+pub(super) use patterns::declare_pattern_bindings;
+pub(super) use patterns::type_after_mismatch;
 use strings::apply_loop_in_place_str_appends;
+use strings::is_eligible_for_in_place_append;
+use strings::rewrite_str_concats;
 
 mod access;
 mod assignment;
@@ -56,7 +58,7 @@ mod control_flow;
 mod definitions;
 mod literals;
 mod operators;
-pub mod patterns;
+mod patterns;
 mod strings;
 
 /// Compiles `exprs` in contiguous registers

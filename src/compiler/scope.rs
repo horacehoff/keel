@@ -1,6 +1,6 @@
+use crate::ast::Span;
 use crate::compiler::Source;
-use crate::compiler::Span;
-use crate::compiler::error_unknown_namespace;
+use crate::compiler::compiler_errors::error_unknown_namespace;
 use indexmap::IndexMap;
 use rustc_hash::FxBuildHasher;
 

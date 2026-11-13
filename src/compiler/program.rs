@@ -1,6 +1,6 @@
 use crate::ast::Expr;
 use crate::ast::Span;
-use crate::compiler::types::DataType;
+use crate::compiler::DataType;
 use crate::compiler::types::VmType;
 use crate::data::Data;
 use crate::errors::ErrorCtx;

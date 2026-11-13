@@ -1,4 +1,4 @@
-use super::ParserErr;
+use crate::parser::ParserErr;
 use bumpalo::Bump;
 use core::hint::unreachable_unchecked;
 use logos::Logos;
@@ -83,7 +83,7 @@ impl core::fmt::Display for Token<'_> {
 #[logos(skip r"[ \t\r\n\f]+")] // Ignore whitespace
 #[logos(skip(r"//[^\n\r]*", allow_greedy = true))] // Ignore comments
 #[logos(error = ParserErr<'s>)]
-pub enum Token<'a> {
+pub(super) enum Token<'a> {
     // ASSIGNEMENT OPS
     #[token("+=")]
     AssignOpAdd,
@@ -243,7 +243,10 @@ pub enum Token<'a> {
 }
 
 /// Strips the surrounding quotes & processes escape sequences \n \t \r \\ \" \0
-pub fn parse_string<'arena>(s: &str, bump: &'arena Bump) -> bumpalo::collections::String<'arena> {
+pub(super) fn parse_string<'arena>(
+    s: &str,
+    bump: &'arena Bump,
+) -> bumpalo::collections::String<'arena> {
     let inner = &s[1..s.len() - 1]; // Strip the surrounding quotes
 
     // Return the stripped string directly if it doesn't contain any escape sequences

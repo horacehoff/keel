@@ -2,15 +2,15 @@
 #![feature(rust_preserve_none_cc)]
 #![allow(incomplete_features)]
 
-use crate::compiler::compile;
-use crate::errors::BOLD;
-use crate::errors::ERROR_PREFIX;
-use crate::errors::RED;
-use crate::errors::RESET;
-use crate::repl::repl;
 use bumpalo::Bump;
+use compiler::compile;
 use core::hint::cold_path;
+use errors::BOLD;
+use errors::ERROR_PREFIX;
+use errors::RED;
+use errors::RESET;
 use hybrid_format::hformat;
+use repl::repl;
 #[cfg(feature = "embed")]
 use std::ffi::{CStr, CString, c_char};
 use std::fs;

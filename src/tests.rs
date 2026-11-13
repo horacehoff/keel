@@ -1,4 +1,4 @@
-use crate::compile;
+use crate::compiler::compile;
 use crate::data::Data;
 use crate::instr::Instr;
 use bumpalo::Bump;

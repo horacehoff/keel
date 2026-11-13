@@ -29,11 +29,10 @@ use core::iter::Peekable;
 use expr::add_op;
 use expr::parse_expr;
 use hybrid_format::hformat;
-use lexer::parse_string;
-use logos::SpannedIter;
-
 use lexer::Token;
+use lexer::parse_string;
 use logos::Logos;
+use logos::SpannedIter;
 
 mod blocks;
 mod expr;
@@ -55,7 +54,7 @@ struct Parser<'a> {
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub enum ParserErr<'a> {
+enum ParserErr<'a> {
     UnexpectedEOF,
     #[default]
     UnknownToken,
@@ -567,7 +566,7 @@ fn parse_type<'arena>(parser: &mut Parser<'arena>) -> TypeExpr<'arena> {
     }
 }
 
-pub const fn get_primitive_type_name(t: Token<'_>) -> Option<&'static str> {
+const fn get_primitive_type_name(t: Token<'_>) -> Option<&'static str> {
     match t {
         Token::TypeInt => Some("int"),
         Token::TypeFloat => Some("float"),

@@ -1,16 +1,16 @@
+use crate::ast::FunctionDeclarationExpr;
+use crate::ast::Span;
 use crate::ast::TypeExpr;
 use crate::compiler::Ctx;
 use crate::compiler::DataType;
 use crate::compiler::Function;
-use crate::compiler::FunctionDeclarationExpr;
-use crate::compiler::Span;
-use crate::compiler::State;
 use crate::compiler::Struct;
-use crate::compiler::StructField;
-use crate::compiler::Symbol;
-use crate::compiler::check_if_returns_void;
 use crate::compiler::compiler_errors;
-use crate::compiler::error_struct_already_defined;
+use crate::compiler::compiler_errors::error_struct_already_defined;
+use crate::compiler::program::StructField;
+use crate::compiler::scope::Symbol;
+use crate::compiler::state::State;
+use crate::compiler::types::check_if_returns_void;
 
 pub(super) fn compile_struct_definition<'arena>(
     name: &'arena str,

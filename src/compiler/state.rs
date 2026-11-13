@@ -1,4 +1,7 @@
-use crate::ast::Span;
+use crate::{
+    ast::Span,
+    compiler::scope::{Scope, Symbol},
+};
 use bumpalo::Bump;
 use core::hint::unreachable_unchecked;
 use fixedbitset::FixedBitSet;
@@ -6,7 +9,6 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     compiler::{
-        Scope, Symbol,
         program::{CodeUnit, Dylib, Function, InstrSrc, Pools, Struct},
         registers::{PERMANENT_REG_FLAG, is_permanent_register},
         types::DataType,

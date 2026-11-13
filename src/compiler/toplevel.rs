@@ -7,12 +7,12 @@ use crate::ast::FunctionDeclarationArgumentExpr;
 use crate::ast::Span;
 use crate::ast::TypeExpr;
 use crate::ast::VariableDeclarationExpr;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::compiler::Library;
-use crate::compiler::compiler_errors;
+use crate::compiler::DataType;
+use crate::compiler::Source;
 use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
 use crate::compiler::compiler_errors::error_cannot_load_dynlib;
 use crate::compiler::compiler_errors::error_cannot_read_file;
+use crate::compiler::compiler_errors::error_function_already_defined;
 use crate::compiler::compiler_errors::error_global_already_defined;
 use crate::compiler::compiler_errors::error_struct_already_defined;
 use crate::compiler::program::Dylib;
@@ -23,8 +23,6 @@ use crate::compiler::program::Struct;
 use crate::compiler::program::StructField;
 use crate::compiler::scope::Scope;
 use crate::compiler::scope::Symbol;
-use crate::compiler::state::Source;
-use crate::compiler::types::DataType;
 use crate::compiler::types::check_if_returns_void;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
@@ -33,6 +31,8 @@ use bumpalo::Bump;
 use core::cell::LazyCell;
 use core::hint::unreachable_unchecked;
 use hybrid_format::hformat;
+#[cfg(not(target_arch = "wasm32"))]
+use libloading::Library;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -89,12 +89,7 @@ pub fn parse_toplevel<'a>(
                 if let Some(func_idx) =
                     scope.find_function(&[], fn_name, span, src_file_idx, sources)
                 {
-                    compiler_errors::error_function_already_defined(
-                        &fns[func_idx],
-                        span,
-                        src_file_idx,
-                        sources,
-                    );
+                    error_function_already_defined(&fns[func_idx], span, src_file_idx, sources);
                 }
                 let returns_void = check_if_returns_void(fn_code);
 
@@ -111,7 +106,7 @@ pub fn parse_toplevel<'a>(
                 });
                 pending_fns.push((fn_id, src_file_idx, fn_args));
                 if let Some(func_idx) = scope.symbols.insert((fn_name, Symbol::Fn), fn_id) {
-                    compiler_errors::error_function_already_defined(
+                    error_function_already_defined(
                         &fns[func_idx as usize],
                         span,
                         src_file_idx,

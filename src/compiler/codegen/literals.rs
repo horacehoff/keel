@@ -1,7 +1,8 @@
 use crate::ast::Expr;
 use crate::ast::QualifiedName;
-use crate::compiler::Span;
-use crate::compiler::StructFieldExpr;
+use crate::ast::Span;
+use crate::ast::StructFieldExpr;
+use crate::compiler::DataType;
 use crate::compiler::compiler_errors;
 use crate::compiler::compiler_errors::error_duplicate_map_key;
 use crate::compiler::compiler_errors::error_map_diff_types;
@@ -9,7 +10,6 @@ use crate::compiler::compiler_errors::error_not_literal_map_key;
 use crate::compiler::registers::UnwrapId;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
-use crate::compiler::types::DataType;
 use crate::compiler::types::struct_field_type_matches;
 use crate::data::Data;
 use crate::data::NULL;

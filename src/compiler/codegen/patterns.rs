@@ -1,7 +1,7 @@
 use super::conditions::patch_jumps;
 use crate::ast::{ArrayPattern, Expr, Pattern, Span, StructPattern, code_modifies_variable};
 use crate::compiler::Ctx;
-use crate::compiler::State;
+use crate::compiler::state::State;
 use crate::{
     compiler::{
         UnwrapId,

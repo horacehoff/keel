@@ -1,14 +1,19 @@
 use crate::ast::Span;
-use crate::compiler::Ctx;
+use crate::ast::TypeExpr;
 use crate::compiler::Source;
-use crate::compiler::State;
 use crate::compiler::compiler_errors::error_function_needs_args_typed;
 use crate::compiler::compiler_errors::error_invalid_c_type;
+use crate::compiler::compiler_errors::error_unknown_type;
+use crate::compiler::compiler_errors::error_unknown_type_with_namespace;
 use crate::compiler::compiler_errors::error_unknown_variable;
-use crate::compiler::types::returns::resolve_function_return_type;
+use crate::compiler::scope::Scope;
+use crate::compiler::state::Ctx;
+use crate::compiler::state::State;
+use core::hint::cold_path;
 use core::hint::unreachable_unchecked;
 use hybrid_format::hformat;
 pub use returns::check_if_returns_void;
+use returns::resolve_function_return_type;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::program::Struct;
@@ -354,4 +359,59 @@ fn reduce_null_struct(types: &[DataType]) -> Option<DataType> {
         }
     }
     struct_type
+}
+
+impl TypeExpr<'_> {
+    pub fn to_datatype(self, file_idx: u16, scope: &Scope, sources: &[Source]) -> DataType {
+        match self {
+            Self::Null => DataType::Null,
+            Self::Identifier(s, span) => match s {
+                "int" => DataType::Int,
+                "float" => DataType::Float,
+                "bool" => DataType::Bool,
+                "string" => DataType::String,
+                "null" => DataType::Null,
+                struct_name => {
+                    if let Some(struct_id) =
+                        scope.find_struct(&[], struct_name, span, file_idx, sources)
+                    {
+                        DataType::Struct(struct_id as u16)
+                    } else {
+                        error_unknown_type(span, file_idx, struct_name, sources, scope);
+                    }
+                }
+            },
+            Self::NamespacedIdentifier(s, span) => {
+                if let Some(struct_id) =
+                    scope.find_struct(s.get_namespace(), s.get_name(), span, file_idx, sources)
+                {
+                    DataType::Struct(struct_id as u16)
+                } else {
+                    cold_path();
+                    error_unknown_type_with_namespace(
+                        span,
+                        file_idx,
+                        s.get_name(),
+                        sources,
+                        scope,
+                        s.get_namespace(),
+                    )
+                }
+            }
+            Self::Array(inner_t) => {
+                DataType::Array(Some(Box::new(inner_t.to_datatype(file_idx, scope, sources))))
+            }
+            Self::Map(k_t, v_t) => DataType::Map(Box::from((
+                Some(k_t.to_datatype(file_idx, scope, sources)),
+                Some(v_t.to_datatype(file_idx, scope, sources)),
+            ))),
+            Self::Union(poly) => DataType::Union(
+                poly.iter().map(|t| t.to_datatype(file_idx, scope, sources)).collect(),
+            )
+            .check_poly(),
+            Self::Function(parts) => DataType::FnSignature(
+                parts.iter().map(|t| t.to_datatype(file_idx, scope, sources)).collect(),
+            ),
+        }
+    }
 }

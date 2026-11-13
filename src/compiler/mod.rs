@@ -1,37 +1,4 @@
-use crate::ast::Expr;
-use crate::ast::FunctionDeclarationExpr;
-use crate::ast::IfBlockExpr;
-use crate::ast::IntForLoopExpr;
-use crate::ast::Span;
-use crate::ast::StructFieldAssignmentExpr;
-use crate::ast::StructFieldExpr;
 use crate::ast::VariableDeclarationExpr;
-use crate::ast::code_modifies_variable;
-use crate::compiler::compiler_errors::error_cannot_push_type_to_array;
-use crate::compiler::compiler_errors::error_division_by_zero;
-use crate::compiler::compiler_errors::error_invalid_index_type;
-use crate::compiler::compiler_errors::error_invalid_type;
-use crate::compiler::compiler_errors::error_range_invalid_type;
-use crate::compiler::compiler_errors::error_struct_already_defined;
-use crate::compiler::compiler_errors::error_type_not_indexable;
-use crate::compiler::compiler_errors::error_unknown_namespace;
-use crate::compiler::program::CodeUnit;
-use crate::compiler::program::InstrSrc;
-use crate::compiler::program::Program;
-use crate::compiler::program::StructField;
-use crate::compiler::registers::move_value_to;
-use crate::compiler::registers::relocate_register;
-use crate::compiler::registers::relocate_registers;
-use crate::compiler::registers::to_nested_operand;
-pub use crate::compiler::scope::Scope;
-use crate::compiler::scope::Symbol;
-use crate::compiler::state::CodeUnitRegisters;
-use crate::compiler::state::Ctx;
-pub use crate::compiler::state::Source;
-use crate::compiler::state::State;
-use crate::compiler::state::Variable;
-use crate::compiler::toplevel::parse_toplevel;
-use crate::compiler::toplevel::resolve_types;
 use crate::data::NULL;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
@@ -43,29 +10,38 @@ use crate::parser;
 use crate::vm::Pool;
 use bumpalo::Bump;
 use codegen::compile_expr;
+use compiler_errors::error_invalid_type;
 use core::cell::LazyCell;
+use program::CodeUnit;
 use program::Dylib;
 use program::DylibFn;
 use program::Function;
+use program::InstrSrc;
 use program::Pools;
+use program::Program;
 use program::Struct;
 use registers::UnwrapId;
-use registers::move_reg_to_reg;
+use registers::relocate_register;
+use registers::relocate_registers;
 use rustc_hash::FxHashMap;
+use scope::Scope;
+use state::CodeUnitRegisters;
+use state::Ctx;
+pub use state::Source;
+use state::State;
+use state::Variable;
 use std::path::PathBuf;
-use types::DataType;
-use types::check_if_returns_void;
-use types::struct_field_type_matches;
+use toplevel::parse_toplevel;
+use toplevel::resolve_types;
+pub use types::DataType;
+pub use types::VmType;
 use types::var_type_is_compatible;
-
-#[cfg(not(target_arch = "wasm32"))]
-use libloading::Library;
 
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
 
 mod codegen;
-pub mod compiler_errors;
+mod compiler_errors;
 #[path = "functions/functions.rs"]
 mod functions;
 #[path = "functions/methods.rs"]
@@ -75,7 +51,7 @@ mod registers;
 mod scope;
 mod state;
 mod toplevel;
-pub mod types;
+mod types;
 
 pub fn compile<'arena>(
     contents: &str,

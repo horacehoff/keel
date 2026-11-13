@@ -391,6 +391,7 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             code: parser.bump.alloc_slice_copy(&arm_code),
         });
     }
+    parser.next_token();
     Expr::Match(MatchExpr {
         obj: parser.bump.alloc(match_obj),
         arms: parser.bump.alloc_slice_copy(&arms),

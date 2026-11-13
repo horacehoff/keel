@@ -1,7 +1,7 @@
+use crate::compiler::DataType;
 use crate::compiler::program::Struct;
-use crate::compiler::types::DataType;
+use crate::vm::Gc;
 use crate::vm::ObjectPool;
-use crate::vm::gc::Gc;
 use crate::vm::{MapPool, StringPool};
 use lexical_core::FormattedSize;
 use std::borrow::Cow;

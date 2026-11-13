@@ -1,14 +1,14 @@
 use super::strings::compile_str_concat_chain;
+use crate::ast::Expr;
+use crate::ast::Span;
 use crate::ast::TypeExpr;
 use crate::compiler::Ctx;
 use crate::compiler::DataType;
-use crate::compiler::Expr;
 use crate::compiler::Instr;
-use crate::compiler::Span;
-use crate::compiler::State;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_errors;
-use crate::compiler::error_division_by_zero;
+use crate::compiler::compiler_errors::error_division_by_zero;
+use crate::compiler::state::State;
 use crate::data::Data;
 use crate::data::FALSE;
 

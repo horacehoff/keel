@@ -1,12 +1,12 @@
 use super::check_arg_type;
 use crate::ast::FunctionCallExpr;
 use crate::compiler::Ctx;
+use crate::compiler::DataType;
 use crate::compiler::Scope;
-use crate::compiler::State;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_errors::check_args_length;
 use crate::compiler::compiler_errors::error_unknown_function;
-use crate::compiler::types::DataType;
+use crate::compiler::state::State;
 use crate::instr::Instr;
 
 pub fn fs_lib_functions<'arena>(

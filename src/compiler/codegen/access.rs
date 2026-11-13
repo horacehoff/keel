@@ -1,18 +1,18 @@
 use super::compile_reg_window;
+use crate::ast::Expr;
 use crate::ast::QualifiedName;
-use crate::compiler::Ctx;
+use crate::ast::Span;
 use crate::compiler::DataType;
-use crate::compiler::Expr;
-use crate::compiler::Span;
-use crate::compiler::State;
 use crate::compiler::UnwrapId;
 use crate::compiler::compiler_errors;
-use crate::compiler::error_invalid_index_type;
+use crate::compiler::compiler_errors::error_invalid_index_type;
+use crate::compiler::compiler_errors::error_type_not_indexable;
 use crate::compiler::error_invalid_type;
-use crate::compiler::error_type_not_indexable;
-use crate::compiler::functions::user_functions::compile_function_impl;
+use crate::compiler::functions::compile_function_impl;
+use crate::compiler::registers::to_nested_operand;
+use crate::compiler::state::Ctx;
+use crate::compiler::state::State;
 use crate::compiler::state::Variable;
-use crate::compiler::to_nested_operand;
 use crate::data::Data;
 use crate::instr::Instr;
 

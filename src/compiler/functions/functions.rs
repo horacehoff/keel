@@ -2,21 +2,22 @@ use crate::ast::Expr;
 use crate::ast::FunctionCallExpr;
 use crate::ast::Span;
 use crate::compiler::Ctx;
-use crate::compiler::State;
+use crate::compiler::DataType;
 use crate::compiler::codegen::compile_reg_window;
 use crate::compiler::compiler_errors::check_args_length;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type_multiple;
 use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
-use crate::compiler::types::DataType;
+use crate::compiler::state::State;
 use crate::compiler::types::c_arg_matches;
 use crate::compiler::types::fn_matches_signature;
 use crate::instr::Instr;
 use builtin_functions::builtin_functions;
 use fs_lib_functions::fs_lib_functions;
+pub(super) use user_functions::compile_function_impl;
 use user_functions::handle_user_function;
 
-pub mod user_functions;
+mod user_functions;
 
 #[path = "builtin/builtin_functions.rs"]
 mod builtin_functions;

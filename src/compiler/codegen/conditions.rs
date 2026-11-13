@@ -1,8 +1,8 @@
+use crate::ast::Expr;
 use crate::compiler::Ctx;
 use crate::compiler::DataType;
-use crate::compiler::Expr;
-use crate::compiler::State;
 use crate::compiler::registers::UnwrapId;
+use crate::compiler::state::State;
 use crate::data::FALSE;
 use crate::data::TRUE;
 use crate::instr::Instr;

@@ -1,9 +1,9 @@
+use crate::compiler::DataType;
+use crate::compiler::VmType;
 use crate::compiler::program::DylibFn;
 use crate::compiler::program::ErrorCatch;
 use crate::compiler::program::Program;
 use crate::compiler::program::Struct;
-use crate::compiler::types::DataType;
-use crate::compiler::types::VmType;
 use crate::data::Data;
 use crate::data::FALSE;
 use crate::data::NULL;
@@ -23,7 +23,7 @@ use core::hint::assert_unchecked;
 use core::hint::cold_path;
 use core::ops::Index;
 use core::ops::IndexMut;
-use gc::Gc;
+pub use gc::Gc;
 use lexical_core::FormattedSize;
 use memchr::memmem;
 pub use pools::MapPool;
@@ -38,7 +38,7 @@ use unchecked_ops::UncheckedVecOps;
 
 mod comparison;
 mod ffi;
-pub mod gc;
+mod gc;
 mod pools;
 mod stack;
 mod unchecked_ops;
@@ -50,7 +50,7 @@ const fn jump(ip: *const Instr, offset: u16) -> *const Instr {
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Frame(*mut Data);
+struct Frame(*mut Data);
 
 impl Index<u16> for Frame {
     type Output = Data;

@@ -1,5 +1,4 @@
 use super::Data;
-use super::DataType;
 use super::Gc;
 use super::MapPool;
 use super::NULL;
@@ -7,6 +6,7 @@ use super::ObjectPool;
 use super::StringPool;
 use super::Struct;
 use super::unchecked_ops::UncheckedSliceOps;
+use crate::compiler::DataType;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::program::StructField;

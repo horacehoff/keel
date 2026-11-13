@@ -1,9 +1,9 @@
 use crate::ast::Expr;
+use crate::compiler::DataType;
 use crate::compiler::UnwrapId;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
 use crate::compiler::state::Variable;
-use crate::compiler::types::DataType;
 use crate::data::Data;
 use crate::instr::Instr;
 

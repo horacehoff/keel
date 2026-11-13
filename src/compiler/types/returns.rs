@@ -1,7 +1,7 @@
 use crate::{
     ast::{Expr, IfBlockExpr, VariableDeclarationExpr},
     compiler::{
-        codegen::patterns::{declare_pattern_bindings, type_after_mismatch},
+        codegen::{declare_pattern_bindings, type_after_mismatch},
         state::{Ctx, State},
         types::DataType,
     },

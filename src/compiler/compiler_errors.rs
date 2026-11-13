@@ -22,9 +22,9 @@ use crate::errors::throw_compiler_error;
 use ariadne::Color;
 use ariadne::Label;
 use ariadne::Report;
+use core::fmt::Display;
 use core::ops::Range;
 use hybrid_format::hformat;
-use std::fmt::Display;
 
 struct ReportLabel<'a> {
     message: &'a dyn Display,
@@ -33,7 +33,7 @@ struct ReportLabel<'a> {
     file_idx: u16,
 }
 
-impl<'a> ReportLabel<'a> {
+impl ReportLabel<'_> {
     #[inline(always)]
     fn location<'s>(&self, sources: &[Source<'s>]) -> (&'s str, Range<usize>) {
         (sources[self.file_idx as usize].filename, self.span.into())
@@ -44,7 +44,7 @@ impl<'a> ReportLabel<'a> {
 #[cold]
 fn throw_compiler_report(
     title: &dyn Display, // the extra runtime cost is fine here since it quits anyway
-    primary_label: ReportLabel,
+    primary_label: &ReportLabel,
     secondary_labels: &[ReportLabel],
     note: Option<&dyn Display>,
     help: Option<&dyn Display>,
@@ -52,7 +52,7 @@ fn throw_compiler_report(
 ) -> ! {
     let mut report =
         Report::build(ARIADNE_ERROR_KIND, primary_label.location(sources)).with_message(title);
-    for label in core::iter::once(&primary_label).chain(secondary_labels) {
+    for label in core::iter::once(primary_label).chain(secondary_labels) {
         report = report.with_label(
             Label::new(label.location(sources)).with_message(label.message).with_color(label.color),
         );
@@ -79,14 +79,14 @@ pub(super) fn error_array_diff_types(
 ) -> ! {
     throw_compiler_report(
         &"Invalid array types",
-        ReportLabel {
+        &ReportLabel {
             message: &format_args!("This expression is of type {}", blue(array_elem_type)),
             color: Color::Blue,
             span: array_span,
             file_idx,
         },
         &[ReportLabel {
-            message: &format_args!("This expression is of type {}", red(failing_elem_type),),
+            message: &format_args!("This expression is of type {}", red(failing_elem_type)),
             color: Color::Red,
             span: failing_elem_span,
             file_idx,
@@ -110,7 +110,7 @@ pub(super) fn error_invalid_type(
 ) -> ! {
     throw_compiler_report(
         &"Invalid type",
-        ReportLabel {
+        &ReportLabel {
             message: &format_args!(
                 "Expected {}, but this expression's type is {}",
                 blue(expected_type),
@@ -122,7 +122,7 @@ pub(super) fn error_invalid_type(
         },
         &[],
         note.as_ref().map(|note| note as &dyn Display),
-        help.as_ref().map(|help: &std::fmt::Arguments<'_>| help as &dyn Display),
+        help.as_ref().map(|help| help as &dyn Display),
         sources,
     )
 }

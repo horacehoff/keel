@@ -1,3 +1,4 @@
+use crate::ast::Expr;
 use crate::compiler::codegen::strings::is_eligible_for_in_place_append;
 use crate::compiler::codegen::strings::rewrite_str_concats;
 use crate::compiler::functions::compile_function_call;
@@ -9,10 +10,7 @@ use crate::compiler::state::State;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::vm::StringPool;
-use crate::{
-    compiler::{expr::Expr, type_system::DataType},
-    instr::Instr,
-};
+use crate::{compiler::type_system::DataType, instr::Instr};
 use access::compile_array_indexing;
 use access::compile_array_slice;
 use access::compile_struct_field_access;

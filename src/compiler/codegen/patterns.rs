@@ -1,4 +1,5 @@
 use super::conditions::patch_jumps;
+use crate::ast::{ArrayPattern, Expr, Pattern, Span, StructPattern, code_modifies_variable};
 use crate::compiler::Ctx;
 use crate::compiler::State;
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
             error_invalid_pattern, error_struct_missing_fields, error_struct_unknown_field,
             error_unknown_struct,
         },
-        expr::{ArrayPattern, Expr, Pattern, Span, StructPattern, code_modifies_variable},
         type_system::{DataType, var_type_is_compatible},
     },
     data::{Data, NULL},

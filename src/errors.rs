@@ -1,5 +1,5 @@
+use crate::ast::Span;
 use crate::compiler::Source;
-use crate::compiler::expr::Span;
 use crate::compiler::program::InstrSrc;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};

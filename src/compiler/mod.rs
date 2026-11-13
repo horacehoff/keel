@@ -1,3 +1,12 @@
+use crate::ast::Expr;
+use crate::ast::FunctionDeclarationExpr;
+use crate::ast::IfBlockExpr;
+use crate::ast::IntForLoopExpr;
+use crate::ast::Span;
+use crate::ast::StructFieldAssignmentExpr;
+use crate::ast::StructFieldExpr;
+use crate::ast::VariableDeclarationExpr;
+use crate::ast::code_modifies_variable;
 use crate::compiler::compiler_errors::error_cannot_push_type_to_array;
 use crate::compiler::compiler_errors::error_division_by_zero;
 use crate::compiler::compiler_errors::error_invalid_index_type;
@@ -6,12 +15,6 @@ use crate::compiler::compiler_errors::error_range_invalid_type;
 use crate::compiler::compiler_errors::error_struct_already_defined;
 use crate::compiler::compiler_errors::error_type_not_indexable;
 use crate::compiler::compiler_errors::error_unknown_namespace;
-use crate::compiler::expr::FunctionDeclarationExpr;
-use crate::compiler::expr::IfBlockExpr;
-use crate::compiler::expr::IntForLoopExpr;
-use crate::compiler::expr::StructFieldAssignmentExpr;
-use crate::compiler::expr::StructFieldExpr;
-use crate::compiler::expr::VariableDeclarationExpr;
 use crate::compiler::program::CodeUnit;
 use crate::compiler::program::InstrSrc;
 use crate::compiler::program::Program;
@@ -38,13 +41,9 @@ use crate::errors::ErrorCtx;
 use crate::errors::RESET;
 use crate::instr::Instr;
 use crate::parser;
-use crate::vm::Pool;
 use bumpalo::Bump;
 pub use codegen::compile_expr;
 use core::cell::LazyCell;
-use expr::Expr;
-use expr::Span;
-use expr::code_modifies_variable;
 use program::Dylib;
 use program::DylibFn;
 use program::Function;
@@ -68,7 +67,6 @@ use crate::errors::wasm_error;
 
 mod codegen;
 mod compiler_errors;
-pub mod expr;
 #[path = "functions/functions.rs"]
 mod functions;
 #[path = "functions/methods.rs"]

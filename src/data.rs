@@ -1,4 +1,5 @@
 use crate::compiler::program::Struct;
+use crate::compiler::type_system::DataType;
 use crate::vm::ObjectPool;
 use crate::vm::gc::Gc;
 use crate::vm::{MapPool, StringPool};
@@ -393,6 +394,46 @@ impl Data {
                 value.format_to(output, obj_pool, str_pool, map_pool, structs, true);
             }
             output.push('}');
+        }
+    }
+    #[inline(never)]
+    pub fn matches_datatype(self, t: &DataType, obj_pool: &ObjectPool, map_pool: &MapPool) -> bool {
+        match t {
+            DataType::Int => self.is_int(),
+            DataType::Float => self.is_float(),
+            DataType::Bool => self.is_bool(),
+            DataType::String => self.is_string(),
+            DataType::Null => self.is_null(),
+            DataType::Struct(id) => self.is_struct() && self.struct_type_id() == *id,
+            DataType::Fn(_) | DataType::FnSignature(_) => self.is_function(),
+            DataType::Union(types) => {
+                types.iter().any(|x| self.matches_datatype(x, obj_pool, map_pool))
+            }
+            DataType::Array(None) => self.is_array(),
+            DataType::Array(Some(elem_type)) => {
+                self.is_array() && {
+                    let array = &obj_pool[self.as_array()];
+                    if matches!(**elem_type, DataType::Union(_)) {
+                        array.iter().all(|e| e.matches_datatype(elem_type, obj_pool, map_pool))
+                    } else {
+                        array
+                            .first()
+                            .is_none_or(|e| e.matches_datatype(elem_type, obj_pool, map_pool))
+                    }
+                }
+            }
+            DataType::Map(kv) => {
+                self.is_map() && {
+                    map_pool[self.as_map()].iter().next().is_none_or(|(k, v)| {
+                        kv.0.as_ref().is_none_or(|t| k.matches_datatype(t, obj_pool, map_pool))
+                            && kv
+                                .1
+                                .as_ref()
+                                .is_none_or(|t| v.matches_datatype(t, obj_pool, map_pool))
+                    })
+                }
+            }
+            DataType::Unknown => true,
         }
     }
 }

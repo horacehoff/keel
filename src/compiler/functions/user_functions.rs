@@ -1,7 +1,8 @@
-use super::super::expr::Expr;
 use super::super::type_system::DataType;
 use super::super::type_system::c_arg_matches;
 use super::check_user_fn_arg_types;
+use crate::ast::Expr;
+use crate::ast::FunctionCallExpr;
 use crate::compiler::CodeUnitRegisters;
 use crate::compiler::Ctx;
 use crate::compiler::State;
@@ -11,7 +12,6 @@ use crate::compiler::codegen::compile_reg_window;
 use crate::compiler::compile_expr;
 use crate::compiler::compiler_errors::check_args_user_fn;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
-use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::program::CodeUnit;
 use crate::compiler::program::FunctionImpl;
 use crate::compiler::registers::move_value_to;

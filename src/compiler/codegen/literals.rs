@@ -1,11 +1,11 @@
+use crate::ast::Expr;
+use crate::ast::QualifiedName;
 use crate::compiler::Span;
 use crate::compiler::StructFieldExpr;
 use crate::compiler::compiler_errors;
 use crate::compiler::compiler_errors::error_duplicate_map_key;
 use crate::compiler::compiler_errors::error_map_diff_types;
 use crate::compiler::compiler_errors::error_not_literal_map_key;
-use crate::compiler::expr::Expr;
-use crate::compiler::expr::QualifiedName;
 use crate::compiler::registers::UnwrapId;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;

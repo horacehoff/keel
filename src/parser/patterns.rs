@@ -1,14 +1,14 @@
 use super::ParserErr;
 use super::lexer::Token;
 use super::lexer::parse_string;
+use crate::ast::ArrayPattern;
+use crate::ast::Expr;
+use crate::ast::Pattern;
+use crate::ast::PatternField;
+use crate::ast::QualifiedName;
+use crate::ast::Span;
+use crate::ast::StructPattern;
 use crate::cold_path;
-use crate::compiler::expr::ArrayPattern;
-use crate::compiler::expr::Expr;
-use crate::compiler::expr::Pattern;
-use crate::compiler::expr::PatternField;
-use crate::compiler::expr::QualifiedName;
-use crate::compiler::expr::Span;
-use crate::compiler::expr::StructPattern;
 use crate::parser::Parser;
 use crate::parser::parse_type;
 

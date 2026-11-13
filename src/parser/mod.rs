@@ -1,12 +1,12 @@
 use crate::BOLD;
 use crate::RED;
 use crate::RESET;
+use crate::ast::DylibFnExpr;
+use crate::ast::DylibImportExpr;
+use crate::ast::QualifiedName;
+use crate::ast::VariableDeclarationExpr;
+use crate::ast::{Expr, Span, var_assign};
 use crate::compiler::Source;
-use crate::compiler::expr::DylibFnExpr;
-use crate::compiler::expr::DylibImportExpr;
-use crate::compiler::expr::QualifiedName;
-use crate::compiler::expr::VariableDeclarationExpr;
-use crate::compiler::expr::{Expr, Span, var_assign};
 use crate::compiler::type_system::TypeExpr;
 use crate::errors::ARIADNE_ERROR_KIND;
 use crate::errors::BLUE;

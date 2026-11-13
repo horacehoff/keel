@@ -1,5 +1,5 @@
+use crate::ast::FunctionCallExpr;
 use crate::compiler::UnwrapId;
-use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::{Ctx, State};
 use crate::instr::Instr;
 use builtin_methods::builtin_methods;

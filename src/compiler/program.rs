@@ -1,7 +1,7 @@
-use super::expr::Expr;
-use super::expr::Span;
 use super::type_system::DataType;
-use crate::compiler::expr::QualifiedName;
+use crate::ast::Expr;
+use crate::ast::QualifiedName;
+use crate::ast::Span;
 use crate::compiler::type_system::VmType;
 use crate::data::Data;
 use crate::errors::ErrorCtx;

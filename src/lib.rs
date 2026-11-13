@@ -19,6 +19,7 @@ use std::panic::catch_unwind;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+mod ast;
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
 mod compiler;

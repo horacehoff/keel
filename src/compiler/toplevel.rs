@@ -1,3 +1,11 @@
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ast::DylibFnExpr;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ast::DylibImportExpr;
+use crate::ast::Expr;
+use crate::ast::FunctionDeclarationArgumentExpr;
+use crate::ast::Span;
+use crate::ast::VariableDeclarationExpr;
 use crate::compiler::Library;
 use crate::compiler::compiler_errors;
 use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
@@ -5,14 +13,6 @@ use crate::compiler::compiler_errors::error_cannot_load_dynlib;
 use crate::compiler::compiler_errors::error_cannot_read_file;
 use crate::compiler::compiler_errors::error_global_already_defined;
 use crate::compiler::compiler_errors::error_struct_already_defined;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::compiler::expr::DylibFnExpr;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::compiler::expr::DylibImportExpr;
-use crate::compiler::expr::Expr;
-use crate::compiler::expr::FunctionDeclarationArgumentExpr;
-use crate::compiler::expr::Span;
-use crate::compiler::expr::VariableDeclarationExpr;
 use crate::compiler::program::Dylib;
 use crate::compiler::program::DylibFn;
 use crate::compiler::program::FnSignature;

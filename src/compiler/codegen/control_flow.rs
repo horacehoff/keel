@@ -1,6 +1,7 @@
 use super::conditions::compile_condition;
 use super::conditions::compile_short_circuit_condition;
 use super::conditions::patch_jumps;
+use crate::ast::MatchExpr;
 use crate::compiler::Ctx;
 use crate::compiler::DataType;
 use crate::compiler::Expr;
@@ -14,7 +15,6 @@ use crate::compiler::compile_expr;
 use crate::compiler::error_invalid_type;
 use crate::compiler::error_range_invalid_type;
 use crate::compiler::error_type_not_indexable;
-use crate::compiler::expr::MatchExpr;
 use crate::compiler::move_reg_to_reg;
 use crate::compiler::move_value_to;
 use crate::compiler::registers::UnwrapId;

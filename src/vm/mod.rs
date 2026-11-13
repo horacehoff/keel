@@ -11,280 +11,41 @@ use crate::data::TRUE;
 use crate::errors::ErrType;
 use crate::errors::ErrorCtx;
 use crate::errors::throw_error;
+#[cfg(target_arch = "wasm32")]
+use crate::errors::wasm_error;
 use crate::fs;
 use crate::instr::Instr;
+use crate::vm::comparison::get_array_position;
+use crate::vm::comparison::get_heap_array_position;
+pub use crate::vm::pools::Pool;
+use comparison::obj_eq;
 use core::hint::assert_unchecked;
 use core::hint::cold_path;
-use core::ops::Deref;
-use core::ops::DerefMut;
 use core::ops::Index;
 use core::ops::IndexMut;
 use gc::Gc;
 use lexical_core::FormattedSize;
 use memchr::memmem;
-use rustc_hash::FxBuildHasher;
+pub use pools::MapPool;
+pub use pools::ObjectPool;
+pub use pools::StringPool;
 use seq_macro::seq;
-use std::collections::HashMap;
-use std::io::Write;
-
+use stack::Stack;
 #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
 use std::io::IsTerminal;
+use std::io::Write;
+use unchecked_ops::UncheckedVecOps;
 
-#[cfg(target_arch = "wasm32")]
-use crate::errors::wasm_error;
-
+mod comparison;
 mod ffi;
 pub mod gc;
-
-pub type ObjectPool = Pool<Vec<Data>>;
-pub type MapPool = Pool<HashMap<Data, Data, FxBuildHasher>>;
-pub type StringPool = Pool<String>;
-
-#[inline(never)]
-#[must_use]
-fn container_eq(
-    x: Data,
-    y: Data,
-    obj_pool: &ObjectPool,
-    map_pool: &MapPool,
-    string_pool: &StringPool,
-) -> bool {
-    if x.is_array() || x.is_struct() {
-        let x_obj = &obj_pool[x.as_array()];
-        let y_obj = &obj_pool[y.as_array()];
-        x_obj.len() == y_obj.len()
-            && x_obj.iter().zip(y_obj).all(|(x, y)| obj_eq(*x, *y, obj_pool, map_pool, string_pool))
-    } else if x.is_map() {
-        let x_map = &map_pool[x.as_map()];
-        let y_map = &map_pool[y.as_map()];
-        x_map.len() == y_map.len()
-            && x_map.iter().all(|(k, v)| {
-                y_map.get(k).is_some_and(|y_v| obj_eq(*v, *y_v, obj_pool, map_pool, string_pool))
-            })
-    } else {
-        false
-    }
-}
-
-#[inline(always)]
-#[must_use]
-fn obj_eq(
-    x: Data,
-    y: Data,
-    obj_pool: &ObjectPool,
-    map_pool: &MapPool,
-    string_pool: &StringPool,
-) -> bool {
-    if x == y {
-        true
-    } else if x.tag() != y.tag() {
-        false
-    } else if x.is_string() {
-        x.string_eq(y, string_pool)
-    } else {
-        container_eq(x, y, obj_pool, map_pool, string_pool)
-    }
-}
-
-#[inline(never)]
-fn data_matches_datatype(d: Data, t: &DataType, obj_pool: &ObjectPool, map_pool: &MapPool) -> bool {
-    match t {
-        DataType::Int => d.is_int(),
-        DataType::Float => d.is_float(),
-        DataType::Bool => d.is_bool(),
-        DataType::String => d.is_string(),
-        DataType::Null => d.is_null(),
-        DataType::Struct(id) => d.is_struct() && d.struct_type_id() == *id,
-        DataType::Fn(_) | DataType::FnSignature(_) => d.is_function(),
-        DataType::Unknown => true,
-        DataType::Union(types) => {
-            types.iter().any(|x| data_matches_datatype(d, x, obj_pool, map_pool))
-        }
-        DataType::Array(None) => d.is_array(),
-        DataType::Array(Some(elem_type)) => {
-            d.is_array() && {
-                let array = &obj_pool[d.as_array()];
-                if matches!(**elem_type, DataType::Union(_)) {
-                    array.iter().all(|e| data_matches_datatype(*e, elem_type, obj_pool, map_pool))
-                } else {
-                    array
-                        .first()
-                        .is_none_or(|e| data_matches_datatype(*e, elem_type, obj_pool, map_pool))
-                }
-            }
-        }
-        DataType::Map(kv) => {
-            d.is_map() && {
-                map_pool[d.as_map()].iter().next().is_none_or(|(k, v)| {
-                    kv.0.as_ref().is_none_or(|t| data_matches_datatype(*k, t, obj_pool, map_pool))
-                        && kv
-                            .1
-                            .as_ref()
-                            .is_none_or(|t| data_matches_datatype(*v, t, obj_pool, map_pool))
-                })
-            }
-        }
-    }
-}
+mod pools;
+mod stack;
+mod unchecked_ops;
 
 #[inline(always)]
 const fn jump(ip: *const Instr, offset: u16) -> *const Instr {
     ip.wrapping_offset(offset as i16 as isize)
-}
-
-const MAX_STACK_LEN: usize = 16_000_000 / 8;
-
-struct Stack {
-    #[cfg(not(target_arch = "wasm32"))]
-    _buf: virtual_buffer::vec::Vec<Data>,
-    #[cfg(target_arch = "wasm32")]
-    _buf: Vec<Data>,
-    ptr: *mut Data,
-    frame_limit: Frame,
-    max_frame_regs: usize,
-}
-
-impl Stack {
-    fn new(initial_stack: &[Data], max_frame_regs: usize) -> Self {
-        let len = initial_stack.len() + MAX_STACK_LEN;
-
-        let mut buf = {
-            #[cfg(target_arch = "wasm32")]
-            {
-                unsafe { Box::<[Data]>::new_zeroed_slice(len).assume_init() }.into_vec()
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                let mut buf = virtual_buffer::vec::Vec::new(len);
-                buf.reserve_exact(len);
-                buf
-            }
-        };
-
-        let ptr: *mut Data = buf.as_mut_ptr();
-        unsafe { core::ptr::copy_nonoverlapping(initial_stack.as_ptr(), ptr, initial_stack.len()) };
-        let frame_limit = Frame(unsafe { ptr.add(buf.capacity() - max_frame_regs) });
-        Self { _buf: buf, ptr, frame_limit, max_frame_regs }
-    }
-
-    #[inline(always)]
-    const fn roots(&self, frame: Frame) -> &[Data] {
-        unsafe {
-            core::slice::from_raw_parts(
-                self.ptr,
-                frame.0.offset_from(self.ptr) as usize + self.max_frame_regs,
-            )
-        }
-    }
-}
-
-pub trait UncheckedVecOps<T> {
-    fn pop_unchecked(&mut self) -> T;
-    fn push_unchecked(&mut self, value: T);
-}
-pub trait UncheckedSliceOps<T: Copy> {
-    unsafe fn copy_from_slice_unchecked(&mut self, src: &[T]);
-}
-
-impl<T> UncheckedVecOps<T> for Vec<T> {
-    #[inline(always)]
-    fn pop_unchecked(&mut self) -> T {
-        debug_assert!(!self.is_empty());
-        let new_len = self.len() - 1;
-        unsafe {
-            self.set_len(new_len);
-            self.as_mut_ptr().add(new_len).read()
-        }
-    }
-    #[inline]
-    fn push_unchecked(&mut self, value: T) {
-        debug_assert!(self.len() < self.capacity());
-        unsafe {
-            self.as_mut_ptr().add(self.len()).write(value);
-            self.set_len(self.len() + 1);
-        }
-    }
-}
-
-impl<T: Copy> UncheckedSliceOps<T> for [T] {
-    #[inline(always)]
-    unsafe fn copy_from_slice_unchecked(&mut self, src: &[T]) {
-        debug_assert_eq!(self.len(), src.len());
-        unsafe { core::ptr::copy_nonoverlapping(src.as_ptr(), self.as_mut_ptr(), self.len()) };
-    }
-}
-
-#[repr(transparent)]
-pub struct Pool<T>(pub Vec<T>);
-
-impl<T> Pool<T> {
-    #[inline(always)]
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self(Vec::with_capacity(capacity))
-    }
-}
-
-impl<T> Deref for Pool<T> {
-    type Target = Vec<T>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl<T> DerefMut for Pool<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl<T> Index<usize> for Pool<T> {
-    type Output = T;
-    #[inline(always)]
-    fn index(&self, index: usize) -> &Self::Output {
-        unsafe { self.0.get_unchecked(index) }
-    }
-}
-impl<T> IndexMut<usize> for Pool<T> {
-    #[inline(always)]
-    fn index_mut(&mut self, index: usize) -> &mut T {
-        unsafe { self.0.get_unchecked_mut(index) }
-    }
-}
-
-impl ObjectPool {
-    /// Extends `obj_pool[dst_idx]` with `obj_pool[src_idx][idx_start..idx_end]`.
-    #[inline(always)]
-    pub fn extend_within(
-        &mut self,
-        src_idx: usize,
-        dst_idx: usize,
-        idx_start: usize,
-        idx_end: usize,
-    ) {
-        debug_assert!(src_idx < self.len());
-        debug_assert!(dst_idx < self.len());
-        debug_assert!(idx_start <= idx_end);
-        unsafe {
-            let ptr = self.as_mut_ptr();
-            let src = ptr.add(src_idx);
-            let dst = ptr.add(dst_idx);
-            debug_assert!(idx_end <= (&*src).len());
-            (*dst).extend_from_slice((&*src).get_unchecked(idx_start..idx_end));
-        }
-    }
-    #[inline(always)]
-    pub fn repeat_within(&mut self, src_idx: usize, dst_idx: usize, n: usize) {
-        debug_assert!(src_idx < self.len());
-        debug_assert!(dst_idx < self.len());
-        unsafe {
-            let ptr = self.as_mut_ptr();
-            let src = &*ptr.add(src_idx);
-            let dst = &mut *(ptr.add(dst_idx));
-            dst.reserve_exact(src.len() * n);
-            for _ in 0..n {
-                dst.extend_from_slice(src);
-            }
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -343,63 +104,6 @@ fn flush_output(output: &mut String) {
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     crate::captured_output::print(output);
     output.clear();
-}
-
-#[must_use]
-#[inline(never)]
-fn get_heap_array_position(
-    array: &[Data],
-    needle: Data,
-    obj_pool: &ObjectPool,
-    map_pool: &MapPool,
-    str_pool: &StringPool,
-) -> Option<usize> {
-    if needle.is_large_str() {
-        let needle = str_pool[needle.get_str_pool_id()].as_bytes();
-        array.iter().position(|e| {
-            e.is_large_str() && {
-                let bytes = str_pool[e.get_str_pool_id()].as_bytes();
-                bytes.len() == needle.len() && bytes == needle
-            }
-        })
-    } else {
-        debug_assert!(
-            needle.is_array() || needle.is_struct() || needle.is_map() || needle.is_function()
-        );
-        array.iter().position(|e| obj_eq(*e, needle, obj_pool, map_pool, str_pool))
-    }
-}
-
-#[must_use]
-#[inline(always)]
-fn get_array_position(
-    array: &[Data],
-    needle: Data,
-    obj_pool: &ObjectPool,
-    map_pool: &MapPool,
-    str_pool: &StringPool,
-) -> Option<usize> {
-    if needle.is_heap() {
-        return get_heap_array_position(array, needle, obj_pool, map_pool, str_pool);
-    }
-    let Some(tail) = array.last_chunk::<8>() else {
-        return array.iter().position(|e| *e == needle);
-    };
-    let find_first_match = |start_idx: usize, data_window: &[Data; 8]| {
-        let mask = data_window
-            .iter()
-            .enumerate()
-            .fold(0u8, |mask, (i, e)| mask | (u8::from(*e == needle) << i));
-        (mask != 0).then(|| start_idx + mask.trailing_zeros() as usize)
-    };
-    array
-        .as_chunks::<8>()
-        .0
-        .iter()
-        .enumerate()
-        .find_map(|(i, window)| find_first_match(i * 8, window))
-        // Checks the remaining array.len() % 8 elements
-        .or_else(|| find_first_match(array.len() - 8, tail))
 }
 
 #[allow(clippy::struct_field_names)]
@@ -1408,8 +1112,7 @@ extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
             }
             Instr::IsNotTypeJmp { src_reg_id, type_idx, jump_size } => {
                 jump!(
-                    !data_matches_datatype(
-                        r[src_reg_id],
+                    !r[src_reg_id].matches_datatype(
                         types.get_unchecked(type_idx as usize),
                         obj_pool,
                         map_pool,
@@ -1418,13 +1121,9 @@ extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
                 );
             }
             Instr::IsType(src, type_idx, dest) => {
-                r[dest] = data_matches_datatype(
-                    r[src],
-                    types.get_unchecked(type_idx as usize),
-                    obj_pool,
-                    map_pool,
-                )
-                .into();
+                r[dest] = r[src]
+                    .matches_datatype(types.get_unchecked(type_idx as usize), obj_pool, map_pool)
+                    .into();
             }
             Instr::Halt(code) => {
                 cold_path();

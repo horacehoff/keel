@@ -4,11 +4,11 @@ use super::lexer::Token;
 use super::parse_args;
 use super::parse_type;
 use super::term::parse_term;
+use crate::ast::Expr;
+use crate::ast::FunctionCallExpr;
+use crate::ast::QualifiedName;
+use crate::ast::Span;
 use crate::cold_path;
-use crate::compiler::expr::Expr;
-use crate::compiler::expr::FunctionCallExpr;
-use crate::compiler::expr::QualifiedName;
-use crate::compiler::expr::Span;
 use core::hint::unreachable_unchecked;
 
 pub fn parse_expr_with_precedence<'arena>(

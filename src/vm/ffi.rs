@@ -6,7 +6,7 @@ use super::NULL;
 use super::ObjectPool;
 use super::StringPool;
 use super::Struct;
-use super::UncheckedSliceOps;
+use super::unchecked_ops::UncheckedSliceOps;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::program::StructField;

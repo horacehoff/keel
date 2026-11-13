@@ -1,4 +1,5 @@
 use super::compile_reg_window;
+use crate::ast::QualifiedName;
 use crate::compiler::Ctx;
 use crate::compiler::DataType;
 use crate::compiler::Expr;
@@ -9,7 +10,6 @@ use crate::compiler::compiler_errors;
 use crate::compiler::error_invalid_index_type;
 use crate::compiler::error_invalid_type;
 use crate::compiler::error_type_not_indexable;
-use crate::compiler::expr::QualifiedName;
 use crate::compiler::functions::user_functions::compile_function_impl;
 use crate::compiler::state::Variable;
 use crate::compiler::to_nested_operand;

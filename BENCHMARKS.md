@@ -48,14 +48,14 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | Keel | Python 3.15.2 | LuaJIT (-joff) |
 | --- | --- | --- |
 | [quicksort.kl](/examples/quicksort/quicksort.kl) | [quicksort.py](/examples/quicksort/quicksort.py) | [quicksort.lua](/examples/quicksort/quicksort.lua) |
-| 278.5ms | 698.8ms | 1755ms |
+| 265.6ms | 698.8ms | 1755ms |
 
 ## Sqrt (N=0 to 9999999)
 
 | Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [sqrt.kl](/examples/sqrt/sqrt.kl) | [sqrt.py](/examples/sqrt/sqrt.py) | [sqrt.lua](/examples/sqrt/sqrt.lua) | [sqrt.c](/examples/sqrt/sqrt.c) |
-| 47.5ms | 1039ms | 167ms | 2.1ms |
+| 42.5ms | 1039ms | 167ms | 2.1ms |
 
 ## String.split(), Array.contains() * 50 000
 

@@ -1,12 +1,12 @@
 use super::expr::Expr;
 use super::expr::Span;
 use super::expr::symbol_of_expr;
+use crate::compiler::Ctx;
 use crate::compiler::Scope;
-use crate::compiler::compiler_data::Ctx;
-use crate::compiler::compiler_data::FnSignature;
-use crate::compiler::compiler_data::Function;
-use crate::compiler::compiler_data::Source;
-use crate::compiler::compiler_data::State;
+use crate::compiler::Source;
+use crate::compiler::State;
+use crate::compiler::codegen::patterns::declare_pattern_bindings;
+use crate::compiler::codegen::patterns::type_after_mismatch;
 use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_function_needs_args_typed;
 use crate::compiler::compiler_errors::error_invalid_c_type;
@@ -24,8 +24,8 @@ use crate::compiler::expr::FunctionCallExpr;
 use crate::compiler::expr::IfBlockExpr;
 use crate::compiler::expr::QualifiedName;
 use crate::compiler::expr::VariableDeclarationExpr;
-use crate::compiler::patterns::declare_pattern_bindings;
-use crate::compiler::patterns::type_after_mismatch;
+use crate::compiler::program::FnSignature;
+use crate::compiler::program::Function;
 use core::cell::RefCell;
 use core::hint::cold_path;
 use core::hint::unreachable_unchecked;
@@ -33,7 +33,7 @@ use hybrid_format::hformat;
 use rustc_hash::FxHashSet;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::compiler::compiler_data::Struct;
+use crate::compiler::program::Struct;
 
 #[cfg(not(target_arch = "wasm32"))]
 use libffi::middle::Type;

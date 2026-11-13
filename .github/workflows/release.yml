@@ -11,6 +11,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: Zlocation-detail=none -Zfmt-debug=none -Zunstable-options -Cpanic=immediate-abort
 
 jobs:
   build:
@@ -73,8 +74,8 @@ jobs:
 
       - name: Build instrumented binary
         env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo pgo build -- --target ${{ matrix.target }} -Zbuild-std=std
+          RUSTFLAGS: ${{ matrix.rustflags }} ${{ env.RUSTFLAGS }}
+        run: cargo pgo build -- --target ${{ matrix.target }} -Zbuild-std=std -Zbuild-std-features=
 
       - name: Build PGO dylib (macOS)
         if: runner.os == 'macOS'
@@ -91,8 +92,6 @@ jobs:
       - name: Gather PGO profiles
         run: |
           target/${{ matrix.target }}/release/${{ matrix.bin }} pgo/pgo-std-library.kl
-          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/nbody/nbody_lua.kl 50000
-          target/${{ matrix.target }}/release/${{ matrix.bin }} examples/nbody/nbody_py.kl 50000
           target/${{ matrix.target }}/release/${{ matrix.bin }} examples/nbody/nbody.kl 50000
           target/${{ matrix.target }}/release/${{ matrix.bin }} examples/binary-trees/binary-trees.kl 14
           target/${{ matrix.target }}/release/${{ matrix.bin }} examples/fib/fib.kl
@@ -124,8 +123,8 @@ jobs:
 
       - name: Build final binary
         env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo pgo optimize -- --target ${{ matrix.target }} -Zbuild-std=std
+          RUSTFLAGS: ${{ matrix.rustflags }} ${{ env.RUSTFLAGS }}
+        run: cargo pgo optimize -- --target ${{ matrix.target }} -Zbuild-std=std -Zbuild-std-features=
 
       - name: Package (Unix)
         if: runner.os != 'Windows'

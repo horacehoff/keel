@@ -1,4 +1,5 @@
 #![feature(explicit_tail_calls)]
+#![feature(rust_preserve_none_cc)]
 #![allow(incomplete_features)]
 
 use crate::compiler::compile;
@@ -20,17 +21,14 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(any(target_arch = "wasm32", feature = "embed"))]
 mod captured_output;
-#[path = "./compiler/compiler.rs"]
 mod compiler;
 mod data;
 mod errors;
 mod instr;
-#[path = "./parser/parser.rs"]
 mod parser;
 mod repl;
 #[cfg(test)]
 mod tests;
-#[path = "./vm/vm.rs"]
 mod vm;
 
 #[cfg(target_arch = "wasm32")]

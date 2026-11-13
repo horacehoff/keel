@@ -19,7 +19,7 @@
 - Execution is substantially faster thanks to an improved VM design
 - Stack overflow now raises a catchable `StackOverflow` error
 - Program size is no longer limited to 65,536 total registers
-- Executables are 15-20% smaller
+- Executables are ~40% smaller
 
 ## 0.4.0 (07/30/2026)
 - Function arguments can now be typed with the syntax `arg: T`

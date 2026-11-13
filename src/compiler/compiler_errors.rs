@@ -6,24 +6,70 @@ use super::Source;
 use super::Span;
 use super::State;
 use super::Variable;
-use crate::compiler::compiler_data::Struct;
-use crate::compiler::compiler_data::StructField;
+use crate::compiler::program::Struct;
+use crate::compiler::program::StructField;
 use crate::errors::ARIADNE_ERROR_KIND;
 use crate::errors::BLUE;
 use crate::errors::GREEN;
 use crate::errors::RESET;
 use crate::errors::blue;
 use crate::errors::bold;
+use crate::errors::crash;
 use crate::errors::green;
+use crate::errors::print_error_report;
 use crate::errors::red;
 use crate::errors::throw_compiler_error;
+use ariadne::Color;
 use ariadne::Label;
 use ariadne::Report;
+use core::ops::Range;
 use hybrid_format::hformat;
+use std::fmt::Display;
+
+struct ReportLabel<'a> {
+    message: &'a dyn Display,
+    color: Color,
+    span: Span,
+    file_idx: u16,
+}
+
+impl<'a> ReportLabel<'a> {
+    #[inline(always)]
+    fn location<'s>(&self, sources: &[Source<'s>]) -> (&'s str, Range<usize>) {
+        (sources[self.file_idx as usize].filename, self.span.into())
+    }
+}
 
 #[inline(never)]
 #[cold]
-pub fn error_array_diff_types(
+fn throw_compiler_report(
+    title: &dyn Display, // the extra runtime cost is fine here since it quits anyway
+    primary_label: ReportLabel,
+    secondary_labels: &[ReportLabel],
+    note: Option<&dyn Display>,
+    help: Option<&dyn Display>,
+    sources: &[Source],
+) -> ! {
+    let mut report =
+        Report::build(ARIADNE_ERROR_KIND, primary_label.location(sources)).with_message(title);
+    for label in core::iter::once(&primary_label).chain(secondary_labels) {
+        report = report.with_label(
+            Label::new(label.location(sources)).with_message(label.message).with_color(label.color),
+        );
+    }
+    if let Some(note) = note {
+        report = report.with_note(note);
+    }
+    if let Some(help) = help {
+        report = report.with_help(help);
+    }
+    print_error_report(&report.finish(), sources);
+    crash()
+}
+
+#[inline(never)]
+#[cold]
+pub(super) fn error_array_diff_types(
     file_idx: u16,
     sources: &[Source],
     array_span: Span,
@@ -31,37 +77,29 @@ pub fn error_array_diff_types(
     failing_elem_span: Span,
     failing_elem_type: &DataType,
 ) -> ! {
-    throw_compiler_error(
-        &|| {
-            let src = &sources[file_idx as usize];
-            Report::build(ARIADNE_ERROR_KIND, (src.filename, array_span.into()))
-                .with_message("Invalid array types")
-                .with_label(
-                    Label::new((src.filename, array_span.into()))
-                        .with_message(format_args!(
-                            "This expression is of type {}",
-                            blue(array_elem_type)
-                        ))
-                        .with_color(ariadne::Color::Blue),
-                )
-                .with_label(
-                    Label::new((src.filename, failing_elem_span.into()))
-                        .with_message(format_args!(
-                            "This expression is of type {}",
-                            red(failing_elem_type),
-                        ))
-                        .with_color(ariadne::Color::Red),
-                )
-                .with_note("Arrays are homogeneous and can only hold elements of a single type")
-                .finish()
+    throw_compiler_report(
+        &"Invalid array types",
+        ReportLabel {
+            message: &format_args!("This expression is of type {}", blue(array_elem_type)),
+            color: Color::Blue,
+            span: array_span,
+            file_idx,
         },
+        &[ReportLabel {
+            message: &format_args!("This expression is of type {}", red(failing_elem_type),),
+            color: Color::Red,
+            span: failing_elem_span,
+            file_idx,
+        }],
+        Some(&"Arrays are homogeneous and can only hold elements of a single type"),
+        None,
         sources,
-    );
+    )
 }
 
 #[inline(never)]
 #[cold]
-pub fn error_invalid_type(
+pub(super) fn error_invalid_type(
     expected_type: &DataType,
     perceived_type: &DataType,
     span: Span,
@@ -70,32 +108,23 @@ pub fn error_invalid_type(
     file_idx: u16,
     sources: &[Source],
 ) -> ! {
-    throw_compiler_error(
-        &|| {
-            let src = &sources[file_idx as usize];
-            let mut report = Report::build(ARIADNE_ERROR_KIND, (src.filename, span.into()))
-                .with_message("Invalid type")
-                .with_label(
-                    Label::new((src.filename, span.into()))
-                        .with_message(format_args!(
-                            "Expected {}, but this expression's type is {}",
-                            blue(expected_type),
-                            red(perceived_type)
-                        ))
-                        .with_color(ariadne::Color::Red),
-                );
-
-            if let Some(note_msg) = note {
-                report = report.with_note(note_msg);
-            }
-            if let Some(help_msg) = help {
-                report = report.with_help(help_msg);
-            }
-
-            report.finish()
+    throw_compiler_report(
+        &"Invalid type",
+        ReportLabel {
+            message: &format_args!(
+                "Expected {}, but this expression's type is {}",
+                blue(expected_type),
+                red(perceived_type)
+            ),
+            color: Color::Red,
+            span,
+            file_idx,
         },
+        &[],
+        note.as_ref().map(|note| note as &dyn Display),
+        help.as_ref().map(|help: &std::fmt::Arguments<'_>| help as &dyn Display),
         sources,
-    );
+    )
 }
 
 #[inline(never)]

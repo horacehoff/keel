@@ -1,15 +1,14 @@
+use super::conditions::patch_jumps;
+use crate::compiler::Ctx;
+use crate::compiler::State;
 use crate::{
     compiler::{
-        UnwrapId, compile_condition, compile_expr,
-        compiler_data::{Ctx, State},
+        UnwrapId,
         compiler_errors::{
-            error_invalid_pattern, error_invalid_type, error_struct_missing_fields,
-            error_struct_unknown_field, error_unknown_struct,
+            error_invalid_pattern, error_struct_missing_fields, error_struct_unknown_field,
+            error_unknown_struct,
         },
-        expr::{
-            ArrayPattern, Expr, MatchExpr, Pattern, Span, StructPattern, code_modifies_variable,
-        },
-        patch_jumps,
+        expr::{ArrayPattern, Expr, Pattern, Span, StructPattern, code_modifies_variable},
         type_system::{DataType, var_type_is_compatible},
     },
     data::{Data, NULL},
@@ -63,7 +62,7 @@ const fn flip_jump(jump_instr: Instr) -> Option<Instr> {
     }
 }
 
-fn compile_pattern<'arena>(
+pub(super) fn compile_pattern<'arena>(
     pattern: &'arena Pattern<'arena>,
     register_id: u16,
     candidate: &DataType,
@@ -503,73 +502,4 @@ pub fn declare_pattern_bindings<'arena>(
     }
     state.free_scope_registers(0, &output);
     Some(false_jump_idxs.is_empty())
-}
-
-pub fn compile_match_block<'arena>(
-    MatchExpr { obj, arms, .. }: &'arena MatchExpr,
-    ctx: Ctx,
-    state: &mut State<'arena, '_>,
-    output: &mut Vec<Instr>,
-) {
-    let mut candidate = obj.infer_type(ctx, state);
-    let obj_reg_id = obj.compile(ctx, state, output, None, false, true).unwrap_id();
-
-    let mut end_jumps = Vec::with_capacity(arms.len());
-    let mut pending_false_jmps = Vec::new();
-
-    for arm in *arms {
-        let (arm_start, v_len) = (output.len(), state.v.len());
-        let Some(mut false_jump_idxs) =
-            compile_pattern(&arm.pattern, obj_reg_id, &candidate, arm.code, ctx, state, output)
-        else {
-            continue;
-        };
-        let pattern_end = output.len();
-
-        if let Some(guard) = arm.guard {
-            let guard_type = guard.infer_type(ctx, state);
-            if guard_type != DataType::Bool {
-                error_invalid_type(
-                    &DataType::Bool,
-                    &guard_type,
-                    arm.guard_span,
-                    None,
-                    None,
-                    ctx.file_idx,
-                    state.sources,
-                )
-            }
-            let (guard_b, guard_true_jump_idxs, guard_false_jump_idxs) =
-                compile_condition(guard, ctx, state, output);
-            if guard_b == Some(false) {
-                // if it's a constant and it's false, just remove the now-dead arm
-                state.v.truncate(v_len);
-                state.free_scope_registers(0, &output[arm_start..]);
-                output.truncate(arm_start);
-                continue;
-            }
-            let body_start = output.len();
-            patch_jumps(output, guard_true_jump_idxs, body_start);
-            false_jump_idxs.extend(guard_false_jump_idxs);
-        }
-        patch_jumps(output, pending_false_jmps, arm_start);
-        output.extend(compile_expr(arm.code, ctx.advance_offset(output.len() as u32), state));
-        state.v.truncate(v_len);
-        state.free_scope_registers(0, &output[arm_start..pattern_end]);
-        end_jumps.push(output.len());
-        output.push(Instr::Jmp(0));
-        pending_false_jmps = false_jump_idxs;
-        if pending_false_jmps.is_empty() {
-            break;
-        }
-        candidate = type_after_mismatch(&arm.pattern, arm.guard, &candidate, ctx, state);
-    }
-    // the last just falls through, pop the Jmp(0)
-    if end_jumps.pop().is_some() {
-        output.pop();
-    }
-    let match_end = output.len();
-    patch_jumps(output, pending_false_jmps, match_end);
-    patch_jumps(output, end_jumps, match_end);
-    state.free_reg(obj_reg_id);
 }

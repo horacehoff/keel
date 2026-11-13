@@ -1,7 +1,7 @@
-use crate::compiler::compiler_data::DylibFn;
-use crate::compiler::compiler_data::ErrorCatch;
-use crate::compiler::compiler_data::Program;
-use crate::compiler::compiler_data::Struct;
+use crate::compiler::program::DylibFn;
+use crate::compiler::program::ErrorCatch;
+use crate::compiler::program::Program;
+use crate::compiler::program::Struct;
 use crate::compiler::type_system::DataType;
 use crate::compiler::type_system::VmType;
 use crate::data::Data;
@@ -488,11 +488,11 @@ pub fn execute(program: &mut Program) -> VmReturnType {
     }
 }
 
-static INSTR_TABLE: [fn(*const Instr, Frame, *mut VmCtx<'static>);
+static INSTR_TABLE: [extern "rust-preserve-none" fn(*const Instr, Frame, *mut VmCtx<'static>);
     Instr::Halt(0).discriminant() as usize + 1] = seq!(N in 0..114 {[#(execute_instr::<N>,)*]});
 
 #[inline(always)]
-fn execute_at(ip: *const Instr, r: Frame, ctx: *mut VmCtx<'static>) {
+extern "rust-preserve-none" fn execute_at(ip: *const Instr, r: Frame, ctx: *mut VmCtx<'static>) {
     unsafe {
         let handler = *INSTR_TABLE.get_unchecked((*ip).discriminant() as usize);
         become handler(ip, r, ctx)
@@ -504,7 +504,7 @@ fn parse_float(s: &str) -> Option<f64> {
     lexical_core::parse::<f64>(s.as_bytes()).ok()
 }
 
-fn execute_instr<const DISCRIMINANT: u8>(
+extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
     mut ip: *const Instr,
     mut r: Frame,
     ctx: *mut VmCtx<'static>,

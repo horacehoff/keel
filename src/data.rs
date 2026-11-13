@@ -1,4 +1,4 @@
-use crate::compiler::compiler_data::Struct;
+use crate::compiler::program::Struct;
 use crate::vm::ObjectPool;
 use crate::vm::gc::Gc;
 use crate::vm::{MapPool, StringPool};

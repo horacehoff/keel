@@ -1,5 +1,6 @@
-use crate::compiler::compiler_data::{InstrSrc, Source};
+use crate::compiler::Source;
 use crate::compiler::expr::Span;
+use crate::compiler::program::InstrSrc;
 use ariadne::FnCache;
 use ariadne::{Color, Label, Report, ReportKind};
 use hybrid_format::hformat;

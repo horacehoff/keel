@@ -97,7 +97,7 @@ codegen-units = 1
 incremental = false
 strip = true
 
-[profile.debugrelease]
+[profile.magrathea]
 inherits = "release"
 lto = true
 strip = false
@@ -107,17 +107,12 @@ debug = 2
 debug-assertions = false
 panic = "abort"
 rpath = true
-incremental = false
+incremental = true
 
-[profile.debugrelease.package."*"]
+[profile.magrathea.package."*"]
 opt-level = 3
 debug = 2
 codegen-units = 1
-
-[profile.asm]
-inherits = "debugrelease"
-lto = "thin"
-incremental = true
 
 [profile.embed]
 inherits = "release"

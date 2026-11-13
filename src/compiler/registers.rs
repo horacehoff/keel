@@ -3,6 +3,18 @@ use crate::instr::Instr;
 use crate::lib_func;
 use core::hint::unreachable_unchecked;
 
+pub trait UnwrapId {
+    fn unwrap_id(self) -> u16;
+}
+
+impl UnwrapId for Option<u16> {
+    #[inline(always)]
+    fn unwrap_id(self) -> u16 {
+        debug_assert!(self.is_some());
+        unsafe { self.unwrap_unchecked() }
+    }
+}
+
 pub fn move_value_to(output: &mut Vec<Instr>, src_instr_idx: usize, value_idx: u16, tgt_idx: u16) {
     if value_idx != tgt_idx {
         let instrs = &mut output[src_instr_idx..];

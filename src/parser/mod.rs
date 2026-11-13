@@ -1,7 +1,7 @@
 use crate::BOLD;
 use crate::RED;
 use crate::RESET;
-use crate::compiler::compiler_data::Source;
+use crate::compiler::Source;
 use crate::compiler::expr::DylibFnExpr;
 use crate::compiler::expr::DylibImportExpr;
 use crate::compiler::expr::QualifiedName;
@@ -26,18 +26,18 @@ use blocks::parse_while_block;
 use bumpalo::Bump;
 use core::hint::{cold_path, unreachable_unchecked};
 use core::iter::Peekable;
+use expr::add_op;
+use expr::parse_expr;
 use hybrid_format::hformat;
 use lexer::parse_string;
 use logos::SpannedIter;
-use parser_expr::add_op;
-use parser_expr::parse_expr;
 
 use lexer::Token;
 use logos::Logos;
 
 mod blocks;
+mod expr;
 mod lexer;
-mod parser_expr;
 mod patterns;
 mod term;
 

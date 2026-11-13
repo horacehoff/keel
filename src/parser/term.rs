@@ -1,10 +1,10 @@
 use super::ParserErr;
+use super::expr;
+use super::expr::parse_expr_no_struct;
+use super::expr::parse_expr_with_precedence;
 use super::lexer::Token;
 use super::lexer::parse_string;
 use super::parse_expr;
-use super::parser_expr;
-use super::parser_expr::parse_expr_no_struct;
-use super::parser_expr::parse_expr_with_precedence;
 use crate::cold_path;
 use crate::compiler::expr::Expr;
 use crate::compiler::expr::FunctionCallExpr;
@@ -337,7 +337,7 @@ pub fn parse_term<'arena>(parser: &mut Parser<'arena>, allow_struct: bool) -> Ex
                     "Key-value pairs must be separated by a colon",
                 );
                 let value_start = parser.peek_token_span().start;
-                let value = parser_expr::parse_expr(parser);
+                let value = expr::parse_expr(parser);
                 let value_end = parser.last_token_end;
                 kv_pairs.push((
                     key,

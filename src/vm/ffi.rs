@@ -9,7 +9,7 @@ use super::Struct;
 use super::UncheckedSliceOps;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::compiler::compiler_data::StructField;
+use crate::compiler::program::StructField;
 
 /// Writes `bytes` into `dst` at `index`
 pub unsafe fn write_bytes_at_offset(

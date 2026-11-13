@@ -32,7 +32,6 @@ use crate::compiler::state::State;
 use crate::compiler::state::Variable;
 use crate::compiler::toplevel::parse_toplevel;
 use crate::compiler::toplevel::resolve_types;
-use crate::compiler::type_system::var_type_is_compatible;
 use crate::data::NULL;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
@@ -43,7 +42,7 @@ use crate::instr::Instr;
 use crate::parser;
 use crate::vm::Pool;
 use bumpalo::Bump;
-pub use codegen::compile_expr;
+use codegen::compile_expr;
 use core::cell::LazyCell;
 use program::Dylib;
 use program::DylibFn;
@@ -54,11 +53,12 @@ use registers::UnwrapId;
 use registers::move_reg_to_reg;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
-use type_system::DataType;
-use type_system::TypeExpr;
-use type_system::check_if_returns_void;
-use type_system::collect_direct_fn_calls;
-use type_system::struct_field_type_matches;
+use types::DataType;
+use types::TypeExpr;
+use types::check_if_returns_void;
+use types::collect_direct_fn_calls;
+use types::struct_field_type_matches;
+use types::var_type_is_compatible;
 
 #[cfg(not(target_arch = "wasm32"))]
 use libloading::Library;
@@ -77,7 +77,7 @@ mod registers;
 mod scope;
 mod state;
 mod toplevel;
-pub mod type_system;
+pub mod types;
 
 pub fn compile<'arena>(
     contents: &str,

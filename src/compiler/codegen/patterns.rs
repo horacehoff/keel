@@ -9,7 +9,7 @@ use crate::{
             error_invalid_pattern, error_struct_missing_fields, error_struct_unknown_field,
             error_unknown_struct,
         },
-        type_system::{DataType, var_type_is_compatible},
+        types::{DataType, var_type_is_compatible},
     },
     data::{Data, NULL},
     instr::Instr,

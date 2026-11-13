@@ -6,6 +6,7 @@ use crate::ast::Expr;
 use crate::ast::FunctionDeclarationArgumentExpr;
 use crate::ast::Span;
 use crate::ast::VariableDeclarationExpr;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::Library;
 use crate::compiler::compiler_errors;
 use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
@@ -22,10 +23,12 @@ use crate::compiler::program::StructField;
 use crate::compiler::scope::Scope;
 use crate::compiler::scope::Symbol;
 use crate::compiler::state::Source;
-use crate::compiler::type_system::DataType;
-use crate::compiler::type_system::TypeExpr;
-use crate::compiler::type_system::check_if_returns_void;
-use crate::compiler::type_system::collect_direct_fn_calls;
+use crate::compiler::types::DataType;
+use crate::compiler::types::TypeExpr;
+use crate::compiler::types::check_if_returns_void;
+use crate::compiler::types::collect_direct_fn_calls;
+#[cfg(target_arch = "wasm32")]
+use crate::errors::wasm_error;
 use crate::parser;
 use bumpalo::Bump;
 use core::cell::LazyCell;
@@ -353,7 +356,7 @@ pub fn resolve_types<'arena>(
         let fns = fn_signatures
             .iter()
             .map(|DylibFnExpr { name, args, name_span }| {
-                use crate::compiler::type_system::datatype_to_vmtype;
+                use crate::compiler::types::datatype_to_vmtype;
 
                 let (fn_return_type, fn_return_type_span) = unsafe { args.get_unchecked(0) };
                 let fn_args = args

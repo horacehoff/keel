@@ -7,7 +7,7 @@ use crate::ast::QualifiedName;
 use crate::ast::VariableDeclarationExpr;
 use crate::ast::{Expr, Span, var_assign};
 use crate::compiler::Source;
-use crate::compiler::type_system::TypeExpr;
+use crate::compiler::types::TypeExpr;
 use crate::errors::ARIADNE_ERROR_KIND;
 use crate::errors::BLUE;
 use crate::errors::crash;

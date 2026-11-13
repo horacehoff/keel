@@ -1,5 +1,5 @@
 use crate::compiler::program::Struct;
-use crate::compiler::type_system::DataType;
+use crate::compiler::types::DataType;
 use crate::vm::ObjectPool;
 use crate::vm::gc::Gc;
 use crate::vm::{MapPool, StringPool};

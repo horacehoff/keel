@@ -9,7 +9,7 @@ use crate::{
         Scope, Symbol,
         program::{CodeUnit, Dylib, Function, InstrSrc, Pools, Struct},
         registers::{PERMANENT_REG_FLAG, is_permanent_register},
-        type_system::DataType,
+        types::DataType,
     },
     data::{Data, NULL},
     instr::Instr,

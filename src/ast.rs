@@ -1,4 +1,4 @@
-use crate::compiler::type_system::TypeExpr;
+use crate::compiler::types::TypeExpr;
 use bumpalo::Bump;
 use core::hint::unreachable_unchecked;
 

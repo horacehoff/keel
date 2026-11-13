@@ -1,6 +1,3 @@
-use super::super::type_system::DataType;
-use super::super::type_system::fn_args_match;
-use super::super::type_system::fn_matches_signature;
 use crate::ast::Expr;
 use crate::ast::FunctionCallExpr;
 use crate::ast::Span;
@@ -18,6 +15,9 @@ use crate::compiler::compiler_errors::error_invalid_obj_type;
 use crate::compiler::compiler_errors::error_unknown_function;
 use crate::compiler::functions::check_arg_type;
 use crate::compiler::functions::user_functions::compile_function_impl;
+use crate::compiler::types::DataType;
+use crate::compiler::types::fn_args_match;
+use crate::compiler::types::fn_matches_signature;
 use crate::data::Data;
 use crate::data::FALSE;
 use crate::instr::Instr;

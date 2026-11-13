@@ -1,5 +1,3 @@
-use super::super::type_system::DataType;
-use super::super::type_system::c_arg_matches;
 use super::check_user_fn_arg_types;
 use crate::ast::Expr;
 use crate::ast::FunctionCallExpr;
@@ -16,6 +14,8 @@ use crate::compiler::program::CodeUnit;
 use crate::compiler::program::FunctionImpl;
 use crate::compiler::registers::move_value_to;
 use crate::compiler::registers::relocate_registers;
+use crate::compiler::types::DataType;
+use crate::compiler::types::c_arg_matches;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;

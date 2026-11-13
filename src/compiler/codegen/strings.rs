@@ -3,7 +3,7 @@ use crate::compiler::UnwrapId;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
 use crate::compiler::state::Variable;
-use crate::compiler::type_system::DataType;
+use crate::compiler::types::DataType;
 use crate::data::Data;
 use crate::instr::Instr;
 

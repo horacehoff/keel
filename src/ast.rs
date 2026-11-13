@@ -1,5 +1,10 @@
-use crate::compiler::types::TypeExpr;
+use crate::compiler::{
+    Scope, Source,
+    compiler_errors::{error_unknown_type, error_unknown_type_with_namespace},
+    types::DataType,
+};
 use bumpalo::Bump;
+use core::hint::cold_path;
 use core::hint::unreachable_unchecked;
 
 #[derive(Clone, Debug, Copy)]
@@ -10,7 +15,6 @@ pub struct IfBlockExpr<'arena> {
     /// if .. {..} else { <OTHERWISE> }
     pub otherwise: &'arena [Expr<'arena>],
     pub condition_span: Span,
-    pub span: Span,
 }
 
 #[derive(Clone, Debug, Copy)]
@@ -205,14 +209,12 @@ pub struct MatchArm<'arena> {
     pub guard: Option<&'arena Expr<'arena>>,
     pub guard_span: Span,
     pub code: &'arena [Expr<'arena>],
-    pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct MatchExpr<'arena> {
     pub obj: &'arena Expr<'arena>, // match <obj>
     pub arms: &'arena [MatchArm<'arena>],
-    pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -411,5 +413,71 @@ impl From<(u32, u32)> for Span {
     #[inline(always)]
     fn from((start, end): (u32, u32)) -> Self {
         Self { start, end }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum TypeExpr<'arena> {
+    Identifier(&'arena str, Span),
+    NamespacedIdentifier(QualifiedName<'arena>, Span),
+    Array(&'arena Self),
+    Map(&'arena Self, &'arena Self),
+    Union(&'arena [Self]),
+    Function(&'arena [Self]),
+    Null,
+}
+
+impl TypeExpr<'_> {
+    pub fn to_datatype(self, file_idx: u16, scope: &Scope, sources: &[Source]) -> DataType {
+        match self {
+            Self::Null => DataType::Null,
+            Self::Identifier(s, span) => match s {
+                "int" => DataType::Int,
+                "float" => DataType::Float,
+                "bool" => DataType::Bool,
+                "string" => DataType::String,
+                "null" => DataType::Null,
+                struct_name => {
+                    if let Some(struct_id) =
+                        scope.find_struct(&[], struct_name, span, file_idx, sources)
+                    {
+                        DataType::Struct(struct_id as u16)
+                    } else {
+                        error_unknown_type(span, file_idx, struct_name, sources, scope);
+                    }
+                }
+            },
+            Self::NamespacedIdentifier(s, span) => {
+                if let Some(struct_id) =
+                    scope.find_struct(s.get_namespace(), s.get_name(), span, file_idx, sources)
+                {
+                    DataType::Struct(struct_id as u16)
+                } else {
+                    cold_path();
+                    error_unknown_type_with_namespace(
+                        span,
+                        file_idx,
+                        s.get_name(),
+                        sources,
+                        scope,
+                        s.get_namespace(),
+                    )
+                }
+            }
+            Self::Array(inner_t) => {
+                DataType::Array(Some(Box::new(inner_t.to_datatype(file_idx, scope, sources))))
+            }
+            Self::Map(k_t, v_t) => DataType::Map(Box::from((
+                Some(k_t.to_datatype(file_idx, scope, sources)),
+                Some(v_t.to_datatype(file_idx, scope, sources)),
+            ))),
+            Self::Union(poly) => DataType::Union(
+                poly.iter().map(|t| t.to_datatype(file_idx, scope, sources)).collect(),
+            )
+            .check_poly(),
+            Self::Function(parts) => DataType::FnSignature(
+                parts.iter().map(|t| t.to_datatype(file_idx, scope, sources)).collect(),
+            ),
+        }
     }
 }

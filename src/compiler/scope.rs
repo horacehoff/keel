@@ -47,13 +47,6 @@ impl Scope<'_> {
             .map(|symbol| *symbol as usize)
     }
     #[must_use]
-    pub fn find_function_fallible(&self, path: &[&str], function_name: &str) -> Option<usize> {
-        self.walk_to_namespace(path)?
-            .symbols
-            .get(&(function_name, Symbol::Fn))
-            .map(|symbol| *symbol as usize)
-    }
-    #[must_use]
     pub fn find_struct(
         &self,
         path: &[&str],

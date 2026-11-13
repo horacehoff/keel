@@ -1,3 +1,4 @@
+use crate::ast::TypeExpr;
 use crate::compiler::Ctx;
 use crate::compiler::DataType;
 use crate::compiler::Function;
@@ -7,9 +8,7 @@ use crate::compiler::State;
 use crate::compiler::Struct;
 use crate::compiler::StructField;
 use crate::compiler::Symbol;
-use crate::compiler::TypeExpr;
 use crate::compiler::check_if_returns_void;
-use crate::compiler::collect_direct_fn_calls;
 use crate::compiler::compiler_errors;
 use crate::compiler::error_struct_already_defined;
 
@@ -63,8 +62,6 @@ pub(super) fn compile_function_definition<'arena>(
     let span = function_declaration.span;
     let fn_code = function_declaration.code;
     let fn_args = &function_declaration.args;
-    let mut callees = Vec::new();
-    collect_direct_fn_calls(fn_code, &mut callees);
     let fn_id = state.functions.len() as u16;
     if let Some(func) = state.scope_mut(ctx.file_idx).symbols.insert((fn_name, Symbol::Fn), fn_id) {
         compiler_errors::error_function_already_defined(
@@ -93,7 +90,6 @@ pub(super) fn compile_function_definition<'arena>(
         returns_null: check_if_returns_void(fn_code),
         src_file_idx: ctx.file_idx,
         return_type_cache: Vec::new(),
-        direct_calls: state.bump.alloc_slice_copy(&callees),
         name_span: span,
     });
 }

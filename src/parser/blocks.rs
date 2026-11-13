@@ -21,7 +21,7 @@ use crate::parser::parse_type;
 use crate::parser::patterns::parse_pattern;
 
 // call right after peeking Token::If
-pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'arena> {
+pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let t = parser.next_token();
     debug_assert_eq!(t.0, Token::If);
     let condition_start = parser.peek_token_span().start;
@@ -31,7 +31,7 @@ pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'
     let otherwise: Box<[Expr]> = if parser.peek_token_opt() == Some(Token::Else) {
         parser.next_token();
         match parser.peek_token_opt() {
-            Some(Token::If) => Box::new([parse_if_block(parser, start)]),
+            Some(Token::If) => Box::new([parse_if_block(parser)]),
             Some(Token::LBrace) => parse_block(parser).into_boxed_slice(),
             _ => Box::new([]),
         }
@@ -43,7 +43,6 @@ pub fn parse_if_block<'arena>(parser: &mut Parser<'arena>, start: u32) -> Expr<'
         then: parser.bump.alloc_slice_copy(&output_code),
         otherwise: parser.bump.alloc_slice_copy(&otherwise),
         condition_span: (condition_start, condition_end).into(),
-        span: (start, parser.last_token_end).into(),
     })
 }
 
@@ -286,7 +285,6 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
             then: parser.bump.alloc_slice_copy(&code),
             otherwise: parser.bump.alloc_slice_copy(&otherwise),
             condition_span: (start, end).into(),
-            span: (start, end).into(),
         })];
     }
     Expr::TryCatchBlock(
@@ -297,7 +295,6 @@ pub fn parse_try_catch_block<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena
             then: parser.bump.alloc_slice_copy(&output_code),
             otherwise: parser.bump.alloc_slice_copy(&otherwise),
             condition_span: (start, end).into(),
-            span: (start, end).into(),
         })]),
     )
 }
@@ -363,7 +360,6 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
     let match_obj = parse_expr_no_struct(parser);
     parser.next_token_expect(Token::LBrace, "Blocks need to start with '{'");
     let mut arms: Vec<MatchArm> = Vec::with_capacity(4);
-    let end: u32;
     loop {
         let peek_token = parser.peek_token();
         if peek_token == Token::RBrace {
@@ -372,10 +368,8 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
                 let span = (start, parser.peek_token_span().end).into();
                 parser.error(span, ParserErr::MatchBlockZeroArms);
             }
-            end = parser.next_token().1.end;
             break;
         }
-        let arm_start = parser.peek_token_span().start;
         let pattern = parse_pattern(parser);
         let (guard, guard_span) = if parser.peek_token() == Token::If {
             parser.next_token();
@@ -390,18 +384,15 @@ pub fn parse_match<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
             "Match arms need to be a pattern followed by '=>' and a block",
         );
         let arm_code = parse_block(parser);
-        let arm_end = parser.last_token_end;
         arms.push(MatchArm {
             pattern,
             guard,
             guard_span,
             code: parser.bump.alloc_slice_copy(&arm_code),
-            span: (arm_start, arm_end).into(),
         });
     }
     Expr::Match(MatchExpr {
         obj: parser.bump.alloc(match_obj),
         arms: parser.bump.alloc_slice_copy(&arms),
-        span: (start, end).into(),
     })
 }

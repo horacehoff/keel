@@ -16,7 +16,6 @@ use crate::compiler::program::FnSignature;
 use crate::compiler::program::Function;
 use crate::compiler::scope::Scope;
 use crate::compiler::types::check_if_returns_void;
-use crate::compiler::types::collect_direct_fn_calls;
 use crate::compiler::types::error_function_needs_args_typed;
 use crate::compiler::types::error_unknown_variable;
 use crate::compiler::types::resolve_function_return_type;
@@ -464,8 +463,6 @@ impl<'arena> Expr<'arena> {
             Self::AnonymousFunction(args, code, span) => {
                 let fn_name = bumpalo::format!(in state.bump,"anonymous@f{}s{}e{}", ctx.file_idx, span.start, span.end);
                 let returns_null = check_if_returns_void(code);
-                let mut callees = Vec::new();
-                collect_direct_fn_calls(code, &mut callees);
                 let id = state.functions.len() as u16;
                 state.functions.push(Function {
                     name: fn_name.into_bump_str(),
@@ -490,7 +487,6 @@ impl<'arena> Expr<'arena> {
                     returns_null,
                     src_file_idx: ctx.file_idx,
                     return_type_cache: Vec::new(),
-                    direct_calls: state.bump.alloc_slice_copy(&callees),
                     name_span: *span,
                 });
                 DataType::Fn(id)

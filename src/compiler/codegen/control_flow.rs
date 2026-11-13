@@ -71,7 +71,7 @@ fn compile_if_block_branch<'arena>(
 }
 
 pub(super) fn compile_if_block<'arena>(
-    IfBlockExpr { condition, then, otherwise, condition_span, span: _ }: &'arena IfBlockExpr,
+    IfBlockExpr { condition, then, otherwise, condition_span }: &'arena IfBlockExpr,
     previous_jumps: Vec<usize>,
     tgt_id: Option<u16>,
     ctx: Ctx,

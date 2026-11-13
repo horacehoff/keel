@@ -23,7 +23,7 @@ use crate::compiler::registers::move_value_to;
 use crate::compiler::registers::relocate_register;
 use crate::compiler::registers::relocate_registers;
 use crate::compiler::registers::to_nested_operand;
-use crate::compiler::scope::Scope;
+pub use crate::compiler::scope::Scope;
 use crate::compiler::scope::Symbol;
 use crate::compiler::state::CodeUnitRegisters;
 use crate::compiler::state::Ctx;
@@ -54,9 +54,7 @@ use registers::move_reg_to_reg;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 use types::DataType;
-use types::TypeExpr;
 use types::check_if_returns_void;
-use types::collect_direct_fn_calls;
 use types::struct_field_type_matches;
 use types::var_type_is_compatible;
 
@@ -67,7 +65,7 @@ use libloading::Library;
 use crate::errors::wasm_error;
 
 mod codegen;
-mod compiler_errors;
+pub mod compiler_errors;
 #[path = "functions/functions.rs"]
 mod functions;
 #[path = "functions/methods.rs"]

@@ -5,6 +5,7 @@ use crate::ast::DylibImportExpr;
 use crate::ast::Expr;
 use crate::ast::FunctionDeclarationArgumentExpr;
 use crate::ast::Span;
+use crate::ast::TypeExpr;
 use crate::ast::VariableDeclarationExpr;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::Library;
@@ -24,9 +25,7 @@ use crate::compiler::scope::Scope;
 use crate::compiler::scope::Symbol;
 use crate::compiler::state::Source;
 use crate::compiler::types::DataType;
-use crate::compiler::types::TypeExpr;
 use crate::compiler::types::check_if_returns_void;
-use crate::compiler::types::collect_direct_fn_calls;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
 use crate::parser;
@@ -98,8 +97,6 @@ pub fn parse_toplevel<'a>(
                     );
                 }
                 let returns_void = check_if_returns_void(fn_code);
-                let mut callees = Vec::new();
-                collect_direct_fn_calls(fn_code, &mut callees);
 
                 let fn_id = fns.len() as u16;
                 fns.push(Function {
@@ -110,7 +107,6 @@ pub fn parse_toplevel<'a>(
                     returns_null: returns_void,
                     src_file_idx,
                     return_type_cache: Vec::new(),
-                    direct_calls: bump.alloc_slice_copy(&callees),
                     name_span: span,
                 });
                 pending_fns.push((fn_id, src_file_idx, fn_args));

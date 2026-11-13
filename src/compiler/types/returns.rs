@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Expr, FunctionCallExpr, IfBlockExpr, QualifiedName, VariableDeclarationExpr},
+    ast::{Expr, IfBlockExpr, VariableDeclarationExpr},
     compiler::{
         codegen::patterns::{declare_pattern_bindings, type_after_mismatch},
         state::{Ctx, State},
@@ -14,105 +14,6 @@ use rustc_hash::FxHashSet;
 thread_local! {
     static RETURN_TYPE_INFERRING: RefCell<FxHashSet<usize>> =
         RefCell::new(FxHashSet::default());
-}
-
-/// Collect all the function calls in the given code
-pub fn collect_direct_fn_calls<'arena>(
-    content: &'arena [Expr],
-    calls: &mut Vec<QualifiedName<'arena>>,
-) {
-    let mut expr_stack: Vec<&Expr> = content.iter().collect();
-    while let Some(expression) = expr_stack.pop() {
-        match expression {
-            Expr::FunctionCall(FunctionCallExpr { qualified_name, args, .. })
-            | Expr::ObjFunctionCall(FunctionCallExpr { qualified_name, args, .. }) => {
-                calls.push(*qualified_name);
-                expr_stack.extend(*args);
-            }
-            Expr::IfBlock(if_block) => {
-                expr_stack.push(if_block.condition);
-                expr_stack.extend(if_block.then);
-                expr_stack.extend(if_block.otherwise);
-            }
-            Expr::WhileBlock(condition, code) => {
-                expr_stack.push(condition);
-                expr_stack.extend(*code);
-            }
-            Expr::Match(match_expr) => {
-                expr_stack.push(match_expr.obj);
-                for arm in match_expr.arms {
-                    if let Some(guard) = arm.guard {
-                        expr_stack.push(guard);
-                    }
-                    expr_stack.extend(arm.code);
-                }
-            }
-            Expr::EvalBlock(x) | Expr::LoopBlock(x) => {
-                expr_stack.extend(*x);
-            }
-            Expr::ReturnVal(code) => {
-                if let Some(code) = code.as_ref() {
-                    expr_stack.push(code);
-                }
-            }
-            Expr::FunctionDecl(function_declaration) => {
-                expr_stack.extend(function_declaration.code.iter());
-            }
-            Expr::ArrayGetSlice(x, y, z, _) => {
-                expr_stack.push(x);
-                expr_stack.push(y);
-                expr_stack.push(z);
-            }
-            Expr::VarDeclare(VariableDeclarationExpr { value: x, .. })
-            | Expr::VarAssign(_, x, _) => expr_stack.push(x),
-            Expr::Neg(x, _, _) | Expr::BoolNeg(x, _, _) => {
-                expr_stack.push(x);
-            }
-            Expr::ForLoop(_, _, code, _) => expr_stack.extend(*code),
-            Expr::IntForLoop(int_for_loop) => {
-                expr_stack.push(int_for_loop.get_lower_bound());
-                expr_stack.push(int_for_loop.get_upper_bound());
-                expr_stack.extend(int_for_loop.get_loop_code());
-            }
-            Expr::ArrayModify(array, index, value, _, _) => {
-                expr_stack.push(array);
-                expr_stack.push(index);
-                expr_stack.push(value);
-            }
-            Expr::Array(elems, _) => expr_stack.extend(*elems),
-            Expr::Struct(_, fields, _) => {
-                expr_stack.extend(fields.iter().map(|field| &field.value));
-            }
-            Expr::GetStructField(expr, _, _, _) => expr_stack.push(expr),
-            Expr::SetStructField(struct_field_assignment) => {
-                expr_stack.push(struct_field_assignment.struct_expr);
-                expr_stack.push(struct_field_assignment.field_value);
-            }
-            Expr::TryCatchBlock(try_code, _, catch_code) => {
-                expr_stack.extend(*try_code);
-                expr_stack.extend(*catch_code);
-            }
-            Expr::ArrayGetIndex(x, y, _)
-            | Expr::Mul(x, y, _, _)
-            | Expr::Div(x, y, _, _)
-            | Expr::Add(x, y, _, _)
-            | Expr::Sub(x, y, _, _)
-            | Expr::Mod(x, y, _, _)
-            | Expr::Pow(x, y, _, _)
-            | Expr::Eq(x, y)
-            | Expr::NotEq(x, y)
-            | Expr::Sup(x, y, _, _)
-            | Expr::SupEq(x, y, _, _)
-            | Expr::Inf(x, y, _, _)
-            | Expr::InfEq(x, y, _, _)
-            | Expr::BoolAnd(x, y, _, _)
-            | Expr::BoolOr(x, y, _, _) => {
-                expr_stack.push(x);
-                expr_stack.push(y);
-            }
-            _ => {}
-        }
-    }
 }
 
 pub fn check_if_returns_void(content: &[Expr]) -> bool {

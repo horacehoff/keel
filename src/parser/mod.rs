@@ -4,10 +4,10 @@ use crate::RESET;
 use crate::ast::DylibFnExpr;
 use crate::ast::DylibImportExpr;
 use crate::ast::QualifiedName;
+use crate::ast::TypeExpr;
 use crate::ast::VariableDeclarationExpr;
 use crate::ast::{Expr, Span, var_assign};
 use crate::compiler::Source;
-use crate::compiler::types::TypeExpr;
 use crate::errors::ARIADNE_ERROR_KIND;
 use crate::errors::BLUE;
 use crate::errors::crash;
@@ -291,9 +291,8 @@ fn parse_args<'arena>(parser: &mut Parser<'arena>) -> (Vec<Expr<'arena>>, Vec<Sp
 
 fn parse_statement<'arena>(parser: &mut Parser<'arena>) -> Option<Expr<'arena>> {
     let token = parser.peek_token_opt()?;
-    let t_span = parser.peek_token_span();
     match token {
-        Token::If => Some(parse_if_block(parser, t_span.start)),
+        Token::If => Some(parse_if_block(parser)),
         Token::While => Some(parse_while_block(parser)),
         Token::For => Some(parse_for_loop(parser)),
         Token::Match => Some(parse_match(parser)),

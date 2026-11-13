@@ -1,5 +1,4 @@
 use crate::ast::Expr;
-use crate::ast::QualifiedName;
 use crate::ast::Span;
 use crate::compiler::types::DataType;
 use crate::compiler::types::VmType;
@@ -42,7 +41,6 @@ pub struct Function<'arena> {
     pub src_file_idx: u16,
     /// Cache of return types from track_returns, keyed by Box<arg types>
     pub return_type_cache: Vec<(Box<[DataType]>, DataType)>,
-    pub direct_calls: &'arena [QualifiedName<'arena>],
     pub name_span: Span,
 }
 

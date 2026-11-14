@@ -1,6 +1,6 @@
-use super::check_user_fn_arg_types;
 use crate::ast::Expr;
 use crate::ast::FunctionCallExpr;
+use crate::ast::Span;
 use crate::compiler::CodeUnitRegisters;
 use crate::compiler::Ctx;
 use crate::compiler::DataType;
@@ -16,9 +16,43 @@ use crate::compiler::registers::move_value_to;
 use crate::compiler::registers::relocate_registers;
 use crate::compiler::state::State;
 use crate::compiler::types::c_arg_matches;
+use crate::compiler::types::fn_matches_signature;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::instr::Instr;
+
+fn check_user_fn_arg_types(
+    fn_id: usize,
+    fn_name: &str,
+    inferred_arg_types: &[DataType],
+    args_indexes: &[Span],
+    ctx: Ctx,
+    state: &mut State<'_, '_>,
+) {
+    let args_len = state.functions[fn_id].args.len();
+    for i in 0..args_len {
+        let t = state.functions[fn_id].args[i].1.clone();
+        if let Some(t) = &t
+            && if let (DataType::FnSignature(expected_sig), DataType::Fn(concrete_id)) =
+                (t, &inferred_arg_types[i])
+            {
+                !fn_matches_signature(*concrete_id as usize, expected_sig, ctx, state)
+            } else {
+                inferred_arg_types[i] != *t
+            }
+        {
+            error_function_arg_invalid_type(
+                &inferred_arg_types[i],
+                t,
+                args_indexes[i],
+                fn_name,
+                Some((state.functions[fn_id].name_span, state.functions[fn_id].src_file_idx)),
+                ctx.file_idx,
+                state.sources,
+            );
+        }
+    }
+}
 
 /// Returns the index into `state.fns[fn_id].impls` for this specialization (those arg types)
 /// matching `inferred_arg_types`. If it doesn't exist yet, it's compiled via `compile_function`.

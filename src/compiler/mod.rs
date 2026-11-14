@@ -42,7 +42,6 @@ use crate::errors::wasm_error;
 
 mod codegen;
 mod compiler_errors;
-#[path = "functions/functions.rs"]
 mod functions;
 pub mod program;
 mod registers;

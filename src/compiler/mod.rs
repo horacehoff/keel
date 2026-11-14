@@ -44,8 +44,6 @@ mod codegen;
 mod compiler_errors;
 #[path = "functions/functions.rs"]
 mod functions;
-#[path = "functions/methods.rs"]
-mod methods;
 pub mod program;
 mod registers;
 mod scope;

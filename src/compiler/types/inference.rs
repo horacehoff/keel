@@ -10,9 +10,10 @@ use crate::compiler::compiler_errors::error_unknown_function;
 use crate::compiler::compiler_errors::error_unknown_function_in_namespace;
 use crate::compiler::compiler_errors::error_unknown_struct;
 use crate::compiler::error_invalid_type;
+use crate::compiler::functions::get_builtin_function_return_type;
+use crate::compiler::functions::get_method_return_type;
 use crate::compiler::program::FnSignature;
 use crate::compiler::program::Function;
-use crate::compiler::scope::Scope;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
 use crate::compiler::types::check_if_returns_void;
@@ -236,200 +237,79 @@ impl<'arena> Expr<'arena> {
                 _ => unsafe { unreachable_unchecked() },
             },
             Self::FunctionCall(function_call) => {
+                if let Some(return_type) =
+                    get_builtin_function_return_type(function_call, ctx, state)
+                {
+                    return return_type;
+                }
+
                 let qualified_name = &function_call.qualified_name;
                 let args = &function_call.args;
-                match qualified_name.get_name() {
-                    "print" | "write" | "append" | "delete" | "delete_dir" => DataType::Null,
-                    "type" | "string" | "input" | "read" => DataType::String,
-                    "float" => DataType::Float,
-                    "int" | "the_answer" => DataType::Int,
-                    "bool" | "exists" => DataType::Bool,
-                    "range" => DataType::Array(Some(Box::from(DataType::Int))),
-                    "argv" => DataType::Array(Some(Box::from(DataType::String))),
-                    function_name => {
-                        if !qualified_name.is_namespace_empty()
-                            && let Some(lib) = state
-                                .dylibs
-                                .iter()
-                                .find(|l| &l.name == qualified_name.get_namespace().last().unwrap())
-                            && let Some(FnSignature {
-                                name: _,
-                                args: _,
-                                return_type: fn_return_type,
-                                id: _,
-                            }) = lib.fns.iter().find(|x| x.name == function_name)
-                        {
-                            return fn_return_type.clone();
-                        }
-                        let infered_arg_types = args
-                            .iter()
-                            .map(|x| x.infer_type(ctx, state))
-                            .collect::<Vec<DataType>>();
+                let function_name = qualified_name.get_name();
+                if !qualified_name.is_namespace_empty()
+                    && let Some(lib) = state
+                        .dylibs
+                        .iter()
+                        .find(|l| &l.name == qualified_name.get_namespace().last().unwrap())
+                    && let Some(FnSignature {
+                        name: _,
+                        args: _,
+                        return_type: fn_return_type,
+                        id: _,
+                    }) = lib.fns.iter().find(|x| x.name == function_name)
+                {
+                    return fn_return_type.clone();
+                }
+                let infered_arg_types =
+                    args.iter().map(|x| x.infer_type(ctx, state)).collect::<Vec<DataType>>();
 
-                        let fn_id = if qualified_name.is_namespace_empty()
-                            && let Some(var) = state.v.iter().rfind(|var| var.name == function_name)
-                        {
-                            if let DataType::Fn(id) = var.var_type {
-                                id as usize
-                            } else {
-                                error_expected_function(
-                                    &var.var_type,
-                                    function_call.get_call_span(),
-                                    ctx.file_idx,
-                                    state.sources,
-                                )
-                            }
-                        } else {
-                            state.file_scopes[ctx.file_idx as usize]
-                                .find_function(
-                                    qualified_name.get_namespace(),
-                                    function_name,
-                                    function_call.spans[0],
-                                    ctx.file_idx,
-                                    state.sources,
-                                )
-                                .unwrap_or_else(|| {
-                                    if qualified_name.is_namespace_empty() {
-                                        error_unknown_function(
-                                            function_name,
-                                            function_call.get_call_span(),
-                                            state.scope(ctx.file_idx),
-                                            ctx.file_idx,
-                                            state.sources,
-                                        );
-                                    }
-                                    error_unknown_function_in_namespace(
-                                        function_name,
-                                        state.scope(ctx.file_idx),
-                                        qualified_name.get_namespace(),
-                                        function_call.get_call_span(),
-                                        ctx.file_idx,
-                                        state.sources,
-                                    );
-                                })
-                        };
-
-                        resolve_function_return_type(
-                            fn_id,
-                            &infered_arg_types,
-                            function_name,
-                            ctx,
-                            state,
+                let fn_id = if qualified_name.is_namespace_empty()
+                    && let Some(var) = state.v.iter().rfind(|var| var.name == function_name)
+                {
+                    if let DataType::Fn(id) = var.var_type {
+                        id as usize
+                    } else {
+                        error_expected_function(
+                            &var.var_type,
+                            function_call.get_call_span(),
+                            ctx.file_idx,
+                            state.sources,
                         )
                     }
-                }
+                } else {
+                    state.file_scopes[ctx.file_idx as usize]
+                        .find_function(
+                            qualified_name.get_namespace(),
+                            function_name,
+                            function_call.spans[0],
+                            ctx.file_idx,
+                            state.sources,
+                        )
+                        .unwrap_or_else(|| {
+                            if qualified_name.is_namespace_empty() {
+                                error_unknown_function(
+                                    function_name,
+                                    function_call.get_call_span(),
+                                    state.scope(ctx.file_idx),
+                                    ctx.file_idx,
+                                    state.sources,
+                                );
+                            }
+                            error_unknown_function_in_namespace(
+                                function_name,
+                                state.scope(ctx.file_idx),
+                                qualified_name.get_namespace(),
+                                function_call.get_call_span(),
+                                ctx.file_idx,
+                                state.sources,
+                            );
+                        })
+                };
+
+                resolve_function_return_type(fn_id, &infered_arg_types, function_name, ctx, state)
             }
             Self::ObjFunctionCall(function_call) => {
-                let obj = &function_call.args[0];
-                match function_call.qualified_name.get_name() {
-                    "uppercase"
-                    | "lowercase"
-                    | "replace"
-                    | "trim"
-                    | "trim_sequence"
-                    | "trim_left"
-                    | "trim_right"
-                    | "trim_sequence_left"
-                    | "trim_sequence_right"
-                    | "join" => DataType::String,
-                    "starts_with" | "ends_with" | "contains" | "is_float" | "is_int" => {
-                        DataType::Bool
-                    }
-                    "remove" if matches!(obj.infer_type(ctx, state), DataType::Map(_)) => {
-                        DataType::Bool
-                    }
-                    "len" | "find" => DataType::Int,
-                    "repeat" | "reverse" => {
-                        let obj_type = obj.infer_type(ctx, state);
-                        if obj_type == DataType::String {
-                            DataType::String
-                        } else if let DataType::Array(array_type) = obj_type {
-                            DataType::Array(array_type)
-                        } else {
-                            unsafe { unreachable_unchecked() }
-                        }
-                    }
-                    "push" | "sort" | "remove" | "insert" => DataType::Null,
-                    "sqrt" | "round" | "floor" => DataType::Float,
-                    "abs" => {
-                        let obj_type = obj.infer_type(ctx, state);
-                        if obj_type == DataType::Float {
-                            DataType::Float
-                        } else if obj_type == DataType::Int {
-                            DataType::Int
-                        } else {
-                            unsafe { unreachable_unchecked() }
-                        }
-                    }
-                    "split" => DataType::Array(Some(Box::from(DataType::String))),
-                    "partition" => {
-                        let obj_type = obj.infer_type(ctx, state);
-                        if let DataType::Array(array_type) = obj_type {
-                            DataType::Array(Some(Box::from(DataType::Array(array_type))))
-                        } else {
-                            unsafe { unreachable_unchecked() }
-                        }
-                    }
-                    "get" => {
-                        let obj_type = obj.infer_type(ctx, state);
-                        if let DataType::Map(m) = obj_type {
-                            m.1.unwrap_or(DataType::Unknown)
-                        } else {
-                            unsafe { unreachable_unchecked() }
-                        }
-                    }
-                    "map" => {
-                        let obj_type = obj.infer_type(ctx, state);
-                        let fn_type = function_call.args[1].infer_type(ctx, state);
-                        let DataType::Fn(fn_id) = fn_type else {
-                            error_expected_function(
-                                &fn_type,
-                                function_call.get_nth_arg_span(0),
-                                ctx.file_idx,
-                                state.sources,
-                            );
-                        };
-                        if obj_type == DataType::String {
-                            DataType::String
-                        } else if let DataType::Array(elem_type) = obj_type {
-                            let elem_type = match elem_type {
-                                Some(t) => *t,
-                                None => state.functions[fn_id as usize].args[0]
-                                    .1
-                                    .clone()
-                                    .unwrap_or(DataType::Unknown),
-                            };
-                            DataType::Array(Some(Box::new(resolve_function_return_type(
-                                fn_id as usize,
-                                &[elem_type],
-                                "map",
-                                ctx,
-                                state,
-                            ))))
-                        } else {
-                            unsafe { unreachable_unchecked() }
-                        }
-                    }
-                    "filter" => {
-                        let fn_type = function_call.args[1].infer_type(ctx, state);
-                        if !matches!(fn_type, DataType::Fn(_)) {
-                            error_expected_function(
-                                &fn_type,
-                                function_call.get_nth_arg_span(0),
-                                ctx.file_idx,
-                                state.sources,
-                            );
-                        }
-                        obj.infer_type(ctx, state)
-                    }
-                    fn_name => error_unknown_function(
-                        fn_name,
-                        function_call.spans[0],
-                        &Scope::default(),
-                        ctx.file_idx,
-                        state.sources,
-                    ),
-                }
+                get_method_return_type(function_call, ctx, state)
             }
             Self::IfBlock(if_block) => {
                 let mut types: Vec<DataType> = Vec::with_capacity(2);

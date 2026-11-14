@@ -547,7 +547,7 @@ pub fn error_invalid_obj_type(
     span: Span,
     sources: &[Source],
     file_idx: u16,
-) {
+) -> ! {
     throw_compiler_error(
         &|| {
             let src = &sources[file_idx as usize];

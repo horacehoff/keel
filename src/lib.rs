@@ -1,5 +1,6 @@
 #![feature(explicit_tail_calls)]
 #![feature(rust_preserve_none_cc)]
+#![feature(default_field_values)]
 #![allow(incomplete_features)]
 
 use bumpalo::Bump;

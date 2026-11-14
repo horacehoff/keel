@@ -13,7 +13,7 @@ use core::hint::cold_path;
 use core::hint::unreachable_unchecked;
 use hybrid_format::hformat;
 pub use returns::check_if_returns_void;
-use returns::resolve_function_return_type;
+pub use returns::resolve_function_return_type;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::compiler::program::Struct;

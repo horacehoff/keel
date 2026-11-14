@@ -84,7 +84,7 @@ fn track_returns<'arena>(
 
 /// Resolves the return type of the function of index `fn_id` in `state.fns`.
 /// It only computes it once per argument types.
-pub(super) fn resolve_function_return_type(
+pub fn resolve_function_return_type(
     fn_id: usize,
     infered_arg_types: &[DataType],
     fn_name: &str,

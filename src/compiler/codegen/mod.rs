@@ -1,7 +1,7 @@
 use crate::ast::Expr;
 use crate::compiler::DataType;
 use crate::compiler::functions::compile_function_call;
-use crate::compiler::methods::compile_method_call;
+use crate::compiler::functions::compile_method_call;
 use crate::compiler::registers::UnwrapId;
 use crate::compiler::registers::move_value_to;
 use crate::compiler::state::Ctx;

@@ -17,10 +17,10 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 
 ## Why Keel?
 
-- **Fast**: ~2-15x faster than Python ([benchmarks](BENCHMARKS.md)), with aggressive compile-time optimizations
+- **Fast**: Across [the benchmarks](BENCHMARKS.md), on average, Keel is **~8x faster than Python**, and **~2.7x faster than LuaJIT's interpreter (-joff)**.
 - **Familiar syntax**: Rust-like, with Python's ease-of-use
 - **Statically typed, optional annotations**: full type inference, static type checking, polymorphism
-- **FFI support**: easily call C/dynamic libraries directly from Keel. FFI call overhead is 3x lower than LuaJIT (-joff).
+- **FFI support**: call functions from any dynamic library easily by declaring their signatures in a `dylib` block. Per-call overhead is **~3.5x lower than LuaJIT's interpreter (-joff)** and **~22x lower than Python**.
 - **Built-in REPL**
 
 Keel also has a [VS Code extension](https://marketplace.visualstudio.com/items?itemName=horacehoff.keel) that provides syntax highlighting.
@@ -71,9 +71,6 @@ Run the following command in a PowerShell terminal. Administrator privileges are
 irm https://raw.githubusercontent.com/horacehoff/keel/main/install.ps1 | iex
 ```
 
-## Benchmarks
-![Keel benchmarks](docs/docs/images/keel-benchmarks.jpg)
-
 ## Usage
 
 ```sh
@@ -93,3 +90,5 @@ git clone https://github.com/horacehoff/keel && cd keel && rustup toolchain inst
 
 ## Near-future roadmap
 The roadmap can be found [here](ROADMAP.md).
+
+Ad astra per aspera!

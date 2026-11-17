@@ -208,6 +208,34 @@ fn parse_float(s: &str) -> Option<f64> {
     lexical_core::parse::<f64>(s.as_bytes()).ok()
 }
 
+#[inline(always)]
+/// Copy `len` bytes from `src` to `dst` suuuuper fast (faster than a simple memcpy call at most lengths)
+const fn copy_bytes_fast(src: *const u8, dst: *mut u8, len: usize) {
+    unsafe {
+        if len <= 16 {
+            if len >= 8 {
+                dst.cast::<u64>().write_unaligned(src.cast::<u64>().read_unaligned());
+                dst.add(len - 8)
+                    .cast::<u64>()
+                    .write_unaligned(src.add(len - 8).cast::<u64>().read_unaligned());
+            } else {
+                dst.cast::<u32>().write_unaligned(src.cast::<u32>().read_unaligned());
+                dst.add(len - 4)
+                    .cast::<u32>()
+                    .write_unaligned(src.add(len - 4).cast::<u32>().read_unaligned());
+            }
+        } else if len <= 32 {
+            dst.cast::<u128>().write_unaligned(src.cast::<u128>().read_unaligned());
+            dst.add(len - 16)
+                .cast::<u128>()
+                .write_unaligned(src.add(len - 16).cast::<u128>().read_unaligned());
+        } else {
+            // slow bad memcpy call
+            core::ptr::copy_nonoverlapping(src, dst, len);
+        }
+    }
+}
+
 extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
     mut ip: *const Instr,
     mut r: Frame,
@@ -991,20 +1019,57 @@ extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
                 obj_pool[output_array_id as usize].extend((min..max).map(Data::int));
                 r[dest] = Data::array(output_array_id);
             }
-            Instr::JoinStringArray(tgt, sep, dest) => {
-                let separator = r[sep].as_str(str_pool);
+            Instr::JoinStringArray(tgt, sep, dst) => {
+                let separator = r[sep];
+                let sep_str = separator.as_str(str_pool);
+                let sep_len = sep_str.len();
                 let array = &obj_pool[r[tgt].as_array()];
-                let total_len: usize =
-                    array.iter().map(|x| x.as_str(str_pool).len()).sum::<usize>()
-                        + separator.len().saturating_mul(array.len().saturating_sub(1));
-                let mut output = String::with_capacity(total_len);
-                for (i, x) in array.iter().enumerate() {
-                    if i > 0 {
-                        output.push_str(separator);
-                    }
-                    output.push_str(x.as_str(str_pool));
+                let mut total_len = sep_len * array.len().saturating_sub(1);
+                for elem in array {
+                    total_len += elem.as_str(str_pool).len();
                 }
-                r[dest] = string!(output);
+                r[dst] = if total_len <= 6 {
+                    // inline
+                    let mut s = Data::small_str("").0;
+                    let mut shift = 0;
+                    for (i, elem) in array.iter().enumerate() {
+                        if i > 0 {
+                            s |= (separator.0 & crate::data::PAYLOAD_MASK) << shift;
+                            shift += 8 * sep_len;
+                        }
+                        s |= (elem.0 & crate::data::PAYLOAD_MASK) << shift;
+                        shift += 8 * elem.as_str(str_pool).len();
+                    }
+                    Data(s)
+                } else {
+                    let str_id = gc.alloc_string_slot(obj_pool, map_pool, str_pool, stack.roots(r));
+                    let slot = str_pool[str_id as usize].as_mut_vec();
+                    if slot.capacity() < total_len + 8 {
+                        // this allows unaligned 8-byte writes without writing into unreserved space
+                        *slot = Vec::with_capacity((total_len + 8).next_power_of_two());
+                    }
+                    let mut array_cursor = slot.as_mut_ptr();
+                    let is_sep_inline = !separator.is_large_str();
+                    for (i, elem) in array.iter().enumerate() {
+                        if i > 0 {
+                            if is_sep_inline {
+                                array_cursor.cast::<u64>().write_unaligned(separator.0);
+                            } else {
+                                copy_bytes_fast(sep_str.as_ptr(), array_cursor, sep_len);
+                            }
+                            array_cursor = array_cursor.add(sep_len);
+                        }
+                        let s = elem.as_str(str_pool);
+                        if elem.is_large_str() {
+                            copy_bytes_fast(s.as_ptr(), array_cursor, s.len());
+                        } else {
+                            array_cursor.cast::<u64>().write_unaligned(elem.0);
+                        }
+                        array_cursor = array_cursor.add(s.len());
+                    }
+                    str_pool[str_id as usize].as_mut_vec().set_len(total_len);
+                    Data::large_str_id(u64::from(str_id))
+                }
             }
             // -----
             // FILE SYSTEM FUNCTIONS

@@ -69,7 +69,7 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
 | --- | --- | --- | --- |
 | [string_building.kl](/examples/string_building/string_building.kl) | [string_building.py](/examples/string_building/string_building.py) | [string_building.lua](/examples/string_building/string_building.lua) |
-| 4.1ms | 27.5ms | 4.6ms |
+| 3.6ms | 27.5ms | 4.6ms |
 
 ## String.split(), Array.contains() * 50 000
 

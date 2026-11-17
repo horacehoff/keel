@@ -141,7 +141,7 @@ impl Gc {
         self.alloc_array_slow(obj_pool, map_pool, str_pool, roots)
     }
     #[inline(never)]
-    pub fn alloc_array_slow(
+    fn alloc_array_slow(
         &mut self,
         obj_pool: &mut ObjectPool,
         map_pool: &MapPool,
@@ -175,7 +175,7 @@ impl Gc {
         self.alloc_map_slow(obj_pool, map_pool, str_pool, roots)
     }
     #[inline(never)]
-    pub fn alloc_map_slow(
+    fn alloc_map_slow(
         &mut self,
         obj_pool: &ObjectPool,
         map_pool: &mut MapPool,
@@ -207,7 +207,7 @@ impl Gc {
         self.alloc_string_slot_slow(obj_pool, map_pool, str_pool, roots)
     }
     #[inline(never)]
-    pub fn alloc_string_slot_slow(
+    fn alloc_string_slot_slow(
         &mut self,
         obj_pool: &ObjectPool,
         map_pool: &MapPool,

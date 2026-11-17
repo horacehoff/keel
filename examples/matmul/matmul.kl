@@ -1,0 +1,28 @@
+fn main() {
+    let n = 120;
+    let matrix_a = [];
+    let matrix_b = [];
+    for i in ..n {
+        let row_a = [];
+        let row_b = [];
+        for j in ..n {
+            row_a.push(float(n + i + j) / float(n));
+            row_b.push(float(n) / float(n + i + j));
+        }
+        matrix_a.push(row_a);
+        matrix_b.push(row_b);
+    }
+    let matrix_c = [];
+    for i in ..n {
+        let row_c = [];
+        for j in ..n {
+            let sum = 0.0;
+            for k in ..n {
+                sum += matrix_a[i][k] * matrix_b[k][j];
+            }
+            row_c.push(sum);
+        }
+        matrix_c.push(row_c);
+    }
+    print(matrix_c[0][0]);
+}

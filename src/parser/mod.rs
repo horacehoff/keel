@@ -340,12 +340,14 @@ fn parse_var_declare<'arena>(parser: &mut Parser<'arena>) -> Expr<'arena> {
         Token::Equals,
         "Variable declarations need a '=' to separate the name from the value.",
     );
+    let var_value_start = parser.peek_token_span().start;
     let var_value = parse_expr(parser);
     Expr::VarDeclare(VariableDeclarationExpr {
         name: var_name,
         value: parser.bump.alloc(var_value),
         var_type,
         span,
+        value_span: (var_value_start, parser.last_token_end).into(),
     })
 }
 

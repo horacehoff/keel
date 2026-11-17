@@ -156,6 +156,7 @@ pub struct VariableDeclarationExpr<'arena> {
     pub var_type: Option<&'arena (TypeExpr<'arena>, Span)>,
     /// Only used for global variables
     pub span: Span,
+    pub value_span: Span,
 }
 
 #[derive(Debug, Clone, Copy)]

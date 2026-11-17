@@ -1,0 +1,42 @@
+fn main() {
+    let count = 0;
+    for _ in 0..100000 {
+        let s = "  Hello, World!  ";
+        let t = s.trim();
+        let tl = s.trim_left();
+        let tr = s.trim_right();
+        let ts = "-Hello-".trim_sequence("-");
+        let tsl = "-Hello-".trim_sequence_left("-");
+        let tsr = "-Hello-".trim_sequence_right("-");
+        let u = t.uppercase();
+        let l = u.lowercase();
+        let c = t.contains("World");
+        let f = t.find("World");
+        let sw = t.starts_with("Hello");
+        let ew = t.ends_with("!");
+        let isf = "3.14".is_float();
+        let isi = "42".is_int();
+        let parts = l.split(", ");
+        let joined = parts.join("-");
+        let r = joined.replace("-", " ");
+        let length = r.len();
+        let rev = r.reverse();
+        let rep = "ab".repeat(3);
+        let n = 42.7;
+        let sq = n.sqrt();
+        let fl = n.floor();
+        let ro = n.round();
+        let ab = (-5).abs();
+        let fab = (-3.14).abs();
+        let to_f = float(42);
+        let to_i = int(3.14);
+        let to_s = string(42);
+        let to_b = bool("true");
+        let rng = range(10);
+        let arr = [3, 1, 4, 1, 5];
+        arr.sort();
+        arr.reverse();
+        count += length;
+    }
+    print(count);
+}

@@ -233,7 +233,7 @@ fn track_return_flow<'arena>(
                     return FnReturnFlow { types: return_types, always_returns: true };
                 }
             }
-            Expr::VarDeclare(VariableDeclarationExpr { name, value, var_type: _, span: _ }) => {
+            Expr::VarDeclare(VariableDeclarationExpr { name, value, .. }) => {
                 let var_type = value.infer_type(ctx, state);
                 state.new_var(name, 0, var_type);
             }

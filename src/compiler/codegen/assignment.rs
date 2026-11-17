@@ -172,7 +172,7 @@ pub(super) fn compile_var_declaration<'arena>(
             error_invalid_type(
                 &declared_var_type,
                 &value_type,
-                v_t.1,
+                var_declaration.value_span,
                 None,
                 None,
                 ctx.file_idx,

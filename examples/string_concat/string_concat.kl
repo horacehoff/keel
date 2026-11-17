@@ -1,0 +1,7 @@
+fn main() {
+    let s = "";
+    for i in ..100000 {
+        s += "Hello, world!";
+    }
+    print(s.len());
+}

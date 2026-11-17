@@ -93,9 +93,11 @@ pub(super) fn compile_pattern<'arena>(
     // Therefore if the arm reassigns the register, it needs to be copied.
     for idx in v_start..state.v.len() {
         let var_reg = state.v[idx].register_id;
-        let mut shared =
-            state.v.iter().chain(state.globals.iter()).filter(|var| var.register_id == var_reg);
-        if shared.any(|var| code_modifies_variable(var.name, arm_code)) {
+        let reg_sharers =
+            || state.v.iter().chain(state.globals.iter()).filter(|var| var.register_id == var_reg);
+        if reg_sharers().nth(1).is_some()
+            && reg_sharers().any(|var| code_modifies_variable(var.name, arm_code))
+        {
             let new = state.alloc_reg();
             output.push(Instr::Mov(var_reg, new));
             state.v[idx].register_id = new;

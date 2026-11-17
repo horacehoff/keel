@@ -1,0 +1,8 @@
+fn main() {
+    let s = [];
+    for _ in ..100000 {
+        s.push("Hello, world!");
+    }
+    let s = s.join("");
+    print(s.len());
+}

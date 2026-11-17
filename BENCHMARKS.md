@@ -57,6 +57,20 @@ Based on [this Python implementation](https://benchmarksgame-team.pages.debian.n
 | [sqrt.kl](/examples/sqrt/sqrt.kl) | [sqrt.py](/examples/sqrt/sqrt.py) | [sqrt.lua](/examples/sqrt/sqrt.lua) | [sqrt.c](/examples/sqrt/sqrt.c) |
 | 42.5ms | 1039ms | 167ms | 2.1ms |
 
+## Naive string building (100000 x "Hello, world!")
+
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
+| --- | --- | --- | --- |
+| [string_concat.kl](/examples/string_concat/string_concat.kl) | [string_concat.py](/examples/string_concat/string_concat.py) | [string_concat.lua](/examples/string_concat/string_concat.lua) |
+| 3.6ms | 1198ms | 7696ms |
+
+## Idiomatic string building (100000 x "Hello, world!")
+
+| Keel | Python 3.15.2 | LuaJIT (-joff) | Native (C) |
+| --- | --- | --- | --- |
+| [string_building.kl](/examples/string_building/string_building.kl) | [string_building.py](/examples/string_building/string_building.py) | [string_building.lua](/examples/string_building/string_building.lua) |
+| 4.1ms | 27.5ms | 4.6ms |
+
 ## String.split(), Array.contains() * 50 000
 
 <table>

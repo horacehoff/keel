@@ -21,10 +21,12 @@ pub struct Scope<'arena> {
 
 impl Scope<'_> {
     #[cold]
+    #[optimize(size)]
     pub fn fns(&self) -> impl Iterator<Item = (&str, u16)> {
         self.symbols.iter().filter(|((_, kind), _)| *kind == Symbol::Fn).map(|(&(k, _), &v)| (k, v))
     }
     #[cold]
+    #[optimize(size)]
     pub fn structs(&self) -> impl Iterator<Item = (&str, u16)> {
         self.symbols
             .iter()

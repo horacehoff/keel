@@ -320,7 +320,7 @@ impl Data {
         };
         unsafe {
             let bytes = output.as_mut_vec();
-            bytes.reserve(text.len() + 1); // text.len() + newline
+            bytes.reserve_exact(text.len() + 1); // text.len() + newline
             let end = bytes.as_mut_ptr().add(bytes.len());
             core::ptr::copy_nonoverlapping(text.as_ptr(), end, text.len());
             end.add(text.len()).write(b'\n');

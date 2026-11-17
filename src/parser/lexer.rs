@@ -228,7 +228,7 @@ pub(super) enum Token<'a> {
 
     #[regex(r"[0-9]*\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+", |lex| {
         let slice = lex.slice();
-        lexical_core::parse::<f64>(slice.as_bytes()).ok().unwrap()
+        lexical_core::parse::<f64>(slice.as_bytes()).unwrap()
     })]
     Float(f64),
 

@@ -31,7 +31,7 @@ pub fn keep_buffer_alive(
     buf: Box<[core::mem::MaybeUninit<u8>]>,
     keep_alive: &mut Vec<Box<[u8]>>,
 ) -> usize {
-    let ptr = buf.as_ptr() as usize;
+    let ptr = buf.as_ptr().expose_provenance();
     keep_alive.push(unsafe { buf.assume_init() });
     ptr
 }
@@ -85,7 +85,7 @@ pub fn array_to_c_ptr(
                 .expect("interior null byte in string passed to C")
                 .into_bytes_with_nul()
                 .into_boxed_slice();
-            let p = bytes.as_ptr() as usize;
+            let p = bytes.as_ptr().expose_provenance();
             keep_alive.push(bytes);
             unsafe {
                 write_bytes_at_offset(&mut ptr_bytes, i * 8, &p.to_ne_bytes());
@@ -216,7 +216,7 @@ pub fn keel_struct_to_c_struct(
                     .expect("interior null byte in string passed to C")
                     .into_bytes_with_nul()
                     .into_boxed_slice();
-                let ptr = (bytes.as_ptr() as u64).to_ne_bytes();
+                let ptr = bytes.as_ptr().expose_provenance().to_ne_bytes();
                 keep_alive.push(bytes);
                 buf.get_unchecked_mut(offset..offset + 8).copy_from_slice_unchecked(&ptr);
             } else if field.is_array() {

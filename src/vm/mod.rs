@@ -76,7 +76,7 @@ fn error_with_catch(
     let ctx = unsafe { &mut *ctx };
     if ctx.error_handles.is_empty() {
         flush_output(&mut ctx.output);
-        throw_error(ctx.err_ctx, unsafe { ip.offset_from(ctx.instr_base) } as usize, err);
+        throw_error(ctx.err_ctx, unsafe { ip.offset_from_unsigned(ctx.instr_base) }, err);
     }
     let err_handle = ctx.error_handles.pop_unchecked();
     let mut r = Frame(err_handle.frame_ptr);
@@ -193,7 +193,7 @@ pub fn execute(program: &mut Program) -> VmReturnType {
 }
 
 static INSTR_TABLE: [extern "rust-preserve-none" fn(*const Instr, Frame, *mut VmCtx<'static>);
-    Instr::Halt(0).discriminant() as usize + 1] = seq!(N in 0..114 {[#(execute_instr::<N>,)*]});
+    core::mem::variant_count::<Instr>()] = seq!(N in 0..114 {[#(execute_instr::<N>,)*]});
 
 #[inline(always)]
 extern "rust-preserve-none" fn execute_at(ip: *const Instr, r: Frame, ctx: *mut VmCtx<'static>) {
@@ -298,7 +298,8 @@ extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
                 }
                 r = new_frame;
                 // The return point is always placed in the target function's first register
-                r[0] = Data::return_point(ip.offset_from(*instr_base) as u32, frame_offset);
+                r[0] =
+                    Data::return_point(ip.offset_from_unsigned(*instr_base) as u32, frame_offset);
                 ip = instr_base.add(target as usize);
                 become execute_at(ip, r, ctx);
             }
@@ -346,9 +347,9 @@ extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
                         VmType::String => {
                             if let Ok(b) = std::ffi::CString::new(data.as_str(str_pool)) {
                                 let bytes = b.into_bytes_with_nul().into_boxed_slice();
-                                let ptr = bytes.as_ptr() as u64;
+                                let ptr = bytes.as_ptr().expose_provenance();
                                 keep_alive.push(bytes);
-                                ptr
+                                ptr as u64
                             } else {
                                 error_with_catch!(ErrType::NullByteInString);
                             }
@@ -1098,7 +1099,7 @@ extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
             }
             Instr::StartErrorCatch(jmp_size, err_reg_id) => {
                 error_handles.push(ErrorCatch {
-                    catch_loc: ip.offset_from(*instr_base) as u32 + u32::from(jmp_size),
+                    catch_loc: ip.offset_from_unsigned(*instr_base) as u32 + u32::from(jmp_size),
                     frame_ptr: r.0,
                     error_reg: err_reg_id,
                 });

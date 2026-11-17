@@ -4,6 +4,7 @@ use std::io::{Write, stdin, stdout};
 
 #[cold]
 #[inline(never)]
+#[optimize(size)]
 pub fn repl() {
     println!("{BLUE}KEEL {} -- REPL (read-eval-print-loop){RESET}", env!("CARGO_PKG_VERSION"));
 
@@ -61,7 +62,7 @@ pub fn repl() {
 
         std::fs::remove_file(&tmp).unwrap();
 
-        let new_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let new_stdout = String::from_utf8_lossy_owned(output.stdout);
 
         if output.status.success() {
             if new_stdout.len() > prev_stdout.len() {

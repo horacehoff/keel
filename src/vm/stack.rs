@@ -41,7 +41,7 @@ impl Stack {
         unsafe {
             core::slice::from_raw_parts(
                 self.ptr,
-                frame.0.offset_from(self.ptr) as usize + self.max_frame_regs,
+                frame.0.offset_from_unsigned(self.ptr) + self.max_frame_regs,
             )
         }
     }

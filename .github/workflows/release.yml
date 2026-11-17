@@ -11,7 +11,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: Zlocation-detail=none -Zfmt-debug=none -Zunstable-options -Cpanic=immediate-abort
+  RUSTFLAGS: -Zlocation-detail=none -Zfmt-debug=none -Zunstable-options -Cpanic=immediate-abort
 
 jobs:
   build:

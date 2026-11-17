@@ -9,21 +9,9 @@ pub const ARIADNE_ERROR_KIND: ReportKind<'static> = ReportKind::Custom("[ERROR]"
 pub const ERROR_PREFIX: &str = hformat!("{RED}[ERROR]:{RESET}");
 
 pub const BLUE: &str = "\x1B[94m";
-pub fn blue<F: core::fmt::Display>(t: F) -> String {
-    format!("{BLUE}{t}{RESET}")
-}
 pub const RED: &str = "\x1B[31m";
-pub fn red<F: core::fmt::Display>(t: F) -> String {
-    format!("{RED}{t}{RESET}")
-}
 pub const BOLD: &str = "\x1B[1m";
-pub fn bold<F: core::fmt::Display>(t: F) -> String {
-    format!("{BOLD}{t}{RESET}")
-}
 pub const GREEN: &str = "\x1B[32m";
-pub fn green<F: core::fmt::Display>(t: F) -> String {
-    format!("{GREEN}{t}{RESET}")
-}
 pub const RESET: &str = "\x1B[0m\x1B[39m";
 
 pub struct ErrorCtx<'a> {
@@ -125,8 +113,9 @@ impl ErrType<'_> {
     }
 }
 
-#[cold]
 #[inline(never)]
+#[cold]
+#[optimize(size)]
 pub fn throw_error(ctx: &ErrorCtx, instr_idx: usize, t: &ErrType) -> ! {
     let InstrSrc { span: Span { start, end }, file_id, .. } = ctx
         .instr_src
@@ -202,26 +191,18 @@ pub fn throw_error(ctx: &ErrorCtx, instr_idx: usize, t: &ErrType) -> ! {
     crash();
 }
 
-#[cold]
 #[inline(never)]
+#[cold]
+#[optimize(size)]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_error(msg: &str) -> ! {
     crate::captured_output::print(&hformat!("{ERROR_PREFIX} {msg}\n"));
     wasm_bindgen::throw_str("keel error");
 }
 
-#[cold]
 #[inline(never)]
-pub fn throw_compiler_error<'a>(
-    report: &dyn Fn() -> Report<'a, (&'a str, core::ops::Range<usize>)>,
-    sources: &'a [Source],
-) -> ! {
-    print_error_report(&report(), sources);
-    crash();
-}
-
 #[cold]
-#[inline(never)]
+#[optimize(size)]
 pub fn print_error_report<'a>(
     report: &Report<'a, (&'a str, core::ops::Range<usize>)>,
     sources: &'a [Source],
@@ -240,8 +221,9 @@ pub fn print_error_report<'a>(
     report.write(fn_cache, crate::captured_output::CapturedOutputWriter).unwrap();
 }
 
-#[cold]
 #[inline(never)]
+#[cold]
+#[optimize(size)]
 pub fn crash() -> ! {
     #[cfg(debug_assertions)]
     panic!();

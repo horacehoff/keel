@@ -76,6 +76,7 @@ enum ParserErr<'a> {
 
 #[cold]
 #[inline(never)]
+#[optimize(size)]
 fn throw_parser_error(src: &Source, Span { start, end }: Span, t: ParserErr) -> ! {
     let err_message = match t {
         ParserErr::UnexpectedEOF => "Unexpected EOF",
@@ -127,6 +128,7 @@ impl<'a> Parser<'a> {
     }
     #[cold]
     #[inline(never)]
+    #[optimize(size)]
     fn error(&self, span: Span, error: ParserErr) -> ! {
         throw_parser_error(&self.ctx.src, span, error)
     }
@@ -134,6 +136,7 @@ impl<'a> Parser<'a> {
     fn next_token(&mut self) -> (Token<'a>, Span) {
         let t = self.input.next().unwrap_or_else(
             #[cold]
+            #[optimize(size)]
             || {
                 self.error(self.eof_span(), ParserErr::UnexpectedEOF);
             },
@@ -142,6 +145,7 @@ impl<'a> Parser<'a> {
         (
             t.0.unwrap_or_else(
                 #[cold]
+                #[optimize(size)]
                 |e| self.error((t.1.start, t.1.end).into(), e),
             ),
             (t.1.start, t.1.end).into(),
@@ -155,6 +159,7 @@ impl<'a> Parser<'a> {
         };
         t.unwrap_or_else(
             #[cold]
+            #[optimize(size)]
             |e| self.error((start, end).into(), e),
         )
     }
@@ -171,6 +176,7 @@ impl<'a> Parser<'a> {
         let (t, start, end) = self.input.peek().map(|(t, span)| (*t, span.start, span.end))?;
         Some(t.unwrap_or_else(
             #[cold]
+            #[optimize(size)]
             |e| self.error((start, end).into(), e),
         ))
     }
@@ -215,6 +221,7 @@ impl<'a> Parser<'a> {
     }
     #[inline(never)]
     #[cold]
+    #[optimize(size)]
     pub fn throw_parser_err<'b, F: Fn() -> Report<'b, (&'b str, core::ops::Range<usize>)>>(
         &self,
         report: F,
@@ -438,6 +445,7 @@ fn parse_line<'arena>(input: &mut Parser<'arena>, peek: Token<'_>) -> Expr<'aren
 
 #[cold]
 #[inline(never)]
+#[optimize(size)]
 fn error_unclosed_delimiter(
     parser: &Parser<'_>,
     opener_token: Token,
@@ -483,6 +491,7 @@ fn error_unclosed_delimiter(
 
 #[cold]
 #[inline(never)]
+#[optimize(size)]
 fn error_missing_semicolon(parser: &Parser<'_>) -> ! {
     parser.throw_parser_err(|| {
         Report::build(

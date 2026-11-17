@@ -291,6 +291,7 @@ pub enum Expr<'arena> {
 
 #[cold]
 #[inline(never)]
+#[optimize(size)]
 pub const fn symbol_of_expr(expr: &Expr) -> &'static str {
     match expr {
         Expr::Mul(_, _, _, _) => "*",

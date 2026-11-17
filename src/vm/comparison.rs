@@ -1,3 +1,6 @@
+use std::simd::cmp::SimdPartialEq;
+use std::simd::u64x8;
+
 use crate::vm::Data;
 use crate::vm::MapPool;
 use crate::vm::ObjectPool;
@@ -89,12 +92,10 @@ pub(super) fn get_array_position(
     let Some(tail) = array.last_chunk::<8>() else {
         return array.iter().position(|e| *e == needle);
     };
+    let simd_needle = u64x8::splat(needle.0);
     let find_first_match = |start_idx: usize, data_window: &[Data; 8]| {
-        let mask = data_window
-            .iter()
-            .enumerate()
-            .fold(0u8, |mask, (i, e)| mask | (u8::from(*e == needle) << i));
-        (mask != 0).then(|| start_idx + mask.trailing_zeros() as usize)
+        let mask = u64x8::from_array(data_window.map(|d| d.0)).simd_eq(simd_needle);
+        mask.any().then(|| start_idx + mask.to_bitmask().trailing_zeros() as usize)
     };
     array
         .as_chunks::<8>()

@@ -1,6 +1,8 @@
 #![feature(explicit_tail_calls)]
 #![feature(rust_preserve_none_cc)]
 #![feature(default_field_values)]
+#![feature(variant_count)]
+#![feature(portable_simd)]
 #![allow(incomplete_features)]
 
 use bumpalo::Bump;
@@ -198,7 +200,7 @@ pub fn main() {
             #[cfg(debug_assertions)]
             {
                 let next = args.next();
-                if next == Some(String::from("--debug")) {
+                if next.as_deref() == Some("--debug") {
                     let now = std::time::Instant::now();
                     let mut program = compile(&contents, file, true, &bump);
                     println!("COMPILATION TIME: {:.2?}", now.elapsed());

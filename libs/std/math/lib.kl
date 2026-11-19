@@ -1,4 +1,4 @@
-dylib "../std_src/math/math" {
+dylib "bin/math" {
     float keel_acos(float);
     float keel_asin(float);
     float keel_atan(float);

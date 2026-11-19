@@ -284,7 +284,7 @@ pub async fn install_library(
 
     clear_line();
     println!(
-        "{} Installed {}@{version}! Ad maiora!\nImport it in any Keel file with `import \"{}\"`",
+        "{} Installed {}@{version}! Ad maiora!\nImport it in any Keel file with `import \"{}\";`",
         "✓".bright_green().bold(),
         format!("{author}/{lib_folder_name}").italic(),
         lib_folder_name,

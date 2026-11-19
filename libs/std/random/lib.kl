@@ -1,4 +1,4 @@
-dylib "../std_src/random/random" {
+dylib "bin/random" {
     keel_seed(int);
     int keel_random_int();
     int keel_random_int_range(int, int);

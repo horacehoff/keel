@@ -322,6 +322,25 @@ pub fn error_cannot_read_file(span: Span, file_idx: u16, sources: &[Source]) -> 
 #[inline(never)]
 #[cold]
 #[optimize(size)]
+pub fn error_ambiguous_import(span: Span, file_idx: u16, sources: &[Source], name: &str) -> ! {
+    compiler_error(
+        &"Ambiguous import",
+        (span, file_idx),
+        &[ReportLabel::new(
+            &format_args!("Both `{name}.kl` and `{name}/lib.kl` exist for this import."),
+            Color::Red,
+            span,
+            file_idx,
+        )],
+        None,
+        None,
+        sources,
+    )
+}
+
+#[inline(never)]
+#[cold]
+#[optimize(size)]
 pub fn error_cannot_load_dynlib(span: Span, file_idx: u16, sources: &[Source]) -> ! {
     compiler_error(
         &"Cannot load dynamic library",

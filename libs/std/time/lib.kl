@@ -1,4 +1,4 @@
-dylib "../std_src/time/time" {
+dylib "bin/time" {
     int now();
     string format(int, string);
 }

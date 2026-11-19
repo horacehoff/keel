@@ -145,6 +145,8 @@ pub fn main() {
             let keel_pkg_args = std::env::args_os().skip(1);
             let keel_pkg_path = std::env::current_exe()
                 .expect("Report this bug at github.com/horacehoff/keel/issues")
+                .canonicalize()
+                .expect("Report this bug at github.com/horacehoff/keel/issues")
                 .parent()
                 .expect("Report this bug at github.com/horacehoff/keel/issues")
                 .join("keel-pkg")

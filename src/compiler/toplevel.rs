@@ -9,6 +9,7 @@ use crate::ast::TypeExpr;
 use crate::ast::VariableDeclarationExpr;
 use crate::compiler::DataType;
 use crate::compiler::Source;
+use crate::compiler::compiler_errors::error_ambiguous_import;
 use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
 use crate::compiler::compiler_errors::error_cannot_load_dynlib;
 use crate::compiler::compiler_errors::error_cannot_read_file;
@@ -197,23 +198,55 @@ pub fn parse_toplevel<'a>(
                 dynamic_libs.push(Dylib { name: dylib_name, fns: Box::new([]) });
             }
             Expr::ImportFile(path, alias, span) => {
-                let file_path = file_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(path)
-                    .canonicalize()
-                    .unwrap_or_else(|_| {
-                        keel_home_libs_path
-                            .as_ref()
-                            .unwrap_or_else(
-                                #[cold]
-                                || error_cannot_read_file(span, src_file_idx, sources),
+                let import_path = Path::new(path);
+                let importing_dir = file_path.parent().unwrap_or_else(|| Path::new("."));
+
+                let find_in = |root: &Path| -> Option<PathBuf> {
+                    let base = root.join(import_path);
+                    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+                    if path.ends_with(".kl") {
+                        return base.is_file().then_some(base);
+                    }
+                    let mut file = base.clone().into_os_string();
+                    file.push(".kl");
+                    let file = PathBuf::from(file);
+                    let folder_lib = base.join("lib.kl");
+                    match (file.is_file(), folder_lib.is_file()) {
+                        (true, true) => error_ambiguous_import(span, src_file_idx, sources, path),
+                        (true, false) => Some(file),
+                        (false, true) => Some(folder_lib),
+                        (false, false) => None,
+                    }
+                };
+
+                let resolved = if import_path.is_absolute()
+                    || matches!(
+                        import_path.components().next(),
+                        Some(std::path::Component::CurDir | std::path::Component::ParentDir)
+                    ) {
+                    find_in(importing_dir)
+                } else {
+                    find_in(importing_dir)
+                        .or_else(|| {
+                            find_in(
+                                &Path::new(sources[0].filename)
+                                    .parent()
+                                    .unwrap_or_else(|| Path::new("."))
+                                    .join("libs"),
                             )
-                            .join(path)
-                    });
+                        })
+                        .or_else(|| keel_home_libs_path.as_deref().and_then(find_in))
+                };
+
+                let file_path: PathBuf = resolved
+                    .and_then(|path| path.canonicalize().ok())
+                    .unwrap_or_else(|| error_cannot_read_file(span, src_file_idx, sources));
 
                 let child_name = alias.unwrap_or_else(|| {
-                    bump.alloc_str(file_path.file_prefix().and_then(|s| s.to_str()).unwrap_or(path))
+                    let name = import_path.file_name().and_then(|s| s.to_str()).unwrap_or(path);
+                    bump.alloc_str(
+                        &name.strip_suffix(".kl").unwrap_or(name).replace(['-', '.'], "_"),
+                    )
                 });
 
                 if let Some(cached) = files.get(&file_path) {

@@ -48,7 +48,7 @@ rustc-hash = "2.1.3"
 fixedbitset = "0.5.9"
 bumpalo = { version = "3.20.4", features = ["collections"] }
 indexmap = "2.14.2"
-hybrid-format = "0.2.0"
+hybrid-format = "0.3.0"
 seq-macro = "0.3.6"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

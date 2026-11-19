@@ -21,6 +21,7 @@ Its goal is to provide a faster alternative to Python that sits closer to low-le
 - **Familiar syntax**: Rust-like, with Python's ease-of-use
 - **Statically typed, optional annotations**: full type inference, static type checking, polymorphism
 - **FFI support**: call functions from any dynamic library easily by declaring their signatures in a `dylib` block. Per-call overhead is **~3.5x lower than LuaJIT's interpreter (-joff)** and **~22x lower than Python**.
+- **Embeddable in other programs through a C ABI**
 - **Built-in REPL**
 
 Keel also has a [VS Code extension](https://marketplace.visualstudio.com/items?itemName=horacehoff.keel) that provides syntax highlighting.

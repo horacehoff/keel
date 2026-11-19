@@ -2,3 +2,4 @@
 /.zed
 .DS_Store
 /.cargo
+tests/

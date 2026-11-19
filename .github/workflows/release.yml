@@ -70,6 +70,8 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Install cargo-pgo
+        env:
+          RUSTFLAGS: ""
         run: cargo install cargo-pgo
 
       - name: Build instrumented binary
@@ -103,34 +105,43 @@ jobs:
       - name: Build stdlib dylibs (macOS)
         if: runner.os == 'macOS'
         run: |
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std_src/math/math.dylib libs/std_src/math/math.c
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std_src/time/time.dylib libs/std_src/time/time.c
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std_src/random/random.dylib libs/std_src/random/random.c libs/std_src/random/pcg_basic.c
+          mkdir -p libs/std/math/bin libs/std/time/bin libs/std/random/bin
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std/math/bin/math.dylib libs/std/math/src/math.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std/time/bin/time.dylib libs/std/time/src/time.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -dynamiclib -o libs/std/random/bin/random.dylib libs/std/random/src/random.c libs/std/random/src/pcg_basic.c
 
       - name: Build stdlib dylibs (Linux)
         if: runner.os == 'Linux'
         run: |
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std_src/math/math.so libs/std_src/math/math.c
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std_src/time/time.so libs/std_src/time/time.c
-          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std_src/random/random.so libs/std_src/random/random.c libs/std_src/random/pcg_basic.c
+          mkdir -p libs/std/math/bin libs/std/time/bin libs/std/random/bin
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std/math/bin/math.so libs/std/math/src/math.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std/time/bin/time.so libs/std/time/src/time.c
+          clang -O2 -flto -fomit-frame-pointer -fvisibility=hidden -shared -fPIC -o libs/std/random/bin/random.so libs/std/random/src/random.c libs/std/random/src/pcg_basic.c
 
       - name: Build stdlib dylibs (Windows)
         if: runner.os == 'Windows'
         run: |
-          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/math/math.dll libs/std_src/math/math.c
-          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/time/time.dll libs/std_src/time/time.c
-          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std_src/random/random.dll libs/std_src/random/random.c libs/std_src/random/pcg_basic.c
+          New-Item -ItemType Directory -Force -Path libs/std/math/bin, libs/std/time/bin, libs/std/random/bin
+          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std/math/bin/math.dll libs/std/math/src/math.c
+          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std/time/bin/time.dll libs/std/time/src/time.c
+          clang -O2 -flto -fuse-ld=lld -fomit-frame-pointer -fvisibility=hidden -shared -o libs/std/random/bin/random.dll libs/std/random/src/random.c libs/std/random/src/pcg_basic.c
 
       - name: Build final binary
         env:
           RUSTFLAGS: ${{ matrix.rustflags }} ${{ env.RUSTFLAGS }}
         run: cargo pgo optimize -- --target ${{ matrix.target }} -Zbuild-std=std -Zbuild-std-features=
 
+      - name: Build final binary (KEEL-PKG)
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }} -Zlocation-detail=none -Zfmt-debug=none
+        run: cd keel-pkg && cargo build --release --target ${{ matrix.target }} -Zbuild-std=std -Zbuild-std-features=
+
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/keel dist/
+          cp keel-pkg/target/${{ matrix.target }}/release/keel-pkg dist/
           cp -R libs dist/
           cp LICENSE THIRD-PARTY-LICENSE dist/
           tar -czf ${{ matrix.artifact }}.tar.gz -C dist .
@@ -140,15 +151,32 @@ jobs:
         run: |
           New-Item -ItemType "Directory" -Force -Path "dist"
           Copy-Item "target/${{ matrix.target }}/release/keel.exe" "dist/"
+          Copy-Item "keel-pkg/target/${{ matrix.target }}/release/keel-pkg.exe" "dist/"
           Copy-Item -Path "libs" -Destination "dist/" -Recurse
           Copy-Item "LICENSE" "dist/"
           Copy-Item "THIRD-PARTY-LICENSE" "dist/"
           Compress-Archive -Path "dist/*" -DestinationPath "${{ matrix.artifact }}.zip"
 
+      - name: Build instrumented binary (LIB)
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }} -Zlocation-detail=none -Zfmt-debug=none
+        run: cargo pgo build -- --target ${{ matrix.target }} --profile embed --features embed -Zbuild-std=std
+
+      - name: Gather PGO profiles (LIB)
+        run: |
+          target/${{ matrix.target }}/embed/${{ matrix.bin }} pgo/pgo-std-library.kl
+          target/${{ matrix.target }}/embed/${{ matrix.bin }} examples/nbody/nbody.kl 50000
+          target/${{ matrix.target }}/embed/${{ matrix.bin }} examples/binary-trees/binary-trees.kl 14
+          target/${{ matrix.target }}/embed/${{ matrix.bin }} examples/fib/fib.kl
+          target/${{ matrix.target }}/embed/${{ matrix.bin }} examples/iter_fib/iter_fib.kl
+          target/${{ matrix.target }}/embed/${{ matrix.bin }} pgo/pgo-fizzbuzz.kl
+          target/${{ matrix.target }}/embed/${{ matrix.bin }} pgo/pgo-dynlib.kl
+          target/${{ matrix.target }}/embed/${{ matrix.bin }} pgo/pgo-import.kl
+
       - name: Build final binary (LIB)
         env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo pgo optimize build -- --target ${{ matrix.target }} --profile embed --features embed -Zbuild-std=std
+          RUSTFLAGS: ${{ matrix.rustflags }} -Zlocation-detail=none -Zfmt-debug=none
+        run: cargo pgo optimize -- --target ${{ matrix.target }} --profile embed --features embed -Zbuild-std=std
 
       - name: Package (Unix) (LIB)
         if: runner.os != 'Windows'

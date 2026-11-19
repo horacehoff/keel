@@ -2,54 +2,51 @@ use crate::packages::{
     PkgInstallStatus, add_package_to_manifest, get_system_packages_manifest,
     is_package_already_installed, write_new_manifest,
 };
-use crate::{CliError, SUFFIXES};
-use console_utils::control::clear_line;
+use crate::{BUG_NOTICE, SUFFIXES, secondary};
+use anyhow::{Context, Result, anyhow, bail, ensure};
+use console::style;
 use flate2::read::GzDecoder;
 use futures_util::TryStreamExt;
+use hybrid_format::hformat;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::info;
-use owo_colors::OwoColorize;
-use owo_colors::colors::css::Gray;
 use reqwest::header::ACCEPT;
 use reqwest::{Client, ClientBuilder, StatusCode};
 use semver::Version;
 use serde::Deserialize;
 use std::hint::cold_path;
-use std::io::Write;
 use std::path::Path;
+use std::time::Duration;
 use tar::Archive;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize)]
 struct GithubReleaseAsset {
     name: String,
     browser_download_url: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize)]
 struct GithubRelease {
     assets: Vec<GithubReleaseAsset>,
     tag_name: String,
 }
 
-fn validate_repository_name(repo_name: &str) -> Result<(), CliError> {
-    if repo_name.is_empty()
-        || repo_name.starts_with('.')
-        || repo_name
-            .chars()
-            .any(|c| !(c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-'))
-        || repo_name.eq_ignore_ascii_case("std")
-    {
-        Err(CliError::InvalidPkgName { repo_name: repo_name.to_string() })
-    } else {
-        Ok(())
-    }
+fn validate_repository_name(repo_name: &str) -> Result<()> {
+    ensure!(
+        !repo_name.is_empty()
+            && !repo_name.starts_with('.')
+            && repo_name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            && !repo_name.eq_ignore_ascii_case("std"),
+        "{} is not a valid package name.",
+        style(repo_name).bold()
+    );
+    Ok(())
 }
 
 pub fn parse_repository(
     repo: &mut String,
     author_required: bool,
-) -> Result<(&str, &str, Option<&str>), CliError> {
+) -> Result<(&str, &str, Option<&str>)> {
     let (author_and_repo, tag) = match repo.find('@') {
         Some(tag_separator) => {
             repo[..tag_separator].make_ascii_lowercase();
@@ -60,12 +57,11 @@ pub fn parse_repository(
             (repo.as_str(), None)
         }
     };
-    let author_repo_group = author_and_repo.split_once('/');
-    if let Some((author, repo_name)) = author_repo_group {
+    if let Some((author, repo_name)) = author_and_repo.split_once('/') {
         validate_repository_name(repo_name)?;
         Ok((author, repo_name, tag))
     } else if author_required {
-        Err(CliError::InvalidRepo { repository: repo.to_string() })
+        bail!("{} is not a valid repository", style(repo).bold());
     } else {
         validate_repository_name(author_and_repo)?;
         Ok(("", author_and_repo, tag))
@@ -76,218 +72,234 @@ pub fn parse_repository(
 struct GitHubError {
     message: String,
 }
-
 async fn get_github_release(
     url: &str,
-    author: &str,
-    repo_name: &str,
+    repository: &str,
     tag: &str,
     client: &Client,
-) -> Result<GithubRelease, CliError> {
-    let request = client.get(url).header(ACCEPT, "application/vnd.github.v3+json");
-    let result = request
+) -> Result<GithubRelease> {
+    let response = client
+        .get(url)
+        .header(ACCEPT, "application/vnd.github.v3+json")
         .send()
         .await
-        .map_err(|e| CliError::RequestFailed { url: url.to_string(), source: e })?;
-    let status_code = result.status();
+        .with_context(|| {
+            format!(
+                "Request failed to {}. Make sure you're connected to the internet.",
+                secondary(url)
+            )
+        })?;
+    let status_code = response.status();
     if status_code.is_success() {
-        result
+        return response
             .json::<GithubRelease>()
             .await
-            .map_err(|_| CliError::InternalBug { details: "Cannot parse release".into() })
-    } else {
-        cold_path();
-        if status_code == StatusCode::FORBIDDEN || status_code == StatusCode::TOO_MANY_REQUESTS {
-            Err(CliError::GithubTooManyRequests)
-        } else if status_code == StatusCode::NOT_FOUND {
-            Err(CliError::UnknownTagOrRepo {
-                tag: tag.to_string(),
-                repository: format!("{author}/{repo_name}"),
-            })
-        } else {
+            .context(hformat!("{BUG_NOTICE}Cannot parse release."));
+    }
+    cold_path();
+    match status_code {
+        StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS => bail!(
+            "GitHub's rate limit has been reached. Try again in a few minutes, this should be resolved in less than an hour."
+        ),
+        StatusCode::NOT_FOUND => bail!(
+            "Could not find tag {} in repository {} {}.",
+            style(tag).bold(),
+            style(repository).bold(),
+            secondary(format!("(https://github.com/{repository})"))
+        ),
+        _ => {
             cold_path();
-            let error_response =
-                result.text().await.map_err(|_| CliError::InternalBug { details: "".into() })?;
+            let error_response = response.text().await.unwrap_or_default();
             let error_json = serde_json::from_str::<GitHubError>(&error_response)
-                .map_err(|_| CliError::GithubError { status_code, message: error_response })?;
-            Err(CliError::GithubError { status_code, message: error_json.message })
+                .map_or(error_response, |e| e.message);
+            bail!(
+                "Request to GitHub failed. Status code: {}. Message: {}.",
+                style(status_code).bold(),
+                style(error_json).bold()
+            )
         }
     }
 }
 
+#[inline(always)]
 fn get_github_release_asset<'a>(
     github_release: &'a GithubRelease,
     repo_name: &str,
-) -> Result<&'a GithubReleaseAsset, CliError> {
-    github_release
-        .assets
+) -> Result<&'a GithubReleaseAsset> {
+    SUFFIXES
         .iter()
-        .find(|asset| {
-            for suffix in SUFFIXES {
-                if asset.name.eq_ignore_ascii_case(&format!("{repo_name}{suffix}.tar.gz")) {
-                    return true;
-                }
-            }
-            false
+        .find_map(|suffix| {
+            github_release.assets.iter().find(|asset| {
+                asset.name.eq_ignore_ascii_case(&format!("{repo_name}{suffix}.tar.gz"))
+            })
         })
-        .ok_or_else(|| CliError::FailedToFindValidReleaseAsset { repo_name: repo_name.to_string() })
+        .with_context(|| {
+            format!(
+                "Failed to find a valid release asset in `{}` that fit the following: {}",
+                style(repo_name).bold(),
+                SUFFIXES.map(|suffix| format!("\n - {repo_name}{suffix}.tar.gz")).concat()
+            )
+        })
 }
 
 pub async fn install_library(
-    repository: &mut String,
+    mut repository: String,
     user_agent: ClientBuilder,
-    keel_home: &Path,
     keel_home_libs: &Path,
-    keel_home_libs_packages_toml: &Path,
+    manifest_path: &Path,
     force: bool,
-) -> Result<(), CliError> {
-    let client = user_agent.build().unwrap();
-    let (author, repo_name, tag) = parse_repository(repository, true)?;
+) -> Result<()> {
+    let client =
+        user_agent.build().context(hformat!("{BUG_NOTICE}Cannot build the HTTP client."))?;
+    let (author, repo_name, tag) = parse_repository(&mut repository, true)?;
     let github_api_url = if let Some(release_tag) = tag {
         format!("https://api.github.com/repos/{author}/{repo_name}/releases/tags/{release_tag}")
     } else {
         format!("https://api.github.com/repos/{author}/{repo_name}/releases/latest")
     };
-    print!("Querying the GitHub API...");
-    std::io::stdout().flush().unwrap();
-    let github_release =
-        get_github_release(&github_api_url, author, repo_name, tag.unwrap_or("latest"), &client)
-            .await?;
-    let version = github_release.tag_name.to_string();
-    Version::parse(version.strip_prefix('v').unwrap_or(&version))
-        .map_err(|_| CliError::InvalidTagOrVersion { tag: version.clone() })?;
+    let progress_bar = ProgressBar::new_spinner();
+    progress_bar.enable_steady_tick(Duration::from_millis(100));
+    progress_bar.set_message("Querying the GitHub API...");
+
+    let github_release = get_github_release(
+        &github_api_url,
+        &format!("{author}/{repo_name}"),
+        tag.unwrap_or("latest"),
+        &client,
+    )
+    .await?;
+    let version = github_release.tag_name.as_str();
+    Version::parse(version.strip_prefix('v').unwrap_or(version))
+        .with_context(|| format!("{} is not a valid tag or version", style(version).bold()))?;
     let github_asset = get_github_release_asset(&github_release, repo_name)?;
-    let lib_folder_name = repo_name.to_string();
-    clear_line();
-    print!("Found a suitable release asset: {}", github_asset.name.italic().fg::<Gray>());
-    std::io::stdout().flush().unwrap();
+    progress_bar
+        .set_message(format!("Found a suitable release asset: {}", secondary(&github_asset.name)));
 
     let (mut system_pkg_manifest, mut manifest_file) =
-        get_system_packages_manifest(keel_home_libs_packages_toml)?;
+        get_system_packages_manifest(manifest_path, &progress_bar)?;
 
-    let pkg_install_status =
-        is_package_already_installed(&system_pkg_manifest, author, repo_name, &version);
-    if PkgInstallStatus::AlreadyInstalled == pkg_install_status && !force {
-        clear_line();
-        info!(
-            "{} {} is already installed as {}! Ad maiora!",
-            "✓".bright_green().bold(),
-            format!("{author}/{lib_folder_name}").italic(),
-            repo_name
-        );
-
-        return Ok(());
-    } else if let PkgInstallStatus::DifferentRepoExists = pkg_install_status
-        && !force
-    {
-        return Err(CliError::PkgWithNameAlreadyExists { repo_name: repo_name.to_string() });
+    if !force {
+        match is_package_already_installed(&system_pkg_manifest, author, repo_name, version) {
+            PkgInstallStatus::AlreadyInstalled => {
+                progress_bar.finish_and_clear();
+                println!(
+                    "{} {} is already installed as {}! Ad maiora!",
+                    style("✓").green().bright().bold(),
+                    style(format!("{author}/{repo_name}")).italic(),
+                    repo_name
+                );
+                return Ok(());
+            }
+            PkgInstallStatus::DifferentRepoExists => bail!(
+                "There is already a package named {} installed. To override this and uninstall it, use the -f/--force flag.",
+                style(repo_name).bold()
+            ),
+            PkgInstallStatus::NotInstalled => {
+                if !system_pkg_manifest.packages.contains_key(repo_name)
+                    && keel_home_libs.join(repo_name).symlink_metadata().is_ok()
+                {
+                    bail!(
+                        "A folder named {} not managed by keel-pkg already exists. To overwrite it, use the -f/--force flag.",
+                        style(repo_name).bold()
+                    )
+                }
+            }
+        }
     }
 
     // let download_url = "http://127.0.0.1:8000/samplearchive.tar.gz";
-    let download_url = &github_asset.browser_download_url;
+    let download_url = github_asset.browser_download_url.as_str();
 
-    let github_response = client.get(download_url).send().await.map_err(|e| {
-        if e.is_connect() {
-            CliError::ConnectionRefused { url: download_url.to_string() }
+    let github_response = client.get(download_url).send().await.and_then(|e| e.error_for_status()).map_err(|e| {
+        let url = secondary(download_url);
+        let message = if let Some(status) = e.status() {
+            format!("Download from {url} failed wotj status {status}.")
+        } else if e.is_connect() {
+            format!("Connection refused when connecting to {url}. Make sure you're connected to the internet.")
         } else if e.is_timeout() {
-            CliError::ConnectionTimeout { url: download_url.to_string() }
+            format!("Connection timeout when connecting to {url}. Make sure you're connected to the internet.")
         } else if e.is_builder() {
-            CliError::InvalidURL { url: download_url.to_string() }
+            format!("Invalid URL: {url}.")
         } else {
-            CliError::RequestFailed { url: download_url.to_string(), source: e }
-        }
+            format!("Request failed to {url}. Make sure you're connected to the internet.")
+        };
+        anyhow!(e).context(message)
     })?;
     let content_length = github_response.content_length();
 
-    let progress_bar = if let Some(size) = content_length {
-        ProgressBar::new(size)
-    } else {
-        ProgressBar::new_spinner()
+    if let Some(size) = content_length {
+        progress_bar.set_length(size);
+        progress_bar.set_style(
+            ProgressStyle::with_template(
+                "{msg}\n[{bar:42}] {percent}% ({decimal_bytes}/{total_bytes})",
+            )
+            .unwrap(),
+        );
     };
-    progress_bar.set_style(
-        ProgressStyle::default_bar()
-            .template("{msg}\n[{bar:42}] {percent}% ({decimal_bytes}/{total_bytes})")
-            .unwrap()
-            .progress_chars("█▉▊▋▌▍▎▏ "),
-    );
-    progress_bar.set_message(format!("Downloading {}", lib_folder_name.bold()));
+    progress_bar.set_message(format!("Downloading {}", style(repo_name).bold()));
 
-    let temp_lib_folder = keel_home.join("tmp/").join(&lib_folder_name);
-    std::fs::create_dir_all(&temp_lib_folder).map_err(|_| CliError::CannotCreateFolder {
-        path: temp_lib_folder.display().to_string(),
-    })?;
+    let temp_folder =
+        tempfile::Builder::new().prefix(".tmp").tempdir_in(keel_home_libs).with_context(|| {
+            format!(
+                "Failed to create temporary folder in {}. Check permissions.",
+                style(keel_home_libs.display()).bold()
+            )
+        })?;
     let bytes_stream = github_response.bytes_stream().map_err(std::io::Error::other);
-    let stream_reader = StreamReader::new(bytes_stream);
+    let bytes_reader =
+        SyncIoBridge::new(progress_bar.wrap_async_read(StreamReader::new(bytes_stream)));
 
-    let bytes_reader = SyncIoBridge::new(progress_bar.wrap_async_read(stream_reader));
-
-    let temp_folder_unpack_dest = temp_lib_folder.clone();
+    let extract_destination = temp_folder.path().to_path_buf();
     let extraction_process = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-        let gzip_decompressor = GzDecoder::new(bytes_reader);
-        Archive::new(gzip_decompressor).unpack(&temp_folder_unpack_dest)
+        Archive::new(GzDecoder::new(bytes_reader)).unpack(extract_destination)
     })
     .await
-    .map_err(|e| CliError::InternalBug { details: e.to_string() })?;
+    .context(hformat!("{BUG_NOTICE}Archive extraction failed."))?;
 
     let downloaded = progress_bar.position();
 
-    if let Err(e) = extraction_process {
-        let _ = std::fs::remove_dir_all(temp_lib_folder);
-        return Err(
-            if let Some(len) = content_length
-                && downloaded < len
-            {
-                CliError::DownloadTruncated { downloaded, total: len }
-            } else {
-                CliError::TarGzExtractionFailed { url: download_url.to_string(), source: e }
-            },
-        );
-    }
-    progress_bar.finish_and_clear();
-    print!("Installing {}", lib_folder_name.bold());
-    std::io::stdout().flush().unwrap();
+    extraction_process.context(
+        if let Some(len) = content_length
+            && downloaded < len
+        {
+            "The download was truncated. Please try again."
+        } else {
+            "Archive extraction failed. Please try again."
+        },
+    )?;
 
-    let lib_folder = keel_home_libs.join(&lib_folder_name);
+    progress_bar.set_style(ProgressStyle::default_spinner());
+    progress_bar.set_message(format!("Installing {}", style(repo_name).bold()));
 
-    let mut lib_entries = std::fs::read_dir(&temp_lib_folder)
-        .map_err(|_| CliError::CannotReadPath { path: temp_lib_folder.display().to_string() })?;
+    let lib_folder = keel_home_libs.join(repo_name);
 
-    let first_lib_entry = lib_entries
-        .next()
-        .ok_or(CliError::DownloadedFolderIsEmpty)?
-        .map_err(|_| CliError::DownloadedFolderIsEmpty)?;
+    let mut lib_entries = fs_err::read_dir(temp_folder.path())?;
+
+    let first_lib_entry = lib_entries.next().context("The downloaded folder is empty!")??;
 
     let _ = std::fs::remove_dir_all(&lib_folder);
     // If there's a single entry in the lib's archive (a top-levl folder or a single file), move that instead of the parent folder
     if lib_entries.next().is_none() {
-        let src = first_lib_entry.path();
-        let dest = if first_lib_entry.file_type().unwrap().is_dir() {
-            lib_folder.clone()
+        let dest = if first_lib_entry.file_type()?.is_dir() {
+            lib_folder
         } else {
-            std::fs::create_dir_all(&lib_folder).map_err(|_| CliError::CannotCreateFolder {
-                path: lib_folder.display().to_string(),
-            })?;
+            fs_err::create_dir_all(&lib_folder)?;
             lib_folder.join(first_lib_entry.file_name())
         };
-        std::fs::rename(&src, &dest)
-            .map_err(|_| CliError::CannotCreateFolder { path: dest.display().to_string() })?;
+        fs_err::rename(first_lib_entry.path(), dest)?;
     } else {
-        std::fs::rename(&temp_lib_folder, &lib_folder)
-            .map_err(|_| CliError::CannotCreateFolder { path: lib_folder.display().to_string() })?;
+        fs_err::rename(temp_folder.path(), &lib_folder)?;
     }
 
-    let _ = std::fs::remove_dir_all(temp_lib_folder);
+    add_package_to_manifest(&mut system_pkg_manifest, author, repo_name, version);
 
-    add_package_to_manifest(&mut system_pkg_manifest, author, repo_name, &version);
+    write_new_manifest(&system_pkg_manifest, &mut manifest_file)?;
 
-    write_new_manifest(&system_pkg_manifest, &mut manifest_file, keel_home_libs_packages_toml)?;
-
-    clear_line();
+    progress_bar.finish_and_clear();
     println!(
-        "{} Installed {}@{version}! Ad maiora!\nImport it in any Keel file with `import \"{}\";`",
-        "✓".bright_green().bold(),
-        format!("{author}/{lib_folder_name}").italic(),
-        lib_folder_name,
+        "{} Installed {}@{version}! Ad maiora!\nImport it in any Keel file with `import \"{repo_name}\";`",
+        style("✓").green().bright().bold(),
+        style(format!("{author}/{repo_name}")).italic(),
     );
 
     Ok(())

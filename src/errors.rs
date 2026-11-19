@@ -1,8 +1,10 @@
+use std::num::NonZeroU32;
+
 use crate::ast::Span;
 use crate::compiler::Source;
 use crate::compiler::program::InstrSrc;
 use ariadne::FnCache;
-use ariadne::{Color, Label, Report, ReportKind};
+use ariadne::{Color, Report, ReportKind};
 use hybrid_format::hformat;
 
 pub const ARIADNE_ERROR_KIND: ReportKind<'static> = ReportKind::Custom("[ERROR]", Color::Red);
@@ -13,6 +15,117 @@ pub const RED: &str = "\x1B[31m";
 pub const BOLD: &str = "\x1B[1m";
 pub const GREEN: &str = "\x1B[32m";
 pub const RESET: &str = "\x1B[0m\x1B[39m";
+
+#[derive(Clone, Copy)]
+pub struct SourceLocation {
+    pub span: Span,
+    pub file_idx: u16,
+}
+
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+#[derive(Clone, Copy)]
+pub enum LabelRole {
+    Primary,
+    Secondary,
+}
+
+pub struct Label<'arena> {
+    pub loc: SourceLocation,
+    pub msg: &'arena str,
+    pub role: LabelRole,
+}
+
+// Borrowed from Rust
+pub enum SuggestionApplicability {
+    /// Definitely what the user intended
+    MachineApplicable,
+    /// Maybe what the user intended, but not sure
+    MaybeIncorrect,
+    /// The suggestion contains placeholders and can't be applied automatically
+    HasPlaceholders,
+}
+
+pub struct Suggestion<'arena> {
+    pub loc: SourceLocation,
+    pub msg: &'arena str,
+    pub replacement: &'arena str,
+    pub applicability: SuggestionApplicability,
+}
+
+#[repr(transparent)]
+pub struct ErrDiagnosticId(NonZeroU32);
+
+pub struct Diagnostic<'arena> {
+    pub code: ErrorCode,
+    pub severity: Severity,
+    pub loc: SourceLocation,
+    pub title: Option<&'arena str>,
+    pub labels: Vec<Label<'arena>>,
+    pub notes: Vec<&'arena str>,
+    pub help: Vec<&'arena str>,
+    pub suggestions: Vec<Suggestion<'arena>>,
+    pub parent: Option<ErrDiagnosticId>,
+}
+
+#[inline(never)]
+#[cold]
+#[optimize(size)]
+pub fn error_diagnostic(diagnostic: &Diagnostic, sources: &[Source]) {
+    let mut report = Report::build(
+        match diagnostic.severity {
+            Severity::Error => ReportKind::Error,
+            Severity::Warning => ReportKind::Warning,
+        },
+        (sources[diagnostic.loc.file_idx as usize].filename, diagnostic.loc.span.into()),
+    )
+    .with_code(format_args!("E{:04}", diagnostic.code as u16))
+    .with_message(diagnostic.title.unwrap_or(diagnostic.code.title()));
+
+    for label in &diagnostic.labels {
+        report = report.with_label(
+            ariadne::Label::new((
+                sources[label.loc.file_idx as usize].filename,
+                label.loc.span.into(),
+            ))
+            .with_message(label.msg)
+            .with_color(Color::Red)
+            .with_priority(1),
+        )
+    }
+    for note in &diagnostic.notes {
+        report = report.with_note(note)
+    }
+    for help in &diagnostic.help {
+        report = report.with_help(help)
+    }
+    for suggestion in &diagnostic.suggestions {
+        report = report.with_help(format!("{}: `{}`", suggestion.msg, suggestion.replacement))
+    }
+
+    print_error_report(&report.finish(), sources);
+}
+
+pub struct ProgramDiagnostics<'arena> {
+    pub diagnostics: Vec<Diagnostic<'arena>>,
+    pub error_count: u32,
+}
+
+#[derive(Clone, Copy)]
+pub enum ErrorCode {
+    UnknownVariable = 0,
+}
+
+impl ErrorCode {
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::UnknownVariable => "Unknown variable",
+        }
+    }
+}
 
 pub struct ErrorCtx<'a> {
     pub instr_src: Vec<InstrSrc>,
@@ -179,7 +292,7 @@ pub fn throw_error(ctx: &ErrorCtx, instr_idx: usize, t: &ErrType) -> ! {
     let report =
         Report::build(ARIADNE_ERROR_KIND, (src.filename, (*start as usize)..(*end as usize)))
             .with_label(
-                Label::new((src.filename, (*start as usize)..(*end as usize)))
+                ariadne::Label::new((src.filename, (*start as usize)..(*end as usize)))
                     .with_message(error_message)
                     .with_color(Color::Red),
             )

@@ -175,7 +175,7 @@ pub(super) fn compile_var_access(
     let Some(fn_id) =
         state.scope(ctx.file_idx).find_function(path, name, span, ctx.file_idx, state.sources)
     else {
-        compiler_errors::error_unknown_variable(name, span, state.v, ctx.file_idx, state.sources);
+        compiler_errors::error_unknown_variable(name, span, ctx.file_idx, state);
     };
 
     let arg_types: Vec<DataType> =

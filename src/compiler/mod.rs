@@ -4,6 +4,7 @@ use crate::errors::BLUE;
 use crate::errors::BOLD;
 use crate::errors::ERROR_PREFIX;
 use crate::errors::ErrorCtx;
+use crate::errors::ProgramDiagnostics;
 use crate::errors::RESET;
 use crate::instr::Instr;
 use crate::parser;
@@ -131,6 +132,7 @@ pub fn compile<'arena>(
         &sources,
     );
 
+    let diagnostics = ProgramDiagnostics { diagnostics: Vec::new(), error_count: 0 };
     let ctx = Ctx {
         in_function: false,
         file_idx: 0,
@@ -156,6 +158,7 @@ pub fn compile<'arena>(
         file_scopes: &mut file_scopes,
         types: &mut types,
         bump,
+        diagnostics,
     };
     let mut instructions: Vec<Instr> = Vec::with_capacity(4);
     for (var_declaration, file_idx) in pending_globals {

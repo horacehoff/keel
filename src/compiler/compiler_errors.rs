@@ -7,17 +7,24 @@ use crate::compiler::program::Struct;
 use crate::compiler::program::StructField;
 use crate::compiler::scope::Scope;
 use crate::compiler::state::State;
-use crate::compiler::state::Variable;
 use crate::errors::ARIADNE_ERROR_KIND;
 use crate::errors::BLUE;
 use crate::errors::BOLD;
+use crate::errors::Diagnostic;
+use crate::errors::ErrorCode;
 use crate::errors::GREEN;
+use crate::errors::Label;
+use crate::errors::LabelRole;
 use crate::errors::RED;
 use crate::errors::RESET;
+use crate::errors::Severity;
+use crate::errors::SourceLocation;
+use crate::errors::Suggestion;
+use crate::errors::SuggestionApplicability;
 use crate::errors::crash;
+use crate::errors::error_diagnostic;
 use crate::errors::print_error_report;
 use ariadne::Color;
-use ariadne::Label;
 use ariadne::Report;
 use core::fmt::Display;
 use core::ops::Range;
@@ -61,7 +68,7 @@ fn compiler_error(
     .with_message(title);
     for label in labels {
         report = report.with_label(
-            Label::new(label.location(sources))
+            ariadne::Label::new(label.location(sources))
                 .with_message(label.message)
                 .with_color(label.color)
                 .with_priority(label.priority),
@@ -831,29 +838,38 @@ fn levenshtein(a: &str, b: &str) -> usize {
 #[cold]
 #[optimize(size)]
 #[inline(never)]
-pub fn error_unknown_variable(
-    var_name: &str,
-    span: Span,
-    v: &[Variable],
-    file_idx: u16,
-    sources: &[Source],
-) -> ! {
-    let help = find_closest_str(var_name, v.iter().map(|v| v.name)).map(|similar_var| {
-        hformat!("A variable with a similar name exists: {BLUE}{similar_var}{RESET}")
-    });
-    compiler_error(
-        &"Unknown variable",
-        (span, file_idx),
-        &[ReportLabel::new(
-            &format_args!("Cannot find variable {RED}{var_name}{RESET} in this scope"),
-            Color::Red,
-            span,
-            file_idx,
-        )],
-        None,
-        help.as_ref().map(|help| help as &dyn Display),
-        sources,
-    )
+pub fn error_unknown_variable(var_name: &str, span: Span, file_idx: u16, state: &State) -> ! {
+    let loc = SourceLocation { span, file_idx };
+    let suggestions = find_closest_str(var_name, state.v.iter().map(|v| v.name))
+        .map(|similar_var| Suggestion {
+            loc,
+            msg: "A variable with a similar name exists",
+            replacement: state.bump.alloc_str(similar_var),
+            applicability: SuggestionApplicability::MaybeIncorrect,
+        })
+        .into_iter()
+        .collect();
+
+    let diagnostic = Diagnostic {
+        code: ErrorCode::UnknownVariable,
+        severity: Severity::Error,
+        loc,
+        title: None,
+        labels: vec![Label {
+            loc,
+            msg:
+                bumpalo::format!(in state.bump, "Cannot find variable `{}` in this scope", var_name)
+                    .into_bump_str(),
+            role: LabelRole::Primary,
+        }],
+        notes: Vec::new(),
+        help: Vec::new(),
+        suggestions,
+        parent: None,
+    };
+
+    error_diagnostic(&diagnostic, state.sources);
+    crash()
 }
 
 #[cold]

@@ -1,6 +1,7 @@
 use crate::{
     ast::Span,
     compiler::scope::{Scope, Symbol},
+    errors::ProgramDiagnostics,
 };
 use bumpalo::Bump;
 use core::hint::unreachable_unchecked;
@@ -84,6 +85,7 @@ pub struct State<'arena, 'compiler> {
     pub file_scopes: &'compiler mut Vec<Scope<'arena>>,
     pub types: &'compiler mut Vec<DataType>,
     pub bump: &'arena Bump,
+    pub diagnostics: ProgramDiagnostics<'arena>,
 }
 
 impl<'arena> State<'arena, '_> {

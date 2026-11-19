@@ -238,7 +238,7 @@ pub(super) fn compile_var_assignment<'arena>(
     {
         Some(global_id)
     } else {
-        compiler_errors::error_unknown_variable(name, span, state.v, ctx.file_idx, state.sources);
+        compiler_errors::error_unknown_variable(name, span, ctx.file_idx, state);
     };
 
     let declared_var_type = if let Some(idx) = local_var_idx {

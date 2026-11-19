@@ -49,7 +49,7 @@ fn infer_symbol_type(
         }
         DataType::Fn(fn_id as u16)
     } else {
-        error_unknown_variable(name, span, state.v, ctx.file_idx, state.sources);
+        error_unknown_variable(name, span, ctx.file_idx, state);
     }
 }
 

@@ -1,5 +1,6 @@
 use bumpalo::Bump;
 use core::hint::unreachable_unchecked;
+use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug, Copy)]
 pub struct IfBlockExpr<'arena> {
@@ -313,27 +314,39 @@ pub const fn symbol_of_expr(expr: &Expr) -> &'static str {
     }
 }
 
-pub fn code_modifies_variable(var_name: &str, code: &[Expr]) -> bool {
-    code.iter().any(|expr| match expr {
-        Expr::VarAssign(n, _, _) => n.get_name() == var_name,
-        Expr::IfBlock(if_block) => {
-            code_modifies_variable(var_name, if_block.then)
-                || code_modifies_variable(var_name, if_block.otherwise)
+pub fn collect_var_assignments<'arena>(
+    code: &'arena [Expr<'arena>],
+    idx: usize,
+    last_var_assigns: &mut FxHashMap<&'arena str, usize>,
+) {
+    for expr in code {
+        match expr {
+            Expr::VarAssign(n, _, _) => {
+                last_var_assigns.insert(n.get_name(), idx);
+            }
+            Expr::IfBlock(if_block) => {
+                collect_var_assignments(if_block.then, idx, last_var_assigns);
+                collect_var_assignments(if_block.otherwise, idx, last_var_assigns);
+            }
+            Expr::WhileBlock(_, code)
+            | Expr::ForLoop(_, _, code, _)
+            | Expr::EvalBlock(code)
+            | Expr::LoopBlock(code) => collect_var_assignments(code, idx, last_var_assigns),
+            Expr::IntForLoop(for_loop) => {
+                collect_var_assignments(for_loop.get_loop_code(), idx, last_var_assigns);
+            }
+            Expr::Match(match_expr) => {
+                for arm in match_expr.arms {
+                    collect_var_assignments(arm.code, idx, last_var_assigns);
+                }
+            }
+            Expr::TryCatchBlock(try_code, _, catch_code) => {
+                collect_var_assignments(try_code, idx, last_var_assigns);
+                collect_var_assignments(catch_code, idx, last_var_assigns);
+            }
+            _ => {}
         }
-        Expr::WhileBlock(_, code) | Expr::ForLoop(_, _, code, _) => {
-            code_modifies_variable(var_name, code)
-        }
-        Expr::EvalBlock(code) | Expr::LoopBlock(code) => code_modifies_variable(var_name, code),
-        Expr::IntForLoop(for_loop) => code_modifies_variable(var_name, for_loop.get_loop_code()),
-        Expr::Match(match_expr) => {
-            match_expr.arms.iter().any(|arm| code_modifies_variable(var_name, arm.code))
-        }
-        Expr::TryCatchBlock(try_code, _, catch_code) => {
-            code_modifies_variable(var_name, try_code)
-                || code_modifies_variable(var_name, catch_code)
-        }
-        _ => false,
-    })
+    }
 }
 
 pub fn var_assign<'arena>(

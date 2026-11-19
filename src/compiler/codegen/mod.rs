@@ -1,4 +1,5 @@
 use crate::ast::Expr;
+use crate::ast::collect_var_assignments;
 use crate::compiler::DataType;
 use crate::compiler::functions::compile_function_call;
 use crate::compiler::functions::compile_method_call;
@@ -47,6 +48,7 @@ use operators::compile_type_eq_op;
 use operators::numeric_op;
 pub(super) use patterns::declare_pattern_bindings;
 pub(super) use patterns::type_after_mismatch;
+use rustc_hash::FxHashMap;
 use strings::apply_loop_in_place_str_appends;
 use strings::is_eligible_for_in_place_append;
 use strings::rewrite_str_concats;
@@ -92,6 +94,13 @@ pub fn compile_expr<'arena>(
     let symbols_len = state.scope(ctx.file_idx).symbols.len();
     let mut output: Vec<Instr> = Vec::with_capacity(input.len());
     let mut str_regs = Vec::new();
+    let last_var_assigns = input.iter().any(|e| matches!(e, Expr::VarDeclare(..))).then(|| {
+        let mut last_var_assigns = FxHashMap::default();
+        for (idx, e) in input.iter().enumerate() {
+            collect_var_assignments(core::slice::from_ref(e), idx, &mut last_var_assigns);
+        }
+        last_var_assigns
+    });
     for (idx, x) in input.iter().enumerate() {
         let v_len = state.v.len();
         if let Some(id) = x.compile_with_code_context(
@@ -100,7 +109,7 @@ pub fn compile_expr<'arena>(
             &mut output,
             None,
             false,
-            &input[idx + 1..],
+            last_var_assigns.as_ref().map(|e| (e, idx)),
             false,
         ) {
             state.free_reg(id);
@@ -154,7 +163,7 @@ impl<'arena> Expr<'arena> {
         var_assignment: bool,
         uses_id: bool,
     ) -> Option<u16> {
-        self.compile_with_code_context(ctx, state, output, tgt_id, var_assignment, &[], uses_id)
+        self.compile_with_code_context(ctx, state, output, tgt_id, var_assignment, None, uses_id)
     }
     pub fn compile_with_code_context(
         &'arena self,
@@ -163,7 +172,7 @@ impl<'arena> Expr<'arena> {
         output: &mut Vec<Instr>,
         tgt_id: Option<u16>,
         var_assignment: bool,
-        remaining_code: &[Self],
+        last_var_assigns: Option<(&FxHashMap<&str, usize>, usize)>,
         uses_id: bool,
     ) -> Option<u16> {
         match self {
@@ -393,7 +402,7 @@ impl<'arena> Expr<'arena> {
             }
             Self::VarDeclare(var_declaration) => {
                 debug_assert!(!uses_id);
-                compile_var_declaration(var_declaration, remaining_code, ctx, state, output);
+                compile_var_declaration(var_declaration, last_var_assigns, ctx, state, output);
                 None
             }
             Self::VarAssign(name, value, span) => {

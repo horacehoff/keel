@@ -1,7 +1,6 @@
 use crate::ast::Expr;
 use crate::ast::Span;
 use crate::ast::StructFieldAssignmentExpr;
-use crate::ast::code_modifies_variable;
 use crate::compiler::Ctx;
 use crate::compiler::DataType;
 use crate::compiler::VariableDeclarationExpr;
@@ -17,6 +16,7 @@ use crate::compiler::state::State;
 use crate::compiler::types::struct_field_type_matches;
 use crate::compiler::var_type_is_compatible;
 use crate::instr::Instr;
+use rustc_hash::FxHashMap;
 
 pub(super) fn compile_array_index_assignment<'arena>(
     array: &'arena Expr,
@@ -156,7 +156,7 @@ pub(super) fn compile_struct_field_assignment<'arena>(
 
 pub(super) fn compile_var_declaration<'arena>(
     var_declaration: &'arena VariableDeclarationExpr,
-    remaining_code: &[Expr],
+    last_var_assigns: Option<(&FxHashMap<&str, usize>, usize)>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
@@ -190,15 +190,19 @@ pub(super) fn compile_var_declaration<'arena>(
     let var_id = if is_var_read
         && match value {
             Expr::Var(v, _) if v.is_namespace_empty() && state.find_var(v.get_name()).is_some() => {
-                code_modifies_variable(v.get_name(), remaining_code)
-                    || code_modifies_variable(name, remaining_code)
+                last_var_assigns.is_some_and(|(e, idx)| {
+                    e.get(v.get_name()).is_some_and(|&last| last > idx)
+                        || e.get(name).is_some_and(|&last| last > idx)
+                })
             }
             _ => true,
         } {
         let reg_id = state.alloc_reg();
         output.push(Instr::Mov(src_id, reg_id));
         reg_id
-    } else if !ctx.single_run && code_modifies_variable(name, remaining_code) {
+    } else if !ctx.single_run
+        && last_var_assigns.is_some_and(|(e, idx)| e.get(name).is_some_and(|&last| last > idx))
+    {
         let var_id = state.alloc_reg();
         move_reg_to_reg(output, src_id, var_id, state.register_value(src_id));
         var_id

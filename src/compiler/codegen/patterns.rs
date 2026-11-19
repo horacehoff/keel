@@ -1,5 +1,7 @@
+use rustc_hash::FxHashMap;
+
 use super::conditions::patch_jumps;
-use crate::ast::{ArrayPattern, Expr, Pattern, Span, StructPattern, code_modifies_variable};
+use crate::ast::{ArrayPattern, Expr, Pattern, Span, StructPattern, collect_var_assignments};
 use crate::compiler::Ctx;
 use crate::compiler::state::State;
 use crate::{
@@ -66,7 +68,7 @@ pub(super) fn compile_pattern<'arena>(
     pattern: &'arena Pattern<'arena>,
     register_id: u16,
     candidate: &DataType,
-    arm_code: &[Expr],
+    arm_code: &'arena [Expr<'arena>],
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
@@ -89,6 +91,9 @@ pub(super) fn compile_pattern<'arena>(
         return None;
     }
 
+    let mut arm_var_assigns = FxHashMap::default();
+    collect_var_assignments(arm_code, 0, &mut arm_var_assigns);
+
     // A binding shares its register with the value it was bound from.
     // Therefore if the arm reassigns the register, it needs to be copied.
     for idx in v_start..state.v.len() {
@@ -96,7 +101,7 @@ pub(super) fn compile_pattern<'arena>(
         let reg_sharers =
             || state.v.iter().chain(state.globals.iter()).filter(|var| var.register_id == var_reg);
         if reg_sharers().nth(1).is_some()
-            && reg_sharers().any(|var| code_modifies_variable(var.name, arm_code))
+            && reg_sharers().any(|var| arm_var_assigns.contains_key(var.name))
         {
             let new = state.alloc_reg();
             output.push(Instr::Mov(var_reg, new));

@@ -1,11 +1,11 @@
-use std::num::NonZeroU32;
-
 use crate::ast::Span;
 use crate::compiler::Source;
 use crate::compiler::program::InstrSrc;
 use ariadne::FnCache;
 use ariadne::{Color, Report, ReportKind};
+use bumpalo::Bump;
 use hybrid_format::hformat;
+use std::num::NonZeroU32;
 
 pub const ARIADNE_ERROR_KIND: ReportKind<'static> = ReportKind::Custom("[ERROR]", Color::Red);
 pub const ERROR_PREFIX: &str = hformat!("{RED}[ERROR]:{RESET}");
@@ -112,19 +112,140 @@ pub fn error_diagnostic(diagnostic: &Diagnostic, sources: &[Source]) {
 pub struct ProgramDiagnostics<'arena> {
     pub diagnostics: Vec<Diagnostic<'arena>>,
     pub error_count: u32,
+    pub bump: &'arena Bump,
+    current: usize,
+    current_file: u16,
+}
+
+impl<'arena> ProgramDiagnostics<'arena> {
+    #[inline(never)]
+    #[cold]
+    #[optimize(size)]
+    pub fn emit_all(&self, sources: &[Source]) {
+        for diagnostic in &self.diagnostics {
+            error_diagnostic(diagnostic, sources);
+        }
+    }
+    #[must_use]
+    #[inline(always)]
+    pub const fn new(bump: &'arena Bump) -> Self {
+        Self { diagnostics: Vec::new(), error_count: 0, bump, current: 0, current_file: 0 }
+    }
+    #[inline(never)]
+    #[cold]
+    #[optimize(size)]
+    pub fn error(&mut self, code: ErrorCode, span: Span, file_idx: u16) -> &mut Self {
+        self.error_count += 1;
+        self.current = self.diagnostics.len();
+        self.current_file = file_idx;
+        self.diagnostics.push(Diagnostic {
+            code,
+            severity: Severity::Error,
+            loc: SourceLocation { span, file_idx },
+            title: None,
+            labels: Vec::new(),
+            notes: Vec::new(),
+            help: Vec::new(),
+            suggestions: Vec::new(),
+            parent: None,
+        });
+        self
+    }
+    #[inline(always)]
+    pub const fn reopen(&mut self, id: ErrDiagnosticId, file_idx: u16) -> &mut Self {
+        self.current = id.0.get() as usize - 1;
+        self.current_file = file_idx;
+        self
+    }
+    #[inline(always)]
+    fn text(&self, msg: core::fmt::Arguments) -> &'arena str {
+        if let Some(txt) = msg.as_str() {
+            return txt;
+        }
+        let mut text = bumpalo::collections::String::new_in(self.bump);
+        unsafe { core::fmt::Write::write_fmt(&mut text, msg).unwrap_unchecked() };
+        text.into_bump_str()
+    }
+    #[inline(never)]
+    #[cold]
+    #[optimize(size)]
+    fn label(&mut self, role: LabelRole, span: Span, msg: core::fmt::Arguments) -> &mut Self {
+        let loc = SourceLocation { span, file_idx: self.current_file };
+        let msg = self.text(msg);
+        self.diagnostics[self.current].labels.push(Label { loc, msg, role });
+        self
+    }
+    #[inline(always)]
+    pub fn primary(&mut self, span: Span, msg: core::fmt::Arguments) -> &mut Self {
+        self.label(LabelRole::Primary, span, msg)
+    }
+    #[inline(always)]
+    pub fn secondary(&mut self, span: Span, msg: core::fmt::Arguments) -> &mut Self {
+        self.label(LabelRole::Secondary, span, msg)
+    }
+    #[inline(never)]
+    #[cold]
+    #[optimize(size)]
+    pub fn note(&mut self, msg: core::fmt::Arguments) -> &mut Self {
+        let note = self.text(msg);
+        self.diagnostics[self.current].notes.push(note);
+        self
+    }
+    #[inline(never)]
+    #[cold]
+    #[optimize(size)]
+    pub fn help(&mut self, msg: core::fmt::Arguments) -> &mut Self {
+        let note = self.text(msg);
+        self.diagnostics[self.current].help.push(note);
+        self
+    }
+    #[inline(never)]
+    #[cold]
+    #[optimize(size)]
+    pub fn suggestion(
+        &mut self,
+        span: Span,
+        msg: core::fmt::Arguments,
+        replacement: &str,
+        applicability: SuggestionApplicability,
+    ) -> &mut Self {
+        let suggestion = Suggestion {
+            loc: SourceLocation { span, file_idx: self.current_file },
+            msg: self.text(msg),
+            replacement: self.bump.alloc_str(replacement),
+            applicability,
+        };
+        self.diagnostics[self.current].suggestions.push(suggestion);
+        self
+    }
+    #[inline(always)]
+    #[must_use]
+    pub const fn finish(&self) -> ErrDiagnosticId {
+        ErrDiagnosticId(unsafe { NonZeroU32::new_unchecked(self.current as u32 + 1) })
+    }
 }
 
 #[derive(Clone, Copy)]
 pub enum ErrorCode {
     UnknownVariable = 0,
+    ImportedFileNotFound = 1,
 }
 
 impl ErrorCode {
     pub const fn title(self) -> &'static str {
         match self {
             Self::UnknownVariable => "Unknown variable",
+            Self::ImportedFileNotFound => "Imported file not found",
         }
     }
+}
+
+#[macro_export]
+macro_rules! error {
+    ($diagnostics:expr) => {{
+        core::hint::cold_path();
+        return Err($diagnostics.finish());
+    }};
 }
 
 pub struct ErrorCtx<'a> {

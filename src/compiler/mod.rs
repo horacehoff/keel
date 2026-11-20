@@ -100,7 +100,8 @@ pub fn compile<'arena>(
     let keel_home_libs =
         LazyCell::new(|| std::env::home_dir().map(|p| p.join(".keel").join("libs/")));
 
-    parse_toplevel(
+    let mut diagnostics: ProgramDiagnostics<'_> = ProgramDiagnostics::new(bump);
+    let parsing_result = parse_toplevel(
         bump,
         code,
         &PathBuf::from(filename),
@@ -118,7 +119,13 @@ pub fn compile<'arena>(
         &mut pending_dylibs,
         &mut pending_globals,
         &keel_home_libs,
+        &mut diagnostics,
     );
+    if parsing_result.is_err() {
+        core::hint::cold_path();
+        diagnostics.emit_all(&sources);
+        crate::errors::crash();
+    }
     resolve_types(
         &mut structs,
         &mut functions,
@@ -131,8 +138,6 @@ pub fn compile<'arena>(
         &mut dyn_libs,
         &sources,
     );
-
-    let diagnostics = ProgramDiagnostics { diagnostics: Vec::new(), error_count: 0 };
     let ctx = Ctx {
         in_function: false,
         file_idx: 0,

@@ -27,7 +27,7 @@ fn infer_symbol_type(
     name: &str,
     span: Span,
     ctx: Ctx,
-    state: &State<'_, '_>,
+    state: &mut State<'_, '_>,
 ) -> DataType {
     if let Some(idx) =
         state.scope(ctx.file_idx).find_global(namespace, name, span, ctx.file_idx, state.sources)

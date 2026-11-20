@@ -12,7 +12,6 @@ use crate::compiler::Source;
 use crate::compiler::compiler_errors::error_ambiguous_import;
 use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
 use crate::compiler::compiler_errors::error_cannot_load_dynlib;
-use crate::compiler::compiler_errors::error_cannot_read_file;
 use crate::compiler::compiler_errors::error_function_already_defined;
 use crate::compiler::compiler_errors::error_global_already_defined;
 use crate::compiler::compiler_errors::error_struct_already_defined;
@@ -25,6 +24,10 @@ use crate::compiler::program::StructField;
 use crate::compiler::scope::Scope;
 use crate::compiler::scope::Symbol;
 use crate::compiler::types::check_if_returns_void;
+use crate::error;
+use crate::errors::ErrDiagnosticId;
+use crate::errors::ErrorCode;
+use crate::errors::ProgramDiagnostics;
 #[cfg(target_arch = "wasm32")]
 use crate::errors::wasm_error;
 use crate::parser;
@@ -76,7 +79,8 @@ pub fn parse_toplevel<'a>(
     )>,
     pending_globals: &mut Vec<(VariableDeclarationExpr<'a>, u16)>,
     keel_home_libs_path: &LazyCell<Option<PathBuf>, impl FnOnce() -> Option<PathBuf>>,
-) {
+    diagnostics: &mut ProgramDiagnostics,
+) -> Result<(), ErrDiagnosticId> {
     let mut imports = Vec::new();
     let mut file_globals: Vec<VariableDeclarationExpr> = Vec::new();
     for expr in code {
@@ -238,9 +242,13 @@ pub fn parse_toplevel<'a>(
                         .or_else(|| keel_home_libs_path.as_deref().and_then(find_in))
                 };
 
-                let file_path: PathBuf = resolved
-                    .and_then(|path| path.canonicalize().ok())
-                    .unwrap_or_else(|| error_cannot_read_file(span, src_file_idx, sources));
+                let Some(file_path) = resolved.and_then(|path| path.canonicalize().ok()) else {
+                    error!(
+                        diagnostics
+                            .error(ErrorCode::ImportedFileNotFound, span, src_file_idx)
+                            .primary(span, format_args!("`{path}` can't be found"))
+                    )
+                };
 
                 let child_name = alias.unwrap_or_else(|| {
                     let name = import_path.file_name().and_then(|s| s.to_str()).unwrap_or(path);
@@ -254,10 +262,15 @@ pub fn parse_toplevel<'a>(
                     continue;
                 }
 
-                let file_contents =
-                    bump.alloc_str(&std::fs::read_to_string(&file_path).unwrap_or_else(|_| {
-                        error_cannot_read_file(span, src_file_idx, sources);
-                    }));
+                let Ok(file_contents) = std::fs::read_to_string(&file_path) else {
+                    error!(
+                        diagnostics
+                            .error(ErrorCode::ImportedFileNotFound, span, src_file_idx)
+                            .primary(span, format_args!("`{path}` cannot be read"))
+                    )
+                };
+
+                let file_contents = bump.alloc_str(&file_contents);
                 let file_name = bump.alloc_str(file_path.to_str().unwrap_or(path));
 
                 let child_src_idx = sources.len() as u16;
@@ -274,7 +287,7 @@ pub fn parse_toplevel<'a>(
 
                 let mut child_scope = Scope::default();
 
-                parse_toplevel(
+                if let Err(id) = parse_toplevel(
                     bump,
                     file_code,
                     &file_path,
@@ -292,7 +305,14 @@ pub fn parse_toplevel<'a>(
                     pending_dylibs,
                     pending_globals,
                     keel_home_libs_path,
-                );
+                    diagnostics,
+                ) {
+                    error!(
+                        diagnostics
+                            .reopen(id, src_file_idx)
+                            .secondary(span, format_args!("`{path}` is imported here"))
+                    );
+                };
                 files.insert(file_path, child_scope.clone());
                 scope.children.push((child_name, child_scope));
             }
@@ -321,6 +341,7 @@ pub fn parse_toplevel<'a>(
     }
     scope.toplevel_count = scope.symbols.len();
     file_scopes[src_file_idx as usize] = scope.clone();
+    Ok(())
 }
 
 pub fn resolve_types<'arena>(

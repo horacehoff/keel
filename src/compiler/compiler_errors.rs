@@ -315,20 +315,6 @@ pub fn error_type_not_indexable(
 #[inline(never)]
 #[cold]
 #[optimize(size)]
-pub fn error_cannot_read_file(span: Span, file_idx: u16, sources: &[Source]) -> ! {
-    compiler_error(
-        &"Cannot read file",
-        (span, file_idx),
-        &[ReportLabel::new(&"This file cannot be found.", Color::Red, span, file_idx)],
-        None,
-        None,
-        sources,
-    )
-}
-
-#[inline(never)]
-#[cold]
-#[optimize(size)]
 pub fn error_ambiguous_import(span: Span, file_idx: u16, sources: &[Source], name: &str) -> ! {
     compiler_error(
         &"Ambiguous import",

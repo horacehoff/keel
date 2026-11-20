@@ -9,6 +9,7 @@ use crate::compiler::compiler_errors::error_unknown_variable;
 use crate::compiler::scope::Scope;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
+use crate::errors::ErrDiagnosticId;
 use core::hint::cold_path;
 use core::hint::unreachable_unchecked;
 use hybrid_format::hformat;
@@ -301,15 +302,15 @@ pub fn fn_matches_signature(
     expected_sig: &[DataType],
     ctx: Ctx,
     state: &mut State<'_, '_>,
-) -> bool {
+) -> Result<bool, ErrDiagnosticId> {
     let expected_arg_types = &expected_sig[..expected_sig.len() - 1];
     let expected_return_type = &expected_sig[expected_sig.len() - 1];
     if !fn_args_match(fn_id, expected_arg_types, state) {
-        return false;
+        return Ok(false);
     }
     let fn_name = state.functions[fn_id].name;
-    resolve_function_return_type(fn_id, expected_arg_types, fn_name, ctx, state)
-        == *expected_return_type
+    Ok(resolve_function_return_type(fn_id, expected_arg_types, fn_name, ctx, state)?
+        == *expected_return_type)
 }
 
 pub fn var_type_is_compatible(declared: &DataType, candidate: &DataType) -> bool {

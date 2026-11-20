@@ -10,6 +10,7 @@ use crate::compiler::registers::UnwrapId;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
 use crate::data::Data;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 use core::hint::cold_path;
 use core::hint::unreachable_unchecked;
@@ -109,7 +110,11 @@ enum ReturnType {
     Null,
     Type(SignatureType),
     Computed(
-        for<'arena> fn(&'arena FunctionCallExpr<'arena>, Ctx, &mut State<'arena, '_>) -> DataType,
+        for<'arena> fn(
+            &'arena FunctionCallExpr<'arena>,
+            Ctx,
+            &mut State<'arena, '_>,
+        ) -> Result<DataType, ErrDiagnosticId>,
     ),
 }
 
@@ -124,7 +129,7 @@ enum Lowering {
             Ctx,
             &mut State<'arena, '_>,
             Option<u16>,
-        ) -> Option<u16>,
+        ) -> Result<Option<u16>, ErrDiagnosticId>,
     ),
 }
 
@@ -152,12 +157,12 @@ impl BuiltIn {
         receiver_type: Option<&DataType>,
         ctx: Ctx,
         state: &mut State<'arena, '_>,
-    ) -> DataType {
+    ) -> Result<DataType, ErrDiagnosticId> {
         match self.return_type {
-            ReturnType::Null => DataType::Null,
-            ReturnType::Type(t) => t.to_datatype(receiver_type),
+            ReturnType::Null => Ok(DataType::Null),
+            ReturnType::Type(t) => Ok(t.to_datatype(receiver_type)),
             ReturnType::Computed(f) => {
-                check_builtin_call(self, function_call, receiver_type, ctx, state);
+                check_builtin_call(self, function_call, receiver_type, ctx, state)?;
                 f(function_call, ctx, state)
             }
         }
@@ -184,14 +189,14 @@ pub(super) fn find_method<'arena>(
     function_call: &'arena FunctionCallExpr<'arena>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
-) -> (&'static BuiltIn, DataType) {
+) -> Result<(&'static BuiltIn, DataType), ErrDiagnosticId> {
     let name = function_call.qualified_name.get_name();
-    let receiver_type = function_call.args[0].infer_type(ctx, state);
+    let receiver_type = function_call.args[0].infer_type(ctx, state)?;
     let candidates = METHODS.iter().filter(|method| method.name == name); // Future-proof
     if let Some(method) =
         candidates.clone().find(|method| is_accepted(method.receivers, &receiver_type, None))
     {
-        return (method, receiver_type);
+        return Ok((method, receiver_type));
     }
     cold_path();
     let expected: Vec<DataType> =
@@ -219,8 +224,8 @@ pub fn get_method_return_type<'arena>(
     function_call: &'arena FunctionCallExpr<'arena>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
-) -> DataType {
-    let (method, receiver_type) = find_method(function_call, ctx, state);
+) -> Result<DataType, ErrDiagnosticId> {
+    let (method, receiver_type) = find_method(function_call, ctx, state)?;
     method.get_return_type(function_call, Some(&receiver_type), ctx, state)
 }
 
@@ -228,15 +233,24 @@ pub fn get_builtin_function_return_type<'arena>(
     function_call: &'arena FunctionCallExpr<'arena>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
-) -> Option<DataType> {
+) -> Result<Option<DataType>, ErrDiagnosticId> {
     let name = function_call.qualified_name.get_name();
     let namespace = function_call.qualified_name.get_namespace();
     let function = if namespace.is_empty() {
-        find_builtin(&GLOBAL_FUNCTIONS, name)?
+        let Some(builtin) = find_builtin(&GLOBAL_FUNCTIONS, name) else {
+            return Ok(None);
+        };
+        builtin
     } else {
-        find_builtin(find_library(namespace)?.functions, name)?
+        let Some(lib) = find_library(namespace) else {
+            return Ok(None);
+        };
+        let Some(builtin) = find_builtin(lib.functions, name) else {
+            return Ok(None);
+        };
+        builtin
     };
-    Some(function.get_return_type(function_call, None, ctx, state))
+    Ok(Some(function.get_return_type(function_call, None, ctx, state)?))
 }
 
 pub(super) fn check_builtin_call<'arena>(
@@ -245,7 +259,7 @@ pub(super) fn check_builtin_call<'arena>(
     receiver_type: Option<&DataType>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
-) {
+) -> Result<(), ErrDiagnosticId> {
     let receiver_count = usize::from(!builtin.receivers.is_empty());
     let args = &function_call.args[receiver_count..];
     let arg_spans = &function_call.get_arg_spans()[receiver_count..];
@@ -275,7 +289,7 @@ pub(super) fn check_builtin_call<'arena>(
         );
     }
     for ((arg, &arg_span), accepted) in args.iter().zip(arg_spans).zip(builtin.positional) {
-        let actual = arg.infer_type(ctx, state);
+        let actual = arg.infer_type(ctx, state)?;
         if !is_accepted(accepted, &actual, receiver_type) {
             let expected: Vec<DataType> =
                 accepted.iter().map(|f| f.to_datatype(receiver_type)).collect();
@@ -290,6 +304,7 @@ pub(super) fn check_builtin_call<'arena>(
             );
         }
     }
+    Ok(())
 }
 
 pub(super) fn compile_builtin_call<'arena>(
@@ -299,7 +314,7 @@ pub(super) fn compile_builtin_call<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     if let Lowering::Custom(f) = builtin.lowering {
         return f(function_call, output, ctx, state, tgt_id);
     }
@@ -309,7 +324,7 @@ pub(super) fn compile_builtin_call<'arena>(
     let mut operands = [0u16; 3];
     for (idx, operand) in operands[..arg_count].iter_mut().enumerate() {
         *operand = match function_call.args.get(idx) {
-            Some(arg) => arg.compile(ctx, state, output, None, false, true).unwrap_id(),
+            Some(arg) => arg.compile(ctx, state, output, None, false, true)?.unwrap_id(),
             None => match unsafe { builtin.default.unwrap_unchecked() } {
                 DefaultArg::EmptyStr => {
                     let empty_str = Data::comp_str("", &mut state.pools.str_pool);
@@ -343,5 +358,5 @@ pub(super) fn compile_builtin_call<'arena>(
             state.add_to_src(ctx, output, span);
         }
     }
-    dst
+    Ok(dst)
 }

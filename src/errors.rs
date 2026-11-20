@@ -57,6 +57,7 @@ pub struct Suggestion<'arena> {
 }
 
 #[repr(transparent)]
+#[derive(Clone, Copy)]
 pub struct ErrDiagnosticId(NonZeroU32);
 
 pub struct Diagnostic<'arena> {

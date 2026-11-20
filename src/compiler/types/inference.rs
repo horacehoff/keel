@@ -20,6 +20,7 @@ use crate::compiler::types::check_if_returns_void;
 use crate::compiler::types::error_function_needs_args_typed;
 use crate::compiler::types::error_unknown_variable;
 use crate::compiler::types::resolve_function_return_type;
+use crate::errors::ErrDiagnosticId;
 use core::hint::unreachable_unchecked;
 
 fn infer_symbol_type(
@@ -27,7 +28,7 @@ fn infer_symbol_type(
     name: &str,
     span: Span,
     ctx: Ctx,
-    state: &mut State<'_, '_>,
+    state: &State<'_, '_>,
 ) -> DataType {
     if let Some(idx) =
         state.scope(ctx.file_idx).find_global(namespace, name, span, ctx.file_idx, state.sources)
@@ -54,8 +55,12 @@ fn infer_symbol_type(
 }
 
 impl<'arena> Expr<'arena> {
-    pub fn infer_type(&'arena self, ctx: Ctx, state: &mut State<'arena, '_>) -> DataType {
-        match self {
+    pub fn infer_type(
+        &'arena self,
+        ctx: Ctx,
+        state: &mut State<'arena, '_>,
+    ) -> Result<DataType, ErrDiagnosticId> {
+        Ok(match self {
             Self::Var(name, span) => {
                 if let Some(var) = state.find_var(name.get_name()) {
                     var.var_type.clone()
@@ -76,31 +81,28 @@ impl<'arena> Expr<'arena> {
                 let elem_type = x
                     .iter()
                     .map(|elem| elem.infer_type(ctx, state))
-                    .find(|elem_type| *elem_type != DataType::Unknown)
-                    .unwrap_or(DataType::Unknown);
+                    .find(|elem_type| !matches!(elem_type, Ok(DataType::Unknown)))
+                    .unwrap_or(Ok(DataType::Unknown))?;
                 Some(Box::from(elem_type))
             }),
             Self::Map(kv_pairs, _) => {
                 if kv_pairs.is_empty() {
                     DataType::Map(Box::from((Some(DataType::Unknown), Some(DataType::Unknown))))
                 } else {
-                    let kv_type = kv_pairs
-                        .iter()
-                        .map(|(key, _, value, _)| {
-                            (key.infer_type(ctx, state), value.infer_type(ctx, state))
-                        })
-                        .find(|(key_t, val_t)| {
-                            key_t != &DataType::Unknown || val_t != &DataType::Unknown
-                        })
-                        .map_or(
-                            (Some(DataType::Unknown), Some(DataType::Unknown)),
-                            |(key_t, val_t)| (Some(key_t), Some(val_t)),
-                        );
-                    DataType::Map(Box::from(kv_type))
+                    let mut kv_types = (DataType::Unknown, DataType::Unknown);
+                    for (key, _, value, _) in *kv_pairs {
+                        let k_t = key.infer_type(ctx, state)?;
+                        let v_t = value.infer_type(ctx, state)?;
+                        if k_t != DataType::Unknown || v_t != DataType::Unknown {
+                            kv_types = (k_t, v_t);
+                            break;
+                        }
+                    }
+                    DataType::Map(Box::from((Some(kv_types.0), Some(kv_types.1))))
                 }
             }
             Self::Add(x, y, span_l, span_r) => {
-                match (x.infer_type(ctx, state), y.infer_type(ctx, state)) {
+                match (x.infer_type(ctx, state)?, y.infer_type(ctx, state)?) {
                     (DataType::Unknown, t) | (t, DataType::Unknown) => t,
                     (DataType::Float, DataType::Float) => DataType::Float,
                     (DataType::Int, DataType::Int) => DataType::Int,
@@ -116,7 +118,7 @@ impl<'arena> Expr<'arena> {
             | Self::Sub(x, y, span_l, span_r)
             | Self::Mod(x, y, span_l, span_r)
             | Self::Pow(x, y, span_l, span_r) => {
-                match (x.infer_type(ctx, state), y.infer_type(ctx, state)) {
+                match (x.infer_type(ctx, state)?, y.infer_type(ctx, state)?) {
                     (DataType::Unknown, t) | (t, DataType::Unknown)
                         if matches!(t, DataType::Float | DataType::Int | DataType::Unknown) =>
                     {
@@ -141,7 +143,7 @@ impl<'arena> Expr<'arena> {
             | Self::SupEq(x, y, span_l, span_r)
             | Self::Inf(x, y, span_l, span_r)
             | Self::InfEq(x, y, span_l, span_r) => {
-                match (x.infer_type(ctx, state), y.infer_type(ctx, state)) {
+                match (x.infer_type(ctx, state)?, y.infer_type(ctx, state)?) {
                     (DataType::Unknown, DataType::Float | DataType::Int)
                     | (DataType::Float | DataType::Int, DataType::Unknown)
                     | (DataType::Float, DataType::Float)
@@ -158,7 +160,7 @@ impl<'arena> Expr<'arena> {
                 }
             }
             Self::BoolAnd(x, y, span_l, span_r) | Self::BoolOr(x, y, span_l, span_r) => {
-                match (x.infer_type(ctx, state), y.infer_type(ctx, state)) {
+                match (x.infer_type(ctx, state)?, y.infer_type(ctx, state)?) {
                     (DataType::Unknown | DataType::Bool, DataType::Bool)
                     | (DataType::Bool, DataType::Unknown) => DataType::Bool,
                     (l, r) => {
@@ -166,7 +168,7 @@ impl<'arena> Expr<'arena> {
                     }
                 }
             }
-            Self::Neg(e, span_l, span_r) => match e.infer_type(ctx, state) {
+            Self::Neg(e, span_l, span_r) => match e.infer_type(ctx, state)? {
                 DataType::Float => DataType::Float,
                 DataType::Int => DataType::Int,
                 DataType::Unknown => DataType::Unknown,
@@ -180,7 +182,7 @@ impl<'arena> Expr<'arena> {
                     state.sources,
                 ),
             },
-            Self::BoolNeg(e, span_l, span_r) => match e.infer_type(ctx, state) {
+            Self::BoolNeg(e, span_l, span_r) => match e.infer_type(ctx, state)? {
                 DataType::Bool => DataType::Bool,
                 operand_type => error_op(
                     &DataType::Null,
@@ -192,14 +194,14 @@ impl<'arena> Expr<'arena> {
                     state.sources,
                 ),
             },
-            Self::ArrayGetIndex(array, _, span) => match array.infer_type(ctx, state) {
+            Self::ArrayGetIndex(array, _, span) => match array.infer_type(ctx, state)? {
                 DataType::Array(array_type) => array_type.map_or(DataType::Null, |t| *t),
                 DataType::String => DataType::String,
                 DataType::Unknown => DataType::Unknown,
                 t => error_type_not_indexable(&t, *span, false, ctx.file_idx, state.sources),
             },
             Self::GetStructField(s, field_name, struct_span, field_span) => {
-                let s = s.infer_type(ctx, state);
+                let s = s.infer_type(ctx, state)?;
                 if let DataType::Struct(s_id) = s {
                     state.structs[s_id as usize]
                         .fields
@@ -230,7 +232,7 @@ impl<'arena> Expr<'arena> {
                     );
                 }
             }
-            Self::ArrayGetSlice(array, _, _, _) => match array.infer_type(ctx, state) {
+            Self::ArrayGetSlice(array, _, _, _) => match array.infer_type(ctx, state)? {
                 DataType::Array(array_type) => DataType::Array(array_type),
                 DataType::String => DataType::String,
                 DataType::Unknown => DataType::Unknown,
@@ -238,9 +240,9 @@ impl<'arena> Expr<'arena> {
             },
             Self::FunctionCall(function_call) => {
                 if let Some(return_type) =
-                    get_builtin_function_return_type(function_call, ctx, state)
+                    get_builtin_function_return_type(function_call, ctx, state)?
                 {
-                    return return_type;
+                    return Ok(return_type);
                 }
 
                 let qualified_name = &function_call.qualified_name;
@@ -258,10 +260,12 @@ impl<'arena> Expr<'arena> {
                         id: _,
                     }) = lib.fns.iter().find(|x| x.name == function_name)
                 {
-                    return fn_return_type.clone();
+                    return Ok(fn_return_type.clone());
                 }
-                let infered_arg_types =
-                    args.iter().map(|x| x.infer_type(ctx, state)).collect::<Vec<DataType>>();
+                let infered_arg_types = args
+                    .iter()
+                    .map(|x| x.infer_type(ctx, state))
+                    .collect::<Result<Vec<DataType>, _>>()?;
 
                 let fn_id = if qualified_name.is_namespace_empty()
                     && let Some(var) = state.v.iter().rfind(|var| var.name == function_name)
@@ -306,18 +310,18 @@ impl<'arena> Expr<'arena> {
                         })
                 };
 
-                resolve_function_return_type(fn_id, &infered_arg_types, function_name, ctx, state)
+                resolve_function_return_type(fn_id, &infered_arg_types, function_name, ctx, state)?
             }
             Self::ObjFunctionCall(function_call) => {
-                get_method_return_type(function_call, ctx, state)
+                get_method_return_type(function_call, ctx, state)?
             }
             Self::IfBlock(if_block) => {
                 let mut types: Vec<DataType> = Vec::with_capacity(2);
                 if let Some(then) = if_block.then.last() {
-                    types.push(then.infer_type(ctx, state));
+                    types.push(then.infer_type(ctx, state)?);
                 }
                 if let Some(otherwise) = if_block.otherwise.last() {
-                    match otherwise.infer_type(ctx, state) {
+                    match otherwise.infer_type(ctx, state)? {
                         DataType::Union(t) => types.extend(t),
                         t => {
                             if !types.contains(&t) {
@@ -372,6 +376,6 @@ impl<'arena> Expr<'arena> {
                 DataType::Fn(id)
             }
             _ => unsafe { unreachable_unchecked() },
-        }
+        })
     }
 }

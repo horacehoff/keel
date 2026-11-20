@@ -5,6 +5,7 @@ use crate::compiler::registers::UnwrapId;
 use crate::compiler::state::State;
 use crate::data::FALSE;
 use crate::data::TRUE;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 use core::hint::unreachable_unchecked;
 
@@ -42,7 +43,7 @@ fn compile_int_imm_false_jump<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> bool {
+) -> Result<bool, ErrDiagnosticId> {
     let (l, bound, jump): (_, _, fn(u16, u16, u16) -> Instr) = match condition {
         Expr::Eq(l, Expr::Int(i)) => (l, Some(*i), Instr::NotEqIntImmJmp),
         Expr::NotEq(l, Expr::Int(i)) => (l, Some(*i), Instr::EqIntImmJmp),
@@ -50,17 +51,17 @@ fn compile_int_imm_false_jump<'arena>(
         Expr::InfEq(l, Expr::Int(i), _, _) => (l, i.checked_add(1), Instr::SupEqIntImmJmp),
         Expr::Sup(l, Expr::Int(i), _, _) => (l, i.checked_add(1), Instr::InfIntImmJmp),
         Expr::SupEq(l, Expr::Int(i), _, _) => (l, Some(*i), Instr::InfIntImmJmp),
-        _ => return false,
+        _ => return Ok(false),
     };
     if let Some(imm) = bound.and_then(|v| i16::try_from(v).ok())
-        && l.infer_type(ctx, state) == DataType::Int
+        && l.infer_type(ctx, state)? == DataType::Int
     {
-        let id = l.compile(ctx, state, output, None, false, true).unwrap_id();
+        let id = l.compile(ctx, state, output, None, false, true)?.unwrap_id();
         state.free_reg(id);
         output.push(jump(id, imm as u16, 0));
-        true
+        Ok(true)
     } else {
-        false
+        Ok(false)
     }
 }
 
@@ -112,59 +113,58 @@ pub(super) fn patch_jumps(
 /// bool_or_mode true indicates left side of ||, emits true jumps
 /// bool_or_mode false emits false jumps
 /// Returns (true_jump_idxs, false_jump_idxs)
-#[must_use]
 pub(super) fn compile_short_circuit_condition<'arena>(
     condition: &'arena Expr,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
     bool_or_mode: bool,
-) -> (Vec<usize>, Vec<usize>) {
+) -> Result<(Vec<usize>, Vec<usize>), ErrDiagnosticId> {
     match condition {
         Expr::BoolOr(left, right, _, _) => {
             // left side of || always uses true jump mode
             let (mut true_jumps, _) =
-                compile_short_circuit_condition(left, ctx, state, output, true);
+                compile_short_circuit_condition(left, ctx, state, output, true)?;
             let (right_true, right_false) =
-                compile_short_circuit_condition(right, ctx, state, output, bool_or_mode);
+                compile_short_circuit_condition(right, ctx, state, output, bool_or_mode)?;
             true_jumps.extend(right_true);
-            (true_jumps, right_false)
+            Ok((true_jumps, right_false))
         }
         Expr::BoolAnd(left, right, _, _) => {
             if bool_or_mode {
                 // && inside left side of ||
-                let id_l = left.compile(ctx, state, output, None, false, true).unwrap_id();
-                let id_r = right.compile(ctx, state, output, None, false, true).unwrap_id();
+                let id_l = left.compile(ctx, state, output, None, false, true)?.unwrap_id();
+                let id_r = right.compile(ctx, state, output, None, false, true)?.unwrap_id();
                 state.free_reg(id_l);
                 state.free_reg(id_r);
                 let id = state.alloc_reg();
                 output.push(Instr::BoolAnd(id_l, id_r, id));
                 add_cmp_true(id, state, output);
                 state.free_reg(id);
-                (vec![output.len() - 1], Vec::new())
+                Ok((vec![output.len() - 1], Vec::new()))
             } else {
                 // normal && -> if either side is false, jump past the body
                 let (_, mut false_jumps) =
-                    compile_short_circuit_condition(left, ctx, state, output, false);
+                    compile_short_circuit_condition(left, ctx, state, output, false)?;
                 let (_, right_false) =
-                    compile_short_circuit_condition(right, ctx, state, output, false);
+                    compile_short_circuit_condition(right, ctx, state, output, false)?;
                 false_jumps.extend(right_false);
-                (Vec::new(), false_jumps)
+                Ok((Vec::new(), false_jumps))
             }
         }
         expr => {
-            if !bool_or_mode && compile_int_imm_false_jump(expr, ctx, state, output) {
-                return (Vec::new(), vec![output.len() - 1]);
+            if !bool_or_mode && compile_int_imm_false_jump(expr, ctx, state, output)? {
+                return Ok((Vec::new(), vec![output.len() - 1]));
             }
-            let cond_id = expr.compile(ctx, state, output, None, false, true).unwrap_id();
+            let cond_id = expr.compile(ctx, state, output, None, false, true)?.unwrap_id();
             if bool_or_mode {
                 add_cmp_true(cond_id, state, output);
                 state.free_reg(cond_id);
-                (vec![output.len() - 1], Vec::new())
+                Ok((vec![output.len() - 1], Vec::new()))
             } else {
                 add_cmp_false(cond_id, state, output);
                 state.free_reg(cond_id);
-                (Vec::new(), vec![output.len() - 1])
+                Ok((Vec::new(), vec![output.len() - 1]))
             }
         }
     }
@@ -179,33 +179,32 @@ fn compile_const_condition(condition: &Expr) -> Option<bool> {
     }
 }
 
-#[must_use]
 pub(super) fn compile_condition<'arena>(
     condition: &'arena Expr,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> (Option<bool>, Vec<usize>, Vec<usize>) {
+) -> Result<(Option<bool>, Vec<usize>, Vec<usize>), ErrDiagnosticId> {
     if let Some(b) = compile_const_condition(condition) {
-        return (Some(b), Vec::new(), Vec::new());
+        return Ok((Some(b), Vec::new(), Vec::new()));
     }
 
     if matches!(condition, Expr::BoolAnd(_, _, _, _) | Expr::BoolOr(_, _, _, _)) {
         let (true_jump_idxs, false_jmp_idxes) =
-            compile_short_circuit_condition(condition, ctx, state, output, false);
-        return (None, true_jump_idxs, false_jmp_idxes);
+            compile_short_circuit_condition(condition, ctx, state, output, false)?;
+        return Ok((None, true_jump_idxs, false_jmp_idxes));
     }
 
-    if compile_int_imm_false_jump(condition, ctx, state, output) {
-        return (None, Vec::new(), vec![output.len() - 1]);
+    if compile_int_imm_false_jump(condition, ctx, state, output)? {
+        return Ok((None, Vec::new(), vec![output.len() - 1]));
     }
-    let cond_id = condition.compile(ctx, state, output, None, false, true).unwrap_id();
+    let cond_id = condition.compile(ctx, state, output, None, false, true)?.unwrap_id();
     if state.regs.const_registers.get(&TRUE) == Some(&cond_id) {
-        return (Some(true), Vec::new(), Vec::new());
+        return Ok((Some(true), Vec::new(), Vec::new()));
     } else if state.regs.const_registers.get(&FALSE) == Some(&cond_id) {
-        return (Some(false), Vec::new(), Vec::new());
+        return Ok((Some(false), Vec::new(), Vec::new()));
     }
     add_cmp_false(cond_id, state, output);
     state.free_reg(cond_id);
-    (None, Vec::new(), vec![output.len() - 1])
+    Ok((None, Vec::new(), vec![output.len() - 1]))
 }

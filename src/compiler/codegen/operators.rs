@@ -11,8 +11,8 @@ use crate::compiler::compiler_errors::error_division_by_zero;
 use crate::compiler::state::State;
 use crate::data::Data;
 use crate::data::FALSE;
+use crate::errors::ErrDiagnosticId;
 
-#[must_use]
 pub(super) fn bool_op<'arena>(
     instr: fn(u16, u16, u16) -> Instr,
     symbol: &'static str,
@@ -24,23 +24,22 @@ pub(super) fn bool_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let (t_l, t_r) = (l.infer_type(ctx, state), r.infer_type(ctx, state));
+) -> Result<u16, ErrDiagnosticId> {
+    let (t_l, t_r) = (l.infer_type(ctx, state)?, r.infer_type(ctx, state)?);
     if t_l != DataType::Bool || t_r != DataType::Bool {
         compiler_errors::error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.file_idx, state.sources);
     }
 
-    let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
-    let id_r = r.compile(ctx, state, output, None, false, true).unwrap_id();
+    let id_l = l.compile(ctx, state, output, None, false, true)?.unwrap_id();
+    let id_r = r.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(id_l);
     state.free_reg(id_r);
     let id = state.alloc_reg_tgt(tgt_id);
     output.push(instr(id_l, id_r, id));
-    id
+    Ok(id)
 }
 
 #[inline]
-#[must_use]
 pub(super) fn numeric_op<'arena>(
     float_instr: fn(u16, u16, u16) -> Instr,
     int_instr: fn(u16, u16, u16) -> Instr,
@@ -53,13 +52,13 @@ pub(super) fn numeric_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let (t_l, t_r) = (l.infer_type(ctx, state), r.infer_type(ctx, state));
+) -> Result<u16, ErrDiagnosticId> {
+    let (t_l, t_r) = (l.infer_type(ctx, state)?, r.infer_type(ctx, state)?);
     if t_l != t_r || !matches!(t_l, DataType::Float | DataType::Int) {
         compiler_errors::error_op(&t_l, &t_r, symbol, span_l, span_r, ctx.file_idx, state.sources);
     }
-    let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
-    let id_r = r.compile(ctx, state, output, None, false, true).unwrap_id();
+    let id_l = l.compile(ctx, state, output, None, false, true)?.unwrap_id();
+    let id_r = r.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(id_l);
     state.free_reg(id_r);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -68,10 +67,9 @@ pub(super) fn numeric_op<'arena>(
     } else {
         int_instr(id_l, id_r, id)
     });
-    id
+    Ok(id)
 }
 
-#[must_use]
 pub(super) fn compile_div_op<'arena>(
     l: &'arena Expr,
     r: &'arena Expr,
@@ -81,7 +79,7 @@ pub(super) fn compile_div_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     if let Expr::Int(n) = r
         && *n == 0
     {
@@ -106,7 +104,6 @@ pub(super) fn compile_div_op<'arena>(
     id
 }
 
-#[must_use]
 pub(super) fn compile_add_op<'arena>(
     l: &'arena Expr,
     r: &'arena Expr,
@@ -116,9 +113,9 @@ pub(super) fn compile_add_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let t_l = l.infer_type(ctx, state);
-    let t_r = r.infer_type(ctx, state);
+) -> Result<u16, ErrDiagnosticId> {
+    let t_l = l.infer_type(ctx, state)?;
+    let t_r = r.infer_type(ctx, state)?;
     if t_l != t_r
         || !matches!(t_l, DataType::String | DataType::Array(_) | DataType::Float | DataType::Int)
     {
@@ -132,17 +129,17 @@ pub(super) fn compile_add_op<'arena>(
             _ => None,
         }
     {
-        let src_id = src_expr.compile(ctx, state, output, None, false, true).unwrap_id();
+        let src_id = src_expr.compile(ctx, state, output, None, false, true)?.unwrap_id();
         state.free_reg(src_id);
         let id = state.alloc_reg_tgt(tgt_id);
         output.push(Instr::AddIntImm { src: src_id, dst: id, imm: imm as u16 });
-        return id;
+        return Ok(id);
     }
     if t_l == DataType::String && matches!(l, Expr::Add(..)) {
         return compile_str_concat_chain(l, r, tgt_id, ctx, state, output);
     }
-    let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
-    let id_r = r.compile(ctx, state, output, None, false, true).unwrap_id();
+    let id_l = l.compile(ctx, state, output, None, false, true)?.unwrap_id();
+    let id_r = r.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(id_l);
     state.free_reg(id_r);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -155,10 +152,9 @@ pub(super) fn compile_add_op<'arena>(
     } else {
         output.push(Instr::AddInt(id_l, id_r, id));
     }
-    id
+    Ok(id)
 }
 
-#[must_use]
 pub(super) fn compile_sub_op<'arena>(
     l: &'arena Expr,
     r: &'arena Expr,
@@ -168,17 +164,17 @@ pub(super) fn compile_sub_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     // var-1 uses the dedicated DecInt/DecIntTo instructions
     if let Expr::Int(i) = r
         && let Some(imm) = i.checked_neg().and_then(|i| i16::try_from(i).ok())
-        && l.infer_type(ctx, state) == DataType::Int
+        && l.infer_type(ctx, state)? == DataType::Int
     {
-        let src_id = l.compile(ctx, state, output, None, false, true).unwrap_id();
+        let src_id = l.compile(ctx, state, output, None, false, true)?.unwrap_id();
         state.free_reg(src_id);
         let id = state.alloc_reg_tgt(tgt_id);
         output.push(Instr::AddIntImm { src: src_id, dst: id, imm: imm as u16 });
-        return id;
+        return Ok(id);
     }
     numeric_op(
         Instr::SubFloat,
@@ -195,7 +191,6 @@ pub(super) fn compile_sub_op<'arena>(
     )
 }
 
-#[must_use]
 pub(super) fn compile_mod_op<'arena>(
     l: &'arena Expr,
     r: &'arena Expr,
@@ -205,7 +200,7 @@ pub(super) fn compile_mod_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     if let Expr::Int(n) = r
         && *n == 0
     {
@@ -230,7 +225,6 @@ pub(super) fn compile_mod_op<'arena>(
     id
 }
 
-#[must_use]
 pub(super) fn compile_eq_op<'arena>(
     l: &'arena Expr,
     r: &'arena Expr,
@@ -239,14 +233,14 @@ pub(super) fn compile_eq_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let l_type = l.infer_type(ctx, state);
-    let r_type = r.infer_type(ctx, state);
+) -> Result<u16, ErrDiagnosticId> {
+    let l_type = l.infer_type(ctx, state)?;
+    let r_type = r.infer_type(ctx, state)?;
     let is_obj = (matches!(l_type, DataType::Array(_) | DataType::Struct(_))
         && matches!(r_type, DataType::Array(_) | DataType::Struct(_)))
         || (l_type == DataType::String && r_type == DataType::String);
-    let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
-    let id_r = r.compile(ctx, state, output, None, false, true).unwrap_id();
+    let id_l = l.compile(ctx, state, output, None, false, true)?.unwrap_id();
+    let id_r = r.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(id_l);
     state.free_reg(id_r);
     let id = state.alloc_reg_tgt(tgt_id);
@@ -256,10 +250,9 @@ pub(super) fn compile_eq_op<'arena>(
         (false, false) => Instr::Eq(id_l, id_r, id),
         (false, true) => Instr::NotEq(id_l, id_r, id),
     });
-    id
+    Ok(id)
 }
 
-#[must_use]
 pub(super) fn compile_neg_op<'arena>(
     l: &'arena Expr,
     span_l: Span,
@@ -268,9 +261,9 @@ pub(super) fn compile_neg_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let operand_type = l.infer_type(ctx, state);
-    let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
+) -> Result<u16, ErrDiagnosticId> {
+    let operand_type = l.infer_type(ctx, state)?;
+    let id_l = l.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(id_l);
     let id = state.alloc_reg_tgt(tgt_id);
     if operand_type == DataType::Float {
@@ -291,10 +284,9 @@ pub(super) fn compile_neg_op<'arena>(
             state.sources,
         );
     }
-    id
+    Ok(id)
 }
 
-#[must_use]
 pub(super) fn compile_bool_neg_op<'arena>(
     l: &'arena Expr,
     span_l: Span,
@@ -303,9 +295,9 @@ pub(super) fn compile_bool_neg_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let operand_type = l.infer_type(ctx, state);
-    let id_l = l.compile(ctx, state, output, None, false, true).unwrap_id();
+) -> Result<u16, ErrDiagnosticId> {
+    let operand_type = l.infer_type(ctx, state)?;
+    let id_l = l.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(id_l);
     let id = state.alloc_reg_tgt(tgt_id);
     if operand_type != DataType::Bool {
@@ -321,7 +313,7 @@ pub(super) fn compile_bool_neg_op<'arena>(
     }
     let false_reg = state.new_const_reg(FALSE);
     output.push(Instr::Eq(id_l, false_reg, id));
-    id
+    Ok(id)
 }
 
 pub(super) fn compile_type_eq_op<'arena>(
@@ -332,14 +324,14 @@ pub(super) fn compile_type_eq_op<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     let type_candidate =
         type_candidate.to_datatype(ctx.file_idx, state.scope(ctx.file_idx), state.sources);
 
-    let value_type = value.infer_type(ctx, state);
+    let value_type = value.infer_type(ctx, state)?;
 
-    if matches!(value_type, DataType::Union(_) | DataType::Unknown) {
-        let val_reg_id = value.compile(ctx, state, output, None, false, true).unwrap_id();
+    Ok(if matches!(value_type, DataType::Union(_) | DataType::Unknown) {
+        let val_reg_id = value.compile(ctx, state, output, None, false, true)?.unwrap_id();
         state.free_reg(val_reg_id);
         let type_idx = state.compile_type(type_candidate);
         let dest_reg_id = state.alloc_reg_tgt(tgt_id);
@@ -348,5 +340,5 @@ pub(super) fn compile_type_eq_op<'arena>(
         dest_reg_id
     } else {
         state.new_const_reg(Data::bool(value_type == type_candidate))
-    }
+    })
 }

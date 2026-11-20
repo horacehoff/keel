@@ -4,6 +4,7 @@ use super::conditions::patch_jumps;
 use crate::ast::{ArrayPattern, Expr, Pattern, Span, StructPattern, collect_var_assignments};
 use crate::compiler::Ctx;
 use crate::compiler::state::State;
+use crate::errors::ErrDiagnosticId;
 use crate::{
     compiler::{
         UnwrapId,
@@ -72,7 +73,7 @@ pub(super) fn compile_pattern<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> Option<Vec<usize>> {
+) -> Result<Option<Vec<usize>>, ErrDiagnosticId> {
     let (v_start, output_start) = (state.v.len(), output.len());
     let mut compiler = PatternCompiler {
         ctx,
@@ -82,20 +83,20 @@ pub(super) fn compile_pattern<'arena>(
         v_start,
         can_never_match: false,
     };
-    compiler.compile(pattern, register_id, candidate);
+    compiler.compile(pattern, register_id, candidate)?;
     let PatternCompiler { false_jump_idxs, can_never_match, .. } = compiler;
     if can_never_match {
         state.v.truncate(v_start);
         state.free_scope_registers(0, &output[output_start..]);
         output.truncate(output_start);
-        return None;
+        return Ok(None);
     }
 
     let mut arm_var_assigns = FxHashMap::default();
     collect_var_assignments(arm_code, 0, &mut arm_var_assigns);
 
     // A binding shares its register with the value it was bound from.
-    // Therefore if the arm reassigns the register, it needs to be copied.
+    // Therefore if the arm reassigns the registe r, it needs to be copied.
     for idx in v_start..state.v.len() {
         let var_reg = state.v[idx].register_id;
         let reg_sharers =
@@ -108,7 +109,7 @@ pub(super) fn compile_pattern<'arena>(
             state.v[idx].register_id = new;
         }
     }
-    Some(false_jump_idxs)
+    Ok(Some(false_jump_idxs))
 }
 
 impl<'arena> PatternCompiler<'_, 'arena, '_> {
@@ -148,12 +149,12 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         pattern: &'arena Pattern<'arena>,
         register_id: u16,
         candidate: &DataType,
-    ) -> DataType {
-        match pattern {
+    ) -> Result<DataType, ErrDiagnosticId> {
+        Ok(match pattern {
             Pattern::Wildcard => candidate.clone(),
             Pattern::Binding(name, sub_pattern, span) => {
                 let var_type = if let Some(sub) = sub_pattern {
-                    self.compile(sub, register_id, candidate)
+                    self.compile(sub, register_id, candidate)?
                 } else {
                     candidate.clone()
                 };
@@ -161,10 +162,10 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                 var_type
             }
             Pattern::Constant(cst) => {
-                let constant_type = cst.infer_type(self.ctx, self.state);
+                let constant_type = cst.infer_type(self.ctx, self.state)?;
                 self.can_never_match |= narrow(candidate, &constant_type).is_none();
                 let constant_reg =
-                    cst.compile(self.ctx, self.state, self.output, None, false, true).unwrap_id();
+                    cst.compile(self.ctx, self.state, self.output, None, false, true)?.unwrap_id();
                 self.false_arm(if constant_type == DataType::String {
                     Instr::ObjNotEqJmp(register_id, constant_reg, 0)
                 } else {
@@ -173,10 +174,10 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                 constant_type
             }
             Pattern::Range { lower_bound, upper_bound, is_inclusive } => {
-                let bound_type = lower_bound.infer_type(self.ctx, self.state);
+                let bound_type = lower_bound.infer_type(self.ctx, self.state)?;
                 self.check_type(register_id, candidate, &bound_type);
                 let lower_bound_reg_id = lower_bound
-                    .compile(self.ctx, self.state, self.output, None, false, true)
+                    .compile(self.ctx, self.state, self.output, None, false, true)?
                     .unwrap_id();
                 self.false_arm(if bound_type == DataType::Int {
                     Instr::InfIntJmp(register_id, lower_bound_reg_id, 0)
@@ -185,7 +186,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                 });
                 if let Some(upper_bound) = upper_bound {
                     let upper_bound_reg_id = upper_bound
-                        .compile(self.ctx, self.state, self.output, None, false, true)
+                        .compile(self.ctx, self.state, self.output, None, false, true)?
                         .unwrap_id();
                     self.false_arm(match (bound_type == DataType::Int, is_inclusive) {
                         (true, true) => Instr::InfIntJmp(upper_bound_reg_id, register_id, 0),
@@ -199,10 +200,10 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                 bound_type
             }
             Pattern::Struct(struct_pattern) => {
-                self.compile_struct_pattern(struct_pattern, register_id, candidate)
+                self.compile_struct_pattern(struct_pattern, register_id, candidate)?
             }
             Pattern::Array(array_pattern) => {
-                self.compile_array_pattern(array_pattern, register_id, candidate)
+                self.compile_array_pattern(array_pattern, register_id, candidate)?
             }
             Pattern::Typed(sub_pattern, type_expr) => {
                 let target = type_expr.to_datatype(
@@ -211,12 +212,12 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
                     self.state.sources,
                 );
                 let (_, narrowed_type) = self.check_type(register_id, candidate, &target);
-                self.compile(sub_pattern, register_id, &narrowed_type)
+                self.compile(sub_pattern, register_id, &narrowed_type)?
             }
             Pattern::Or(sub_patterns, span) => {
-                self.compile_or_pattern(sub_patterns, *span, register_id, candidate)
+                self.compile_or_pattern(sub_patterns, *span, register_id, candidate)?
             }
-        }
+        })
     }
 
     fn compile_struct_pattern(
@@ -226,7 +227,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         >,
         register_id: u16,
         candidate: &DataType,
-    ) -> DataType {
+    ) -> Result<DataType, ErrDiagnosticId> {
         let struct_idx = self
             .state
             .scope(self.ctx.file_idx)
@@ -276,7 +277,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
             let field_type = s.fields[field_idx].field_type.clone();
             let field_reg_id = self.state.alloc_reg();
             self.output.push(Instr::GetFieldStruct(register_id, field_idx as u16, field_reg_id));
-            self.compile(&field.pattern, field_reg_id, &field_type);
+            self.compile(&field.pattern, field_reg_id, &field_type)?;
             // todo!("Pattern func call!");
         }
 
@@ -299,7 +300,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
             );
         }
 
-        struct_type
+        Ok(struct_type)
     }
 
     fn compile_array_pattern(
@@ -307,10 +308,10 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         ArrayPattern { prefix, rest, suffix }: &'arena ArrayPattern,
         register_id: u16,
         candidate: &DataType,
-    ) -> DataType {
+    ) -> Result<DataType, ErrDiagnosticId> {
         let (_, array_type) = self.check_type(register_id, candidate, &DataType::Array(None));
         if prefix.is_empty() && suffix.is_empty() && matches!(rest, Some(Pattern::Wildcard)) {
-            return array_type;
+            return Ok(array_type);
         }
         let elem_type: DataType = match &array_type {
             DataType::Array(Some(elem_type)) => (**elem_type).clone(),
@@ -356,7 +357,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
             }
             let elem_reg_id = self.state.alloc_reg();
             self.output.push(Instr::GetIndexArray(register_id, idx_reg_id, elem_reg_id));
-            self.compile(elem, elem_reg_id, &elem_type);
+            self.compile(elem, elem_reg_id, &elem_type)?;
         }
         if let Some(rest @ Pattern::Binding(..)) = rest {
             let reg_window = unsafe { reg_window.unwrap_unchecked() };
@@ -371,9 +372,9 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
             let rest_reg_id = self.state.alloc_reg();
             self.output.push(Instr::GetSliceArray(register_id, reg_window, rest_reg_id));
             self.state.free_reg_window(reg_window, 2);
-            self.compile(rest, rest_reg_id, &array_type);
+            self.compile(rest, rest_reg_id, &array_type)?;
         }
-        array_type
+        Ok(array_type)
     }
     fn compile_or_pattern(
         &mut self,
@@ -381,7 +382,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         span: Span,
         register_id: u16,
         candidate: &DataType,
-    ) -> DataType {
+    ) -> Result<DataType, ErrDiagnosticId> {
         let (false_jump_start, v_start) = (self.false_jump_idxs.len(), self.state.v.len());
         let outer_can_never_match = core::mem::take(&mut self.can_never_match);
 
@@ -391,7 +392,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         let mut false_jumps = Vec::new();
         for pattern in sub_patterns {
             let pattern_start = self.output.len();
-            let pattern_type = self.compile(pattern, register_id, candidate);
+            let pattern_type = self.compile(pattern, register_id, candidate)?;
             let vars = self.state.v.split_off(v_start);
             // if it can never match just remove everything added since
             if core::mem::take(&mut self.can_never_match) {
@@ -448,7 +449,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         }
         if types.is_empty() {
             self.can_never_match = true;
-            return candidate.clone();
+            return Ok(candidate.clone());
         }
 
         // Last option falls through
@@ -467,7 +468,7 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         for (name, register_id, slot_types) in slots {
             self.bind_var(name, register_id, join(slot_types), span);
         }
-        join(types)
+        Ok(join(types))
     }
 }
 
@@ -500,13 +501,17 @@ pub fn declare_pattern_bindings<'arena>(
     candidate: &DataType,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
-) -> Option<bool> {
+) -> Result<Option<bool>, ErrDiagnosticId> {
     let v_len = state.v.len();
     let mut output = Vec::new();
-    let false_jump_idxs = compile_pattern(pattern, 0, candidate, &[], ctx, state, &mut output)?;
+    let Some(false_jump_idxs) =
+        compile_pattern(pattern, 0, candidate, &[], ctx, state, &mut output)?
+    else {
+        return Ok(None);
+    };
     for var in &mut state.v[v_len..] {
         var.register_id = 0;
     }
     state.free_scope_registers(0, &output);
-    Some(false_jump_idxs.is_empty())
+    Ok(Some(false_jump_idxs.is_empty()))
 }

@@ -9,6 +9,7 @@ use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
 use crate::data::Data;
 use crate::data::NULL;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 use crate::vm::StringPool;
 use access::compile_array_indexing;
@@ -64,31 +65,30 @@ mod patterns;
 mod strings;
 
 /// Compiles `exprs` in contiguous registers
-#[must_use]
 pub fn compile_reg_window<'arena>(
     exprs: impl ExactSizeIterator<Item = &'arena Expr<'arena>>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     let first = state.alloc_reg_window(exprs.len() as u16);
     for (i, expr) in exprs.enumerate() {
         let tgt = first + i as u16;
         let start_len = output.len();
-        let reg = expr.compile(ctx, state, output, Some(tgt), false, true).unwrap_id();
+        let reg = expr.compile(ctx, state, output, Some(tgt), false, true)?.unwrap_id();
         move_value_to(output, start_len, reg, tgt);
         if reg != tgt {
             state.free_reg(reg);
         }
     }
-    first
+    Ok(first)
 }
 
 pub fn compile_expr<'arena>(
     input: &'arena [Expr<'arena>],
     ctx: Ctx,
     state: &mut State<'arena, '_>,
-) -> Vec<Instr> {
+) -> Result<Vec<Instr>, ErrDiagnosticId> {
     let v_len = state.v.len();
     let fn_len = state.functions.len();
     let symbols_len = state.scope(ctx.file_idx).symbols.len();
@@ -111,7 +111,7 @@ pub fn compile_expr<'arena>(
             false,
             last_var_assigns.as_ref().map(|e| (e, idx)),
             false,
-        ) {
+        )? {
             state.free_reg(id);
         }
         if let Some(v) = state.v[v_len..].last()
@@ -136,7 +136,7 @@ pub fn compile_expr<'arena>(
     state.v.truncate(v_len);
     state.functions.truncate(fn_len);
     state.scope_mut(ctx.file_idx).symbols.truncate(symbols_len);
-    output
+    Ok(output)
 }
 
 impl<'arena> Expr<'arena> {
@@ -162,7 +162,7 @@ impl<'arena> Expr<'arena> {
         tgt_id: Option<u16>,
         var_assignment: bool,
         uses_id: bool,
-    ) -> Option<u16> {
+    ) -> Result<Option<u16>, ErrDiagnosticId> {
         self.compile_with_code_context(ctx, state, output, tgt_id, var_assignment, None, uses_id)
     }
     pub fn compile_with_code_context(
@@ -174,8 +174,8 @@ impl<'arena> Expr<'arena> {
         var_assignment: bool,
         last_var_assigns: Option<(&FxHashMap<&str, usize>, usize)>,
         uses_id: bool,
-    ) -> Option<u16> {
-        match self {
+    ) -> Result<Option<u16>, ErrDiagnosticId> {
+        Ok(match self {
             Self::Int(_) | Self::Float(_) | Self::String(_) | Self::Null | Self::Bool(_) => {
                 debug_assert!(uses_id);
                 let data =
@@ -188,23 +188,23 @@ impl<'arena> Expr<'arena> {
             }
             Self::Var(name, span) => {
                 debug_assert!(uses_id);
-                Some(compile_var_access(name, *span, ctx, state, output))
+                Some(compile_var_access(name, *span, ctx, state, output)?)
             }
             Self::TypeEq(value, type_candidate, span) => {
                 debug_assert!(uses_id);
-                Some(compile_type_eq_op(value, type_candidate, *span, tgt_id, ctx, state, output))
+                Some(compile_type_eq_op(value, type_candidate, *span, tgt_id, ctx, state, output)?)
             }
             Self::Array(array_items, spans) => {
                 debug_assert!(uses_id);
-                Some(compile_array_literal(array_items, spans, ctx, state, output))
+                Some(compile_array_literal(array_items, spans, ctx, state, output)?)
             }
             Self::Struct(name, fields, span) => {
                 debug_assert!(uses_id);
-                Some(compile_struct_literal(name, fields, *span, ctx, state, output))
+                Some(compile_struct_literal(name, fields, *span, ctx, state, output)?)
             }
             Self::Map(kv_pairs, span) => {
                 debug_assert!(uses_id);
-                Some(compile_map_literal(kv_pairs, *span, ctx, state, output))
+                Some(compile_map_literal(kv_pairs, *span, ctx, state, output)?)
             }
             Self::GetStructField(struct_expr, field, struct_span, field_span) => {
                 debug_assert!(uses_id);
@@ -216,17 +216,17 @@ impl<'arena> Expr<'arena> {
                     ctx,
                     state,
                     output,
-                ))
+                )?)
             }
             // array[index]
             Self::ArrayGetIndex(array, index, span) => {
                 debug_assert!(uses_id);
-                Some(compile_array_indexing(array, index, *span, ctx, state, output))
+                Some(compile_array_indexing(array, index, *span, ctx, state, output)?)
             }
             // array[start..end]
             Self::ArrayGetSlice(array, idx_start, idx_end, span) => {
                 debug_assert!(uses_id);
-                Some(compile_array_slice(array, idx_start, idx_end, *span, ctx, state, output))
+                Some(compile_array_slice(array, idx_start, idx_end, *span, ctx, state, output)?)
             }
             Self::Mul(l, r, span1, span2)
             | Self::Pow(l, r, span1, span2)
@@ -267,50 +267,61 @@ impl<'arena> Expr<'arena> {
                     ctx,
                     state,
                     output,
-                ))
+                )?)
             }
             Self::Div(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_div_op(l, r, *span1, *span2, tgt_id, ctx, state, output))
+                Some(compile_div_op(l, r, *span1, *span2, tgt_id, ctx, state, output)?)
             }
             Self::Add(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_add_op(l, r, *span1, *span2, tgt_id, ctx, state, output))
+                Some(compile_add_op(l, r, *span1, *span2, tgt_id, ctx, state, output)?)
             }
             Self::Sub(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_sub_op(l, r, *span1, *span2, tgt_id, ctx, state, output))
+                Some(compile_sub_op(l, r, *span1, *span2, tgt_id, ctx, state, output)?)
             }
             Self::Mod(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_mod_op(l, r, *span1, *span2, tgt_id, ctx, state, output))
+                Some(compile_mod_op(l, r, *span1, *span2, tgt_id, ctx, state, output)?)
             }
             Self::Eq(l, r) => {
                 debug_assert!(uses_id);
-                Some(compile_eq_op(l, r, false, tgt_id, ctx, state, output))
+                Some(compile_eq_op(l, r, false, tgt_id, ctx, state, output)?)
             }
             Self::NotEq(l, r) => {
                 debug_assert!(uses_id);
-                Some(compile_eq_op(l, r, true, tgt_id, ctx, state, output))
+                Some(compile_eq_op(l, r, true, tgt_id, ctx, state, output)?)
             }
             Self::BoolAnd(l, r, s1, s2) => {
                 debug_assert!(uses_id);
-                Some(bool_op(Instr::BoolAnd, "&&", l, r, *s1, *s2, tgt_id, ctx, state, output))
+                Some(bool_op(Instr::BoolAnd, "&&", l, r, *s1, *s2, tgt_id, ctx, state, output)?)
             }
             Self::BoolOr(l, r, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(bool_op(Instr::BoolOr, "||", l, r, *span1, *span2, tgt_id, ctx, state, output))
+                Some(bool_op(
+                    Instr::BoolOr,
+                    "||",
+                    l,
+                    r,
+                    *span1,
+                    *span2,
+                    tgt_id,
+                    ctx,
+                    state,
+                    output,
+                )?)
             }
             Self::Neg(l, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_neg_op(l, *span1, *span2, tgt_id, ctx, state, output))
+                Some(compile_neg_op(l, *span1, *span2, tgt_id, ctx, state, output)?)
             }
             Self::BoolNeg(l, span1, span2) => {
                 debug_assert!(uses_id);
-                Some(compile_bool_neg_op(l, *span1, *span2, tgt_id, ctx, state, output))
+                Some(compile_bool_neg_op(l, *span1, *span2, tgt_id, ctx, state, output)?)
             }
             Self::FunctionCall(function_call) => {
-                let output_id = compile_function_call(function_call, output, ctx, state, tgt_id);
+                let output_id = compile_function_call(function_call, output, ctx, state, tgt_id)?;
                 if uses_id {
                     Some(output_id.unwrap_or_else(|| state.new_const_reg(NULL)))
                 } else {
@@ -321,7 +332,7 @@ impl<'arena> Expr<'arena> {
                 }
             }
             Self::ObjFunctionCall(function_call) => {
-                let output_id = compile_method_call(output, ctx, state, tgt_id, function_call);
+                let output_id = compile_method_call(output, ctx, state, tgt_id, function_call)?;
                 if uses_id {
                     Some(output_id.unwrap_or_else(|| state.new_const_reg(NULL)))
                 } else {
@@ -353,56 +364,56 @@ impl<'arena> Expr<'arena> {
                     ctx,
                     state,
                     output,
-                );
+                )?;
                 None
             }
             Self::SetStructField(struct_field_assignment) => {
                 debug_assert!(!uses_id);
-                compile_struct_field_assignment(struct_field_assignment, ctx, state, output);
+                compile_struct_field_assignment(struct_field_assignment, ctx, state, output)?;
                 None
             }
             Self::IfBlock(if_block) => {
                 let condition_return_id =
                     if uses_id { Some(state.alloc_reg_tgt(tgt_id)) } else { None };
-                compile_if_block(if_block, Vec::new(), condition_return_id, ctx, state, output);
+                compile_if_block(if_block, Vec::new(), condition_return_id, ctx, state, output)?;
                 condition_return_id
             }
             Self::WhileBlock(condition, code) => {
                 debug_assert!(!uses_id);
                 let loop_start = output.len();
-                compile_while_loop(condition, code, ctx, state, output);
+                compile_while_loop(condition, code, ctx, state, output)?;
                 apply_loop_in_place_str_appends(loop_start, ctx, state, output);
                 None
             }
             Self::ForLoop(var_name, array, code, span) => {
                 debug_assert!(!uses_id);
                 let loop_start = output.len();
-                compile_for_loop(var_name, array, code, *span, ctx, state, output);
+                compile_for_loop(var_name, array, code, *span, ctx, state, output)?;
                 apply_loop_in_place_str_appends(loop_start, ctx, state, output);
                 None
             }
             Self::IntForLoop(int_for_loop) => {
                 debug_assert!(!uses_id);
                 let loop_start = output.len();
-                compile_int_for_loop(int_for_loop, ctx, state, output);
+                compile_int_for_loop(int_for_loop, ctx, state, output)?;
                 apply_loop_in_place_str_appends(loop_start, ctx, state, output);
                 None
             }
             Self::LoopBlock(code) => {
                 debug_assert!(!uses_id);
                 let loop_start = output.len();
-                compile_loop_block(code, ctx, state, output);
+                compile_loop_block(code, ctx, state, output)?;
                 apply_loop_in_place_str_appends(loop_start, ctx, state, output);
                 None
             }
             Self::TryCatchBlock(e, err_var, catch_code) => {
                 debug_assert!(!uses_id);
-                compile_try_catch_block(e, err_var, catch_code, ctx, state, output);
+                compile_try_catch_block(e, err_var, catch_code, ctx, state, output)?;
                 None
             }
             Self::VarDeclare(var_declaration) => {
                 debug_assert!(!uses_id);
-                compile_var_declaration(var_declaration, last_var_assigns, ctx, state, output);
+                compile_var_declaration(var_declaration, last_var_assigns, ctx, state, output)?;
                 None
             }
             Self::VarAssign(name, value, span) => {
@@ -415,7 +426,7 @@ impl<'arena> Expr<'arena> {
                     ctx,
                     state,
                     output,
-                );
+                )?;
                 None
             }
             Self::StructDeclare(name, fields, span) => {
@@ -430,7 +441,7 @@ impl<'arena> Expr<'arena> {
             }
             Self::ReturnVal(return_value) => {
                 debug_assert!(!uses_id);
-                compile_return(*return_value, ctx, state, output);
+                compile_return(*return_value, ctx, state, output)?;
                 None
             }
             Self::Break => {
@@ -445,16 +456,16 @@ impl<'arena> Expr<'arena> {
             }
             Self::EvalBlock(code) => {
                 debug_assert!(!uses_id);
-                compile_eval_block(code, ctx, state, output);
+                compile_eval_block(code, ctx, state, output)?;
                 None
             }
             Self::Match(match_expr) => {
                 debug_assert!(!uses_id);
-                compile_match_block(match_expr, ctx, state, output);
+                compile_match_block(match_expr, ctx, state, output)?;
                 None
             }
 
             Self::ImportDylib(..) | Self::ImportFile(..) => unsafe { unreachable_unchecked() },
-        }
+        })
     }
 }

@@ -8,6 +8,7 @@ use crate::{
         state::{Ctx, State},
         types::c_arg_matches,
     },
+    errors::ErrDiagnosticId,
     instr::Instr,
 };
 
@@ -30,7 +31,7 @@ pub(super) fn compile_dyn_lib_function<'arena>(
     state: &mut State<'arena, '_>,
     ctx: Ctx,
     tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     let span = function_call.get_call_span();
     let FnSignature { name, id: dyn_fn_id, .. } = state.dylibs[lib_idx].fns[lib_fn_idx];
     let arg_len = state.dylibs[lib_idx].fns[lib_fn_idx].args.len();
@@ -38,7 +39,7 @@ pub(super) fn compile_dyn_lib_function<'arena>(
 
     check_args_length(function_call.args, arg_len, name, span, state.sources, ctx.file_idx);
     for i in 0..arg_len {
-        let inferred_arg_type = function_call.args[i].infer_type(ctx, state);
+        let inferred_arg_type = function_call.args[i].infer_type(ctx, state)?;
         let declared_type = &state.dylibs[lib_idx].fns[lib_fn_idx].args[i];
         if !c_arg_matches(&inferred_arg_type, declared_type) {
             error_function_arg_invalid_type(
@@ -53,15 +54,15 @@ pub(super) fn compile_dyn_lib_function<'arena>(
         }
     }
 
-    let first_arg = compile_reg_window(function_call.args.iter(), ctx, state, output);
+    let first_arg = compile_reg_window(function_call.args.iter(), ctx, state, output)?;
     let dest_reg_id = if returns_null { state.alloc_reg() } else { state.alloc_reg_tgt(tgt_id) };
     output.push(Instr::CallDynamicLibFunc { fn_id: dyn_fn_id, dst: dest_reg_id, first_arg });
     state.add_to_src(ctx, output, span);
     state.free_reg_window(first_arg, function_call.args.len() as u16);
-    if returns_null {
+    Ok(if returns_null {
         state.free_reg(dest_reg_id);
         None
     } else {
         Some(dest_reg_id)
-    }
+    })
 }

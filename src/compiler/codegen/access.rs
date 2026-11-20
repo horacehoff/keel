@@ -14,9 +14,9 @@ use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
 use crate::compiler::state::Variable;
 use crate::data::Data;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 
-#[must_use]
 pub(super) fn compile_struct_field_access<'arena>(
     struct_expr: &'arena Expr,
     field: &str,
@@ -25,8 +25,8 @@ pub(super) fn compile_struct_field_access<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let t = struct_expr.infer_type(ctx, state);
+) -> Result<u16, ErrDiagnosticId> {
+    let t = struct_expr.infer_type(ctx, state)?;
     if let DataType::Struct(s_id) = t {
         let s = &state.structs[s_id as usize];
         let idx = s.fields.iter().position(|f| f.name == field).unwrap_or_else(|| {
@@ -39,10 +39,10 @@ pub(super) fn compile_struct_field_access<'arena>(
                 state.sources,
             );
         });
-        let id = struct_expr.compile(ctx, state, output, None, false, true).unwrap_id();
+        let id = struct_expr.compile(ctx, state, output, None, false, true)?.unwrap_id();
         let dest_reg_id = state.alloc_reg();
         output.push(Instr::GetFieldStruct(id, idx as u16, dest_reg_id));
-        dest_reg_id
+        Ok(dest_reg_id)
     } else {
         error_invalid_type(
             &DataType::Struct(0),
@@ -56,7 +56,6 @@ pub(super) fn compile_struct_field_access<'arena>(
     }
 }
 
-#[must_use]
 pub(super) fn compile_array_indexing<'arena>(
     array: &'arena Expr,
     index: &'arena Expr,
@@ -64,20 +63,20 @@ pub(super) fn compile_array_indexing<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let inferred = array.infer_type(ctx, state);
+) -> Result<u16, ErrDiagnosticId> {
+    let inferred = array.infer_type(ctx, state)?;
     if !inferred.is_indexable() {
         error_type_not_indexable(&inferred, span, false, ctx.file_idx, state.sources);
     }
 
-    let id = array.compile(ctx, state, output, None, false, true).unwrap_id();
+    let id = array.compile(ctx, state, output, None, false, true)?.unwrap_id();
     let len_after_array = output.len();
 
-    let index_inferred = index.infer_type(ctx, state);
+    let index_inferred = index.infer_type(ctx, state)?;
     if index_inferred != DataType::Int {
         error_invalid_index_type(&index_inferred, span, ctx.file_idx, state.sources);
     }
-    let index_id = index.compile(ctx, state, output, None, false, true).unwrap_id();
+    let index_id = index.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(index_id);
     let dest_reg_id = state.alloc_reg();
 
@@ -102,10 +101,9 @@ pub(super) fn compile_array_indexing<'arena>(
         output.push(Instr::GetIndexArray(id, index_id, dest_reg_id));
     }
     state.add_to_src(ctx, output, span);
-    dest_reg_id
+    Ok(dest_reg_id)
 }
 
-#[must_use]
 pub(super) fn compile_array_slice<'arena>(
     array: &'arena Expr,
     idx_start: &'arena Expr,
@@ -114,21 +112,21 @@ pub(super) fn compile_array_slice<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    let inferred = array.infer_type(ctx, state);
+) -> Result<u16, ErrDiagnosticId> {
+    let inferred = array.infer_type(ctx, state)?;
     if !inferred.is_indexable() {
         error_type_not_indexable(&inferred, span, false, ctx.file_idx, state.sources);
     }
-    let id = array.compile(ctx, state, output, None, false, true).unwrap_id();
-    let idx_start_inferred = idx_start.infer_type(ctx, state);
+    let id = array.compile(ctx, state, output, None, false, true)?.unwrap_id();
+    let idx_start_inferred = idx_start.infer_type(ctx, state)?;
     if idx_start_inferred != DataType::Int {
         error_invalid_index_type(&idx_start_inferred, span, ctx.file_idx, state.sources);
     }
-    let idx_end_inferred = idx_end.infer_type(ctx, state);
+    let idx_end_inferred = idx_end.infer_type(ctx, state)?;
     if idx_end_inferred != DataType::Int {
         error_invalid_index_type(&idx_end_inferred, span, ctx.file_idx, state.sources);
     }
-    let reg_window = compile_reg_window([idx_start, idx_end].into_iter(), ctx, state, output);
+    let reg_window = compile_reg_window([idx_start, idx_end].into_iter(), ctx, state, output)?;
     let dest_reg_id = state.alloc_reg();
     let to_push = if inferred == DataType::String {
         Instr::GetSliceString(id, reg_window, dest_reg_id)
@@ -138,24 +136,23 @@ pub(super) fn compile_array_slice<'arena>(
     output.push(to_push);
     state.add_to_src(ctx, output, span);
     state.free_reg_window(reg_window, 2);
-    dest_reg_id
+    Ok(dest_reg_id)
 }
 
-#[must_use]
 pub(super) fn compile_var_access(
     qualified_name: &QualifiedName,
     span: Span,
     ctx: Ctx,
     state: &mut State<'_, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     let name = qualified_name.get_name();
     let path = qualified_name.get_namespace();
     // Local variable
     if path.is_empty()
         && let Some(Variable { register_id, .. }) = state.find_var(name)
     {
-        return *register_id;
+        return Ok(*register_id);
     }
     // Global variable
     if let Some(idx) =
@@ -164,11 +161,11 @@ pub(super) fn compile_var_access(
         // Global variables live in the top-level frame
         let register_id = state.globals[idx].register_id;
         if !ctx.in_function {
-            return register_id;
+            return Ok(register_id);
         }
         let reg = state.alloc_reg();
         output.push(Instr::LoadGlobal { dest_reg: reg, reg: u32::from(register_id) });
-        return reg;
+        return Ok(reg);
     }
 
     // Function referenced by name
@@ -181,7 +178,7 @@ pub(super) fn compile_var_access(
     let arg_types: Vec<DataType> =
         state.functions[fn_id].args.iter().map(|(_, t)| t.clone().unwrap()).collect();
 
-    let fn_impl_idx = compile_function_impl(state, fn_id, &arg_types);
+    let fn_impl_idx = compile_function_impl(state, fn_id, &arg_types)?;
     let unit = state.functions[fn_id].impls[fn_impl_idx].unit;
-    state.value_reg(Data::function(unit))
+    Ok(state.value_reg(Data::function(unit)))
 }

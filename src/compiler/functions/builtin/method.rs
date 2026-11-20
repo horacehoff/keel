@@ -13,6 +13,7 @@ use crate::{
         types::{fn_args_match, fn_matches_signature, resolve_function_return_type},
     },
     data::{Data, FALSE},
+    errors::ErrDiagnosticId,
     instr::Instr,
 };
 
@@ -22,46 +23,46 @@ fn builtin_push<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     _tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     let receiver = &function_call.args[0];
     let element = &function_call.args[1];
-    if receiver.infer_type(ctx, state) == DataType::Array(None)
+    if receiver.infer_type(ctx, state)? == DataType::Array(None)
         && let Expr::Var(var_name, _) = receiver
     {
-        let element_type = element.infer_type(ctx, state);
+        let element_type = element.infer_type(ctx, state)?;
         if let Some(var) = state.find_var_mut(var_name.get_name()) {
             var.var_type = DataType::Array(Some(Box::new(element_type)));
         }
     }
-    let src = receiver.compile(ctx, state, output, None, false, true).unwrap_id();
-    let element_id = element.compile(ctx, state, output, None, false, true).unwrap_id();
+    let src = receiver.compile(ctx, state, output, None, false, true)?.unwrap_id();
+    let element_id = element.compile(ctx, state, output, None, false, true)?.unwrap_id();
     output.push(Instr::Push(src, element_id));
     state.free_reg(src);
-    None
+    Ok(None)
 }
 
 fn builtin_map_return_type<'arena>(
     function_call: &'arena FunctionCallExpr<'arena>,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
-) -> DataType {
-    let receiver_type = function_call.args[0].infer_type(ctx, state);
+) -> Result<DataType, ErrDiagnosticId> {
+    let receiver_type = function_call.args[0].infer_type(ctx, state)?;
     if receiver_type == DataType::String {
-        return DataType::String;
+        return Ok(DataType::String);
     }
-    let DataType::Fn(fn_id) = function_call.args[1].infer_type(ctx, state) else { unreachable!() };
+    let DataType::Fn(fn_id) = function_call.args[1].infer_type(ctx, state)? else { unreachable!() };
     let fn_id = fn_id as usize;
     let element_type = match receiver_type {
         DataType::Array(Some(element_type)) => *element_type,
         _ => state.functions[fn_id].args[0].1.clone().unwrap_or(DataType::Unknown),
     };
-    DataType::Array(Some(Box::new(resolve_function_return_type(
+    Ok(DataType::Array(Some(Box::new(resolve_function_return_type(
         fn_id,
         &[element_type],
         "map",
         ctx,
         state,
-    ))))
+    )?))))
 }
 
 fn builtin_map_filter<'arena>(
@@ -70,14 +71,14 @@ fn builtin_map_filter<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-) -> Option<u16> {
-    let receiver_type = function_call.args[0].infer_type(ctx, state);
-    let src = function_call.args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+) -> Result<Option<u16>, ErrDiagnosticId> {
+    let receiver_type = function_call.args[0].infer_type(ctx, state)?;
+    let src = function_call.args[0].compile(ctx, state, output, None, false, true)?.unwrap_id();
     let args = &function_call.args[1..];
     let arg_spans = &function_call.get_arg_spans()[1..];
     let name = function_call.qualified_name.get_name();
 
-    let fn_type = args[0].infer_type(ctx, state);
+    let fn_type = args[0].infer_type(ctx, state)?;
     let DataType::Fn(fn_id) = fn_type else {
         error_expected_function(&fn_type, arg_spans[0], ctx.file_idx, state.sources);
     };
@@ -100,7 +101,7 @@ fn builtin_map_filter<'arena>(
     };
     let signature = [elem_type.clone(), return_type];
     let matches_signature = if is_filter || is_str {
-        fn_matches_signature(fn_id, &signature, ctx, state)
+        fn_matches_signature(fn_id, &signature, ctx, state)?
     } else {
         fn_args_match(fn_id, &signature[..1], state)
     };
@@ -117,7 +118,7 @@ fn builtin_map_filter<'arena>(
         );
     }
 
-    let fn_impl_idx = compile_function_impl(state, fn_id, core::slice::from_ref(&elem_type));
+    let fn_impl_idx = compile_function_impl(state, fn_id, core::slice::from_ref(&elem_type))?;
     let unit = state.functions[fn_id].impls[fn_impl_idx].unit;
 
     let result_id = state.alloc_reg_tgt(tgt_id);
@@ -195,7 +196,7 @@ fn builtin_map_filter<'arena>(
         }
     }
     state.free_reg(src);
-    Some(result_id)
+    Ok(Some(result_id))
 }
 
 fn builtin_replace<'arena>(
@@ -204,14 +205,14 @@ fn builtin_replace<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-) -> Option<u16> {
-    let src = function_call.args[0].compile(ctx, state, output, None, false, true).unwrap_id();
+) -> Result<Option<u16>, ErrDiagnosticId> {
+    let src = function_call.args[0].compile(ctx, state, output, None, false, true)?.unwrap_id();
 
-    let old_reg = compile_reg_window(function_call.args.iter().skip(1), ctx, state, output);
+    let old_reg = compile_reg_window(function_call.args.iter().skip(1), ctx, state, output)?;
     let output_id = state.alloc_reg_tgt(tgt_id);
     output.push(Instr::Replace(src, old_reg, output_id));
     state.free_reg_window(old_reg, 2);
-    Some(output_id)
+    Ok(Some(output_id))
 }
 
 pub(super) static METHODS: [BuiltIn; 35] = [

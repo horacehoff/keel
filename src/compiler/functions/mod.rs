@@ -15,6 +15,7 @@ use crate::compiler::functions::dyn_lib::compile_dyn_lib_function;
 use crate::compiler::functions::dyn_lib::find_dyn_lib_function;
 use crate::compiler::scope::Scope;
 use crate::compiler::state::State;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 pub use builtin::get_builtin_function_return_type;
 pub use builtin::get_method_return_type;
@@ -34,13 +35,13 @@ pub fn compile_function_call<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     let namespace = function_call.qualified_name.get_namespace();
     let name = function_call.qualified_name.get_name();
     let span = function_call.get_call_span();
     if namespace.is_empty() {
         if let Some(function) = find_builtin_global(name) {
-            check_builtin_call(function, function_call, None, ctx, state);
+            check_builtin_call(function, function_call, None, ctx, state)?;
             compile_builtin_call(function, function_call, output, ctx, state, tgt_id)
         } else if let Some(var) = state.find_var(name) {
             let DataType::Fn(fn_id) = var.var_type else {
@@ -73,7 +74,7 @@ pub fn compile_function_call<'arena>(
             error_unknown_function(name, span, &Scope::default(), ctx.file_idx, state.sources)
         };
 
-        check_builtin_call(function, function_call, None, ctx, state);
+        check_builtin_call(function, function_call, None, ctx, state)?;
         compile_builtin_call(function, function_call, output, ctx, state, tgt_id)
     } else if let Some((lib_idx, lib_fn_idx)) =
         find_dyn_lib_function(namespace.last().unwrap(), name, state)
@@ -102,8 +103,8 @@ pub fn compile_method_call<'arena>(
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
     function_call: &'arena FunctionCallExpr<'arena>,
-) -> Option<u16> {
-    let (method, receiver_type) = find_method(function_call, ctx, state);
-    check_builtin_call(method, function_call, Some(&receiver_type), ctx, state);
+) -> Result<Option<u16>, ErrDiagnosticId> {
+    let (method, receiver_type) = find_method(function_call, ctx, state)?;
+    check_builtin_call(method, function_call, Some(&receiver_type), ctx, state)?;
     compile_builtin_call(method, function_call, output, ctx, state, tgt_id)
 }

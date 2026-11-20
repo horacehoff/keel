@@ -175,7 +175,11 @@ pub fn compile<'arena>(
     let mut instructions: Vec<Instr> = Vec::with_capacity(4);
     for (var_declaration, file_idx) in pending_globals {
         let var_ctx = ctx.with_file_idx(file_idx);
-        let value_type = var_declaration.value.infer_type(var_ctx, &mut state);
+        let Ok(value_type) = var_declaration.value.infer_type(var_ctx, &mut state) else {
+            core::hint::cold_path();
+            state.diagnostics.emit_all(&sources);
+            crate::errors::crash();
+        };
         let declared_type = if let Some(v_t) = var_declaration.var_type {
             let declared_var_type =
                 v_t.0.to_datatype(file_idx, state.scope(file_idx), state.sources);
@@ -194,10 +198,14 @@ pub fn compile<'arena>(
         } else {
             value_type.clone()
         };
-        let register_id = var_declaration
-            .value
-            .compile(var_ctx, &mut state, &mut instructions, None, true, true)
-            .unwrap_id();
+        let Ok(register_id) =
+            var_declaration.value.compile(var_ctx, &mut state, &mut instructions, None, true, true)
+        else {
+            core::hint::cold_path();
+            state.diagnostics.emit_all(&sources);
+            crate::errors::crash();
+        };
+        let register_id = register_id.unwrap_id();
         state.reserve_register(register_id);
         state.globals.push(Variable {
             name: var_declaration.name,
@@ -223,6 +231,11 @@ pub fn compile<'arena>(
         ctx.with_offset(instructions.len() as u32),
         &mut state,
     );
+    let Ok(program_instructions) = program_instructions else {
+        core::hint::cold_path();
+        state.diagnostics.emit_all(&sources);
+        crate::errors::crash();
+    };
     instructions.reserve_exact(program_instructions.len() + 1);
     instructions.extend(program_instructions);
     instructions.push(Instr::Halt(u16::MAX));

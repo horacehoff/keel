@@ -13,34 +13,33 @@ use crate::compiler::state::State;
 use crate::compiler::types::struct_field_type_matches;
 use crate::data::Data;
 use crate::data::NULL;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 use core::hint::unreachable_unchecked;
 use rustc_hash::FxBuildHasher;
 use std::collections::HashMap;
 
-#[must_use]
 pub(super) fn compile_array_literal<'arena>(
     array_items: &'arena [Expr],
     spans: &[Span],
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
-    if let Some(first) = array_items.first() {
-        let first_type = first.infer_type(ctx, state);
-        if let Some(failing_elem_idx) =
-            array_items.iter().skip(1).position(|x| x.infer_type(ctx, state) != first_type)
-        {
-            let failing_elem_type = array_items[failing_elem_idx + 1].infer_type(ctx, state);
-            let failing_elem_span = spans[failing_elem_idx + 2];
-            compiler_errors::error_array_diff_types(
-                ctx.file_idx,
-                state.sources,
-                spans[1],
-                &first_type,
-                failing_elem_span,
-                &failing_elem_type,
-            )
+) -> Result<u16, ErrDiagnosticId> {
+    if let Some((first, rest)) = array_items.split_first() {
+        let first_type = first.infer_type(ctx, state)?;
+        for (idx, elem) in rest.iter().enumerate() {
+            let elem_type = elem.infer_type(ctx, state)?;
+            if first_type != elem_type {
+                compiler_errors::error_array_diff_types(
+                    ctx.file_idx,
+                    state.sources,
+                    spans[1],
+                    &first_type,
+                    spans[idx + 2],
+                    &elem_type,
+                )
+            }
         }
     }
     let array_id = {
@@ -50,7 +49,7 @@ pub(super) fn compile_array_literal<'arena>(
     if array_items.is_empty() && !ctx.single_run {
         let array_reg = state.scratch_reg();
         output.push(Instr::EmptyArray(array_reg));
-        return array_reg;
+        return Ok(array_reg);
     }
     if ctx.single_run {
         let array_reg = state.init_reg(Data::array(array_id as u32), ctx);
@@ -58,7 +57,7 @@ pub(super) fn compile_array_literal<'arena>(
             if let Some(literal) = elem.literal_value(&mut state.pools.str_pool) {
                 state.pools.obj_pool[array_id].push(literal);
             } else {
-                let id = elem.compile(ctx, state, output, None, false, true).unwrap_id();
+                let id = elem.compile(ctx, state, output, None, false, true)?.unwrap_id();
                 output.push(Instr::SetFieldObj(
                     array_reg,
                     id,
@@ -67,7 +66,7 @@ pub(super) fn compile_array_literal<'arena>(
                 state.pools.obj_pool[array_id].push(NULL);
             }
         }
-        array_reg
+        Ok(array_reg)
     } else if array_items.iter().all(Expr::is_constant_literal) {
         for elem in array_items {
             let Some(literal) = elem.literal_value(&mut state.pools.str_pool) else {
@@ -79,22 +78,21 @@ pub(super) fn compile_array_literal<'arena>(
         let template_reg = state.value_reg(Data::array(array_id as u32));
         let dest_reg = state.scratch_reg();
         output.push(Instr::CloneObj(template_reg, dest_reg, array_items.len() as u16));
-        dest_reg
+        Ok(dest_reg)
     } else {
         let mut elem_ids: Vec<u16> = Vec::with_capacity(array_items.len());
         for elem in array_items {
-            elem_ids.push(elem.compile(ctx, state, output, None, false, true).unwrap_id());
+            elem_ids.push(elem.compile(ctx, state, output, None, false, true)?.unwrap_id());
         }
         let dest_reg = state.scratch_reg();
         output.push(Instr::EmptyArray(dest_reg));
         for elem_reg in elem_ids {
             output.push(Instr::Push(dest_reg, elem_reg));
         }
-        dest_reg
+        Ok(dest_reg)
     }
 }
 
-#[must_use]
 pub(super) fn compile_struct_literal<'arena>(
     name: &'arena QualifiedName,
     fields: &'arena [StructFieldExpr],
@@ -102,7 +100,7 @@ pub(super) fn compile_struct_literal<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     let struct_name = name.get_name();
     let namespace = name.get_namespace();
     let Some(expected_struct_idx) = state.scope(ctx.file_idx).find_struct(
@@ -139,7 +137,7 @@ pub(super) fn compile_struct_literal<'arena>(
             .iter()
             .find(|field| field.name == state.structs[expected_struct_idx].fields[field_idx].name)
         {
-            let field_type = value.infer_type(ctx, state);
+            let field_type = value.infer_type(ctx, state)?;
             let field = &state.structs[expected_struct_idx].fields[field_idx];
             if !struct_field_type_matches(&field.field_type, &field_type) {
                 compiler_errors::error_struct_field_invalid_type(
@@ -156,7 +154,7 @@ pub(super) fn compile_struct_literal<'arena>(
             if let Some(literal) = value.literal_value(&mut state.pools.str_pool) {
                 state.pools.obj_pool[struct_id].push(literal);
             } else {
-                let id = value.compile(ctx, state, output, None, false, true).unwrap_id();
+                let id = value.compile(ctx, state, output, None, false, true)?.unwrap_id();
                 state.pools.obj_pool[struct_id].push(NULL);
                 dynamic.push((id, field_idx as u16));
             }
@@ -190,17 +188,16 @@ pub(super) fn compile_struct_literal<'arena>(
     for (val_reg, slot) in dynamic {
         output.push(Instr::SetFieldObj(dest_reg, val_reg, slot));
     }
-    dest_reg
+    Ok(dest_reg)
 }
 
-#[must_use]
 pub(super) fn compile_map_literal<'arena>(
     kv_pairs: &'arena [(Expr, Span, Expr, Span)],
     map_span: Span,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     let mut global_key_type: DataType = DataType::Unknown;
     let mut global_val_type: DataType = DataType::Unknown;
     let map_id = state.pools.map_pool.len();
@@ -214,8 +211,8 @@ pub(super) fn compile_map_literal<'arena>(
         0 // placeholder that's never used
     };
     for (i, (key, key_span, val, val_span)) in kv_pairs.iter().enumerate() {
-        let key_t = key.infer_type(ctx, state);
-        let val_t = val.infer_type(ctx, state);
+        let key_t = key.infer_type(ctx, state)?;
+        let val_t = val.infer_type(ctx, state)?;
         if i == 0 {
             global_key_type = key_t;
             global_val_type = val_t;
@@ -245,7 +242,7 @@ pub(super) fn compile_map_literal<'arena>(
             literal
         } else {
             let output_len = output.len();
-            let key_val_id = key.compile(ctx, state, output, None, false, true).unwrap_id();
+            let key_val_id = key.compile(ctx, state, output, None, false, true)?.unwrap_id();
             if !(matches!(key, Expr::Array(_, _)) && output_len == output.len()) {
                 error_not_literal_map_key(*key_span, map_span, ctx.file_idx, state.sources);
             }
@@ -266,7 +263,7 @@ pub(super) fn compile_map_literal<'arena>(
         if let Some(literal) = val.literal_value(&mut state.pools.str_pool) {
             state.pools.map_pool[map_id].insert(key_val, literal);
         } else {
-            let val_id: u16 = val.compile(ctx, state, output, None, false, true).unwrap_id();
+            let val_id: u16 = val.compile(ctx, state, output, None, false, true)?.unwrap_id();
             state.pools.map_pool[map_id].insert(key_val, NULL);
             if ctx.single_run {
                 output.push(Instr::MapInsertReg(map_reg, state.value_reg(key_val), val_id));
@@ -275,7 +272,7 @@ pub(super) fn compile_map_literal<'arena>(
             }
         }
     }
-    if ctx.single_run {
+    Ok(if ctx.single_run {
         map_reg
     } else {
         let template_reg = state.value_reg(Data::map(map_id as u32));
@@ -286,5 +283,5 @@ pub(super) fn compile_map_literal<'arena>(
             output.push(Instr::MapInsertReg(dest_reg, key_reg, val_id));
         }
         dest_reg
-    }
+    })
 }

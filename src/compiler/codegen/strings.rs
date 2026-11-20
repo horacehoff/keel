@@ -1,10 +1,10 @@
 use crate::ast::Expr;
 use crate::compiler::DataType;
-use crate::compiler::UnwrapId;
 use crate::compiler::state::Ctx;
 use crate::compiler::state::State;
 use crate::compiler::state::Variable;
 use crate::data::Data;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 
 enum StrRegUse {
@@ -22,36 +22,41 @@ pub(super) fn compile_str_concat_chain<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) -> u16 {
+) -> Result<u16, ErrDiagnosticId> {
     let mut operands = vec![r];
     let mut current_node = l;
     while let Expr::Add(add_l, add_r, _, _) = current_node
-        && add_l.infer_type(ctx, state) == DataType::String
-        && add_r.infer_type(ctx, state) == DataType::String
+        && add_l.infer_type(ctx, state)? == DataType::String
+        && add_r.infer_type(ctx, state)? == DataType::String
     {
         operands.push(add_r);
         current_node = add_l;
     }
     operands.push(current_node);
-    let ids: Vec<u16> = operands
+    let ids = operands
         .iter()
         .rev()
-        .map(|e| e.compile(ctx, state, output, None, false, true).unwrap_id())
-        .collect();
+        .map(|e| {
+            e.compile(ctx, state, output, None, false, true)
+                .map(crate::compiler::registers::UnwrapId::unwrap_id)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     // the first two elements are filtered out because they require an AddStr
     let dst = tgt_id.filter(|t| !ids[2..].contains(t)).unwrap_or_else(|| state.alloc_reg());
     output.push(Instr::AddStr(ids[0], ids[1], dst));
     output.extend(ids[2..].iter().map(|&id| Instr::AddStrInPlace(dst, id)));
     ids.iter().filter(|&&id| id != dst).for_each(|&id| state.free_reg(id));
-    if let Some(t) = tgt_id
-        && t != dst
-    {
-        output.push(Instr::Mov(dst, t));
-        state.free_reg(dst);
-        t
-    } else {
-        dst
-    }
+    Ok(
+        if let Some(t) = tgt_id
+            && t != dst
+        {
+            output.push(Instr::Mov(dst, t));
+            state.free_reg(dst);
+            t
+        } else {
+            dst
+        },
+    )
 }
 
 fn categorize_str_reg_use(instr: Instr, reg: u16) -> StrRegUse {

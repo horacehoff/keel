@@ -7,6 +7,7 @@ use crate::{
         state::{Ctx, State},
     },
     data::Data,
+    errors::ErrDiagnosticId,
     instr::Instr,
 };
 
@@ -16,13 +17,13 @@ fn builtin_print<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     _tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     for arg in function_call.args {
-        let id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
+        let id = arg.compile(ctx, state, output, None, false, true)?.unwrap_id();
         output.push(Instr::Print(id));
         state.free_reg(id);
     }
-    None
+    Ok(None)
 }
 
 fn builtin_type<'arena>(
@@ -31,11 +32,11 @@ fn builtin_type<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     _tgt_id: Option<u16>,
-) -> Option<u16> {
-    let inferred = function_call.args[0].infer_type(ctx, state);
+) -> Result<Option<u16>, ErrDiagnosticId> {
+    let inferred = function_call.args[0].infer_type(ctx, state)?;
     let arg_type =
         Data::comp_str(inferred.format_detailed(state).as_str(), &mut state.pools.str_pool);
-    Some(state.value_reg(arg_type))
+    Ok(Some(state.value_reg(arg_type)))
 }
 
 fn builtin_string<'arena>(
@@ -44,16 +45,16 @@ fn builtin_string<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     let arg = &function_call.args[0];
-    let id = arg.compile(ctx, state, output, None, false, true).unwrap_id();
-    if arg.infer_type(ctx, state) == DataType::String {
-        return Some(id);
+    let id = arg.compile(ctx, state, output, None, false, true)?.unwrap_id();
+    if arg.infer_type(ctx, state)? == DataType::String {
+        return Ok(Some(id));
     }
     state.free_reg(id);
     let output_id = state.alloc_reg_tgt(tgt_id);
     output.push(Instr::Str(id, output_id));
-    Some(output_id)
+    Ok(Some(output_id))
 }
 
 fn builtin_range<'arena>(
@@ -62,19 +63,19 @@ fn builtin_range<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     let args = function_call.args;
     let (min_reg, max_expr) = if args.len() == 1 {
         (state.new_const_reg(Data::int(0)), &args[0])
     } else {
-        (args[0].compile(ctx, state, output, None, false, true).unwrap_id(), &args[1])
+        (args[0].compile(ctx, state, output, None, false, true)?.unwrap_id(), &args[1])
     };
-    let max_reg = max_expr.compile(ctx, state, output, None, false, true).unwrap_id();
+    let max_reg = max_expr.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(min_reg);
     state.free_reg(max_reg);
     let output_id = state.alloc_reg_tgt(tgt_id);
     output.push(Instr::Range(min_reg, max_reg, output_id));
-    Some(output_id)
+    Ok(Some(output_id))
 }
 
 fn builtin_exit<'arena>(
@@ -83,14 +84,14 @@ fn builtin_exit<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     _tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     let halt_code = if function_call.args.is_empty() {
         u16::MAX
     } else {
-        function_call.args[0].compile(ctx, state, output, None, false, true).unwrap_id()
+        function_call.args[0].compile(ctx, state, output, None, false, true)?.unwrap_id()
     };
     output.push(Instr::Halt(halt_code));
-    None
+    Ok(None)
 }
 
 pub(super) static GLOBAL_FUNCTIONS: [BuiltIn; 12] = [

@@ -5,6 +5,7 @@ use crate::{
         state::{Ctx, State},
         types::DataType,
     },
+    errors::ErrDiagnosticId,
 };
 use core::{cell::RefCell, hint::unreachable_unchecked};
 use rustc_hash::FxHashSet;
@@ -74,12 +75,12 @@ fn track_returns<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     fn_name: &str,
-) -> Vec<DataType> {
-    let mut flow = track_return_flow(content, ctx, state, fn_name);
+) -> Result<Vec<DataType>, ErrDiagnosticId> {
+    let mut flow = track_return_flow(content, ctx, state, fn_name)?;
     if !flow.always_returns && !flow.types.is_empty() {
         add_return_type!(&mut flow.types, DataType::Null);
     }
-    flow.types
+    Ok(flow.types)
 }
 
 /// Resolves the return type of the function of index `fn_id` in `state.fns`.
@@ -90,13 +91,13 @@ pub fn resolve_function_return_type(
     fn_name: &str,
     ctx: Ctx,
     state: &mut State<'_, '_>,
-) -> DataType {
+) -> Result<DataType, ErrDiagnosticId> {
     if let Some((_, ret)) = state.functions[fn_id]
         .return_type_cache
         .iter()
         .find(|(args, _)| **args == *infered_arg_types)
     {
-        return ret.clone();
+        return Ok(ret.clone());
     }
 
     let fn_args = state.functions[fn_id].args.clone();
@@ -114,14 +115,14 @@ pub fn resolve_function_return_type(
     let already_inferring = RETURN_TYPE_INFERRING.with(|s| s.borrow().contains(&fn_id));
     if already_inferring {
         state.v.truncate(v_len_before_args);
-        return DataType::Unknown;
+        return Ok(DataType::Unknown);
     }
 
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().insert(fn_id));
 
     let fn_ctx = ctx.with_file_idx(fn_src_file);
     let hidden_symbols = state.enter_function_scope(fn_src_file, fn_id);
-    let fn_type = track_returns(fn_code, fn_ctx, state, fn_name);
+    let fn_type = track_returns(fn_code, fn_ctx, state, fn_name)?;
     state.exit_function_scope(fn_src_file, hidden_symbols);
 
     RETURN_TYPE_INFERRING.with(|s| s.borrow_mut().remove(&fn_id));
@@ -141,7 +142,7 @@ pub fn resolve_function_return_type(
         .return_type_cache
         .push((Box::from(infered_arg_types), to_return.clone()));
 
-    to_return
+    Ok(to_return)
 }
 
 struct FnReturnFlow {
@@ -154,7 +155,7 @@ fn track_scoped_returns<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     fn_name: &str,
-) -> FnReturnFlow {
+) -> Result<FnReturnFlow, ErrDiagnosticId> {
     let v_len = state.v.len();
     let flow = track_return_flow(code, ctx, state, fn_name);
     state.v.truncate(v_len);
@@ -166,22 +167,22 @@ fn track_condition_returns<'arena>(
     fn_name: &str,
     ctx: Ctx,
     state: &mut State<'arena, '_>,
-) -> FnReturnFlow {
+) -> Result<FnReturnFlow, ErrDiagnosticId> {
     let mut return_types = Vec::new();
-    let then_flow = track_scoped_returns(if_block.then, ctx, state, fn_name);
+    let then_flow = track_scoped_returns(if_block.then, ctx, state, fn_name)?;
     extend_return_types!(&mut return_types, then_flow.types);
 
-    if if_block.otherwise.is_empty() {
+    Ok(if if_block.otherwise.is_empty() {
         FnReturnFlow { types: return_types, always_returns: false }
     } else {
-        let otherwise_flow = track_scoped_returns(if_block.otherwise, ctx, state, fn_name);
+        let otherwise_flow = track_scoped_returns(if_block.otherwise, ctx, state, fn_name)?;
         extend_return_types!(&mut return_types, otherwise_flow.types);
 
         FnReturnFlow {
             types: return_types,
             always_returns: then_flow.always_returns && otherwise_flow.always_returns,
         }
-    }
+    })
 }
 
 fn track_return_flow<'arena>(
@@ -189,29 +190,29 @@ fn track_return_flow<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     fn_name: &str,
-) -> FnReturnFlow {
+) -> Result<FnReturnFlow, ErrDiagnosticId> {
     let mut return_types: Vec<DataType> = Vec::new();
     for expr in content {
         match expr {
             Expr::IfBlock(if_block) => {
-                let flow = track_condition_returns(if_block, fn_name, ctx, state);
+                let flow = track_condition_returns(if_block, fn_name, ctx, state)?;
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
-                    return FnReturnFlow { types: return_types, always_returns: true };
+                    return Ok(FnReturnFlow { types: return_types, always_returns: true });
                 }
             }
             Expr::Match(match_expr) => {
-                let mut candidate = match_expr.obj.infer_type(ctx, state);
+                let mut candidate = match_expr.obj.infer_type(ctx, state)?;
                 let mut arms_always_return = true;
                 let mut has_irrefutable_arm = false;
                 for arm in match_expr.arms {
                     let v_len = state.v.len();
                     let Some(is_irrefutable) =
-                        declare_pattern_bindings(&arm.pattern, &candidate, ctx, state)
+                        declare_pattern_bindings(&arm.pattern, &candidate, ctx, state)?
                     else {
                         continue;
                     };
-                    let arm_flow = track_return_flow(arm.code, ctx, state, fn_name);
+                    let arm_flow = track_return_flow(arm.code, ctx, state, fn_name)?;
                     state.v.truncate(v_len);
                     extend_return_types!(&mut return_types, arm_flow.types);
                     arms_always_return &= arm_flow.always_returns;
@@ -223,39 +224,39 @@ fn track_return_flow<'arena>(
                         type_after_mismatch(&arm.pattern, arm.guard, &candidate, ctx, state);
                 }
                 if arms_always_return && has_irrefutable_arm {
-                    return FnReturnFlow { types: return_types, always_returns: true };
+                    return Ok(FnReturnFlow { types: return_types, always_returns: true });
                 }
             }
             Expr::EvalBlock(code) | Expr::LoopBlock(code) => {
-                let flow = track_scoped_returns(code, ctx, state, fn_name);
+                let flow = track_scoped_returns(code, ctx, state, fn_name)?;
                 extend_return_types!(&mut return_types, flow.types);
                 if flow.always_returns {
-                    return FnReturnFlow { types: return_types, always_returns: true };
+                    return Ok(FnReturnFlow { types: return_types, always_returns: true });
                 }
             }
             Expr::VarDeclare(VariableDeclarationExpr { name, value, .. }) => {
-                let var_type = value.infer_type(ctx, state);
+                let var_type = value.infer_type(ctx, state)?;
                 state.new_var(name, 0, var_type);
             }
             Expr::VarAssign(name, expr, _) => {
-                let var_type = expr.infer_type(ctx, state);
+                let var_type = expr.infer_type(ctx, state)?;
                 if let Some(var) = state.find_var_mut(name.get_name()) {
                     var.var_type = var_type;
                 }
             }
             Expr::WhileBlock(_, code) => {
-                let flow = track_scoped_returns(code, ctx, state, fn_name);
+                let flow = track_scoped_returns(code, ctx, state, fn_name)?;
                 extend_return_types!(&mut return_types, flow.types);
             }
             Expr::IntForLoop(int_for_loop) => {
                 let v_len = state.v.len();
                 state.new_var(int_for_loop.var_name, 0, DataType::Int);
-                let flow = track_return_flow(int_for_loop.get_loop_code(), ctx, state, fn_name);
+                let flow = track_return_flow(int_for_loop.get_loop_code(), ctx, state, fn_name)?;
                 extend_return_types!(&mut return_types, flow.types);
                 state.v.truncate(v_len);
             }
             Expr::ForLoop(var_name, array_expr, array_code, _) => {
-                let inferred_collection_type = array_expr.infer_type(ctx, state);
+                let inferred_collection_type = array_expr.infer_type(ctx, state)?;
                 let elem_type = match inferred_collection_type {
                     DataType::Array(inner) => inner.map_or(DataType::Unknown, |t| *t),
                     DataType::String => DataType::String,
@@ -266,7 +267,7 @@ fn track_return_flow<'arena>(
                 if *var_name != "_" {
                     state.new_var(var_name, 0, elem_type);
                 }
-                let flow = track_return_flow(array_code, ctx, state, fn_name);
+                let flow = track_return_flow(array_code, ctx, state, fn_name)?;
                 extend_return_types!(&mut return_types, flow.types);
                 state.v.truncate(v_len);
             }
@@ -280,7 +281,7 @@ fn track_return_flow<'arena>(
                         .rfind(|var| var.name == var_name.get_name())
                         .is_some_and(|var| var.var_type == DataType::Array(None))
                 {
-                    let arg_type = function_call.args[1].infer_type(ctx, state);
+                    let arg_type = function_call.args[1].infer_type(ctx, state)?;
                     if let Some(var) = state.find_var_mut(var_name.get_name()) {
                         var.var_type = DataType::Array(Some(Box::new(arg_type)));
                     }
@@ -288,15 +289,15 @@ fn track_return_flow<'arena>(
             }
             Expr::ReturnVal(return_val) => {
                 if let Some(val) = return_val.as_ref() {
-                    let infered = val.infer_type(ctx, state);
+                    let infered = val.infer_type(ctx, state)?;
                     add_return_type!(&mut return_types, infered);
                 } else {
                     add_return_type!(&mut return_types, DataType::Null);
                 }
-                return FnReturnFlow { types: return_types, always_returns: true };
+                return Ok(FnReturnFlow { types: return_types, always_returns: true });
             }
             _ => {}
         }
     }
-    FnReturnFlow { types: return_types, always_returns: false }
+    Ok(FnReturnFlow { types: return_types, always_returns: false })
 }

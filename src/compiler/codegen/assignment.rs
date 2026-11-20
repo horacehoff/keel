@@ -15,6 +15,7 @@ use crate::compiler::registers::move_value_to;
 use crate::compiler::state::State;
 use crate::compiler::types::struct_field_type_matches;
 use crate::compiler::var_type_is_compatible;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 use rustc_hash::FxHashMap;
 
@@ -27,18 +28,18 @@ pub(super) fn compile_array_index_assignment<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) {
-    let array_type = array.infer_type(ctx, state);
+) -> Result<(), ErrDiagnosticId> {
+    let array_type = array.infer_type(ctx, state)?;
     if !array_type.is_indexable() {
         error_type_not_indexable(&array_type, index_span, false, ctx.file_idx, state.sources);
     }
     // Get the id of the source array/string (may be a nested GetIndex)
-    let id = array.compile(ctx, state, output, None, false, true).unwrap_id();
+    let id = array.compile(ctx, state, output, None, false, true)?.unwrap_id();
 
-    let final_id = index.compile(ctx, state, output, None, false, true).unwrap_id();
+    let final_id = index.compile(ctx, state, output, None, false, true)?.unwrap_id();
 
-    let elem_type = value.infer_type(ctx, state);
-    let elem_id = value.compile(ctx, state, output, None, false, true).unwrap_id();
+    let elem_type = value.infer_type(ctx, state)?;
+    let elem_id = value.compile(ctx, state, output, None, false, true)?.unwrap_id();
     state.free_reg(elem_id);
     if {
         if let DataType::Array(Some(array_type)) = &array_type
@@ -83,6 +84,7 @@ pub(super) fn compile_array_index_assignment<'arena>(
         output.push(Instr::StoreGlobal { src_reg: id, reg });
     }
     state.free_reg(id);
+    Ok(())
 }
 
 pub(super) fn compile_struct_field_assignment<'arena>(
@@ -90,12 +92,12 @@ pub(super) fn compile_struct_field_assignment<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) {
+) -> Result<(), ErrDiagnosticId> {
     let struct_expr = &struct_field_assignment.struct_expr;
     let new_val = &struct_field_assignment.field_value;
     let field = &struct_field_assignment.field;
-    let t = struct_expr.infer_type(ctx, state);
-    let new_val_type = new_val.infer_type(ctx, state);
+    let t = struct_expr.infer_type(ctx, state)?;
+    let new_val_type = new_val.infer_type(ctx, state)?;
     let DataType::Struct(struct_id) = t else {
         let struct_span = unsafe { *struct_field_assignment.spans.get_unchecked(0) };
         error_invalid_type(
@@ -149,9 +151,10 @@ pub(super) fn compile_struct_field_assignment<'arena>(
             state.sources,
         );
     };
-    let id = struct_expr.compile(ctx, state, output, None, false, true).unwrap_id();
-    let new_elem_reg_id = new_val.compile(ctx, state, output, None, false, true).unwrap_id();
+    let id = struct_expr.compile(ctx, state, output, None, false, true)?.unwrap_id();
+    let new_elem_reg_id = new_val.compile(ctx, state, output, None, false, true)?.unwrap_id();
     output.push(Instr::SetFieldObj(id, new_elem_reg_id, field_index));
+    Ok(())
 }
 
 pub(super) fn compile_var_declaration<'arena>(
@@ -160,10 +163,10 @@ pub(super) fn compile_var_declaration<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) {
+) -> Result<(), ErrDiagnosticId> {
     let name = &var_declaration.name;
     let value = &var_declaration.value;
-    let value_type = value.infer_type(ctx, state);
+    let value_type = value.infer_type(ctx, state)?;
 
     let declared_type = if let Some(v_t) = &var_declaration.var_type {
         let declared_var_type =
@@ -186,7 +189,7 @@ pub(super) fn compile_var_declaration<'arena>(
 
     let is_var_read = matches!(value, Expr::Var(..)) && !matches!(value_type, DataType::Fn(_));
 
-    let src_id = value.compile(ctx, state, output, None, ctx.single_run, true).unwrap_id();
+    let src_id = value.compile(ctx, state, output, None, ctx.single_run, true)?.unwrap_id();
     let var_id = if is_var_read
         && match value {
             Expr::Var(v, _) if v.is_namespace_empty() && state.find_var(v.get_name()).is_some() => {
@@ -217,6 +220,7 @@ pub(super) fn compile_var_declaration<'arena>(
     }
     state.unfree_register(var_id);
     state.new_var_with_type(name, var_id, value_type, declared_type);
+    Ok(())
 }
 
 pub(super) fn compile_var_assignment<'arena>(
@@ -227,8 +231,8 @@ pub(super) fn compile_var_assignment<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     output: &mut Vec<Instr>,
-) {
-    let var_type = value.infer_type(ctx, state);
+) -> Result<(), ErrDiagnosticId> {
+    let var_type = value.infer_type(ctx, state)?;
 
     let local_var_idx = if path.is_empty() { state.find_var_idx(name) } else { None };
     let global_var_idx = if local_var_idx.is_some() {
@@ -302,12 +306,12 @@ pub(super) fn compile_var_assignment<'arena>(
                 output.push(Instr::StoreGlobal { src_reg: reg_id, reg: global_reg });
                 state.free_reg(reg_id);
             }
-            return;
+            return Ok(());
         }
     }
 
     let output_len = output.len();
-    let obj_id = value.compile(ctx, state, output, Some(reg_id), false, true).unwrap_id();
+    let obj_id = value.compile(ctx, state, output, Some(reg_id), false, true)?.unwrap_id();
     if state.is_register_const(obj_id) {
         move_reg_to_reg(output, obj_id, reg_id, state.register_value(obj_id));
     } else {
@@ -325,6 +329,7 @@ pub(super) fn compile_var_assignment<'arena>(
     } else if let Some(pos) = global_var_idx {
         state.globals[pos].var_type = var_type;
     }
+    Ok(())
 }
 
 #[must_use]

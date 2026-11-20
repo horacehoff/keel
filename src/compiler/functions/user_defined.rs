@@ -19,6 +19,7 @@ use crate::compiler::types::c_arg_matches;
 use crate::compiler::types::fn_matches_signature;
 use crate::data::Data;
 use crate::data::NULL;
+use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
 
 fn check_user_fn_arg_types(
@@ -28,7 +29,7 @@ fn check_user_fn_arg_types(
     args_indexes: &[Span],
     ctx: Ctx,
     state: &mut State<'_, '_>,
-) {
+) -> Result<(), ErrDiagnosticId> {
     let args_len = state.functions[fn_id].args.len();
     for i in 0..args_len {
         let t = state.functions[fn_id].args[i].1.clone();
@@ -36,7 +37,7 @@ fn check_user_fn_arg_types(
             && if let (DataType::FnSignature(expected_sig), DataType::Fn(concrete_id)) =
                 (t, &inferred_arg_types[i])
             {
-                !fn_matches_signature(*concrete_id as usize, expected_sig, ctx, state)
+                !(fn_matches_signature(*concrete_id as usize, expected_sig, ctx, state)?)
             } else {
                 inferred_arg_types[i] != *t
             }
@@ -52,6 +53,7 @@ fn check_user_fn_arg_types(
             );
         }
     }
+    Ok(())
 }
 
 /// Returns the index into `state.fns[fn_id].impls` for this specialization (those arg types)
@@ -60,7 +62,7 @@ pub fn compile_function_impl(
     state: &mut State<'_, '_>,
     fn_id: usize,
     inferred_arg_types: &[DataType],
-) -> usize {
+) -> Result<usize, ErrDiagnosticId> {
     let get_fn_impl = |state: &State| {
         state.functions[fn_id]
             .impls
@@ -69,7 +71,7 @@ pub fn compile_function_impl(
     };
     // Try to check if function has already been compiled for these specific arg types
     if let Some(idx) = get_fn_impl(state) {
-        return idx;
+        return Ok(idx);
     }
     // If it hasn't, compile a new specialization of this function
     let fn_args = state.functions[fn_id].args.iter().map(|(a, _)| *a).collect::<Vec<&str>>();
@@ -80,8 +82,8 @@ pub fn compile_function_impl(
         inferred_arg_types,
         state.functions[fn_id].code,
         state.functions[fn_id].src_file_idx,
-    );
-    unsafe { get_fn_impl(state).unwrap_unchecked() }
+    )?;
+    Ok(unsafe { get_fn_impl(state).unwrap_unchecked() })
 }
 
 pub fn handle_user_function<'arena>(
@@ -91,7 +93,7 @@ pub fn handle_user_function<'arena>(
     ctx: Ctx,
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
-) -> Option<u16> {
+) -> Result<Option<u16>, ErrDiagnosticId> {
     let args = function_call.args;
     let fn_name = function_call.qualified_name.get_name();
     let span = function_call.get_call_span();
@@ -135,7 +137,7 @@ pub fn handle_user_function<'arena>(
         let returns_null = fn_sig.return_type == DataType::Null;
         let expected_arg_types = fn_sig.args.clone();
         for (i, arg) in args.iter().enumerate() {
-            let inferred = arg.infer_type(ctx, state);
+            let inferred = arg.infer_type(ctx, state)?;
             if !c_arg_matches(&inferred, &expected_arg_types[i]) {
                 error_function_arg_invalid_type(
                     &inferred,
@@ -152,22 +154,22 @@ pub fn handle_user_function<'arena>(
             }
         }
 
-        let first_arg = compile_reg_window(args.iter(), ctx, state, output);
+        let first_arg = compile_reg_window(args.iter(), ctx, state, output)?;
         let dest_reg_id =
             if returns_null { state.alloc_reg() } else { state.alloc_reg_tgt(tgt_id) };
         output.push(Instr::CallDynamicLibFunc { fn_id: dyn_id, dst: dest_reg_id, first_arg });
         state.add_to_src(ctx, output, span);
         state.free_reg_window(first_arg, args.len() as u16);
-        return Some(dest_reg_id);
+        return Ok(Some(dest_reg_id));
     }
 
     // Infer arg types
     let inferred_arg_types =
-        args.iter().map(|arg| arg.infer_type(ctx, state)).collect::<Vec<DataType>>();
+        args.iter().map(|arg| arg.infer_type(ctx, state)).collect::<Result<Vec<DataType>, _>>()?;
 
-    check_user_fn_arg_types(function_idx, fn_name, &inferred_arg_types, arg_spans, ctx, state);
+    check_user_fn_arg_types(function_idx, fn_name, &inferred_arg_types, arg_spans, ctx, state)?;
 
-    let fn_impl_idx = compile_function_impl(state, function_idx, &inferred_arg_types);
+    let fn_impl_idx = compile_function_impl(state, function_idx, &inferred_arg_types)?;
     let unit = state.functions[function_idx].impls[fn_impl_idx].unit;
     let frame_offset = state.call_frame_offset();
     state.reserve_call_window(frame_offset, args.len() as u16 + 1);
@@ -180,7 +182,7 @@ pub fn handle_user_function<'arena>(
             continue;
         }
         let start_len = output.len();
-        let arg_id = arg_expr.compile(ctx, state, output, Some(tgt_id), false, true).unwrap_id();
+        let arg_id = arg_expr.compile(ctx, state, output, Some(tgt_id), false, true)?.unwrap_id();
         move_value_to(output, start_len, arg_id, tgt_id);
         if arg_id != tgt_id {
             state.free_reg(arg_id);
@@ -193,12 +195,12 @@ pub fn handle_user_function<'arena>(
         state.free_reg(frame_offset + 1 + i);
     }
 
-    if fn_returns_null {
+    Ok(if fn_returns_null {
         state.free_reg(frame_offset);
         None
     } else {
         Some(frame_offset)
-    }
+    })
 }
 
 pub fn compile_function<'arena>(
@@ -208,7 +210,7 @@ pub fn compile_function<'arena>(
     inferred_arg_types: &[DataType],
     fn_code: &'arena [Expr],
     fn_file_idx: u16,
-) {
+) -> Result<(), ErrDiagnosticId> {
     // Local vector vars and recorded_types to allow the inner body to type-check correctly
     let caller_registers = core::mem::take(&mut state.regs);
     let return_reg = state.scratch_reg();
@@ -252,7 +254,7 @@ pub fn compile_function<'arena>(
             current_unit: Some(unit),
         },
         state,
-    );
+    )?;
     core::mem::swap(state.v, &mut v_temp);
     state.exit_function_scope(fn_file_idx, hidden_symbols);
 
@@ -287,4 +289,5 @@ pub fn compile_function<'arena>(
         src.instr_idx += len;
     }
     code_unit.instructions = instructions;
+    Ok(())
 }

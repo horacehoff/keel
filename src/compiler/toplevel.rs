@@ -9,12 +9,6 @@ use crate::ast::TypeExpr;
 use crate::ast::VariableDeclarationExpr;
 use crate::compiler::DataType;
 use crate::compiler::Source;
-use crate::compiler::compiler_errors::error_ambiguous_import;
-use crate::compiler::compiler_errors::error_cannot_find_dynlib_symbol;
-use crate::compiler::compiler_errors::error_cannot_load_dynlib;
-use crate::compiler::compiler_errors::error_function_already_defined;
-use crate::compiler::compiler_errors::error_global_already_defined;
-use crate::compiler::compiler_errors::error_struct_already_defined;
 use crate::compiler::program::Dylib;
 use crate::compiler::program::DylibFn;
 use crate::compiler::program::FnSignature;
@@ -38,6 +32,7 @@ use hybrid_format::hformat;
 #[cfg(not(target_arch = "wasm32"))]
 use libloading::Library;
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -91,13 +86,7 @@ pub fn parse_toplevel<'a>(
                 let span = function_declaration.span;
                 let fn_code = function_declaration.code;
                 let fn_args = function_declaration.args;
-                if let Some(func_idx) =
-                    scope.find_function(&[], fn_name, span, src_file_idx, sources)
-                {
-                    error_function_already_defined(&fns[func_idx], span, src_file_idx, sources);
-                }
                 let returns_void = check_if_returns_void(fn_code);
-
                 let fn_id = fns.len() as u16;
                 fns.push(Function {
                     name: fn_name,
@@ -111,11 +100,17 @@ pub fn parse_toplevel<'a>(
                 });
                 pending_fns.push((fn_id, src_file_idx, fn_args));
                 if let Some(func_idx) = scope.symbols.insert((fn_name, Symbol::Fn), fn_id) {
-                    error_function_already_defined(
-                        &fns[func_idx as usize],
-                        span,
-                        src_file_idx,
-                        sources,
+                    error!(
+                        diagnostics
+                            .error(ErrorCode::FunctionAlreadyDefined, span, src_file_idx)
+                            .secondary(
+                                fns[func_idx as usize].name_span,
+                                format_args!("`{fn_name}` is first defined here")
+                            )
+                            .primary(
+                                span,
+                                format_args!("`{fn_name}` is defined a second time here")
+                            )
                     );
                 }
             }
@@ -131,11 +126,17 @@ pub fn parse_toplevel<'a>(
                 if let Some(struct_id) =
                     scope.symbols.insert((struct_name, Symbol::Struct), struct_id)
                 {
-                    error_struct_already_defined(
-                        &structs[struct_id as usize],
-                        span,
-                        src_file_idx,
-                        sources,
+                    error!(
+                        diagnostics
+                            .error(ErrorCode::StructAlreadyDefined, span, src_file_idx)
+                            .secondary(
+                                structs[struct_id as usize].name_span,
+                                format_args!("`{struct_name}` is first defined here")
+                            )
+                            .primary(
+                                span,
+                                format_args!("`{struct_name}` is defined a second time here")
+                            )
                     );
                 }
                 pending_structs.push((struct_id, src_file_idx, fields));
@@ -173,25 +174,24 @@ pub fn parse_toplevel<'a>(
                 );
                 // If the extension is omitted, the extension is chosen based on the target OS.
                 // An architecture-specific suffix is also tried before the extension
-                let lib = Rc::new(unsafe {
-                    if Path::new(base_path).extension().is_none() {
-                        let path = {
-                            let arch_path = hformat!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
-                            if Path::new(&arch_path).exists() {
-                                arch_path
-                            } else {
-                                hformat!("{base_path}.{DYLIB_EXT}")
-                            }
-                        };
-                        libloading::Library::new(path).unwrap_or_else(|_| {
-                            error_cannot_load_dynlib(span, src_file_idx, sources);
-                        })
+                let lib_path = if Path::new(base_path).extension().is_none() {
+                    let arch_path = hformat!("{base_path}{ARCH_SUFFIX}.{DYLIB_EXT}");
+                    Cow::Owned(if Path::new(&arch_path).exists() {
+                        arch_path
                     } else {
-                        libloading::Library::new(base_path).unwrap_or_else(|_| {
-                            error_cannot_load_dynlib(span, src_file_idx, sources);
-                        })
-                    }
-                });
+                        hformat!("{base_path}.{DYLIB_EXT}")
+                    })
+                } else {
+                    Cow::Borrowed(base_path)
+                };
+                let Ok(lib) = (unsafe { Library::new(lib_path.as_ref()) }) else {
+                    error!(
+                        diagnostics
+                            .error(ErrorCode::CannotLoadDynamicLibrary, span, src_file_idx)
+                            .primary(span, format_args!("`{lib_path}` cannot be found or loaded"))
+                    )
+                };
+                let lib = Rc::new(lib);
                 pending_dylibs.push((
                     src_file_idx,
                     dynamic_libs.len() as u16,
@@ -205,42 +205,52 @@ pub fn parse_toplevel<'a>(
                 let import_path = Path::new(path);
                 let importing_dir = file_path.parent().unwrap_or_else(|| Path::new("."));
 
-                let find_in = |root: &Path| -> Option<PathBuf> {
+                let mut find_in = |root: &Path| -> Result<Option<PathBuf>, ErrDiagnosticId> {
                     let base = root.join(import_path);
                     #[allow(clippy::case_sensitive_file_extension_comparisons)]
                     if path.ends_with(".kl") {
-                        return base.is_file().then_some(base);
+                        return Ok(base.is_file().then_some(base));
                     }
                     let mut file = base.clone().into_os_string();
                     file.push(".kl");
                     let file = PathBuf::from(file);
                     let folder_lib = base.join("lib.kl");
-                    match (file.is_file(), folder_lib.is_file()) {
-                        (true, true) => error_ambiguous_import(span, src_file_idx, sources, path),
+                    Ok(match (file.is_file(), folder_lib.is_file()) {
+                        (true, true) => error!(
+                            diagnostics
+                                .error(ErrorCode::AmbiguousImport, span, src_file_idx)
+                                .primary(
+                                    span,
+                                    format_args!("both `{path}.kl` and `{path}/lib.kl` exist")
+                                )
+                                .help(format_args!("rename or remove one of them"))
+                        ),
                         (true, false) => Some(file),
                         (false, true) => Some(folder_lib),
                         (false, false) => None,
-                    }
+                    })
                 };
 
-                let resolved = if import_path.is_absolute()
+                let mut resolved = find_in(importing_dir)?;
+                if !(import_path.is_absolute()
                     || matches!(
                         import_path.components().next(),
                         Some(std::path::Component::CurDir | std::path::Component::ParentDir)
-                    ) {
-                    find_in(importing_dir)
-                } else {
-                    find_in(importing_dir)
-                        .or_else(|| {
-                            find_in(
-                                &Path::new(sources[0].filename)
-                                    .parent()
-                                    .unwrap_or_else(|| Path::new("."))
-                                    .join("libs"),
-                            )
-                        })
-                        .or_else(|| keel_home_libs_path.as_deref().and_then(find_in))
-                };
+                    ))
+                    && resolved.is_none()
+                {
+                    resolved = find_in(
+                        &Path::new(sources[0].filename)
+                            .parent()
+                            .unwrap_or_else(|| Path::new("."))
+                            .join("libs"),
+                    )?;
+                    if resolved.is_none()
+                        && let Some(keel_home_libs) = keel_home_libs_path.as_deref()
+                    {
+                        resolved = find_in(keel_home_libs)?;
+                    }
+                }
 
                 let Some(file_path) = resolved.and_then(|path| path.canonicalize().ok()) else {
                     error!(
@@ -312,7 +322,7 @@ pub fn parse_toplevel<'a>(
                             .reopen(id, src_file_idx)
                             .secondary(span, format_args!("`{path}` is imported here"))
                     );
-                };
+                }
                 files.insert(file_path, child_scope.clone());
                 scope.children.push((child_name, child_scope));
             }
@@ -325,12 +335,17 @@ pub fn parse_toplevel<'a>(
             .symbols
             .insert((var_declaration.name, Symbol::Global), pending_globals.len() as u16)
         {
-            error_global_already_defined(
-                var_declaration.name,
-                pending_globals[previous_global as usize].0.span,
-                var_declaration.span,
-                src_file_idx,
-                sources,
+            error!(
+                diagnostics
+                    .error(ErrorCode::GlobalAlreadyDefined, var_declaration.span, src_file_idx)
+                    .secondary(
+                        pending_globals[previous_global as usize].0.span,
+                        format_args!("`{}` is first declared here", var_declaration.name)
+                    )
+                    .primary(
+                        var_declaration.span,
+                        format_args!("`{}` is declared a second time here", var_declaration.name)
+                    )
             );
         }
         pending_globals.push((var_declaration, src_file_idx));
@@ -360,7 +375,8 @@ pub fn resolve_types<'arena>(
     dynamic_libs_fns: &mut Vec<DylibFn>,
     dynamic_libs: &mut [Dylib<'arena>],
     sources: &[Source],
-) {
+    diagnostics: &mut ProgramDiagnostics,
+) -> Result<(), ErrDiagnosticId> {
     for (struct_id, src_file_idx, fields) in pending_structs {
         let resolved_fields = fields
             .iter()
@@ -398,6 +414,7 @@ pub fn resolve_types<'arena>(
     #[cfg(not(target_arch = "wasm32"))]
     for (src_file_idx, dynlib_id, fn_signatures, lib, span) in pending_dylibs {
         let namespace = &file_namespaces[src_file_idx as usize];
+        let dylib_name = dynamic_libs[dynlib_id as usize].name;
         let fns = fn_signatures
             .iter()
             .map(|DylibFnExpr { name, args, name_span }| {
@@ -430,22 +447,23 @@ pub fn resolve_types<'arena>(
                 );
                 let cif = libffi::middle::Cif::new(arg_types, return_type);
                 let ptr = unsafe {
-                    libffi::middle::CodePtr(
-                        lib.get::<*const ()>(name.as_bytes())
-                            .unwrap_or_else(|_| {
-                                error_cannot_find_dynlib_symbol(
-                                    name,
+                    let Ok(lib_symbol) = lib.get::<*const ()>(name.as_bytes()) else {
+                        error!(
+                            diagnostics
+                                .error(
+                                    ErrorCode::CannotFindDynamicLibrarySymbol,
                                     *name_span,
-                                    span,
-                                    src_file_idx,
-                                    sources,
-                                );
-                            })
-                            .try_as_raw_ptr()
-                            .unwrap_unchecked(),
-                    )
+                                    src_file_idx
+                                )
+                                .primary(
+                                    *name_span,
+                                    format_args!("`{name}` cannot be found in `{dylib_name}`")
+                                )
+                                .secondary(span, format_args!("`{dylib_name}` is loaded here"))
+                        );
+                    };
+                    libffi::middle::CodePtr(lib_symbol.try_as_raw_ptr().unwrap_unchecked())
                 };
-
                 dynamic_libs_fns.push(DylibFn {
                     types: core::iter::once(&fn_return_type)
                         .chain(fn_args.iter().map(|(t, _)| t))
@@ -456,9 +474,10 @@ pub fn resolve_types<'arena>(
                     cif,
                     args_len: fn_args.len(),
                 });
-                return_val
+                Ok(return_val)
             })
-            .collect();
+            .collect::<Result<Box<[FnSignature]>, ErrDiagnosticId>>()?;
         dynamic_libs[dynlib_id as usize].fns = fns;
     }
+    Ok(())
 }

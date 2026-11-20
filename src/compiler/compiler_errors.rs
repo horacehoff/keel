@@ -315,77 +315,6 @@ pub fn error_type_not_indexable(
 #[inline(never)]
 #[cold]
 #[optimize(size)]
-pub fn error_ambiguous_import(span: Span, file_idx: u16, sources: &[Source], name: &str) -> ! {
-    compiler_error(
-        &"Ambiguous import",
-        (span, file_idx),
-        &[ReportLabel::new(
-            &format_args!("Both `{name}.kl` and `{name}/lib.kl` exist for this import."),
-            Color::Red,
-            span,
-            file_idx,
-        )],
-        None,
-        None,
-        sources,
-    )
-}
-
-#[inline(never)]
-#[cold]
-#[optimize(size)]
-pub fn error_cannot_load_dynlib(span: Span, file_idx: u16, sources: &[Source]) -> ! {
-    compiler_error(
-        &"Cannot load dynamic library",
-        (span, file_idx),
-        &[ReportLabel::new(
-            &"This dynamic library cannot be found/loaded.",
-            Color::Red,
-            span,
-            file_idx,
-        )],
-        None,
-        None,
-        sources,
-    )
-}
-
-#[inline(never)]
-#[cold]
-#[optimize(size)]
-pub fn error_cannot_find_dynlib_symbol(
-    symbol: &str,
-    symbol_span: Span,
-    dynlib_span: Span,
-    file_idx: u16,
-    sources: &[Source],
-) -> ! {
-    compiler_error(
-        &"Cannot find symbol in dynamic library",
-        (dynlib_span, file_idx),
-        &[
-            ReportLabel::new(
-                &"This dynamic library is loaded here.",
-                Color::Blue,
-                dynlib_span,
-                file_idx,
-            ),
-            ReportLabel::new(
-                &format_args!("Cannot find symbol {RED}{symbol}{RESET} in this dynamic library"),
-                Color::Red,
-                symbol_span,
-                file_idx,
-            ),
-        ],
-        None,
-        None,
-        sources,
-    )
-}
-
-#[inline(never)]
-#[cold]
-#[optimize(size)]
 pub fn error_map_diff_types(
     file_idx: u16,
     sources: &[Source],
@@ -993,36 +922,6 @@ pub fn error_struct_already_defined(
             ReportLabel::new(&"Already defined here", Color::Blue, s.name_span, s.src_file_idx),
             ReportLabel::new(
                 &format_args!("Struct {BLUE}{}{RESET} is already defined", s.name),
-                Color::Red,
-                redeclaration_span,
-                file_idx,
-            ),
-        ],
-        None,
-        None,
-        sources,
-    )
-}
-
-#[cold]
-#[optimize(size)]
-#[inline(never)]
-pub fn error_global_already_defined(
-    global_name: &str,
-    initial_decl_span: Span,
-    redeclaration_span: Span,
-    file_idx: u16,
-    sources: &[Source],
-) -> ! {
-    compiler_error(
-        &"Global variable already defined",
-        (redeclaration_span, file_idx),
-        &[
-            ReportLabel::new(&"Already declared here", Color::Red, initial_decl_span, file_idx),
-            ReportLabel::new(
-                &format_args!(
-                    "A second global variable with the name {BLUE}{global_name}{RESET} is declared here"
-                ),
                 Color::Red,
                 redeclaration_span,
                 file_idx,

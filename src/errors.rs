@@ -4,8 +4,8 @@ use crate::compiler::program::InstrSrc;
 use ariadne::FnCache;
 use ariadne::{Color, Report, ReportKind};
 use bumpalo::Bump;
+use core::num::NonZeroU32;
 use hybrid_format::hformat;
-use std::num::NonZeroU32;
 
 pub const ARIADNE_ERROR_KIND: ReportKind<'static> = ReportKind::Custom("[ERROR]", Color::Red);
 pub const ERROR_PREFIX: &str = hformat!("{RED}[ERROR]:{RESET}");
@@ -94,16 +94,16 @@ pub fn error_diagnostic(diagnostic: &Diagnostic, sources: &[Source]) {
             .with_message(label.msg)
             .with_color(Color::Red)
             .with_priority(1),
-        )
+        );
     }
     for note in &diagnostic.notes {
-        report = report.with_note(note)
+        report = report.with_note(note);
     }
     for help in &diagnostic.help {
-        report = report.with_help(help)
+        report = report.with_help(help);
     }
     for suggestion in &diagnostic.suggestions {
-        report = report.with_help(format!("{}: `{}`", suggestion.msg, suggestion.replacement))
+        report = report.with_help(format!("{}: `{}`", suggestion.msg, suggestion.replacement));
     }
 
     print_error_report(&report.finish(), sources);
@@ -229,6 +229,12 @@ impl<'arena> ProgramDiagnostics<'arena> {
 pub enum ErrorCode {
     UnknownVariable = 0,
     ImportedFileNotFound = 1,
+    FunctionAlreadyDefined = 2,
+    StructAlreadyDefined = 3,
+    GlobalAlreadyDefined = 4,
+    AmbiguousImport = 5,
+    CannotLoadDynamicLibrary = 6,
+    CannotFindDynamicLibrarySymbol = 7,
 }
 
 impl ErrorCode {
@@ -236,6 +242,12 @@ impl ErrorCode {
         match self {
             Self::UnknownVariable => "Unknown variable",
             Self::ImportedFileNotFound => "Imported file not found",
+            Self::FunctionAlreadyDefined => "Function already defined",
+            Self::StructAlreadyDefined => "Struct already defined",
+            Self::GlobalAlreadyDefined => "Global variable already defined",
+            Self::AmbiguousImport => "Ambiguous import",
+            Self::CannotLoadDynamicLibrary => "Cannot load dynamic library",
+            Self::CannotFindDynamicLibrarySymbol => "Cannot find symbol in dynamic library",
         }
     }
 }

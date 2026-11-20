@@ -126,7 +126,7 @@ pub fn compile<'arena>(
         diagnostics.emit_all(&sources);
         crate::errors::crash();
     }
-    resolve_types(
+    if resolve_types(
         &mut structs,
         &mut functions,
         pending_structs,
@@ -137,7 +137,14 @@ pub fn compile<'arena>(
         &mut dylib_fns,
         &mut dyn_libs,
         &sources,
-    );
+        &mut diagnostics,
+    )
+    .is_err()
+    {
+        core::hint::cold_path();
+        diagnostics.emit_all(&sources);
+        crate::errors::crash();
+    }
     let ctx = Ctx {
         in_function: false,
         file_idx: 0,

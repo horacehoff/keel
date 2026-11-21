@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use console::style;
 use indicatif::ProgressBar;
 
@@ -15,7 +15,7 @@ pub fn uninstall_library(
 ) -> Result<()> {
     let (author, repo_name, tag) = parse_repository(&mut repository, false)?;
     let progress_bar = ProgressBar::new_spinner();
-    let (mut manifest, mut manifest_file) =
+    let (mut manifest, _manifest_lock) =
         get_system_packages_manifest(manifest_path, &progress_bar)?;
     progress_bar.finish_and_clear();
 
@@ -24,11 +24,10 @@ pub fn uninstall_library(
         return Ok(());
     };
     if !author.is_empty() && pkg.author != author {
-        println!(
+        bail!(
             "{repo_name} is installed but the package is from a different author: {}.",
             style(&pkg.author).bold()
         );
-        return Ok(());
     }
     if let Some(version) = tag
         && pkg.version != version
@@ -46,7 +45,7 @@ pub fn uninstall_library(
     {
         return Err(e.into());
     }
-    write_new_manifest(&manifest, &mut manifest_file)?;
+    write_new_manifest(&manifest, manifest_path)?;
     println!("{} Uninstalled {repo_name}!", style("✓").green().bright().bold());
     Ok(())
 }

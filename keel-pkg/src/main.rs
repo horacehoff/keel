@@ -5,6 +5,7 @@ use console::style;
 use constcat::concat;
 use reqwest::Client;
 use std::hint::cold_path;
+use std::time::Duration;
 
 use crate::install::install_library;
 use crate::list::list_installed_packages;
@@ -41,6 +42,8 @@ enum Commands {
     List,
 }
 
+pub const TMP_PREFIX: &str = ".tmp-keel-adastra";
+
 #[cfg(target_os = "macos")]
 const OS_SUFFIX: &str = "-macos";
 #[cfg(target_os = "linux")]
@@ -74,15 +77,18 @@ async fn main() {
 }
 
 async fn cli() -> Result<()> {
+    let args = Cli::parse();
+
     let keel_home_libs =
         std::env::home_dir().context("Cannot find the home directory!")?.join(".keel/libs/");
     let manifest_path = keel_home_libs.join(".packages.toml");
-    std::fs::create_dir_all(&keel_home_libs)
-        .expect("Unable to check the existence of ~/.keel/libs");
+    fs_err::create_dir_all(&keel_home_libs)?;
 
-    let user_agent = Client::builder().user_agent(concat!("keel-pkg@", env!("CARGO_PKG_VERSION")));
+    let user_agent = Client::builder()
+        .user_agent(concat!("keel-pkg@", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(10))
+        .read_timeout(Duration::from_secs(42));
 
-    let args = Cli::parse();
     match args.command {
         Commands::Install { repository, force } => {
             install_library(repository, user_agent, &keel_home_libs, &manifest_path, force).await

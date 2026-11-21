@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use console::style;
-use fs_err::{File, OpenOptions};
+use fs_err::File;
 use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
-use std::io::{Seek, Write};
+use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{collections::HashMap, io::Read, path::Path};
+use std::{collections::HashMap, path::Path};
 
 #[derive(Deserialize, Serialize)]
 #[serde(default)]
@@ -29,40 +29,32 @@ pub struct Package {
     pub version: String,
 }
 
-fn parse_manifest(manifest_file: &mut File) -> Result<PackagesManifest> {
-    let mut contents = String::new();
-    manifest_file.read_to_string(&mut contents)?;
-    toml::from_str(&contents).with_context(|| {
-        format!(
-            "Failed to parse the system packages manifest at {}",
-            style(manifest_file.path().display()).bold()
-        )
-    })
-}
-
 /// Clears the current console line
-/// Returns the current manifest (created if nonexistent) and the file with a lock
+/// Returns the current manifest (default if nonexistent) and the file with a lock
 pub fn get_system_packages_manifest(
     manifest_path: &Path,
     progress_bar: &ProgressBar,
 ) -> Result<(PackagesManifest, File)> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(manifest_path)?;
+    let lock = File::create(manifest_path.with_extension("lock"))?;
     progress_bar.set_message("Obtaining lock on manifest...");
-    file.lock()?;
-    Ok((parse_manifest(&mut file)?, file))
+    lock.lock()?;
+    Ok((read_system_packages_manifest(manifest_path)?, lock))
 }
 
 pub fn read_system_packages_manifest(manifest_path: &Path) -> Result<PackagesManifest> {
-    let Ok(mut file) = File::open(manifest_path) else {
-        return Ok(PackagesManifest::default());
+    let contents = match fs_err::read_to_string(manifest_path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(PackagesManifest::default());
+        }
+        Err(e) => return Err(e.into()),
     };
-    file.lock_shared()?;
-    parse_manifest(&mut file)
+    toml::from_str(&contents).with_context(|| {
+        format!(
+            "Failed to parse the system packages manifest at {}",
+            style(manifest_path.display()).bold()
+        )
+    })
 }
 
 #[derive(PartialEq)]
@@ -88,12 +80,13 @@ pub fn add_package_to_manifest(
     );
 }
 
-pub fn write_new_manifest(manifest: &PackagesManifest, manifest_file: &mut File) -> Result<()> {
+pub fn write_new_manifest(manifest: &PackagesManifest, manifest_path: &Path) -> Result<()> {
     let contents =
         toml::to_string(manifest).context("Failed to encode the system packages manifest")?;
-    manifest_file.set_len(0)?;
-    manifest_file.rewind()?;
-    manifest_file.write_all(contents.as_bytes())?;
+    let mut tmp = tempfile::NamedTempFile::new_in(manifest_path.parent().unwrap())?;
+    tmp.write_all(contents.as_bytes())?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(manifest_path)?;
     Ok(())
 }
 

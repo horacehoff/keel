@@ -2,14 +2,14 @@ use crate::packages::{
     PkgInstallStatus, add_package_to_manifest, get_system_packages_manifest,
     is_package_already_installed, write_new_manifest,
 };
-use crate::{BUG_NOTICE, SUFFIXES, secondary};
+use crate::{BUG_NOTICE, SUFFIXES, TMP_PREFIX, secondary};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use console::style;
 use flate2::read::GzDecoder;
 use futures_util::TryStreamExt;
 use hybrid_format::hformat;
 use indicatif::{ProgressBar, ProgressStyle};
-use reqwest::header::ACCEPT;
+use reqwest::header::{ACCEPT, RETRY_AFTER};
 use reqwest::{Client, ClientBuilder, StatusCode};
 use semver::Version;
 use serde::Deserialize;
@@ -36,7 +36,8 @@ fn validate_repository_name(repo_name: &str) -> Result<()> {
         !repo_name.is_empty()
             && !repo_name.starts_with('.')
             && repo_name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-            && !repo_name.eq_ignore_ascii_case("std"),
+            && !repo_name.eq_ignore_ascii_case("std")
+            && !repo_name.ends_with(".kl"),
         "{} is not a valid package name.",
         style(repo_name).bold()
     );
@@ -98,9 +99,15 @@ async fn get_github_release(
     }
     cold_path();
     match status_code {
-        StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS => bail!(
-            "GitHub's rate limit has been reached. Try again in a few minutes, this should be resolved in less than an hour."
-        ),
+        StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
+            if status_code == StatusCode::TOO_MANY_REQUESTS
+                || response.headers().contains_key(RETRY_AFTER)
+                || response.headers().get("x-ratelimit-remaining").is_some_and(|h| h == "0") =>
+        {
+            bail!(
+                "GitHub's rate limit has been reached. Try again in a few minutes, this should be resolved in less than an hour."
+            )
+        }
         StatusCode::NOT_FOUND => bail!(
             "Could not find tag {} in repository {} {}.",
             style(tag).bold(),
@@ -175,12 +182,20 @@ pub async fn install_library(
     progress_bar
         .set_message(format!("Found a suitable release asset: {}", secondary(&github_asset.name)));
 
-    let (mut system_pkg_manifest, mut manifest_file) =
+    let (mut system_pkg_manifest, _manifest_lock) =
         get_system_packages_manifest(manifest_path, &progress_bar)?;
+
+    for f in fs_err::read_dir(keel_home_libs)?.flatten() {
+        if f.file_name().to_string_lossy().starts_with(TMP_PREFIX) {
+            let _ = std::fs::remove_dir_all(f.path());
+        }
+    }
 
     if !force {
         match is_package_already_installed(&system_pkg_manifest, author, repo_name, version) {
-            PkgInstallStatus::AlreadyInstalled => {
+            PkgInstallStatus::AlreadyInstalled
+                if keel_home_libs.join(repo_name).join("lib.kl").is_file() =>
+            {
                 progress_bar.finish_and_clear();
                 println!(
                     "{} {} is already installed as {}! Ad maiora!",
@@ -194,7 +209,7 @@ pub async fn install_library(
                 "There is already a package named {} installed. To override this and uninstall it, use the -f/--force flag.",
                 style(repo_name).bold()
             ),
-            PkgInstallStatus::NotInstalled => {
+            PkgInstallStatus::NotInstalled | PkgInstallStatus::AlreadyInstalled => {
                 if !system_pkg_manifest.packages.contains_key(repo_name)
                     && keel_home_libs.join(repo_name).symlink_metadata().is_ok()
                 {
@@ -213,7 +228,7 @@ pub async fn install_library(
     let github_response = client.get(download_url).send().await.and_then(|e| e.error_for_status()).map_err(|e| {
         let url = secondary(download_url);
         let message = if let Some(status) = e.status() {
-            format!("Download from {url} failed wotj status {status}.")
+            format!("Download from {url} failed with status {status}.")
         } else if e.is_connect() {
             format!("Connection refused when connecting to {url}. Make sure you're connected to the internet.")
         } else if e.is_timeout() {
@@ -238,8 +253,10 @@ pub async fn install_library(
     };
     progress_bar.set_message(format!("Downloading {}", style(repo_name).bold()));
 
-    let temp_folder =
-        tempfile::Builder::new().prefix(".tmp").tempdir_in(keel_home_libs).with_context(|| {
+    let temp_folder = tempfile::Builder::new()
+        .prefix(TMP_PREFIX)
+        .tempdir_in(keel_home_libs)
+        .with_context(|| {
             format!(
                 "Failed to create temporary folder in {}. Check permissions.",
                 style(keel_home_libs.display()).bold()
@@ -277,23 +294,33 @@ pub async fn install_library(
 
     let first_lib_entry = lib_entries.next().context("The downloaded folder is empty!")??;
 
-    let _ = std::fs::remove_dir_all(&lib_folder);
     // If there's a single entry in the lib's archive (a top-levl folder or a single file), move that instead of the parent folder
-    if lib_entries.next().is_none() {
-        let dest = if first_lib_entry.file_type()?.is_dir() {
-            lib_folder
-        } else {
-            fs_err::create_dir_all(&lib_folder)?;
-            lib_folder.join(first_lib_entry.file_name())
-        };
-        fs_err::rename(first_lib_entry.path(), dest)?;
+    let lib_source = if lib_entries.next().is_none() && first_lib_entry.file_type()?.is_dir() {
+        first_lib_entry.path()
     } else {
-        fs_err::rename(temp_folder.path(), &lib_folder)?;
+        temp_folder.path().to_path_buf()
+    };
+    ensure!(
+        lib_source.join("lib.kl").is_file(),
+        "The package does not contain a {} file.",
+        style("lib.kl").bold()
+    );
+
+    // Backup in case the new version can'tb e moved into place
+    let backup_folder = tempfile::Builder::new().prefix(TMP_PREFIX).tempdir_in(keel_home_libs)?;
+    let prev_lib_path = backup_folder.path().join(repo_name);
+
+    if lib_folder.symlink_metadata().is_ok() {
+        fs_err::rename(&lib_folder, &prev_lib_path)?;
+    }
+    if let Err(e) = fs_err::rename(&lib_source, &lib_folder) {
+        let _ = std::fs::rename(&prev_lib_path, &lib_folder);
+        return Err(e.into());
     }
 
     add_package_to_manifest(&mut system_pkg_manifest, author, repo_name, version);
 
-    write_new_manifest(&system_pkg_manifest, &mut manifest_file)?;
+    write_new_manifest(&system_pkg_manifest, manifest_path)?;
 
     progress_bar.finish_and_clear();
     println!(

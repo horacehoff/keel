@@ -8,7 +8,6 @@ use crate::compiler::UnwrapId;
 use crate::compiler::Variable;
 use crate::compiler::codegen::compile_reg_window;
 use crate::compiler::compile_expr;
-use crate::compiler::compiler_errors::check_args_user_fn;
 use crate::compiler::compiler_errors::error_function_arg_invalid_type;
 use crate::compiler::program::CodeUnit;
 use crate::compiler::program::FunctionImpl;
@@ -19,7 +18,9 @@ use crate::compiler::types::c_arg_matches;
 use crate::compiler::types::fn_matches_signature;
 use crate::data::Data;
 use crate::data::NULL;
+use crate::error;
 use crate::errors::ErrDiagnosticId;
+use crate::errors::ErrorCode;
 use crate::instr::Instr;
 
 fn check_user_fn_arg_types(
@@ -94,7 +95,7 @@ pub fn handle_user_function<'arena>(
     state: &mut State<'arena, '_>,
     tgt_id: Option<u16>,
 ) -> Result<Option<u16>, ErrDiagnosticId> {
-    let args = function_call.args;
+    let call_args = function_call.args;
     let fn_name = function_call.qualified_name.get_name();
     let span = function_call.get_call_span();
     let arg_spans = &function_call.get_arg_spans();
@@ -103,16 +104,17 @@ pub fn handle_user_function<'arena>(
 
     // Check if the arguments are correct
     let args_len = state.functions[function_idx].args.len();
-    check_args_user_fn(
-        args,
-        args_len,
-        fn_name,
-        ctx.file_idx,
-        span,
-        (state.functions[function_idx].name_span, state.functions[function_idx].src_file_idx),
-        state,
-        arg_spans,
-    );
+    let call_args_len = call_args.len();
+    if call_args_len != args_len {
+        error!(
+            state.diagnostics.error(ErrorCode::InvalidArgumentCount, span, ctx.file_idx).primary(
+                span,
+                format_args!(
+                    "`{fn_name}` expects {args_len} arguments but {call_args_len} were passed"
+                ),
+            )
+        );
+    }
 
     //This inlines dylib wrappers
     // Actual general function inlining is coming soon
@@ -136,7 +138,7 @@ pub fn handle_user_function<'arena>(
         let dyn_id = fn_sig.id;
         let returns_null = fn_sig.return_type == DataType::Null;
         let expected_arg_types = fn_sig.args.clone();
-        for (i, arg) in args.iter().enumerate() {
+        for (i, arg) in call_args.iter().enumerate() {
             let inferred = arg.infer_type(ctx, state)?;
             if !c_arg_matches(&inferred, &expected_arg_types[i]) {
                 error_function_arg_invalid_type(
@@ -154,26 +156,37 @@ pub fn handle_user_function<'arena>(
             }
         }
 
-        let first_arg = compile_reg_window(args.iter(), ctx, state, output)?;
+        let first_arg = compile_reg_window(call_args.iter(), ctx, state, output)?;
         let dest_reg_id =
             if returns_null { state.alloc_reg() } else { state.alloc_reg_tgt(tgt_id) };
         output.push(Instr::CallDynamicLibFunc { fn_id: dyn_id, dst: dest_reg_id, first_arg });
         state.add_to_src(ctx, output, span);
-        state.free_reg_window(first_arg, args.len() as u16);
+        state.free_reg_window(first_arg, call_args.len() as u16);
         return Ok(Some(dest_reg_id));
     }
 
     // Infer arg types
-    let inferred_arg_types =
-        args.iter().map(|arg| arg.infer_type(ctx, state)).collect::<Result<Vec<DataType>, _>>()?;
+    let inferred_arg_types = call_args
+        .iter()
+        .map(|arg| arg.infer_type(ctx, state))
+        .collect::<Result<Vec<DataType>, _>>()?;
 
     check_user_fn_arg_types(function_idx, fn_name, &inferred_arg_types, arg_spans, ctx, state)?;
 
-    let fn_impl_idx = compile_function_impl(state, function_idx, &inferred_arg_types)?;
+    let fn_impl_idx = compile_function_impl(state, function_idx, &inferred_arg_types).map_err(
+        #[cold]
+        |e| {
+            state
+                .diagnostics
+                .reopen(e, ctx.file_idx)
+                .secondary(span, format_args!("when calling `{fn_name}`"))
+                .finish()
+        },
+    )?;
     let unit = state.functions[function_idx].impls[fn_impl_idx].unit;
     let frame_offset = state.call_frame_offset();
-    state.reserve_call_window(frame_offset, args.len() as u16 + 1);
-    for (i, arg_expr) in args.iter().enumerate() {
+    state.reserve_call_window(frame_offset, call_args.len() as u16 + 1);
+    for (i, arg_expr) in call_args.iter().enumerate() {
         let tgt_id = frame_offset + 1 + i as u16;
         if let DataType::Fn(arg_fn_id) = inferred_arg_types[i] {
             let unit = state.functions[arg_fn_id as usize].impls.first().map_or(0, |imp| imp.unit);
@@ -191,7 +204,7 @@ pub fn handle_user_function<'arena>(
     output.push(Instr::CallFunc { target: unit, frame_offset });
     // Makes overflow report at the failing call
     state.add_to_src(ctx, output, span);
-    for i in 0..args.len() as u16 {
+    for i in 0..call_args.len() as u16 {
         state.free_reg(frame_offset + 1 + i);
     }
 

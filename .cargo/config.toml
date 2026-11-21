@@ -1,4 +1,9 @@
 [build]
 # target = "wasm32-unknown-unknown"
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "target-feature=+tail-call"]
+rustflags = [
+    "-Zunstable-options",
+    "--jobs-frontend=4",
+    "-C",
+    "target-feature=+tail-call",
+]

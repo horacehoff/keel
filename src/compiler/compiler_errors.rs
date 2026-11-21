@@ -498,66 +498,6 @@ pub fn error_invalid_obj_type(
     )
 }
 
-pub fn check_args_user_fn(
-    args: &[Expr],
-    expected_args_len: usize,
-    fn_name: &str,
-    file_idx: u16,
-    span: Span,
-    fn_decl_span: (Span, u16),
-    state: &State,
-    args_indexes: &[Span],
-) {
-    let args_len = args.len();
-    if args_len != expected_args_len {
-        let has_excess_args = args_len > expected_args_len;
-        let excess_args_span: Span = if has_excess_args {
-            (args_indexes[expected_args_len].start, args_indexes[args_indexes.len() - 1].end).into()
-        } else {
-            span
-        };
-        compiler_error(
-            &"Invalid argument count",
-            (span, file_idx),
-            &[
-                ReportLabel::new(
-                    &format_args!("The function {BLUE}{fn_name}{RESET} is defined here"),
-                    Color::Blue,
-                    fn_decl_span.0,
-                    fn_decl_span.1,
-                ),
-                ReportLabel::new(
-                    &format_args!(
-                        "Function {BLUE}{fn_name}{RESET} expects {BOLD}{expected_args_len}{RESET} arguments but {BOLD}{args_len}{RESET} arguments were supplied"
-                    ),
-                    Color::Red,
-                    span,
-                    file_idx,
-                ),
-                ReportLabel {
-                    priority: -1,
-                    ..ReportLabel::new(
-                        &format_args!(
-                            "{BLUE}Help{RESET}: Remove {}",
-                            if args_len == expected_args_len + 1 {
-                                "this argument"
-                            } else {
-                                "those arguments"
-                            }
-                        ),
-                        Color::Blue,
-                        excess_args_span,
-                        file_idx,
-                    )
-                },
-            ][..2 + usize::from(has_excess_args)],
-            None,
-            None,
-            state.sources,
-        );
-    }
-}
-
 pub fn check_args_range(
     args: &[Expr],
     min_args_len: usize,

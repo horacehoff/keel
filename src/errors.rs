@@ -93,7 +93,10 @@ pub fn error_diagnostic(diagnostic: &Diagnostic, sources: &[Source]) {
                 label.loc.span.into(),
             ))
             .with_message(label.msg)
-            .with_color(Color::Red)
+            .with_color(match label.role {
+                LabelRole::Primary => Color::Red,
+                LabelRole::Secondary => Color::White,
+            })
             .with_priority(1),
         );
     }
@@ -236,6 +239,7 @@ pub enum ErrorCode {
     AmbiguousImport = 5,
     CannotLoadDynamicLibrary = 6,
     CannotFindDynamicLibrarySymbol = 7,
+    InvalidArgumentCount = 8,
 }
 
 impl ErrorCode {
@@ -249,6 +253,7 @@ impl ErrorCode {
             Self::AmbiguousImport => "Ambiguous import",
             Self::CannotLoadDynamicLibrary => "Cannot load dynamic library",
             Self::CannotFindDynamicLibrarySymbol => "Cannot find symbol in dynamic library",
+            Self::InvalidArgumentCount => "Invalid number of arguments",
         }
     }
 }

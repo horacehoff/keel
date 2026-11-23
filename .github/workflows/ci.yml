@@ -25,4 +25,4 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: rustup toolchain install && rustup target add wasm32-unknown-unknown
-      - run: cargo build --verbose --target wasm32-unknown-unknown
+      - run: cargo build --verbose --target wasm32-unknown-unknown -Zbuild-std=std

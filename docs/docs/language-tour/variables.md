@@ -34,7 +34,7 @@ fn main() {
 
 ## Global variables
 
-Global variables are declared at the toplevel with `static name = value` or `static name: type = value`. They are mutable and accessible from every functon in the file, and from importing files as `module::global_var_name`.
+Global variables are declared at the toplevel with `static name = value` or `static name: type = value`. They are mutable and accessible from every function in the file, and from importing files as `module::global_var_name`.
 
 ```rust
 static first_name = "David";

@@ -53,29 +53,30 @@ Copyright &copy; 2026 Horace Hoff
 # ]
 #
 nav = [
-  {"Get started" = "index.md"},
-  {"Language tour" = [
-     "language-tour/hello-world.md",
-     "language-tour/variables.md",
-     "language-tour/data-types.md",
-     "language-tour/functions.md",
-     "language-tour/control-flow.md",
-     "language-tour/error-handling.md",
-     "language-tour/modules.md",
-     "language-tour/dynamic-libraries.md",
-     "language-tour/embedding.md",
-  ]},
-  {"Reference" = [
-      "reference/operators.md",
-      "reference/errors.md",
-  ]},
-  {"Standard library" = [
-      "standard-library/built-in-functions.md",
-      "standard-library/fs.md",
-      "standard-library/math.md",
-      "standard-library/random.md",
-      "standard-library/time.md",
-  ]}
+    { "Get started" = "index.md" },
+    { "Language tour" = [
+        "language-tour/hello-world.md",
+        "language-tour/variables.md",
+        "language-tour/data-types.md",
+        "language-tour/functions.md",
+        "language-tour/control-flow.md",
+        "language-tour/error-handling.md",
+        "language-tour/modules.md",
+        "language-tour/packages.md",
+        "language-tour/dynamic-libraries.md",
+        "language-tour/embedding.md",
+    ] },
+    { "Reference" = [
+        "reference/operators.md",
+        "reference/errors.md",
+    ] },
+    { "Standard library" = [
+        "standard-library/built-in-functions.md",
+        "standard-library/fs.md",
+        "standard-library/math.md",
+        "standard-library/random.md",
+        "standard-library/time.md",
+    ] },
 ]
 
 edit_uri = "edit/main/docs/docs/"
@@ -378,7 +379,7 @@ pygments_lang_class = true
 [project.markdown_extensions.pymdownx.smartsymbols]
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [
-  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }
+    { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
@@ -389,9 +390,5 @@ custom_checkbox = true
 [project.markdown_extensions.zensical.extensions.glightbox]
 auto = true
 [project.markdown_extensions.zensical.extensions.preview]
-configurations = [
-    { targets.include = [
-        "*.md"
-    ]}
-]
+configurations = [{ targets.include = ["*.md"] }]
 [project.plugins.offline]

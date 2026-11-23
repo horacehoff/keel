@@ -63,10 +63,11 @@ getrandom = { version = "0.4.3", features = ["wasm_js"] }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = [
-    "-O",
+    "-O3",
     "--enable-bulk-memory",
     "--enable-nontrapping-float-to-int",
     "--enable-tail-call",
+    "--enable-simd",
 ]
 
 [lib]

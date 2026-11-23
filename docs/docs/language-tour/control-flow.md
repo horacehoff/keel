@@ -40,27 +40,65 @@ fn main() {
 }
 ```
 
-## Match statements
-!!! warning
+## Type guards
 
-    Match statements currently don't support binding variables.
-
-Match statements are currently a shorthand for if blocks, allowing you to compare a value against multiple other ones. The value `_` is a catch-all, and will match if nothing else previously matched.
+The expression `value: type` evaluates to `true` if `value`'s type is `type`, and false otherwise.
 
 ```rust
-fn main() {
-    let x = "Hello";
-    match x {
-        "hello" => {
-            print("This will be printed!");
-        }
-        "goodbye" => {
-            print("This will never be printed!");
-        }
-        _ => {
-            print("Something else: "+x);
-        }
+fn number(num: int | string) {
+    print("The number is: " + if num: int {string(num)} else {num});
+}
+```
+
+## Match statements
+
+Match statements arms are tested in order and short-circuit.
+
+| Pattern | Matches... |
+| --- | --- |
+| `_` | Anything! |
+| `x` | Any value, and it binds it to `x` |
+| `42`, `"Magrathea"`, ... | A value equal to that constant |
+| `42..67`, `42..=67` | A number in the exclusive or inclusive given range |
+| `a \| b` | A value matching `a` or `b` |
+| `x @ pattern` | A value matching `pattern` and binds it to `x` |
+| `pattern: type` | A value of type `type` matching `pattern` |
+| `StructName {field, field2: pattern, ..}` | A struct whose fields match, and `..` ignores the other fields |
+| `[a, b]`, `[first, ..rest]`, `[..rest, last]` | An array whose elements match, and `..rest` binds the array containing the remaining elements |
+
+An arm can be followed by a guard (`if <condition>`), which must evaluate to `true` for the arm to match.
+
+```rust
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn my_func(num: int | Point | int[]) {
+    match num {
+        0 => {return 0;}
+        Point {x: 0, y} => {return y;}
+        Point {x, ..} => {return x;}
+        num:int => { match num {
+            x if x < 0 => {return 1;}
+            42..67 => {return 2;}
+            something => {return something;}
+        }}
+        array: int[] => { match array {
+            [] => {return "empty";}
+            [.., last] => {return last;}
+        }}
     }
+}
+
+fn main() {
+    print(my_func(-1)); // 1
+    print(my_func(0)); // 0
+    print(my_func(Point {x: 0, y: 42})); // 42
+    print(my_func(Point {x: 42, y: 0})); // 42
+    print(my_func(42)); // 2
+    print(my_func([])); // "empty"
+    print(my_func([1,2,3,4])); // 4
 }
 ```
 

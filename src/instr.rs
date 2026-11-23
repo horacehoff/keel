@@ -76,6 +76,7 @@ pub enum Instr {
     /// Return(n)\
     /// Returns the data located in register n
     Return(u16),
+    ReturnNull,
     /// Copies the absolute register `reg` into `dest_reg`
     LoadGlobal {
         dest_reg: u16,

@@ -31,6 +31,7 @@ use control_flow::compile_match_block;
 use control_flow::compile_return;
 use control_flow::compile_try_catch_block;
 use control_flow::compile_while_loop;
+pub use control_flow::type_guard_narrowing;
 use core::hint::unreachable_unchecked;
 use definitions::compile_function_definition;
 use definitions::compile_struct_definition;

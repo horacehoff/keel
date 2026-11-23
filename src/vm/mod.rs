@@ -98,8 +98,17 @@ fn flush_output(output: &mut String) {
     #[cfg(not(any(target_arch = "wasm32", feature = "embed")))]
     {
         let mut stdout = std::io::stdout().lock();
-        stdout.write_all(output.as_bytes()).unwrap();
-        stdout.flush().unwrap();
+        if let Err(e) = stdout.write_all(output.as_bytes()).and_then(|()| stdout.flush()) {
+            cold_path();
+            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                eprintln!(
+                    "{} Failed to write to the standard output: {e}",
+                    crate::errors::ERROR_PREFIX
+                );
+                std::process::exit(1);
+            }
+            std::process::exit(0);
+        }
     }
     #[cfg(any(target_arch = "wasm32", feature = "embed"))]
     crate::captured_output::print(output);
@@ -193,7 +202,7 @@ pub fn execute(program: &mut Program) -> VmReturnType {
 }
 
 static INSTR_TABLE: [extern "rust-preserve-none" fn(*const Instr, Frame, *mut VmCtx<'static>);
-    core::mem::variant_count::<Instr>()] = seq!(N in 0..114 {[#(execute_instr::<N>,)*]});
+    core::mem::variant_count::<Instr>()] = seq!(N in 0..115 {[#(execute_instr::<N>,)*]});
 
 #[inline(always)]
 extern "rust-preserve-none" fn execute_at(ip: *const Instr, r: Frame, ctx: *mut VmCtx<'static>) {
@@ -334,6 +343,12 @@ extern "rust-preserve-none" fn execute_instr<const DISCRIMINANT: u8>(
             Instr::Return(src) => {
                 let (return_addr, frame_offset) = r[0].as_return_point();
                 r[0] = r[src];
+                r = Frame(r.0.sub(frame_offset as usize));
+                ip = instr_base.add(return_addr as usize);
+            }
+            Instr::ReturnNull => {
+                let (return_addr, frame_offset) = r[0].as_return_point();
+                r[0] = NULL;
                 r = Frame(r.0.sub(frame_offset as usize));
                 ip = instr_base.add(return_addr as usize);
             }

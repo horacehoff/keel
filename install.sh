@@ -8,8 +8,8 @@ set -e
 OS=$(uname -s)
 
 case "$OS" in
-    Darwin) INSTALL_DIR="/Library/Keel/" ;;
-    Linux) INSTALL_DIR="/usr/local/lib/keel/" ;;
+    Darwin) INSTALL_DIR="$HOME/.keel/" ;;
+    Linux) INSTALL_DIR="$HOME/.keel/" ;;
 esac
 
 if mkdir -p "$INSTALL_DIR" 2>/dev/null; then

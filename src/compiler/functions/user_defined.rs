@@ -16,6 +16,7 @@ use crate::compiler::registers::relocate_registers;
 use crate::compiler::state::State;
 use crate::compiler::types::c_arg_matches;
 use crate::compiler::types::fn_matches_signature;
+use crate::compiler::types::is_assignable;
 use crate::data::Data;
 use crate::data::NULL;
 use crate::error;
@@ -40,7 +41,7 @@ fn check_user_fn_arg_types(
             {
                 !(fn_matches_signature(*concrete_id as usize, expected_sig, ctx, state)?)
             } else {
-                inferred_arg_types[i] != *t
+                !is_assignable(t, &inferred_arg_types[i])
             }
         {
             error_function_arg_invalid_type(
@@ -232,12 +233,16 @@ pub fn compile_function<'arena>(
         .iter()
         .enumerate()
         .map(|(i, x)| {
+            let var_type = match &state.functions[function_id].args[i].1 {
+                Some(t) if !matches!(t, DataType::FnSignature(_)) => t.clone(),
+                _ => inferred_arg_types[i].clone(),
+            };
             // Allocate a registers slot for each func arg
             Variable {
                 name: x,
                 register_id: state.scratch_reg(),
                 declared_type: inferred_arg_types[i].clone(),
-                var_type: inferred_arg_types[i].clone(),
+                var_type,
             }
         })
         .collect();
@@ -294,7 +299,7 @@ pub fn compile_function<'arena>(
     }
     let len = instructions.len() as u32;
     instructions.extend(parsed);
-    instructions.push(Instr::Return(0));
+    instructions.push(Instr::ReturnNull);
     relocate_registers(&mut instructions[len as usize..], fixed_count, permanent_count);
 
     let code_unit = &mut state.code_units[unit as usize];

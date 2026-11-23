@@ -141,6 +141,7 @@ impl Instr {
             | Self::MapInsertReg(_, _, _)
             | Self::Push(_, _)
             | Self::Return(_) // Modifies a register, but this function doesn't know which one
+            | Self::ReturnNull
             | Self::StoreGlobal { .. }
             | Self::CopyConstants { .. }
             | Self::Remove(_, _)
@@ -300,8 +301,6 @@ impl Instr {
                 f(c);
             }
 
-            Self::Return(a) if *a == 0 => {}
-
             Self::Print(a)
             | Self::SetInt(a, _)
             | Self::CallFunc { frame_offset: a, .. }
@@ -347,7 +346,7 @@ impl Instr {
                     *self = Self::nested_index_array_instr(regs);
                 }
             }
-            Self::Jmp(_) | Self::StopErrorCatch => {}
+            Self::Jmp(_) | Self::StopErrorCatch | Self::ReturnNull => {}
         }
     }
     #[inline]

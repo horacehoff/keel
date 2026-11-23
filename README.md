@@ -81,6 +81,9 @@ keel -v/--version  # Print version
 keel -h/--help     # Print help
 ```
 
+## Benchmarks
+![Benchmarks](docs/docs/images/benchmarks.png)
+
 ### Build from source (without PGO)
 Make sure [Rust](https://rustup.rs/) is installed.
 

@@ -46,6 +46,14 @@ jobs:
             bin: keel
             lib: libkeel.so
 
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: keel-aarch64-linux
+            embed_artifact: libkeel-aarch64-linux
+            rustflags: ""
+            bin: keel
+            lib: libkeel.so
+
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: keel-x86_64-linux-v1

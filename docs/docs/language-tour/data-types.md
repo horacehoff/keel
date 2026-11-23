@@ -183,7 +183,7 @@ fn test(flag: bool, f1: fn(), f2: fn(bool, int) -> string) {
 fn main() {
     test(false, 
         fn() {print("Hell yeah!");}, 
-        fn(flag, n) {return str(flag) + ": " + str(n);}
+        fn(flag, n) {return string(flag) + ": " + string(n);}
     );
 }
 ```

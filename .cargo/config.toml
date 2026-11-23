@@ -1,9 +1,13 @@
 [build]
+rustflags = ["-Zunstable-options", "--jobs-frontend=4"]
 # target = "wasm32-unknown-unknown"
 [target.wasm32-unknown-unknown]
 rustflags = [
     "-Zunstable-options",
     "--jobs-frontend=4",
     "-C",
-    "target-feature=+tail-call",
+    "target-feature=+tail-call,+simd128",
+    "-Zlocation-detail=none",
+    "-Zfmt-debug=none",
+    "-Cpanic=immediate-abort",
 ]

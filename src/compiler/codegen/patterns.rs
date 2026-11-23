@@ -318,7 +318,12 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
             _ => DataType::Unknown,
         };
 
-        let array_length_reg = self.state.alloc_reg();
+        let reg_window =
+            matches!(rest, Some(Pattern::Binding(..))).then(|| self.state.alloc_reg_window(2));
+        let last_reg = reg_window.map(|i| i + 1);
+        let array_length_reg =
+            last_reg.filter(|_| suffix.is_empty()).unwrap_or_else(|| self.state.alloc_reg());
+
         self.output.push(Instr::Len(register_id, array_length_reg));
         let min_match_len = prefix.len() + suffix.len();
         let min_match_len_reg = self.state.new_const_reg(Data::int(min_match_len as i32));
@@ -327,12 +332,6 @@ impl<'arena> PatternCompiler<'_, 'arena, '_> {
         } else if min_match_len > 0 {
             self.false_arm(Instr::InfIntJmp(array_length_reg, min_match_len_reg, 0));
         }
-
-        let reg_window =
-            matches!(rest, Some(Pattern::Binding(..))).then(|| self.state.alloc_reg_window(2));
-        let last_reg = reg_window.map(|i| i + 1);
-        let array_length_reg =
-            last_reg.filter(|_| suffix.is_empty()).unwrap_or_else(|| self.state.alloc_reg());
 
         let mut suffix_start = suffix.is_empty().then_some(array_length_reg);
         for (i, elem) in prefix.iter().chain(*suffix).enumerate() {

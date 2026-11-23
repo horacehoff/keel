@@ -250,6 +250,12 @@ pub fn parse_toplevel<'a>(
                     {
                         resolved = find_in(keel_home_libs)?;
                     }
+                    if resolved.is_none()
+                        && let Ok(exe_path) = std::env::current_exe().and_then(|p| p.canonicalize())
+                        && let Some(exe_dir) = exe_path.parent()
+                    {
+                        resolved = find_in(&exe_dir.join("libs"))?;
+                    }
                 }
 
                 let Some(file_path) = resolved.and_then(|path| path.canonicalize().ok()) else {

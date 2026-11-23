@@ -232,7 +232,6 @@ impl PartialEq for DataType {
                 (a.0.is_none() || b.0.is_none() || a.0 == b.0)
                     && (a.1.is_none() || b.1.is_none() || a.1 == b.1)
             }
-            (t, Self::Union(p)) | (Self::Union(p), t) => p.contains(t),
             _ => false,
         }
     }
@@ -274,8 +273,19 @@ impl core::hash::Hash for DataType {
 }
 
 #[inline(always)]
+pub fn is_assignable(expected: &DataType, received: &DataType) -> bool {
+    match (expected, received) {
+        (DataType::Union(expected), DataType::Union(received)) => {
+            received.iter().all(|t| expected.contains(t))
+        }
+        (DataType::Union(expected), received) => expected.contains(received),
+        _ => expected == received,
+    }
+}
+
+#[inline(always)]
 pub fn struct_field_type_matches(expected: &DataType, received: &DataType) -> bool {
-    received == &DataType::Null || expected == received
+    received == &DataType::Null || is_assignable(expected, received)
 }
 
 pub fn c_arg_matches(inferred: &DataType, declared: &DataType) -> bool {

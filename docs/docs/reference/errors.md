@@ -42,7 +42,8 @@ Error: Incompatible types
 - `index_out_of_bounds`
 - `slice_out_of_bounds`
 - `unknown_map_key`
-- `integer_negative_exponent` (will be available with the release of Keel 0.5)
+- `integer_negative_exponent`
+- `stack_overflow`
 
 ### Runtime parsing
 
@@ -66,7 +67,7 @@ Error: Incompatible types
 - `fs_read_only_filesystem`
 - `fs_storage_full`
 - `fs_timed_out`
-- `fs_other` (will be available with the release of Keel 0.5)
+- `fs_other`
 
 ### FFI
 

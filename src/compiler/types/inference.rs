@@ -2,6 +2,7 @@ use crate::ast::Expr;
 use crate::ast::Span;
 use crate::ast::symbol_of_expr;
 use crate::compiler::DataType;
+use crate::compiler::codegen::type_guard_narrowing;
 use crate::compiler::compiler_errors::error_expected_function;
 use crate::compiler::compiler_errors::error_op;
 use crate::compiler::compiler_errors::error_struct_unknown_field;
@@ -317,10 +318,17 @@ impl<'arena> Expr<'arena> {
             }
             Self::IfBlock(if_block) => {
                 let mut types: Vec<DataType> = Vec::with_capacity(2);
+                let narrowing = type_guard_narrowing(if_block.condition, ctx, state);
                 if let Some(then) = if_block.then.last() {
+                    if let Some((name, t, ..)) = &narrowing {
+                        state.find_var_mut(name).unwrap().var_type = t.clone();
+                    }
                     types.push(then.infer_type(ctx, state)?);
                 }
                 if let Some(otherwise) = if_block.otherwise.last() {
+                    if let Some((name, _, t, ..)) = &narrowing {
+                        state.find_var_mut(name).unwrap().var_type = t.clone();
+                    }
                     match otherwise.infer_type(ctx, state)? {
                         DataType::Union(t) => types.extend(t),
                         t => {
@@ -329,6 +337,9 @@ impl<'arena> Expr<'arena> {
                             }
                         }
                     }
+                }
+                if let Some((name, .., original_type)) = narrowing {
+                    state.find_var_mut(name).unwrap().var_type = original_type;
                 }
                 DataType::Union(Box::from(types)).check_poly()
             }

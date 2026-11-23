@@ -50,19 +50,19 @@ int("42"); // Returns 42
 int("Hello, World!"); // Crashes
 ```
 
-## Str
+## String
 
-`str(T) -> string`<br/>
+`string(T) -> string`<br/>
 Returns the given object as a string.
 
 ```
-str(42); // Returns "42"
-str([0,1,2,3]); // Returns "[0,1,2,3]"
+string(42); // Returns "42"
+string([0,1,2,3]); // Returns "[0,1,2,3]"
 ```
 
 !!! note
 
-    In Keel 0.5.0, this function will be renamed to `string`.
+    Before Keel 0.5.0, this function was named `str`.
 
 ## Bool
 

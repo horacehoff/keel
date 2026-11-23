@@ -6,8 +6,8 @@
 - Formatting/Printing performance has been immensely improved
 - The `str` function has been renamed to `string`
 - The `check` CLI command has been added to check if a program is correct without running it
-- Global mutable variables have been added and can be declared wth `static var = value`.
-- Added type guards, with the syntax `value: type`
+- Global mutable variables have been added and can be declared with `static var = value`.
+- Added type guards, with the syntax `value: type` (used in an if block, they narrow types)
 - Variables now have their type fixed at declaration
 - Variables can now be optionally typed with `let var: type = value` and `static var: type = value`
 - The standard library and future files are now stored in `$HOME/.keel/`

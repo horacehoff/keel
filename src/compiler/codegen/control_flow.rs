@@ -18,6 +18,7 @@ use crate::compiler::registers::UnwrapId;
 use crate::compiler::registers::move_reg_to_reg;
 use crate::compiler::registers::move_value_to;
 use crate::compiler::state::State;
+use crate::compiler::types::var_type_is_compatible;
 use crate::data::Data;
 use crate::errors::ErrDiagnosticId;
 use crate::instr::Instr;
@@ -35,6 +36,36 @@ fn parse_loop_flow_control(loop_code: &mut [Instr]) {
             *x = Instr::Jmp(body_len - i as u16);
         }
     });
+}
+
+/// (var_name, type_if_true, type_if_false, original_type)
+pub fn type_guard_narrowing<'arena>(
+    condition: &'arena Expr<'arena>,
+    ctx: Ctx,
+    state: &State,
+) -> Option<(&'arena str, DataType, DataType, DataType)> {
+    match condition {
+        Expr::BoolNeg(condition, ..) => {
+            type_guard_narrowing(condition, ctx, state).map(|(a, b, c, d)| (a, c, b, d))
+        }
+        Expr::TypeEq(Expr::Var(name, _), type_expr, _) => {
+            let var = state.find_var(name.get_name())?;
+            let tgt = type_expr.to_datatype(ctx.file_idx, state.scope(ctx.file_idx), state.sources);
+            let DataType::Union(types) = &var.var_type else { return None };
+            let remaining = DataType::Union(
+                types
+                    .iter()
+                    .filter(|t| {
+                        matches!(t, DataType::Struct(_)) || !var_type_is_compatible(&tgt, t)
+                    })
+                    .cloned()
+                    .collect(),
+            )
+            .check_poly();
+            Some((name.get_name(), tgt, remaining, var.var_type.clone()))
+        }
+        _ => None,
+    }
 }
 
 fn compile_if_block_branch<'arena>(
@@ -112,8 +143,17 @@ pub(super) fn compile_if_block<'arena>(
     // Modify true jump instructions to point to body_start
     let body_start = output.len();
     patch_jumps(output, true_jump_idxs, body_start);
+    let narrowing = type_guard_narrowing(condition, ctx, state);
+    if let Some((name, t, ..)) = &narrowing {
+        state.find_var_mut(name).unwrap().var_type = t.clone();
+    }
 
     compile_if_block_branch(then, tgt_id, ctx, state, output)?;
+
+    if let Some((name, _, false_type, original_type)) = &narrowing {
+        state.find_var_mut(name).unwrap().var_type =
+            if otherwise.is_empty() { original_type } else { false_type }.clone();
+    }
 
     if otherwise.is_empty() {
         let body_end = output.len();
@@ -129,6 +169,9 @@ pub(super) fn compile_if_block<'arena>(
         let branch_start = output.len();
         patch_jumps(output, false_jump_idxs, branch_start);
         compile_if_block_branch(otherwise, tgt_id, ctx, state, output)?;
+    }
+    if let Some((name, .., original_type)) = narrowing {
+        state.find_var_mut(name).unwrap().var_type = original_type;
     }
 
     let condition_end = output.len();
@@ -414,7 +457,7 @@ pub(super) fn compile_return<'arena>(
     output.push(match (ctx.in_function, id) {
         (false, ..) => Instr::Halt(u16::MAX),
         (true, Some(id)) => Instr::Return(id?),
-        (true, None) => Instr::Return(0),
+        (true, None) => Instr::ReturnNull,
     });
     Ok(())
 }

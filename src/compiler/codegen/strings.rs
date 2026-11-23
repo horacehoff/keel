@@ -64,7 +64,7 @@ fn categorize_str_reg_use(instr: Instr, reg: u16) -> StrRegUse {
         Instr::AddStr(o1, o2, dst) if o1 == reg && o2 != reg && dst == reg => {
             return StrRegUse::AppendInPlace;
         }
-        Instr::AddStr(..) | Instr::AddStrInPlace(..) | Instr::Return(_) => true,
+        Instr::AddStr(..) | Instr::AddStrInPlace(..) | Instr::Return(_) | Instr::ReturnNull => true,
         Instr::Print(_)
         | Instr::EqJmp(..)
         | Instr::NotEqJmp(..)

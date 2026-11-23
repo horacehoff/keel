@@ -89,7 +89,7 @@ For more information, use the `--help` flag."
 
 const HELP: &str = hformat!(
     "  \x1b[34m// /\x1b[0m
- \x1b[34m// /\x1b[0m  keel {}
+ \x1b[34m// /\x1b[0m  keel {} \"Major Tom\"
 \x1b[34m// /\x1b[0m
 
 by Horace Hoff - keel-lang.com

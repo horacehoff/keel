@@ -1,8 +1,9 @@
 # Keel Changelog
 
-## 0.5.0 (in development)
+## 0.5.0 (11/23/2026) "Major Tom"
 - Several critical bugs have been fixed
 - There's now a Windows install script
+- There's now a rudimentary WIP package manager called keel-pkg installed alongside keel, that's accessible directly via the keel executable ([docs](https://docs.keel-lang.com/language-tour/packages.html))
 - Formatting/Printing performance has been immensely improved
 - The `str` function has been renamed to `string`
 - The `check` CLI command has been added to check if a program is correct without running it
